@@ -612,6 +612,45 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       ],
                     ),
                     const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: loc.offlineCount > 0
+                            ? const Color(0xFFFEF2F2)
+                            : const Color(0xFFF0FDF4),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: loc.offlineCount > 0
+                              ? const Color(0xFFFECACA)
+                              : const Color(0xFFBBF7D0),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.monitor_heart_rounded,
+                            size: 14,
+                            color: loc.offlineCount > 0
+                                ? const Color(0xFFDC2626)
+                                : const Color(0xFF16A34A),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Datacenter Monitorizados: ${loc.monitoredCount} • 🟢 ${loc.onlineCount} • 🔴 ${loc.offlineCount}${loc.warningCount > 0 ? ' • 🟠 ${loc.warningCount}' : ''}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
                     if (floor != null) ...[
                       OutlinedButton.icon(
                         onPressed: _uploading
@@ -740,7 +779,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                       borderRadius: BorderRadius.circular(10),
                                     ),
                                     child: Text(
-                                      '$rCount racks',
+                                      '$rCount racks • Monit: ${fl.monitoredCount} (🟢${fl.onlineCount} 🔴${fl.offlineCount})',
                                       style: TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.bold,
@@ -1057,6 +1096,34 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                         fontSize: 9.5,
                       ),
                       overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 1.5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: rk.offlineCount > 0
+                            ? const Color(0x44DC2626)
+                            : const Color(0x3316A34A),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: rk.offlineCount > 0
+                              ? const Color(0xFFF87171)
+                              : const Color(0xFF4ADE80),
+                          width: 0.8,
+                        ),
+                      ),
+                      child: Text(
+                        'Monit:${rk.monitoredCount} 🟢${rk.onlineCount} 🔴${rk.offlineCount}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     const Spacer(),
                   ],

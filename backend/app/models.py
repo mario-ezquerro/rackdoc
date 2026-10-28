@@ -26,6 +26,7 @@ class ADServer(Base):
     bind_password = Column(String(255), default="")
     user_filter = Column(String(255), default="(&(objectClass=user)(sAMAccountName={username}))")
     default_role = Column(String(30), default="viewer")  # admin | editor | operator | viewer
+    group_role_mapping = Column(JSON, default=list)  # Lista de {"group_name": str, "group_dn": str, "role": str}
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

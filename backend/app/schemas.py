@@ -127,6 +127,7 @@ class ADServerSchema(BaseModel):
     bind_dn: str
     user_filter: str
     default_role: str
+    group_role_mapping: List[Dict[str, Any]] = []
     enabled: bool
 
 
@@ -139,6 +140,7 @@ class ADServerCreate(BaseModel):
     bind_password: str = ""
     user_filter: str = "(&(objectClass=user)(sAMAccountName={username}))"
     default_role: str = "viewer"
+    group_role_mapping: List[Dict[str, Any]] = []
     enabled: bool = True
 
 
@@ -151,6 +153,7 @@ class ADServerUpdate(BaseModel):
     bind_password: Optional[str] = None
     user_filter: Optional[str] = None
     default_role: Optional[str] = None
+    group_role_mapping: Optional[List[Dict[str, Any]]] = None
     enabled: Optional[bool] = None
 
 

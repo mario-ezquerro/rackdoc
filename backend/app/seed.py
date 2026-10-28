@@ -1384,17 +1384,25 @@ def sync_system_defaults(db: Session):
             "layout_spec": {
                 "front": [
                     {
+                        "port_type": "power_plug_male",
+                        "prefix": "MACHO-IN",
+                        "count": 1,
+                        "rows": 1,
+                        "start_x": 0.09,
+                        "end_x": 0.12,
+                    },
+                    {
                         "port_type": "power_schuko",
                         "prefix": "SCH",
                         "count": 8,
                         "rows": 1,
-                        "start_x": 0.16,
+                        "start_x": 0.22,
                         "end_x": 0.90,
-                    }
+                    },
                 ],
                 "back": [
                     {
-                        "port_type": "power_c14",
+                        "port_type": "power_plug_male",
                         "prefix": "IN",
                         "count": 1,
                         "rows": 1,
@@ -1415,17 +1423,25 @@ def sync_system_defaults(db: Session):
             "layout_spec": {
                 "front": [
                     {
+                        "port_type": "power_plug_male",
+                        "prefix": "MACHO-IN",
+                        "count": 1,
+                        "rows": 1,
+                        "start_x": 0.10,
+                        "end_x": 0.14,
+                    },
+                    {
                         "port_type": "power_schuko",
                         "prefix": "SCH",
                         "count": 2,
                         "rows": 1,
                         "start_x": 0.35,
                         "end_x": 0.65,
-                    }
+                    },
                 ],
                 "back": [
                     {
-                        "port_type": "power_schuko",
+                        "port_type": "power_plug_male",
                         "prefix": "IN",
                         "count": 1,
                         "rows": 1,
@@ -1800,6 +1816,8 @@ def sync_system_defaults(db: Session):
         )
         if not exists:
             db.add(DeviceTemplate(**et))
+        elif et["category"] == "pdu":
+            exists.layout_spec = et["layout_spec"]
     db.flush()
 
     get_or_create_external_feed_template(db)
@@ -1829,10 +1847,50 @@ def sync_system_defaults(db: Session):
     if pdu_b and pdu_b.start_u == 36:
         pdu_b.start_u = 25
 
-    for pdu_dev in db.query(RackDevice).filter(RackDevice.code.in_(["PDU-A", "PDU-B"])).all():
-        for p in pdu_dev.ports:
-            if p.port_number.startswith("IN"):
-                p.face = "front"
+    # Asegurar que toda regleta PDU / Schuko montada tenga su conector MACHO de entrada (power_plug_male) en Front
+    for pdu_dev in db.query(RackDevice).all():
+        if pdu_dev.template and pdu_dev.template.category == "pdu":
+            has_front_male = any(
+                p.face == "front"
+                and (
+                    p.port_type == "power_plug_male"
+                    or p.port_number.startswith("IN")
+                    or p.port_number.startswith("MACHO")
+                )
+                for p in pdu_dev.ports
+            )
+            if not has_front_male:
+                back_in = next(
+                    (
+                        p
+                        for p in pdu_dev.ports
+                        if p.port_number.startswith("IN")
+                        or p.port_number.startswith("MACHO")
+                    ),
+                    None,
+                )
+                if back_in:
+                    back_in.face = "front"
+                    back_in.port_type = "power_plug_male"
+                    back_in.rel_x = 0.095
+                else:
+                    db.add(
+                        Port(
+                            rack_device_id=pdu_dev.id,
+                            port_number="MACHO-IN1",
+                            label=f"{pdu_dev.code}:MACHO-IN1",
+                            face="front",
+                            port_type="power_plug_male",
+                            row_index=0,
+                            col_index=0,
+                            rel_x=0.095,
+                            rel_y=0.5,
+                        )
+                    )
+            else:
+                for p in pdu_dev.ports:
+                    if p.port_number.startswith("IN") or p.port_number.startswith("MACHO"):
+                        p.port_type = "power_plug_male"
 
     # Asegurar que cualquier equipo montado en Front tenga también sus puertos traseros en Back
     for dev in db.query(RackDevice).all():
@@ -1875,6 +1933,51 @@ def sync_system_defaults(db: Session):
                             rel_y=round(rel_y, 4),
                         )
                     )
+
+    # Asegurar mapeos de Grupos de AD -> Roles en los servidores AD existentes
+    for ad_srv in db.query(ADServer).all():
+        if not ad_srv.group_role_mapping:
+            base = ad_srv.base_dn or "DC=corp,DC=rackdoc,DC=local"
+            ad_srv.group_role_mapping = [
+                {
+                    "group_name": "Domain Admins / Arquitectura TI",
+                    "group_dn": f"CN=Domain Admins,OU=Groups,{base}",
+                    "role": "admin",
+                },
+                {
+                    "group_name": "NetOps & SysAdmins (Ingeniería CPD)",
+                    "group_dn": f"CN=NetOps-Engineers,OU=Groups,{base}",
+                    "role": "editor",
+                },
+                {
+                    "group_name": "NOC 24x7 & Guardia Operaciones (SSH/Web)",
+                    "group_dn": f"CN=NOC-Operators,OU=Groups,{base}",
+                    "role": "operator",
+                },
+                {
+                    "group_name": "Auditores & Seguridad Compliance",
+                    "group_dn": f"CN=Auditores-TI,OU=Groups,{base}",
+                    "role": "viewer",
+                },
+            ]
+
+    # Asegurar que los equipos activos monitorizados muestren estados realistas (Verde Online y Rojo Offline) y métodos de Heartbeat variados
+    for dev in db.query(RackDevice).all():
+        if dev.mounted_face == "external":
+            continue
+        if dev.monitoring_enabled:
+            if dev.code == "SW03":
+                dev.status = "offline"
+                dev.last_ping_ms = None
+            elif dev.status not in ("online", "offline"):
+                dev.status = "online"
+                dev.last_ping_ms = 1.6
+            if dev.code in ("SRV01", "SRV02") and dev.monitor_method == "icmp":
+                dev.monitor_method = "ssh"
+                dev.monitor_port = 22
+            elif dev.code in ("FW01",) and dev.monitor_method == "icmp":
+                dev.monitor_method = "https"
+                dev.monitor_port = 443
 
     # Asegurar que cada Rack tenga sus Tomas Exteriores Schuko (mínimo 1, por defecto 2: Línea A Roja y Línea B Azul)
     racks = db.query(Rack).all()

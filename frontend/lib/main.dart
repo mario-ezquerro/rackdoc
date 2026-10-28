@@ -59,6 +59,19 @@ class _RackDocShellState extends State<RackDocShell> {
     isActive: true,
   );
 
+  bool _isAuthenticated = false;
+  final TextEditingController _gateUserCtrl = TextEditingController(text: 'admin');
+  final TextEditingController _gatePassCtrl = TextEditingController();
+  String? _gateAuthError;
+  bool _gateAuthenticating = false;
+
+  // Estado del buscador y organizador de Sistemas Monitorizados en el Dashboard
+  final TextEditingController _dashSearchCtrl = TextEditingController();
+  String _dashStatusFilter = 'all'; // 'all' | 'online' | 'offline' | 'warning'
+  String _dashMethodFilter = 'all'; // 'all' | 'icmp' | 'ssh' | 'https' | 'http' | 'tcp' | 'snmp'
+  String _dashSortBy = 'status'; // 'status' | 'code' | 'ip' | 'rack' | 'latency' | 'method'
+  bool _dashSortAsc = true;
+
   bool _loading = true;
   String? _error;
 
@@ -169,10 +182,41 @@ class _RackDocShellState extends State<RackDocShell> {
     });
   }
 
-  Future<void> _showLoginOrSwitchUserModal() async {
+  Future<void> _performGateLogin() async {
+    setState(() {
+      _gateAuthenticating = true;
+      _gateAuthError = null;
+    });
+    try {
+      final logged = await _api.login(
+        _gateUserCtrl.text.trim(),
+        _gatePassCtrl.text,
+      );
+      if (mounted) {
+        setState(() {
+          _currentUser = logged;
+          _isAuthenticated = true;
+          _gateAuthenticating = false;
+          _gatePassCtrl.clear();
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _gateAuthError = e.toString().replaceFirst('Exception: ', '');
+          _gateAuthenticating = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _showLoginOrSwitchUserModal({String? prefillUsername}) async {
     final messenger = ScaffoldMessenger.of(context);
-    final userCtrl = TextEditingController(text: 'admin');
-    final passCtrl = TextEditingController(text: 'admin');
+    final userCtrl = TextEditingController(
+      text: prefillUsername ?? _currentUser.username,
+    );
+    final passCtrl = TextEditingController();
+    final passFocus = FocusNode();
     String? authError;
 
     try {
@@ -186,29 +230,30 @@ class _RackDocShellState extends State<RackDocShell> {
         builder: (ctx, setModal) => AlertDialog(
           title: const Row(
             children: [
-              Icon(Icons.shield_outlined, color: Color(0xFF1E3A8A)),
+              Icon(Icons.lock_person_outlined, color: Color(0xFF1E3A8A)),
               SizedBox(width: 8),
-              Text('Iniciar Sesión / Cambiar Rol de Usuario'),
+              Text('Cambiar de Usuario (Requiere Contraseña)'),
             ],
           ),
           content: SizedBox(
-            width: 440,
+            width: 480,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Autenticación Local (.env admin/admin) o Active Directory (LDAP):',
+                  'Introduce el usuario y la contraseña para cambiar de sesión (Local .env o Active Directory):',
                   style: TextStyle(fontSize: 12, color: Color(0xFF475569)),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 Row(
                   children: [
                     Expanded(
                       child: TextField(
                         controller: userCtrl,
                         decoration: const InputDecoration(
-                          labelText: 'Usuario (ej. admin)',
+                          labelText: 'Usuario *',
+                          prefixIcon: Icon(Icons.person_outline, size: 17),
                           isDense: true,
                         ),
                       ),
@@ -217,22 +262,55 @@ class _RackDocShellState extends State<RackDocShell> {
                     Expanded(
                       child: TextField(
                         controller: passCtrl,
+                        focusNode: passFocus,
+                        autofocus: true,
                         obscureText: true,
+                        onSubmitted: (_) async {
+                          try {
+                            final logged = await _api.login(
+                              userCtrl.text.trim(),
+                              passCtrl.text,
+                            );
+                            setState(() {
+                              _currentUser = logged;
+                              _isAuthenticated = true;
+                            });
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Sesión iniciada como ${logged.username} (${logged.roleLabel}).',
+                                ),
+                              ),
+                            );
+                          } catch (e) {
+                            setModal(
+                              () => authError = e.toString().replaceFirst(
+                                    'Exception: ',
+                                    '',
+                                  ),
+                            );
+                          }
+                        },
                         decoration: const InputDecoration(
-                          labelText: 'Contraseña (ej. admin)',
+                          labelText: 'Contraseña *',
+                          prefixIcon: Icon(Icons.key_outlined, size: 17),
                           isDense: true,
                         ),
                       ),
                     ),
                     const SizedBox(width: 8),
-                    FilledButton(
+                    FilledButton.icon(
                       onPressed: () async {
                         try {
                           final logged = await _api.login(
                             userCtrl.text.trim(),
                             passCtrl.text,
                           );
-                          setState(() => _currentUser = logged);
+                          setState(() {
+                            _currentUser = logged;
+                            _isAuthenticated = true;
+                          });
                           if (ctx.mounted) Navigator.pop(ctx);
                           messenger.showSnackBar(
                             SnackBar(
@@ -242,92 +320,133 @@ class _RackDocShellState extends State<RackDocShell> {
                             ),
                           );
                         } catch (e) {
-                          setModal(() => authError = e.toString());
+                          setModal(
+                            () => authError = e.toString().replaceFirst(
+                                  'Exception: ',
+                                  '',
+                                ),
+                          );
                         }
                       },
-                      child: const Text('Entrar'),
+                      icon: const Icon(Icons.login, size: 15),
+                      label: const Text('Autenticar'),
                     ),
                   ],
                 ),
                 if (authError != null) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    authError!,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFFDC2626),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF2F2),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xFFFECACA)),
+                    ),
+                    child: Text(
+                      authError!,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFFDC2626),
+                      ),
                     ),
                   ),
                 ],
                 const Divider(height: 24),
                 const Text(
-                  'Cambio Rápido de Sesión (Probar los 4 Roles RBAC):',
+                  'Usuarios registrados (pulsa uno para rellenar su nombre y escribe su contraseña):',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 11.5,
                     fontWeight: FontWeight.w700,
                     color: Color(0xFF0F172A),
                   ),
                 ),
                 const SizedBox(height: 8),
-                ..._users.map((u) {
-                  final isSel = u.id == _currentUser.id;
-                  return ListTile(
-                    dense: true,
-                    visualDensity: VisualDensity.compact,
-                    selected: isSel,
-                    selectedTileColor: const Color(0xFFEFF6FF),
-                    leading: Icon(
-                      u.authSource == 'ad'
-                          ? Icons.domain_verification
-                          : Icons.person_outline,
-                      size: 18,
-                      color: const Color(0xFF1E3A8A),
-                    ),
-                    title: Text(
-                      '${u.username} — ${u.fullName}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    subtitle: Text(
-                      'Rol: ${u.roleLabel} (${u.role}) • Origen: ${u.authSource.toUpperCase()}',
-                      style: const TextStyle(fontSize: 10.5),
-                    ),
-                    trailing: isSel
-                        ? const Icon(
-                            Icons.check_circle,
-                            color: Color(0xFF16A34A),
-                            size: 18,
-                          )
-                        : const Text(
-                            'Usar',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Color(0xFF2563EB),
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                    onTap: () {
-                      setState(() => _currentUser = u);
-                      Navigator.pop(ctx);
-                      messenger.showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            'Sesión activa: ${u.username} — Rol: ${u.roleLabel}',
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 220),
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: _users.map((u) {
+                      final isSel = u.id == _currentUser.id;
+                      return ListTile(
+                        dense: true,
+                        visualDensity: VisualDensity.compact,
+                        selected: isSel,
+                        selectedTileColor: const Color(0xFFEFF6FF),
+                        leading: Icon(
+                          u.authSource == 'ad'
+                              ? Icons.domain_verification
+                              : Icons.person_outline,
+                          size: 18,
+                          color: const Color(0xFF1E3A8A),
+                        ),
+                        title: Text(
+                          '${u.username} — ${u.fullName}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
+                        subtitle: Text(
+                          'Rol: ${u.roleLabel} (${u.role}) • Origen: ${u.authSource.toUpperCase()}',
+                          style: const TextStyle(fontSize: 10.5),
+                        ),
+                        trailing: isSel
+                            ? const Icon(
+                                Icons.check_circle,
+                                color: Color(0xFF16A34A),
+                                size: 18,
+                              )
+                            : const Text(
+                                'Seleccionar',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF2563EB),
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                        onTap: () {
+                          setModal(() {
+                            userCtrl.text = u.username;
+                            passCtrl.clear();
+                            authError =
+                                'Introduce la contraseña de "${u.username}" y pulsa Autenticar.';
+                          });
+                          passFocus.requestFocus();
+                        },
                       );
-                    },
-                  );
-                }),
+                    }).toList(),
+                  ),
+                ),
               ],
             ),
           ),
           actions: [
+            TextButton.icon(
+              onPressed: () {
+                Navigator.pop(ctx);
+                setState(() {
+                  _isAuthenticated = false;
+                  _gateUserCtrl.text = _currentUser.username;
+                  _gatePassCtrl.clear();
+                });
+              },
+              icon: const Icon(
+                Icons.logout,
+                size: 15,
+                color: Color(0xFFDC2626),
+              ),
+              label: const Text(
+                'Cerrar Sesión',
+                style: TextStyle(color: Color(0xFFDC2626)),
+              ),
+            ),
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cerrar'),
+              child: const Text('Cancelar'),
             ),
           ],
         ),
@@ -335,15 +454,162 @@ class _RackDocShellState extends State<RackDocShell> {
     );
   }
 
+  Widget _buildLoginGateScreen() {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F172A),
+      body: Center(
+        child: Container(
+          width: 440,
+          padding: const EdgeInsets.all(28),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black38,
+                blurRadius: 24,
+                offset: Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E3A8A),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.dns_rounded,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'RackDoc DCIM',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFF0F172A),
+                          ),
+                        ),
+                        Text(
+                          'Acceso Seguro — Autenticación Local (.env) / Active Directory',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              TextField(
+                controller: _gateUserCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Usuario (Username)',
+                  prefixIcon: Icon(Icons.person_outline),
+                  border: OutlineInputBorder(),
+                ),
+                onSubmitted: (_) => _performGateLogin(),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _gatePassCtrl,
+                obscureText: true,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Contraseña (Password)',
+                  prefixIcon: Icon(Icons.lock_outline),
+                  border: OutlineInputBorder(),
+                ),
+                onSubmitted: (_) => _performGateLogin(),
+              ),
+              if (_gateAuthError != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF2F2),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFFECACA)),
+                  ),
+                  child: Text(
+                    _gateAuthError!,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFFDC2626),
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 18),
+              SizedBox(
+                height: 44,
+                child: FilledButton.icon(
+                  onPressed: _gateAuthenticating ? null : _performGateLogin,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF1E3A8A),
+                  ),
+                  icon: const Icon(Icons.login, size: 18),
+                  label: Text(
+                    _gateAuthenticating
+                        ? 'Verificando credenciales...'
+                        : 'Iniciar Sesión en RackDoc',
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: const Text(
+                  'Credenciales iniciales por defecto (.env): usuario "admin" / contraseña "admin" (o "rackdoc123" para usuarios AD/locales de demostración).',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF475569)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (!_isAuthenticated) {
+      return _buildLoginGateScreen();
+    }
+
     return Scaffold(
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // BARRA LATERAL IZQUIERDA CON EL FLUJO JERÁRQUICO + ADMINISTRACIÓN RBAC/AD
+          // BARRA LATERAL IZQUIERDA CON EL FLUJO JERÁRQUICO + ICONO RUEDA CONFIGURACIÓN (USUARIOS/ROLES/AD)
           Container(
-            width: 235,
+            width: 245,
             decoration: const BoxDecoration(
               color: Colors.white,
               border: Border(right: BorderSide(color: Color(0xFFE2E8F0))),
@@ -352,7 +618,7 @@ class _RackDocShellState extends State<RackDocShell> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+                  padding: const EdgeInsets.fromLTRB(16, 14, 12, 10),
                   child: Row(
                     children: [
                       Container(
@@ -391,15 +657,45 @@ class _RackDocShellState extends State<RackDocShell> {
                           ],
                         ),
                       ),
+                      // ICONO RUEDA DE CONFIGURACIÓN (Usuarios, Contraseñas, Roles RBAC y Servidores AD)
+                      Tooltip(
+                        message:
+                            'Configuración: Usuarios, Contraseñas, Roles RBAC y Active Directory',
+                        child: InkWell(
+                          onTap: () => setState(() => _activeNav = 'admin'),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: _activeNav == 'admin'
+                                  ? const Color(0xFFDBEAFE)
+                                  : const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: _activeNav == 'admin'
+                                    ? const Color(0xFF2563EB)
+                                    : const Color(0xFFCBD5E1),
+                              ),
+                            ),
+                            child: Icon(
+                              Icons.settings_rounded,
+                              size: 18,
+                              color: _activeNav == 'admin'
+                                  ? const Color(0xFF1D4ED8)
+                                  : const Color(0xFF334155),
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
 
-                // Tarjeta de Sesión Activa y Rol RBAC
+                // Tarjeta de Sesión Activa y Rol RBAC + Botón Rueda Configuración
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
                   child: InkWell(
-                    onTap: _showLoginOrSwitchUserModal,
+                    onTap: () => _showLoginOrSwitchUserModal(),
                     borderRadius: BorderRadius.circular(8),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
@@ -443,10 +739,13 @@ class _RackDocShellState extends State<RackDocShell> {
                               ],
                             ),
                           ),
-                          const Icon(
-                            Icons.swap_horiz_rounded,
-                            size: 16,
-                            color: Color(0xFF64748B),
+                          const Tooltip(
+                            message: 'Cambiar usuario (pide usuario y contraseña)',
+                            child: Icon(
+                              Icons.swap_horiz_rounded,
+                              size: 16,
+                              color: Color(0xFF64748B),
+                            ),
                           ),
                         ],
                       ),
@@ -482,8 +781,8 @@ class _RackDocShellState extends State<RackDocShell> {
                   onTap: () => setState(() => _activeNav = 'dashboard'),
                 ),
                 _SidebarItem(
-                  icon: Icons.admin_panel_settings_outlined,
-                  label: '5. Administración & AD',
+                  icon: Icons.settings_rounded,
+                  label: '5. Configuración (Usuarios/AD)',
                   active: _activeNav == 'admin',
                   onTap: () => setState(() => _activeNav = 'admin'),
                 ),
@@ -508,10 +807,12 @@ class _RackDocShellState extends State<RackDocShell> {
                         ListTile(
                           dense: true,
                           visualDensity: VisualDensity.compact,
-                          leading: const Icon(
+                          leading: Icon(
                             Icons.business_rounded,
                             size: 16,
-                            color: Color(0xFF0F172A),
+                            color: loc.offlineCount > 0
+                                ? const Color(0xFFDC2626)
+                                : const Color(0xFF0F172A),
                           ),
                           title: Text(
                             '${loc.code} — ${loc.name}',
@@ -519,6 +820,14 @@ class _RackDocShellState extends State<RackDocShell> {
                               fontSize: 11.5,
                               fontWeight: FontWeight.w800,
                               color: Color(0xFF0F172A),
+                            ),
+                          ),
+                          subtitle: Text(
+                            'Monit: ${loc.monitoredCount} • 🟢${loc.onlineCount} 🔴${loc.offlineCount}',
+                            style: const TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF475569),
                             ),
                           ),
                           onTap: () => _openDatacenter(loc.id),
@@ -540,10 +849,12 @@ class _RackDocShellState extends State<RackDocShell> {
                                   leading: Icon(
                                     Icons.dns_outlined,
                                     size: 15,
-                                    color: (_activeNav == 'rack_editor' &&
-                                            _activeRackId == rk.id)
-                                        ? const Color(0xFF2563EB)
-                                        : const Color(0xFF64748B),
+                                    color: rk.offlineCount > 0
+                                        ? const Color(0xFFDC2626)
+                                        : ((_activeNav == 'rack_editor' &&
+                                                _activeRackId == rk.id)
+                                            ? const Color(0xFF2563EB)
+                                            : const Color(0xFF64748B)),
                                   ),
                                   title: Text(
                                     '${rk.code} (${rk.name})',
@@ -561,10 +872,10 @@ class _RackDocShellState extends State<RackDocShell> {
                                     ),
                                   ),
                                   subtitle: Text(
-                                    'P${fl.levelNumber} • ${rk.aisleName}',
+                                    'P${fl.levelNumber} • Monit:${rk.monitoredCount} 🟢${rk.onlineCount} 🔴${rk.offlineCount}',
                                     style: const TextStyle(
-                                      fontSize: 10,
-                                      color: Color(0xFF94A3B8),
+                                      fontSize: 9.5,
+                                      color: Color(0xFF64748B),
                                     ),
                                   ),
                                   onTap: () => _openRack(rk.id),
@@ -677,10 +988,14 @@ class _RackDocShellState extends State<RackDocShell> {
         onSwitchActiveUser: (usr) async {
           final usrs = await _api.getUsers();
           if (mounted) {
-            setState(() {
-              _users = usrs;
-              _currentUser = usr;
-            });
+            setState(() => _users = usrs);
+          }
+          if (usr.id == _currentUser.id) {
+            if (mounted) {
+              setState(() => _currentUser = usr);
+            }
+          } else {
+            await _showLoginOrSwitchUserModal(prefillUsername: usr.username);
           }
         },
       );
@@ -705,19 +1020,119 @@ class _RackDocShellState extends State<RackDocShell> {
     int totalRooms = 0;
     int totalRacks = 0;
     int totalDevices = 0;
+    int totalMonitored = 0;
+    int totalOnline = 0;
+    int totalOffline = 0;
+    int totalWarning = 0;
+
+    final allMonitoredSystems = <Map<String, dynamic>>[];
 
     for (final l in _locations) {
       totalFloors += l.floorsCount;
       totalRooms += l.roomsCount;
       totalRacks += l.racksCount;
+      totalMonitored += l.monitoredCount;
+      totalOnline += l.onlineCount;
+      totalOffline += l.offlineCount;
+      totalWarning += l.warningCount;
       for (final f in l.floors) {
         for (final r in f.rooms) {
           for (final rk in r.racks) {
             totalDevices += rk.deviceCount;
+            for (final md in rk.monitoredDevices) {
+              allMonitoredSystems.add({
+                ...md,
+                'location_id': l.id,
+                'location_code': l.code,
+                'location_name': l.name,
+                'floor_name': f.name,
+                'room_name': r.name,
+                'rack_id': rk.id,
+                'rack_code': rk.code,
+                'rack_name': rk.name,
+              });
+            }
           }
         }
       }
     }
+
+    // Filtrado por texto, estado y método Heartbeat
+    final q = _dashSearchCtrl.text.trim().toLowerCase();
+    final filtered = allMonitoredSystems.where((sys) {
+      final st = (sys['status'] ?? 'unknown').toString().toLowerCase();
+      final method = (sys['monitor_method'] ?? 'icmp').toString().toLowerCase();
+      if (_dashStatusFilter != 'all' && st != _dashStatusFilter) {
+        return false;
+      }
+      if (_dashMethodFilter != 'all' && method != _dashMethodFilter) {
+        return false;
+      }
+      if (q.isNotEmpty) {
+        final hay = [
+          sys['code'],
+          sys['name'],
+          sys['hostname'],
+          sys['ip_address'],
+          sys['model_name'],
+          sys['rack_code'],
+          sys['location_code'],
+          sys['monitor_method'],
+        ].map((e) => (e ?? '').toString().toLowerCase()).join(' ');
+        if (!hay.contains(q)) return false;
+      }
+      return true;
+    }).toList();
+
+    // Ordenación interactiva
+    int statusPriority(String st) {
+      if (st == 'offline') return 0; // Rojo primero
+      if (st == 'warning') return 1;
+      if (st == 'online') return 2; // Verde
+      return 3;
+    }
+
+    filtered.sort((a, b) {
+      int cmp = 0;
+      switch (_dashSortBy) {
+        case 'status':
+          cmp = statusPriority((a['status'] ?? '').toString()).compareTo(
+            statusPriority((b['status'] ?? '').toString()),
+          );
+          if (cmp == 0) {
+            cmp = (a['code'] ?? '').toString().compareTo(
+                  (b['code'] ?? '').toString(),
+                );
+          }
+          break;
+        case 'code':
+          cmp = (a['code'] ?? '').toString().compareTo(
+                (b['code'] ?? '').toString(),
+              );
+          break;
+        case 'ip':
+          cmp = (a['ip_address'] ?? '').toString().compareTo(
+                (b['ip_address'] ?? '').toString(),
+              );
+          break;
+        case 'rack':
+          cmp = (a['rack_code'] ?? '').toString().compareTo(
+                (b['rack_code'] ?? '').toString(),
+              );
+          break;
+        case 'method':
+          cmp = (a['monitor_method'] ?? '').toString().compareTo(
+                (b['monitor_method'] ?? '').toString(),
+              );
+          break;
+        case 'latency':
+          final la = (a['last_ping_ms'] as num?)?.toDouble() ?? 999999.0;
+          final lb = (b['last_ping_ms'] as num?)?.toDouble() ?? 999999.0;
+          cmp = la.compareTo(lb);
+          break;
+      }
+      return _dashSortAsc ? cmp : -cmp;
+    });
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(28),
@@ -731,7 +1146,7 @@ class _RackDocShellState extends State<RackDocShell> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Dashboard & Exportación de Informes',
+                      'Dashboard, Monitorización Heartbeat & Exportación Excel',
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w800,
@@ -740,12 +1155,18 @@ class _RackDocShellState extends State<RackDocShell> {
                     ),
                     SizedBox(height: 4),
                     Text(
-                      'Resumen global de sedes, plantas del edificio, racks (Front & Back), red y exportación Excel.',
+                      'Estado en tiempo real de todos los sistemas monitorizados (Verde/Rojo), métricas por Datacenter/Rack y exportación Excel.',
                       style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
                     ),
                   ],
                 ),
               ),
+              OutlinedButton.icon(
+                onPressed: _refreshDataSilently,
+                icon: const Icon(Icons.refresh, size: 17),
+                label: const Text('Actualizar Estado'),
+              ),
+              const SizedBox(width: 10),
               FilledButton.icon(
                 onPressed: () {
                   final url = Uri.parse(_api.getExcelExportUrl());
@@ -759,36 +1180,420 @@ class _RackDocShellState extends State<RackDocShell> {
               ),
             ],
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
           Wrap(
-            spacing: 16,
-            runSpacing: 16,
+            spacing: 14,
+            runSpacing: 14,
             children: [
               _DashboardCard(
-                title: 'Datacenters (Locations)',
-                value: '${_locations.length}',
+                title: 'Datacenters / Plantas',
+                value: '${_locations.length} Sedes / $totalFloors Plantas ($totalRooms Salas)',
                 icon: Icons.public,
                 color: const Color(0xFF2563EB),
               ),
               _DashboardCard(
-                title: 'Plantas y Salas',
-                value: '$totalFloors Plantas / $totalRooms Salas',
-                icon: Icons.layers_outlined,
-                color: const Color(0xFF0284C7),
-              ),
-              _DashboardCard(
-                title: 'Racks Operativos',
-                value: '$totalRacks Racks',
+                title: 'Racks & Equipos',
+                value: '$totalRacks Racks / $totalDevices Eq.',
                 icon: Icons.dns_outlined,
                 color: const Color(0xFF7C3AED),
               ),
               _DashboardCard(
-                title: 'Equipos Montados',
-                value: '$totalDevices Dispositivos',
-                icon: Icons.settings_ethernet,
+                title: 'Sistemas Monitorizados',
+                value: '$totalMonitored Activos',
+                icon: Icons.monitor_heart_outlined,
+                color: const Color(0xFF0284C7),
+              ),
+              _DashboardCard(
+                title: 'Estado Online (Verde)',
+                value: '🟢 $totalOnline Online',
+                icon: Icons.check_circle_outline,
                 color: const Color(0xFF16A34A),
               ),
+              _DashboardCard(
+                title: 'Alertas Offline (Rojo)',
+                value: '🔴 $totalOffline Offline${totalWarning > 0 ? ' • 🟠 $totalWarning' : ''}',
+                icon: Icons.error_outline,
+                color: const Color(0xFFDC2626),
+              ),
             ],
+          ),
+
+          const SizedBox(height: 26),
+
+          // LISTADO ORGANIZABLE Y BUSCABLE DE SISTEMAS MONITORIZADOS
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.monitor_heart_rounded,
+                      color: Color(0xFF1E3A8A),
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Listado de Sistemas Monitorizados (${filtered.length} de $totalMonitored)',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF0F172A),
+                      ),
+                    ),
+                    const Spacer(),
+                    // Filtro rápido por estado
+                    SegmentedButton<String>(
+                      segments: [
+                        ButtonSegment(
+                          value: 'all',
+                          label: Text(
+                            'Todos ($totalMonitored)',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ),
+                        ButtonSegment(
+                          value: 'online',
+                          label: Text(
+                            '🟢 Verde ($totalOnline)',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ),
+                        ButtonSegment(
+                          value: 'offline',
+                          label: Text(
+                            '🔴 Rojo ($totalOffline)',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ),
+                      ],
+                      selected: {_dashStatusFilter},
+                      onSelectionChanged: (s) {
+                        setState(() => _dashStatusFilter = s.first);
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                // Barra de búsqueda, filtro por método y selector de ordenación
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: TextField(
+                        controller: _dashSearchCtrl,
+                        onChanged: (_) => setState(() {}),
+                        decoration: InputDecoration(
+                          hintText:
+                              'Buscar por hostname, código, IP, modelo, rack o datacenter...',
+                          prefixIcon: const Icon(Icons.search, size: 18),
+                          suffixIcon: _dashSearchCtrl.text.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, size: 16),
+                                  onPressed: () {
+                                    _dashSearchCtrl.clear();
+                                    setState(() {});
+                                  },
+                                )
+                              : null,
+                          isDense: true,
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(
+                              color: Color(0xFFCBD5E1),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _dashMethodFilter,
+                        isDense: true,
+                        decoration: InputDecoration(
+                          labelText: 'Filtrar Método Heartbeat',
+                          isDense: true,
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'all',
+                            child: Text('Todos los métodos', style: TextStyle(fontSize: 12)),
+                          ),
+                          DropdownMenuItem(
+                            value: 'icmp',
+                            child: Text('ICMP Ping', style: TextStyle(fontSize: 12)),
+                          ),
+                          DropdownMenuItem(
+                            value: 'ssh',
+                            child: Text('SSH (22)', style: TextStyle(fontSize: 12)),
+                          ),
+                          DropdownMenuItem(
+                            value: 'https',
+                            child: Text('HTTPS / SSL', style: TextStyle(fontSize: 12)),
+                          ),
+                          DropdownMenuItem(
+                            value: 'http',
+                            child: Text('HTTP URL', style: TextStyle(fontSize: 12)),
+                          ),
+                          DropdownMenuItem(
+                            value: 'tcp',
+                            child: Text('TCP Port', style: TextStyle(fontSize: 12)),
+                          ),
+                          DropdownMenuItem(
+                            value: 'snmp',
+                            child: Text('SNMP', style: TextStyle(fontSize: 12)),
+                          ),
+                        ],
+                        onChanged: (v) =>
+                            setState(() => _dashMethodFilter = v ?? 'all'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _dashSortBy,
+                        isDense: true,
+                        decoration: InputDecoration(
+                          labelText: 'Organizar / Ordenar por',
+                          isDense: true,
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'status',
+                            child: Text('Estado (Rojo / Alertas primero)', style: TextStyle(fontSize: 12)),
+                          ),
+                          DropdownMenuItem(
+                            value: 'code',
+                            child: Text('Código / Hostname', style: TextStyle(fontSize: 12)),
+                          ),
+                          DropdownMenuItem(
+                            value: 'ip',
+                            child: Text('Dirección IP', style: TextStyle(fontSize: 12)),
+                          ),
+                          DropdownMenuItem(
+                            value: 'rack',
+                            child: Text('Datacenter / Rack', style: TextStyle(fontSize: 12)),
+                          ),
+                          DropdownMenuItem(
+                            value: 'method',
+                            child: Text('Método Heartbeat', style: TextStyle(fontSize: 12)),
+                          ),
+                          DropdownMenuItem(
+                            value: 'latency',
+                            child: Text('Latencia (ms)', style: TextStyle(fontSize: 12)),
+                          ),
+                        ],
+                        onChanged: (v) =>
+                            setState(() => _dashSortBy = v ?? 'status'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton.outlined(
+                      tooltip: _dashSortAsc
+                          ? 'Orden Ascendente (pulsa para invertir)'
+                          : 'Orden Descendente (pulsa para invertir)',
+                      onPressed: () =>
+                          setState(() => _dashSortAsc = !_dashSortAsc),
+                      icon: Icon(
+                        _dashSortAsc
+                            ? Icons.arrow_upward_rounded
+                            : Icons.arrow_downward_rounded,
+                        size: 18,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                const Divider(height: 1),
+                if (filtered.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Center(
+                      child: Text(
+                        'No se encontraron sistemas monitorizados con los filtros actuales.',
+                        style: TextStyle(color: Color(0xFF64748B)),
+                      ),
+                    ),
+                  )
+                else
+                  ...filtered.map((sys) {
+                    final st = (sys['status'] ?? 'unknown').toString();
+                    final isOnline = st == 'online';
+                    final isOffline = st == 'offline';
+                    final stCol = isOnline
+                        ? const Color(0xFF16A34A)
+                        : (isOffline
+                            ? const Color(0xFFDC2626)
+                            : const Color(0xFFD97706));
+                    final method = (sys['monitor_method'] ?? 'icmp')
+                        .toString()
+                        .toUpperCase();
+                    final port = sys['monitor_port'] ?? 22;
+                    final pingMs = sys['last_ping_ms'];
+                    final rackId = sys['rack_id'] as int;
+
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isOffline
+                            ? const Color(0xFFFEF2F2)
+                            : Colors.transparent,
+                        border: const Border(
+                          bottom: BorderSide(color: Color(0xFFF1F5F9)),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: stCol.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: stCol.withValues(alpha: 0.45),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: stCol,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  isOnline
+                                      ? 'VERDE (ONLINE)'
+                                      : (isOffline
+                                          ? 'ROJO (OFFLINE)'
+                                          : st.toUpperCase()),
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: stCol,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            flex: 3,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${sys['code']} — ${sys['name']}',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w800,
+                                    color: Color(0xFF0F172A),
+                                  ),
+                                ),
+                                Text(
+                                  '${sys['model_name']} • Hostname: ${sys['hostname']?.toString().isNotEmpty == true ? sys['hostname'] : '-'}',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Expanded(
+                            flex: 2,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'IP: ${sys['ip_address']?.toString().isNotEmpty == true ? sys['ip_address'] : 'Sin IP'}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF1E293B),
+                                  ),
+                                ),
+                                Text(
+                                  'Heartbeat: $method (Puerto $port)${pingMs != null ? ' • $pingMs ms' : ''}',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF475569),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Expanded(
+                            flex: 2,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${sys['location_code']} > ${sys['rack_code']} (U${sys['start_u']})',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF1E3A8A),
+                                  ),
+                                ),
+                                Text(
+                                  '${sys['floor_name']} • ${sys['rack_name']}',
+                                  style: const TextStyle(
+                                    fontSize: 10.5,
+                                    color: Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          FilledButton.tonalIcon(
+                            onPressed: () => _openRack(rackId),
+                            icon: const Icon(
+                              Icons.developer_board_outlined,
+                              size: 15,
+                            ),
+                            label: const Text(
+                              'Ir al Rack',
+                              style: TextStyle(fontSize: 11.5),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+              ],
+            ),
           ),
         ],
       ),

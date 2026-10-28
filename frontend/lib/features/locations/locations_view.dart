@@ -991,6 +991,64 @@ class _LocationsViewState extends State<LocationsView> {
                                   ),
                                 ],
                               ),
+                              const SizedBox(height: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: loc.offlineCount > 0
+                                      ? const Color(0xFFFEF2F2)
+                                      : const Color(0xFFF0FDF4),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color: loc.offlineCount > 0
+                                        ? const Color(0xFFFECACA)
+                                        : const Color(0xFFBBF7D0),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.monitor_heart_rounded,
+                                      size: 14,
+                                      color: loc.offlineCount > 0
+                                          ? const Color(0xFFDC2626)
+                                          : const Color(0xFF16A34A),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Monitorizados: ${loc.monitoredCount}',
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF0F172A),
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    _StatusDotPill(
+                                      color: const Color(0xFF16A34A),
+                                      count: loc.onlineCount,
+                                      label: 'Verde',
+                                    ),
+                                    const SizedBox(width: 6),
+                                    _StatusDotPill(
+                                      color: const Color(0xFFDC2626),
+                                      count: loc.offlineCount,
+                                      label: 'Rojo',
+                                    ),
+                                    if (loc.warningCount > 0) ...[
+                                      const SizedBox(width: 6),
+                                      _StatusDotPill(
+                                        color: const Color(0xFFD97706),
+                                        count: loc.warningCount,
+                                        label: 'Aviso',
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -1181,7 +1239,7 @@ class _LocationsViewState extends State<LocationsView> {
                                       ],
                                     ),
                                     Text(
-                                      '${loc.floorsCount} plantas • ${loc.racksCount} racks (${loc.totalRackUnits}U)',
+                                      '${loc.floorsCount} plantas • ${loc.racksCount} racks • Monit: ${loc.monitoredCount} (🟢${loc.onlineCount} 🔴${loc.offlineCount})',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
@@ -1445,7 +1503,7 @@ class _LocationsViewState extends State<LocationsView> {
                                 const SizedBox(width: 4),
                                 Flexible(
                                   child: Text(
-                                    '${loc.code} (${loc.racksCount} racks)',
+                                    '${loc.code} • 🟢${loc.onlineCount} 🔴${loc.offlineCount}',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
@@ -1748,6 +1806,41 @@ class _StatColumn extends StatelessWidget {
             fontSize: 16,
             fontWeight: FontWeight.w700,
             color: Color(0xFF0F172A),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _StatusDotPill extends StatelessWidget {
+  final Color color;
+  final int count;
+  final String label;
+
+  const _StatusDotPill({
+    required this.color,
+    required this.count,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          '$count',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            color: color,
           ),
         ),
       ],

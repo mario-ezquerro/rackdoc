@@ -38,6 +38,11 @@ class RackSummary {
   final double depthPx;
   final int rotationDeg;
   final int deviceCount;
+  final int monitoredCount;
+  final int onlineCount;
+  final int offlineCount;
+  final int warningCount;
+  final List<Map<String, dynamic>> monitoredDevices;
 
   RackSummary({
     required this.id,
@@ -56,6 +61,11 @@ class RackSummary {
     required this.depthPx,
     required this.rotationDeg,
     required this.deviceCount,
+    this.monitoredCount = 0,
+    this.onlineCount = 0,
+    this.offlineCount = 0,
+    this.warningCount = 0,
+    this.monitoredDevices = const [],
   });
 
   factory RackSummary.fromJson(Map<String, dynamic> json) {
@@ -76,6 +86,13 @@ class RackSummary {
       depthPx: ((json['depth_px'] ?? 86.0) as num).toDouble(),
       rotationDeg: (json['rotation_deg'] ?? 0) as int,
       deviceCount: (json['device_count'] ?? 0) as int,
+      monitoredCount: (json['monitored_count'] ?? 0) as int,
+      onlineCount: (json['online_count'] ?? 0) as int,
+      offlineCount: (json['offline_count'] ?? 0) as int,
+      warningCount: (json['warning_count'] ?? 0) as int,
+      monitoredDevices: ((json['monitored_devices'] ?? []) as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList(),
     );
   }
 }
@@ -122,6 +139,10 @@ class FloorNode {
   final int levelNumber;
   final String mapImageUrl;
   final double mapScale;
+  final int monitoredCount;
+  final int onlineCount;
+  final int offlineCount;
+  final int warningCount;
   final List<RoomNode> rooms;
 
   FloorNode({
@@ -130,6 +151,10 @@ class FloorNode {
     required this.levelNumber,
     required this.mapImageUrl,
     required this.mapScale,
+    this.monitoredCount = 0,
+    this.onlineCount = 0,
+    this.offlineCount = 0,
+    this.warningCount = 0,
     required this.rooms,
   });
 
@@ -140,6 +165,10 @@ class FloorNode {
       levelNumber: (json['level_number'] ?? 1) as int,
       mapImageUrl: (json['map_image_url'] ?? '') as String,
       mapScale: ((json['map_scale'] ?? 1.0) as num).toDouble(),
+      monitoredCount: (json['monitored_count'] ?? 0) as int,
+      onlineCount: (json['online_count'] ?? 0) as int,
+      offlineCount: (json['offline_count'] ?? 0) as int,
+      warningCount: (json['warning_count'] ?? 0) as int,
       rooms: ((json['rooms'] ?? []) as List)
           .map((e) => RoomNode.fromJson(e as Map<String, dynamic>))
           .toList(),
@@ -165,6 +194,10 @@ class LocationNode {
   final int roomsCount;
   final int racksCount;
   final int totalRackUnits;
+  final int monitoredCount;
+  final int onlineCount;
+  final int offlineCount;
+  final int warningCount;
   final List<FloorNode> floors;
 
   LocationNode({
@@ -185,6 +218,10 @@ class LocationNode {
     required this.roomsCount,
     required this.racksCount,
     required this.totalRackUnits,
+    this.monitoredCount = 0,
+    this.onlineCount = 0,
+    this.offlineCount = 0,
+    this.warningCount = 0,
     required this.floors,
   });
 
@@ -207,6 +244,10 @@ class LocationNode {
       roomsCount: (json['rooms_count'] ?? 0) as int,
       racksCount: (json['racks_count'] ?? 0) as int,
       totalRackUnits: (json['total_rack_units'] ?? 0) as int,
+      monitoredCount: (json['monitored_count'] ?? 0) as int,
+      onlineCount: (json['online_count'] ?? 0) as int,
+      offlineCount: (json['offline_count'] ?? 0) as int,
+      warningCount: (json['warning_count'] ?? 0) as int,
       floors: ((json['floors'] ?? []) as List)
           .map((e) => FloorNode.fromJson(e as Map<String, dynamic>))
           .toList(),
@@ -669,6 +710,7 @@ class ADServerModel {
   final String bindDn;
   final String userFilter;
   final String defaultRole;
+  final List<Map<String, dynamic>> groupRoleMapping;
   final bool isActive;
 
   ADServerModel({
@@ -682,6 +724,7 @@ class ADServerModel {
     required this.bindDn,
     required this.userFilter,
     required this.defaultRole,
+    this.groupRoleMapping = const [],
     required this.isActive,
   });
 
@@ -699,6 +742,9 @@ class ADServerModel {
       bindDn: (json['bind_dn'] ?? '') as String,
       userFilter: (json['user_filter'] ?? '') as String,
       defaultRole: (json['default_role'] ?? 'viewer') as String,
+      groupRoleMapping: ((json['group_role_mapping'] ?? []) as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList(),
       isActive: (json['enabled'] ?? json['is_active'] ?? true) as bool,
     );
   }

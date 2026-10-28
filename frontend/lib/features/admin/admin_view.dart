@@ -253,6 +253,19 @@ class _AdminViewState extends State<AdminView> {
     );
     String defaultRole = existing?.defaultRole ?? 'operator';
     bool useSsl = existing?.useSsl ?? false;
+    final List<Map<String, dynamic>> groupRules = existing != null &&
+            existing.groupRoleMapping.isNotEmpty
+        ? existing.groupRoleMapping
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList()
+        : [
+            {'group': 'CN=Domain Admins,OU=Groups', 'role': 'admin'},
+            {'group': 'CN=NetOps_Infrastructure,OU=Groups', 'role': 'editor'},
+            {'group': 'CN=NOC_Operators,OU=Groups', 'role': 'operator'},
+            {'group': 'CN=SecAudit_ReadOnly,OU=Groups', 'role': 'viewer'},
+          ];
+    final newGroupCtrl = TextEditingController();
+    String newGroupRole = 'operator';
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -264,10 +277,11 @@ class _AdminViewState extends State<AdminView> {
                 : 'Editar Servidor Active Directory (${existing.name})',
           ),
           content: SizedBox(
-            width: 520,
+            width: 580,
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
@@ -391,6 +405,142 @@ class _AdminViewState extends State<AdminView> {
                       portCtrl.text = v ? '636' : '389';
                     }),
                   ),
+                  const Divider(height: 20),
+                  const Text(
+                    'Mapeo de Roles por Grupos de Active Directory (Group -> Role RBAC):',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  ...groupRules.asMap().entries.map((entry) {
+                    final idx = entry.key;
+                    final rule = entry.value;
+                    final grp = (rule['group'] ?? '').toString();
+                    final rRole = (rule['role'] ?? 'viewer').toString();
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.groups_2_outlined,
+                            size: 16,
+                            color: Color(0xFF1E3A8A),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              grp,
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          DropdownButton<String>(
+                            value: rRole,
+                            isDense: true,
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'admin',
+                                child: Text('Rol: ADMIN', style: TextStyle(fontSize: 11)),
+                              ),
+                              DropdownMenuItem(
+                                value: 'editor',
+                                child: Text('Rol: EDITOR', style: TextStyle(fontSize: 11)),
+                              ),
+                              DropdownMenuItem(
+                                value: 'operator',
+                                child: Text('Rol: OPERATOR', style: TextStyle(fontSize: 11)),
+                              ),
+                              DropdownMenuItem(
+                                value: 'viewer',
+                                child: Text('Rol: VIEWER', style: TextStyle(fontSize: 11)),
+                              ),
+                            ],
+                            onChanged: (v) {
+                              if (v != null) {
+                                setModal(() => groupRules[idx]['role'] = v);
+                              }
+                            },
+                          ),
+                          IconButton(
+                            onPressed: () =>
+                                setModal(() => groupRules.removeAt(idx)),
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              size: 15,
+                              color: Color(0xFFDC2626),
+                            ),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: TextField(
+                          controller: newGroupCtrl,
+                          style: const TextStyle(fontSize: 12),
+                          decoration: const InputDecoration(
+                            labelText:
+                                'Nuevo Grupo AD (ej. CN=NetOps,OU=Groups)',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 2,
+                        child: DropdownButtonFormField<String>(
+                          initialValue: newGroupRole,
+                          isDense: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Rol RBAC',
+                            isDense: true,
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: 'admin', child: Text('admin')),
+                            DropdownMenuItem(value: 'editor', child: Text('editor')),
+                            DropdownMenuItem(value: 'operator', child: Text('operator')),
+                            DropdownMenuItem(value: 'viewer', child: Text('viewer')),
+                          ],
+                          onChanged: (v) =>
+                              setModal(() => newGroupRole = v ?? 'viewer'),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      FilledButton.tonal(
+                        onPressed: () {
+                          if (newGroupCtrl.text.trim().isNotEmpty) {
+                            setModal(() {
+                              groupRules.add({
+                                'group': newGroupCtrl.text.trim(),
+                                'role': newGroupRole,
+                              });
+                              newGroupCtrl.clear();
+                            });
+                          }
+                        },
+                        child: const Text('+ Grupo'),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -431,6 +581,7 @@ class _AdminViewState extends State<AdminView> {
           'bind_password': bindPassCtrl.text,
           'user_filter': filterCtrl.text.trim(),
           'default_role': defaultRole,
+          'group_role_mapping': groupRules,
           'enabled': true,
         };
         if (existing == null) {
@@ -528,9 +679,66 @@ class _AdminViewState extends State<AdminView> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
+                    if (ad.groupRoleMapping.isNotEmpty) ...[
+                      const Text(
+                        'Aplicar Rol a todo un Grupo de AD en 1 clic:',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF1E3A8A),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: ad.groupRoleMapping.map((rule) {
+                          final grp = (rule['group'] ?? '').toString();
+                          final rRole = (rule['role'] ?? 'viewer').toString();
+                          final shortGrp = grp
+                              .replaceFirst('CN=', '')
+                              .split(',')
+                              .first;
+                          return ActionChip(
+                            avatar: const Icon(
+                              Icons.groups_2_outlined,
+                              size: 14,
+                              color: Color(0xFF1E3A8A),
+                            ),
+                            label: Text(
+                              '$shortGrp → ${rRole.toUpperCase()}',
+                              style: const TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            onPressed: () {
+                              setModal(() {
+                                for (final u in results) {
+                                  final uGrp =
+                                      (u['ad_group'] ?? u['ad_dn'] ?? '')
+                                          .toString();
+                                  final uname = (u['username'] ?? '').toString();
+                                  if (uGrp
+                                          .toLowerCase()
+                                          .contains(shortGrp.toLowerCase()) ||
+                                      grp
+                                          .toLowerCase()
+                                          .contains(uGrp.toLowerCase())) {
+                                    checkedUsernames.add(uname);
+                                    selectedUsers[uname] = rRole;
+                                  }
+                                }
+                              });
+                            },
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                     const Text(
-                      'Selecciona los usuarios del Directorio Activo y asígnales uno de los 4 roles de RackDoc:',
+                      'Selecciona los usuarios o grupos del Directorio Activo y asígnales uno de los 4 roles de RackDoc:',
                       style: TextStyle(fontSize: 12, color: Color(0xFF475569)),
                     ),
                     const SizedBox(height: 8),
@@ -555,6 +763,7 @@ class _AdminViewState extends State<AdminView> {
                             final fname = (item['full_name'] ?? '').toString();
                             final email = (item['email'] ?? '').toString();
                             final dept = (item['department'] ?? '').toString();
+                            final adGroup = (item['ad_group'] ?? '').toString();
                             final already =
                                 item['already_registered'] == true ||
                                 item['already_imported'] == true;
@@ -590,6 +799,29 @@ class _AdminViewState extends State<AdminView> {
                                                 fontWeight: FontWeight.w700,
                                               ),
                                             ),
+                                            if (adGroup.isNotEmpty) ...[
+                                              const SizedBox(width: 6),
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 5,
+                                                      vertical: 1.5,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(0xFFE0E7FF),
+                                                  borderRadius:
+                                                      BorderRadius.circular(4),
+                                                ),
+                                                child: Text(
+                                                  'Grupo AD: ${adGroup.replaceFirst('CN=', '').split(',').first}',
+                                                  style: const TextStyle(
+                                                    fontSize: 9.5,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: Color(0xFF3730A3),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
                                             if (already) ...[
                                               const SizedBox(width: 6),
                                               Container(
@@ -946,6 +1178,42 @@ class _AdminViewState extends State<AdminView> {
                               color: Color(0xFF64748B),
                             ),
                           ),
+                          if (ad.groupRoleMapping.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 4,
+                              runSpacing: 4,
+                              children: ad.groupRoleMapping.map((rule) {
+                                final grp = (rule['group'] ?? '')
+                                    .toString()
+                                    .replaceFirst('CN=', '')
+                                    .split(',')
+                                    .first;
+                                final rl = (rule['role'] ?? 'viewer').toString();
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _roleColor(rl).withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                      color: _roleColor(rl).withValues(alpha: 0.35),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    'Grupo $grp → ${rl.toUpperCase()}',
+                                    style: TextStyle(
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: _roleColor(rl),
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ],
                           const SizedBox(height: 10),
                           Row(
                             children: [

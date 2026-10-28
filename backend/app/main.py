@@ -91,6 +91,7 @@ def _ensure_db_migrations():
         "ALTER TABLE users ADD COLUMN ad_server_id INTEGER",
         "ALTER TABLE users ADD COLUMN ad_dn VARCHAR(255) DEFAULT ''",
         "ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT 1",
+        "ALTER TABLE ad_servers ADD COLUMN group_role_mapping JSON DEFAULT '[]'",
     ]
     with engine.begin() as conn:
         for stmt in alter_statements:
@@ -225,7 +226,8 @@ def get_locations_tree(db: Session = Depends(get_db)):
             joinedload(Location.floors)
             .joinedload(Floor.rooms)
             .joinedload(Room.racks)
-            .joinedload(Rack.devices),
+            .joinedload(Rack.devices)
+            .joinedload(RackDevice.template),
             joinedload(Location.floors)
             .joinedload(Floor.rooms)
             .joinedload(Room.aisles),
@@ -239,10 +241,18 @@ def get_locations_tree(db: Session = Depends(get_db)):
         rooms_count = 0
         racks_count = 0
         total_rack_units = 0
+        loc_monitored = 0
+        loc_online = 0
+        loc_offline = 0
+        loc_warning = 0
         floors_data = []
 
         for fl in sorted(loc.floors, key=lambda x: x.level_number):
             rooms_count += len(fl.rooms)
+            fl_monitored = 0
+            fl_online = 0
+            fl_offline = 0
+            fl_warning = 0
             rooms_data = []
             for rm in fl.rooms:
                 racks_count += len(rm.racks)
@@ -260,6 +270,49 @@ def get_locations_tree(db: Session = Depends(get_db)):
                 for rk in rm.racks:
                     total_rack_units += rk.total_units
                     aisle_obj = aisles_map.get(rk.aisle_id)
+                    rack_devs = [d for d in rk.devices if d.mounted_face != "external"]
+                    mon_devs = [d for d in rack_devs if d.monitoring_enabled]
+                    rk_mon = len(mon_devs)
+                    rk_on = len([d for d in mon_devs if d.status == "online"])
+                    rk_off = len([d for d in mon_devs if d.status == "offline"])
+                    rk_warn = rk_mon - rk_on - rk_off
+
+                    fl_monitored += rk_mon
+                    fl_online += rk_on
+                    fl_offline += rk_off
+                    fl_warning += rk_warn
+
+                    monitored_list = [
+                        {
+                            "id": d.id,
+                            "code": d.code,
+                            "name": d.name,
+                            "hostname": d.hostname or "",
+                            "fqdn": d.fqdn or "",
+                            "ip_address": d.ip_address or "",
+                            "start_u": d.start_u,
+                            "u_height": d.template.u_height if d.template else 1,
+                            "category": d.template.category if d.template else "server",
+                            "manufacturer": d.template.manufacturer if d.template else "",
+                            "model_name": d.template.model_name if d.template else "",
+                            "monitoring_enabled": d.monitoring_enabled,
+                            "monitor_method": d.monitor_method or "icmp",
+                            "monitor_port": d.monitor_port or 22,
+                            "status": d.status or "unknown",
+                            "last_ping_ms": d.last_ping_ms,
+                            "custom_fields": d.custom_fields or {},
+                            "rack_id": rk.id,
+                            "rack_code": rk.code,
+                            "rack_name": rk.name,
+                            "floor_name": fl.name,
+                            "room_name": rm.name,
+                            "location_id": loc.id,
+                            "location_code": loc.code,
+                            "location_name": loc.name,
+                        }
+                        for d in rack_devs
+                    ]
+
                     racks_data.append(
                         {
                             "id": rk.id,
@@ -277,7 +330,12 @@ def get_locations_tree(db: Session = Depends(get_db)):
                             "width_px": rk.width_px or 96.0,
                             "depth_px": rk.depth_px or 116.0,
                             "rotation_deg": rk.rotation_deg or 0,
-                            "device_count": len([d for d in rk.devices if d.mounted_face != "external"]),
+                            "device_count": len(rack_devs),
+                            "monitored_count": rk_mon,
+                            "online_count": rk_on,
+                            "offline_count": rk_off,
+                            "warning_count": rk_warn,
+                            "monitored_devices": monitored_list,
                         }
                     )
                 rooms_data.append(
@@ -291,6 +349,10 @@ def get_locations_tree(db: Session = Depends(get_db)):
                         "racks": racks_data,
                     }
                 )
+            loc_monitored += fl_monitored
+            loc_online += fl_online
+            loc_offline += fl_offline
+            loc_warning += fl_warning
             floors_data.append(
                 {
                     "id": fl.id,
@@ -298,6 +360,10 @@ def get_locations_tree(db: Session = Depends(get_db)):
                     "level_number": fl.level_number,
                     "map_image_url": fl.map_image_url or "",
                     "map_scale": fl.map_scale or 1.0,
+                    "monitored_count": fl_monitored,
+                    "online_count": fl_online,
+                    "offline_count": fl_offline,
+                    "warning_count": fl_warning,
                     "rooms": rooms_data,
                 }
             )
@@ -321,6 +387,10 @@ def get_locations_tree(db: Session = Depends(get_db)):
                 "rooms_count": rooms_count,
                 "racks_count": racks_count,
                 "total_rack_units": total_rack_units,
+                "monitored_count": loc_monitored,
+                "online_count": loc_online,
+                "offline_count": loc_offline,
+                "warning_count": loc_warning,
                 "floors": floors_data,
             }
         )
@@ -839,35 +909,15 @@ def update_rack_device(device_id: int, payload: RackDeviceUpdate, db: Session = 
     new_face = updates.get("mounted_face", device.mounted_face)
 
     if new_start_u != device.start_u or new_face != device.mounted_face:
-        end_u = new_start_u + device.template.u_height - 1
-        if new_start_u < 1 or end_u > device.rack.total_units:
-            raise HTTPException(
-                status_code=400,
-                detail=f"La posición U{new_start_u}-U{end_u} excede los límites del rack (1..{device.rack.total_units}U).",
-            )
-        # Comprobar si hay un único equipo en la U destino para intercambiar su posición automáticamente (Swap)
-        overlapping = [
-            other
-            for other in db.query(RackDevice)
-            .options(joinedload(RackDevice.template))
-            .filter(RackDevice.rack_id == device.rack_id)
-            .all()
-            if other.id != device.id
-            and other.mounted_face != "external"
-            and not (end_u < other.start_u or new_start_u > (other.start_u + other.template.u_height - 1))
-        ]
-        if len(overlapping) == 1 and overlapping[0].template.u_height == device.template.u_height:
-            overlapping[0].start_u = device.start_u
-        elif overlapping:
-            _check_u_collision(
-                db=db,
-                rack=device.rack,
-                start_u=new_start_u,
-                u_height=device.template.u_height,
-                mounted_face=new_face,
-                is_full_depth=True,
-                exclude_device_id=device.id,
-            )
+        _check_u_collision(
+            db=db,
+            rack=device.rack,
+            start_u=new_start_u,
+            u_height=device.template.u_height,
+            mounted_face=new_face,
+            is_full_depth=True,
+            exclude_device_id=device.id,
+        )
 
     for k, v in updates.items():
         setattr(device, k, v)
@@ -1374,52 +1424,73 @@ def search_ad_directory_users(
     domain_suffix = srv.domain or "corp.local"
     base_dn = srv.base_dn or "DC=corp,DC=local"
 
-    # Catálogo de cuentas del directorio AD para explorar/filtrar e importar con rol asignado
+    # Mapa de grupos AD -> rol RBAC configurado en este servidor AD
+    group_map = {}
+    for gm in (srv.group_role_mapping or []):
+        gname = str(gm.get("group_name", "")).lower()
+        gdn = str(gm.get("group_dn", "")).lower()
+        r = str(gm.get("role", srv.default_role))
+        if gname:
+            group_map[gname] = r
+        if gdn:
+            group_map[gdn] = r
+
+    # Catálogo de cuentas del directorio AD para explorar/filtrar e importar con rol asignado por grupo o usuario
     directory_entries = [
         {
             "username": "jgarcia",
             "full_name": "Javier García (NetOps AD)",
             "email": f"jgarcia@{domain_suffix}",
             "ad_dn": f"CN=Javier Garcia,OU=NetOps,{base_dn}",
+            "ad_group": "NetOps & SysAdmins (Ingeniería CPD)",
             "department": "Infraestructura & Redes",
-            "suggested_role": srv.default_role,
+            "suggested_role": group_map.get("netops & sysadmins (ingeniería cpd)", "editor"),
         },
         {
             "username": "mfernandez",
             "full_name": "Marta Fernández (SysAdmin AD)",
             "email": f"mfernandez@{domain_suffix}",
             "ad_dn": f"CN=Marta Fernandez,OU=Sistemas,{base_dn}",
+            "ad_group": "NetOps & SysAdmins (Ingeniería CPD)",
             "department": "Sistemas & Virtualización",
-            "suggested_role": "editor",
+            "suggested_role": group_map.get("netops & sysadmins (ingeniería cpd)", "editor"),
         },
         {
             "username": "rnavarro",
             "full_name": "Roberto Navarro (Guardia NOC SSH/Web)",
             "email": f"rnavarro@{domain_suffix}",
             "ad_dn": f"CN=Roberto Navarro,OU=NOC,{base_dn}",
+            "ad_group": "NOC 24x7 & Guardia Operaciones (SSH/Web)",
             "department": "Operaciones 24x7 (SSH & Web)",
-            "suggested_role": "operator",
+            "suggested_role": group_map.get("noc 24x7 & guardia operaciones (ssh/web)", "operator"),
         },
         {
             "username": "elopez",
             "full_name": "Elena López (Auditoría TI)",
             "email": f"elopez@{domain_suffix}",
             "ad_dn": f"CN=Elena Lopez,OU=Auditoria,{base_dn}",
+            "ad_group": "Auditores & Seguridad Compliance",
             "department": "Seguridad & Compliance",
-            "suggested_role": "viewer",
+            "suggested_role": group_map.get("auditores & seguridad compliance", "viewer"),
         },
         {
             "username": "admin_ad",
             "full_name": "Administrador Dominio AD",
             "email": f"admin_ad@{domain_suffix}",
             "ad_dn": f"CN=Domain Admin,OU=Admins,{base_dn}",
+            "ad_group": "Domain Admins / Arquitectura TI",
             "department": "Arquitectura TI",
-            "suggested_role": "admin",
+            "suggested_role": group_map.get("domain admins / arquitectura ti", "admin"),
         },
     ]
 
     # Si el usuario escribió un username específico que no está en la lista de muestra, también lo generamos como candidato del AD
-    if q and not any(q in e["username"].lower() or q in e["full_name"].lower() for e in directory_entries):
+    if q and not any(
+        q in e["username"].lower()
+        or q in e["full_name"].lower()
+        or q in e.get("ad_group", "").lower()
+        for e in directory_entries
+    ):
         clean_u = q.split("@")[0].replace(" ", ".")
         directory_entries.insert(
             0,
@@ -1428,6 +1499,7 @@ def search_ad_directory_users(
                 "full_name": f"{clean_u.capitalize()} ({srv.name})",
                 "email": f"{clean_u}@{domain_suffix}",
                 "ad_dn": f"CN={clean_u},OU=Users,{base_dn}",
+                "ad_group": "Domain Users",
                 "department": "Directorio Activo",
                 "suggested_role": srv.default_role,
             },
@@ -1439,6 +1511,7 @@ def search_ad_directory_users(
             if q in e["username"].lower()
             or q in e["full_name"].lower()
             or q in e["department"].lower()
+            or q in e.get("ad_group", "").lower()
         ]
 
     existing_usernames = {u.username for u in db.query(User).all()}

@@ -69,6 +69,15 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
   bool _devMonitorEnabled = false;
   String _devMonitorMethod = 'icmp';
   int _devMonitorPort = 22;
+  late TextEditingController _devMonitorPortCtrl;
+  late TextEditingController _hbUrlCtrl;
+  late TextEditingController _hbExpectedStatusCtrl;
+  late TextEditingController _hbSshUserCtrl;
+  late TextEditingController _hbSshArgsCtrl;
+  late TextEditingController _hbSnmpCommunityCtrl;
+  late TextEditingController _hbSnmpOidCtrl;
+  List<String> _hbSecondaryMethods = [];
+  bool _hbSimulateOffline = false;
   List<Map<String, dynamic>> _devLinks = [];
   Map<String, dynamic> _devCustomFields = {};
 
@@ -137,13 +146,42 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
     _devStartUCtrl = TextEditingController(text: '${d?.startU ?? 1}');
     _devMountedFace = d?.mountedFace ?? 'front';
     _devMonitorEnabled = d?.monitoringEnabled ?? false;
-    _devMonitorMethod = d?.monitorMethod ?? 'icmp';
+    const validMethods = {'icmp', 'ssh', 'https', 'http', 'tcp', 'snmp'};
+    final rawMethod = (d?.monitorMethod ?? 'icmp').toLowerCase();
+    _devMonitorMethod = validMethods.contains(rawMethod) ? rawMethod : 'icmp';
     _devMonitorPort = d?.monitorPort ?? 22;
+    _devMonitorPortCtrl = TextEditingController(text: '$_devMonitorPort');
     _devLinks = d != null
         ? d.managementLinks.map((e) => Map<String, dynamic>.from(e)).toList()
         : [];
     _devCustomFields =
         d != null ? Map<String, dynamic>.from(d.customFields) : {};
+    final rawHb = _devCustomFields['heartbeat_config'];
+    final hb = rawHb is Map
+        ? Map<String, dynamic>.from(rawHb)
+        : <String, dynamic>{};
+    _hbUrlCtrl = TextEditingController(
+      text: (hb['url'] ?? hb['path'] ?? '/').toString(),
+    );
+    _hbExpectedStatusCtrl = TextEditingController(
+      text: (hb['expected_status'] ?? '200').toString(),
+    );
+    _hbSshUserCtrl = TextEditingController(
+      text: (hb['ssh_user'] ?? 'admin').toString(),
+    );
+    _hbSshArgsCtrl = TextEditingController(
+      text: (hb['ssh_extra_args'] ?? '-o StrictHostKeyChecking=no').toString(),
+    );
+    _hbSnmpCommunityCtrl = TextEditingController(
+      text: (hb['snmp_community'] ?? 'public').toString(),
+    );
+    _hbSnmpOidCtrl = TextEditingController(
+      text: (hb['snmp_oid'] ?? '1.3.6.1.2.1.1.1.0').toString(),
+    );
+    _hbSecondaryMethods = ((hb['secondary_methods'] ?? []) as List)
+        .map((e) => e.toString())
+        .toList();
+    _hbSimulateOffline = hb['simulate_offline'] == true;
   }
 
   void _initConnectionControllers() {
@@ -190,11 +228,28 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
     }
   }
 
+  Map<String, dynamic> _buildHeartbeatConfigMap() {
+    return {
+      'url': _hbUrlCtrl.text.trim(),
+      'path': _hbUrlCtrl.text.trim(),
+      'expected_status': int.tryParse(_hbExpectedStatusCtrl.text.trim()) ?? 200,
+      'ssh_user': _hbSshUserCtrl.text.trim(),
+      'ssh_extra_args': _hbSshArgsCtrl.text.trim(),
+      'snmp_community': _hbSnmpCommunityCtrl.text.trim(),
+      'snmp_oid': _hbSnmpOidCtrl.text.trim(),
+      'secondary_methods': _hbSecondaryMethods,
+      'simulate_offline': _hbSimulateOffline,
+    };
+  }
+
   Future<void> _saveDeviceSettings() async {
     final d = widget.selectedDevice;
     if (d == null) return;
     setState(() => _isSaving = true);
     try {
+      _devMonitorPort =
+          int.tryParse(_devMonitorPortCtrl.text.trim()) ?? _devMonitorPort;
+      _devCustomFields['heartbeat_config'] = _buildHeartbeatConfigMap();
       await widget.api.updateDevice(d.id, {
         'code': _devCodeCtrl.text.trim(),
         'name': _devNameCtrl.text.trim(),
@@ -253,13 +308,17 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
       _pingResultMessage = null;
     });
     try {
+      _devMonitorPort =
+          int.tryParse(_devMonitorPortCtrl.text.trim()) ?? _devMonitorPort;
+      _devCustomFields['heartbeat_config'] = _buildHeartbeatConfigMap();
       if (_canEdit) {
         await widget.api.updateDevice(d.id, {
           'ip_address': _devIpCtrl.text.trim(),
           'fqdn': _devFqdnCtrl.text.trim(),
-          'monitoring_enabled': true,
+          'monitoring_enabled': _devMonitorEnabled,
           'monitor_method': _devMonitorMethod,
           'monitor_port': _devMonitorPort,
+          'custom_fields': _devCustomFields,
         });
       }
       final res = await widget.api.pingDevice(d.id);
@@ -702,13 +761,17 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         ),
         const Divider(height: 20),
 
-        // SECCIÓN A: ESTADO PING Y CONECTIVIDAD EN VIVO
+        // SECCIÓN A: MONITORIZACIÓN Y HEARTBEAT (ICMP, SSH, HTTPS/URL, TCP, SNMP)
         Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
             color: const Color(0xFFF8FAFC),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
+            border: Border.all(
+              color: _devMonitorEnabled
+                  ? statusColor.withValues(alpha: 0.45)
+                  : const Color(0xFFE2E8F0),
+            ),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -719,63 +782,274 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                     width: 10,
                     height: 10,
                     decoration: BoxDecoration(
-                      color: statusColor,
+                      color: _devMonitorEnabled
+                          ? statusColor
+                          : const Color(0xFF94A3B8),
                       shape: BoxShape.circle,
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    'Estado: ${d.status.toUpperCase()}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: statusColor,
-                    ),
-                  ),
-                  const Spacer(),
-                  if (d.lastPingMs != null)
-                    Text(
-                      '${d.lastPingMs} ms',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF334155),
+                  Expanded(
+                    child: Text(
+                      _devMonitorEnabled
+                          ? 'Heartbeat: ${d.status.toUpperCase()}'
+                          : 'Heartbeat: DESACTIVADO',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: _devMonitorEnabled
+                            ? statusColor
+                            : const Color(0xFF64748B),
                       ),
                     ),
+                  ),
+                  if (d.lastPingMs != null && _devMonitorEnabled)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: Text(
+                        '${d.lastPingMs} ms',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF334155),
+                        ),
+                      ),
+                    ),
+                  Switch(
+                    value: _devMonitorEnabled,
+                    onChanged: _canEdit
+                        ? (v) => setState(() => _devMonitorEnabled = v)
+                        : null,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
                 ],
               ),
-              if (_pingResultMessage != null) ...[
-                const SizedBox(height: 6),
-                Text(
-                  _pingResultMessage!,
-                  style: const TextStyle(fontSize: 11, color: Color(0xFF475569)),
-                ),
-              ],
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Row(
                 children: [
                   Expanded(
+                    flex: 3,
                     child: DropdownButtonFormField<String>(
                       initialValue: _devMonitorMethod,
                       isDense: true,
-                      decoration: _compactDecoration(label: 'Método Check'),
+                      decoration: _compactDecoration(label: 'Método Heartbeat'),
                       items: const [
-                        DropdownMenuItem(value: 'icmp', child: Text('ICMP Ping')),
-                        DropdownMenuItem(value: 'tcp', child: Text('TCP Port Probe')),
+                        DropdownMenuItem(
+                          value: 'icmp',
+                          child: Text('ICMP Ping', style: TextStyle(fontSize: 11.5)),
+                        ),
+                        DropdownMenuItem(
+                          value: 'ssh',
+                          child: Text('SSH (Banner/Auth)', style: TextStyle(fontSize: 11.5)),
+                        ),
+                        DropdownMenuItem(
+                          value: 'https',
+                          child: Text('HTTPS / Web SSL', style: TextStyle(fontSize: 11.5)),
+                        ),
+                        DropdownMenuItem(
+                          value: 'http',
+                          child: Text('HTTP / Endpoint URL', style: TextStyle(fontSize: 11.5)),
+                        ),
+                        DropdownMenuItem(
+                          value: 'tcp',
+                          child: Text('TCP Port Probe', style: TextStyle(fontSize: 11.5)),
+                        ),
+                        DropdownMenuItem(
+                          value: 'snmp',
+                          child: Text('SNMP v2c/v3', style: TextStyle(fontSize: 11.5)),
+                        ),
                       ],
-                      onChanged: (v) =>
-                          setState(() => _devMonitorMethod = v ?? 'icmp'),
+                      onChanged: _canEdit
+                          ? (v) {
+                              setState(() {
+                                _devMonitorMethod = v ?? 'icmp';
+                                if (_devMonitorMethod == 'ssh') {
+                                  _devMonitorPortCtrl.text = '22';
+                                } else if (_devMonitorMethod == 'https') {
+                                  _devMonitorPortCtrl.text = '443';
+                                } else if (_devMonitorMethod == 'http') {
+                                  _devMonitorPortCtrl.text = '80';
+                                } else if (_devMonitorMethod == 'snmp') {
+                                  _devMonitorPortCtrl.text = '161';
+                                }
+                              });
+                            }
+                          : null,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  FilledButton.tonalIcon(
-                    onPressed: (_isPinging || !_canConnectRemote)
-                        ? null
-                        : _triggerDevicePing,
-                    icon: const Icon(Icons.network_ping, size: 15),
-                    label: Text(_isPinging ? 'Ping...' : 'Test Ping'),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    flex: 1,
+                    child: TextField(
+                      controller: _devMonitorPortCtrl,
+                      style: const TextStyle(fontSize: 11.5),
+                      decoration: _compactDecoration(label: 'Puerto'),
+                    ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Métodos adicionales combinados (Multi-Check):',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF475569),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: ['icmp', 'ssh', 'https', 'http', 'tcp', 'snmp'].map((m) {
+                  final isPrimary = _devMonitorMethod == m;
+                  final isSelected = isPrimary || _hbSecondaryMethods.contains(m);
+                  return FilterChip(
+                    label: Text(
+                      m.toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: isSelected
+                            ? const Color(0xFF1D4ED8)
+                            : const Color(0xFF475569),
+                      ),
+                    ),
+                    selected: isSelected,
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    onSelected: (!_canEdit || isPrimary)
+                        ? null
+                        : (sel) {
+                            setState(() {
+                              if (sel) {
+                                _hbSecondaryMethods.add(m);
+                              } else {
+                                _hbSecondaryMethods.remove(m);
+                              }
+                            });
+                          },
+                  );
+                }).toList(),
+              ),
+              // Parámetros extra según el método seleccionado
+              if (_devMonitorMethod == 'https' ||
+                  _devMonitorMethod == 'http' ||
+                  _hbSecondaryMethods.contains('https') ||
+                  _hbSecondaryMethods.contains('http')) ...[
+                const SizedBox(height: 8),
+                _CompactInput(
+                  label: 'URL / Path Heartbeat (ej. /healthz o https://ip:8443/api)',
+                  controller: _hbUrlCtrl,
+                ),
+                _CompactInput(
+                  label: 'Código HTTP Esperado (ej. 200)',
+                  controller: _hbExpectedStatusCtrl,
+                ),
+              ],
+              if (_devMonitorMethod == 'ssh' ||
+                  _hbSecondaryMethods.contains('ssh')) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _CompactInput(
+                        label: 'Usuario SSH',
+                        controller: _hbSshUserCtrl,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: _CompactInput(
+                        label: 'Opciones Extra SSH',
+                        controller: _hbSshArgsCtrl,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (_devMonitorMethod == 'snmp' ||
+                  _hbSecondaryMethods.contains('snmp')) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _CompactInput(
+                        label: 'Comunidad SNMP',
+                        controller: _hbSnmpCommunityCtrl,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: _CompactInput(
+                        label: 'OID Heartbeat',
+                        controller: _hbSnmpOidCtrl,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (_canEdit) ...[
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: Checkbox(
+                        value: _hbSimulateOffline,
+                        activeColor: const Color(0xFFDC2626),
+                        onChanged: (v) =>
+                            setState(() => _hbSimulateOffline = v ?? false),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Expanded(
+                      child: Text(
+                        'Simular caída / Alerta Roja (Offline)',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFFB91C1C),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (_pingResultMessage != null) ...[
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Text(
+                    _pingResultMessage!,
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      color: Color(0xFF334155),
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonalIcon(
+                  onPressed: (_isPinging || !_canConnectRemote)
+                      ? null
+                      : _triggerDevicePing,
+                  icon: const Icon(Icons.monitor_heart_outlined, size: 15),
+                  label: Text(
+                    _isPinging
+                        ? 'Ejecutando Heartbeat...'
+                        : 'Probar Heartbeat Ahora',
+                  ),
+                ),
               ),
             ],
           ),
@@ -995,7 +1269,14 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
             ),
           ],
         ),
-        if (_devCustomFields.isEmpty)
+        if (_devCustomFields.entries
+            .where((e) => !const {
+                  'heartbeat_config',
+                  'is_external_feed',
+                  'feed_color',
+                  'socket_count',
+                }.contains(e.key))
+            .isEmpty)
           const Padding(
             padding: EdgeInsets.only(bottom: 8),
             child: Text(
@@ -1004,7 +1285,14 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
             ),
           )
         else
-          ..._devCustomFields.entries.map((entry) {
+          ..._devCustomFields.entries
+              .where((e) => !const {
+                    'heartbeat_config',
+                    'is_external_feed',
+                    'feed_color',
+                    'socket_count',
+                  }.contains(e.key))
+              .map((entry) {
             return Container(
               margin: const EdgeInsets.only(bottom: 6),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
