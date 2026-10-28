@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../core/api_client.dart';
 import '../../core/image_file_picker.dart';
 import '../../models/datacenter_models.dart';
@@ -39,6 +40,11 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   final Map<int, Size> _rackSizes = {};
   final Map<int, int> _rackRotations = {};
   double _floorImageScale = 1.0;
+
+  // Selección múltiple de Racks (Caja de selección con ratón o Shift + Clic)
+  final Set<int> _selectedRackIds = {};
+  Offset? _marqueeStart;
+  Offset? _marqueeCurrent;
 
   LocationNode? get _location {
     if (widget.locations.isEmpty) return null;
@@ -151,6 +157,110 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       });
       widget.onRefresh();
     } catch (_) {}
+  }
+
+  Future<void> _saveMultipleRacksGeometry(Iterable<int> rackIds) async {
+    for (final rackId in rackIds) {
+      final pos = _rackPositions[rackId];
+      final size = _rackSizes[rackId];
+      final rot = _rackRotations[rackId];
+      if (pos == null || size == null) continue;
+      try {
+        await widget.api.updateRack(rackId, {
+          'pos_x': double.parse(pos.dx.toStringAsFixed(4)),
+          'pos_y': double.parse(pos.dy.toStringAsFixed(4)),
+          'width_px': size.width.roundToDouble(),
+          'depth_px': size.height.roundToDouble(),
+          'rotation_deg': rot ?? 0,
+        });
+      } catch (_) {}
+    }
+    widget.onRefresh();
+  }
+
+  bool get _isShiftPressed {
+    final keys = HardwareKeyboard.instance.logicalKeysPressed;
+    return keys.contains(LogicalKeyboardKey.shiftLeft) ||
+        keys.contains(LogicalKeyboardKey.shiftRight) ||
+        keys.contains(LogicalKeyboardKey.metaLeft) ||
+        keys.contains(LogicalKeyboardKey.controlLeft);
+  }
+
+  /// Alinea los Racks seleccionados en una fila horizontal limpia (misma coordenada Y)
+  Future<void> _alignSelectedRacksHorizontally({
+    required double canvasW,
+    bool packTightly = false,
+  }) async {
+    if (_selectedRackIds.length < 2) return;
+    final ids = _selectedRackIds.toList()
+      ..sort(
+        (a, b) => (_rackPositions[a]?.dx ?? 0).compareTo(
+          _rackPositions[b]?.dx ?? 0,
+        ),
+      );
+    final avgY = ids
+            .map((id) => _rackPositions[id]?.dy ?? 0.35)
+            .reduce((a, b) => a + b) /
+        ids.length;
+    setState(() {
+      double runningX = _rackPositions[ids.first]?.dx ?? 0.15;
+      for (final id in ids) {
+        final curX = _rackPositions[id]?.dx ?? runningX;
+        final targetX = packTightly ? runningX : curX;
+        _rackPositions[id] = Offset(
+          targetX.clamp(0.02, 0.90),
+          avgY.clamp(0.04, 0.88),
+        );
+        final wNorm = ((_rackSizes[id]?.width ?? 120.0) + 10.0) / canvasW;
+        runningX = targetX + wNorm;
+      }
+    });
+    await _saveMultipleRacksGeometry(ids);
+  }
+
+  /// Alinea los Racks seleccionados en una columna vertical limpia (misma coordenada X)
+  Future<void> _alignSelectedRacksVertically({
+    required double canvasH,
+    bool packTightly = false,
+  }) async {
+    if (_selectedRackIds.length < 2) return;
+    final ids = _selectedRackIds.toList()
+      ..sort(
+        (a, b) => (_rackPositions[a]?.dy ?? 0).compareTo(
+          _rackPositions[b]?.dy ?? 0,
+        ),
+      );
+    final avgX = ids
+            .map((id) => _rackPositions[id]?.dx ?? 0.25)
+            .reduce((a, b) => a + b) /
+        ids.length;
+    setState(() {
+      double runningY = _rackPositions[ids.first]?.dy ?? 0.15;
+      for (final id in ids) {
+        final curY = _rackPositions[id]?.dy ?? runningY;
+        final targetY = packTightly ? runningY : curY;
+        _rackPositions[id] = Offset(
+          avgX.clamp(0.02, 0.90),
+          targetY.clamp(0.04, 0.88),
+        );
+        final hNorm = ((_rackSizes[id]?.height ?? 90.0) + 10.0) / canvasH;
+        runningY = targetY + hNorm;
+      }
+    });
+    await _saveMultipleRacksGeometry(ids);
+  }
+
+  /// Iguala las dimensiones de todos los Racks seleccionados tomando el primero como referencia
+  Future<void> _equalizeSelectedRacksSize() async {
+    if (_selectedRackIds.length < 2) return;
+    final refId = _selectedRackIds.first;
+    final refSize = _rackSizes[refId] ?? const Size(120.0, 90.0);
+    setState(() {
+      for (final id in _selectedRackIds) {
+        _rackSizes[id] = refSize;
+      }
+    });
+    await _saveMultipleRacksGeometry(_selectedRackIds);
   }
 
   Future<void> _saveFloorScale(FloorNode floor, double newScale) async {
@@ -841,7 +951,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
             ),
           ),
 
-          // 2. BARRA DE CONTROLES DE LA VISTA DE PLANTA (Escala del Plano, Ayuda interactiva)
+          // 2. BARRA DE CONTROLES DE LA VISTA DE PLANTA (Escala del Plano, Selección Múltiple y Doble Clic)
           if (floor != null)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
@@ -852,24 +962,51 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
               child: Row(
                 children: [
                   const Icon(
-                    Icons.info_outline,
+                    Icons.ads_click_rounded,
                     size: 16,
                     color: Color(0xFF2563EB),
                   ),
                   const SizedBox(width: 8),
                   const Expanded(
                     child: Text(
-                      'Vista de Planta: Arrastra cada Rack para colocarlo en su sitio • Estira su esquina inferior derecha (◢) para dimensionarlo • Pulsa ↻ para rotar su frontal • Haz clic en el Rack para abrir su editor de 42U.',
+                      '1 Clic o Mayús+Clic / Caja de Ratón: Seleccionar uno o varios Racks para moverlos y alinearlos en bloque  •  Doble Clic en el Rack: Abrir en 3. Rack Editor.',
                       style: TextStyle(
                         fontSize: 11.5,
-                        color: Color(0xFF334155),
-                        fontWeight: FontWeight.w500,
+                        color: Color(0xFF1E293B),
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  if (floorRacks.isNotEmpty) ...[
+                    TextButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          if (_selectedRackIds.length == floorRacks.length) {
+                            _selectedRackIds.clear();
+                          } else {
+                            _selectedRackIds
+                              ..clear()
+                              ..addAll(floorRacks.map((r) => r.id));
+                          }
+                        });
+                      },
+                      icon: Icon(
+                        _selectedRackIds.length == floorRacks.length
+                            ? Icons.deselect
+                            : Icons.select_all,
+                        size: 15,
+                      ),
+                      label: Text(
+                        _selectedRackIds.length == floorRacks.length
+                            ? 'Deseleccionar Todos'
+                            : 'Seleccionar Todos (${floorRacks.length})',
+                        style: const TextStyle(fontSize: 11.5),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
                   const Text(
-                    'Tamaño/Escala del Plano:',
+                    'Escala del Plano:',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
@@ -877,7 +1014,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     ),
                   ),
                   SizedBox(
-                    width: 140,
+                    width: 130,
                     child: Slider(
                       value: _floorImageScale,
                       min: 0.4,
@@ -902,7 +1039,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
               ),
             ),
 
-          // 3. LIENZO DE LA VISTA DE PLANTA 2D DEL EDIFICIO (CON PLANO JPG/PNG/GIF Y RACKS ARRASTRABLES/DIMENSIONABLES)
+          // 3. LIENZO DE LA VISTA DE PLANTA 2D DEL EDIFICIO (CON CAJA DE SELECCIÓN MARQUEE, MULTISELECCIÓN SHIFT Y DOBLE CLIC)
           Expanded(
             child: floor == null
                 ? const Center(child: Text('Crea una planta para empezar.'))
@@ -926,35 +1063,113 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                         builder: (context, constraints) {
                           final canvasW = constraints.maxWidth;
                           final canvasH = constraints.maxHeight;
+                          final marqueeRect = (_marqueeStart != null &&
+                                  _marqueeCurrent != null)
+                              ? Rect.fromPoints(
+                                  _marqueeStart!,
+                                  _marqueeCurrent!,
+                                )
+                              : null;
 
                           return Stack(
                             fit: StackFit.expand,
                             children: [
-                              // A. Fondo: Cuadrícula técnica arquitectónica + Imagen del Plano subida (escalable)
-                              CustomPaint(
-                                painter: _ArchitecturalGridPainter(),
-                              ),
-                              if (floorImageUrl.isNotEmpty)
-                                Center(
-                                  child: Transform.scale(
-                                    scale: _floorImageScale,
-                                    child: Image.network(
-                                      floorImageUrl,
-                                      fit: BoxFit.contain,
-                                      errorBuilder: (ctx, err, _) {
-                                        WidgetsBinding.instance
-                                            .addPostFrameCallback((_) {
-                                          if (mounted && !_floorPlanLoadError) {
-                                            setState(
-                                              () => _floorPlanLoadError = true,
-                                            );
-                                          }
-                                        });
-                                        return const SizedBox.shrink();
-                                      },
+                              // A. Fondo interactivo: clic en vacío limpia selección, arrastrar dibuja caja de selección (Marquee)
+                              GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () {
+                                  if (!_isShiftPressed &&
+                                      _selectedRackIds.isNotEmpty) {
+                                    setState(() => _selectedRackIds.clear());
+                                  }
+                                },
+                                onPanStart: (details) {
+                                  setState(() {
+                                    if (!_isShiftPressed) {
+                                      _selectedRackIds.clear();
+                                    }
+                                    _marqueeStart = details.localPosition;
+                                    _marqueeCurrent = details.localPosition;
+                                  });
+                                },
+                                onPanUpdate: (details) {
+                                  if (_marqueeStart == null) return;
+                                  final cur = details.localPosition;
+                                  final selRect = Rect.fromPoints(
+                                    _marqueeStart!,
+                                    cur,
+                                  );
+                                  setState(() {
+                                    _marqueeCurrent = cur;
+                                    for (final rk in floorRacks) {
+                                      final normPos = _rackPositions[rk.id] ??
+                                          const Offset(0.25, 0.35);
+                                      final sz = _rackSizes[rk.id] ??
+                                          const Size(120.0, 90.0);
+                                      final leftPx = (normPos.dx * canvasW)
+                                          .clamp(
+                                            8.0,
+                                            (canvasW - sz.width - 8.0)
+                                                .clamp(8.0, canvasW),
+                                          );
+                                      final topPx = (normPos.dy * canvasH)
+                                          .clamp(
+                                            8.0,
+                                            (canvasH - sz.height - 8.0)
+                                                .clamp(8.0, canvasH),
+                                          );
+                                      final rkRect = Rect.fromLTWH(
+                                        leftPx,
+                                        topPx,
+                                        sz.width,
+                                        sz.height,
+                                      );
+                                      if (selRect.overlaps(rkRect)) {
+                                        _selectedRackIds.add(rk.id);
+                                      } else if (!_isShiftPressed) {
+                                        _selectedRackIds.remove(rk.id);
+                                      }
+                                    }
+                                  });
+                                },
+                                onPanEnd: (_) {
+                                  setState(() {
+                                    _marqueeStart = null;
+                                    _marqueeCurrent = null;
+                                  });
+                                },
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    CustomPaint(
+                                      painter: _ArchitecturalGridPainter(),
                                     ),
-                                  ),
+                                    if (floorImageUrl.isNotEmpty)
+                                      Center(
+                                        child: Transform.scale(
+                                          scale: _floorImageScale,
+                                          child: Image.network(
+                                            floorImageUrl,
+                                            fit: BoxFit.contain,
+                                            errorBuilder: (ctx, err, _) {
+                                              WidgetsBinding.instance
+                                                  .addPostFrameCallback((_) {
+                                                if (mounted &&
+                                                    !_floorPlanLoadError) {
+                                                  setState(
+                                                    () => _floorPlanLoadError =
+                                                        true,
+                                                  );
+                                                }
+                                              });
+                                              return const SizedBox.shrink();
+                                            },
+                                          ),
+                                        ),
+                                      ),
+                                  ],
                                 ),
+                              ),
 
                               if (_floorPlanLoadError &&
                                   floorImageUrl.isNotEmpty)
@@ -1045,6 +1260,234 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                   canvasW: canvasW,
                                   canvasH: canvasH,
                                 ),
+
+                              // C. Caja de selección visual (Marquee) al arrastrar con el ratón
+                              if (marqueeRect != null)
+                                Positioned(
+                                  left: marqueeRect.left,
+                                  top: marqueeRect.top,
+                                  width: marqueeRect.width,
+                                  height: marqueeRect.height,
+                                  child: IgnorePointer(
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF2563EB)
+                                            .withValues(alpha: 0.16),
+                                        border: Border.all(
+                                          color: const Color(0xFF2563EB),
+                                          width: 1.8,
+                                        ),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+
+                              // D. Barra Flotante de Colocación/Alineación cuando hay Racks seleccionados
+                              if (_selectedRackIds.isNotEmpty)
+                                Positioned(
+                                  top: 12,
+                                  left: 16,
+                                  right: 16,
+                                  child: Center(
+                                    child: Material(
+                                      elevation: 6,
+                                      borderRadius: BorderRadius.circular(10),
+                                      color: const Color(0xFF0F172A),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 14,
+                                          vertical: 8,
+                                        ),
+                                        child: Wrap(
+                                          crossAxisAlignment:
+                                              WrapCrossAlignment.center,
+                                          spacing: 8,
+                                          runSpacing: 6,
+                                          children: [
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 8,
+                                                vertical: 3,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF2563EB),
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                              ),
+                                              child: Text(
+                                                '${_selectedRackIds.length} ${_selectedRackIds.length == 1 ? 'Rack seleccionado' : 'Racks seleccionados'}',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w800,
+                                                ),
+                                              ),
+                                            ),
+                                            if (_selectedRackIds.length == 1)
+                                              FilledButton.icon(
+                                                style: FilledButton.styleFrom(
+                                                  backgroundColor:
+                                                      const Color(0xFF10B981),
+                                                  visualDensity:
+                                                      VisualDensity.compact,
+                                                ),
+                                                onPressed: () => widget
+                                                    .onOpenRack(
+                                                  _selectedRackIds.first,
+                                                ),
+                                                icon: const Icon(
+                                                  Icons.open_in_new,
+                                                  size: 14,
+                                                ),
+                                                label: const Text(
+                                                  'Abrir en Rack Editor (Doble Clic)',
+                                                  style:
+                                                      TextStyle(fontSize: 11),
+                                                ),
+                                              ),
+                                            if (_selectedRackIds.length >=
+                                                2) ...[
+                                              OutlinedButton.icon(
+                                                style: OutlinedButton.styleFrom(
+                                                  foregroundColor: Colors.white,
+                                                  side: const BorderSide(
+                                                    color: Color(0xFF475569),
+                                                  ),
+                                                  visualDensity:
+                                                      VisualDensity.compact,
+                                                ),
+                                                onPressed: () =>
+                                                    _alignSelectedRacksHorizontally(
+                                                  canvasW: canvasW,
+                                                  packTightly: false,
+                                                ),
+                                                icon: const Icon(
+                                                  Icons
+                                                      .align_vertical_center_rounded,
+                                                  size: 14,
+                                                ),
+                                                label: const Text(
+                                                  'Alinear en Fila',
+                                                  style:
+                                                      TextStyle(fontSize: 11),
+                                                ),
+                                              ),
+                                              OutlinedButton.icon(
+                                                style: OutlinedButton.styleFrom(
+                                                  foregroundColor: Colors.white,
+                                                  side: const BorderSide(
+                                                    color: Color(0xFF475569),
+                                                  ),
+                                                  visualDensity:
+                                                      VisualDensity.compact,
+                                                ),
+                                                onPressed: () =>
+                                                    _alignSelectedRacksHorizontally(
+                                                  canvasW: canvasW,
+                                                  packTightly: true,
+                                                ),
+                                                icon: const Icon(
+                                                  Icons.view_column_outlined,
+                                                  size: 14,
+                                                ),
+                                                label: const Text(
+                                                  'Juntar en Fila (Pasillo)',
+                                                  style:
+                                                      TextStyle(fontSize: 11),
+                                                ),
+                                              ),
+                                              OutlinedButton.icon(
+                                                style: OutlinedButton.styleFrom(
+                                                  foregroundColor: Colors.white,
+                                                  side: const BorderSide(
+                                                    color: Color(0xFF475569),
+                                                  ),
+                                                  visualDensity:
+                                                      VisualDensity.compact,
+                                                ),
+                                                onPressed: () =>
+                                                    _alignSelectedRacksVertically(
+                                                  canvasH: canvasH,
+                                                  packTightly: false,
+                                                ),
+                                                icon: const Icon(
+                                                  Icons
+                                                      .align_horizontal_center_rounded,
+                                                  size: 14,
+                                                ),
+                                                label: const Text(
+                                                  'Alinear en Columna',
+                                                  style:
+                                                      TextStyle(fontSize: 11),
+                                                ),
+                                              ),
+                                              OutlinedButton.icon(
+                                                style: OutlinedButton.styleFrom(
+                                                  foregroundColor: Colors.white,
+                                                  side: const BorderSide(
+                                                    color: Color(0xFF475569),
+                                                  ),
+                                                  visualDensity:
+                                                      VisualDensity.compact,
+                                                ),
+                                                onPressed: () =>
+                                                    _alignSelectedRacksVertically(
+                                                  canvasH: canvasH,
+                                                  packTightly: true,
+                                                ),
+                                                icon: const Icon(
+                                                  Icons.table_rows_outlined,
+                                                  size: 14,
+                                                ),
+                                                label: const Text(
+                                                  'Juntar en Columna',
+                                                  style:
+                                                      TextStyle(fontSize: 11),
+                                                ),
+                                              ),
+                                              OutlinedButton.icon(
+                                                style: OutlinedButton.styleFrom(
+                                                  foregroundColor: Colors.white,
+                                                  side: const BorderSide(
+                                                    color: Color(0xFF475569),
+                                                  ),
+                                                  visualDensity:
+                                                      VisualDensity.compact,
+                                                ),
+                                                onPressed:
+                                                    _equalizeSelectedRacksSize,
+                                                icon: const Icon(
+                                                  Icons.aspect_ratio,
+                                                  size: 14,
+                                                ),
+                                                label: const Text(
+                                                  'Igualar Tamaño',
+                                                  style:
+                                                      TextStyle(fontSize: 11),
+                                                ),
+                                              ),
+                                            ],
+                                            IconButton(
+                                              onPressed: () => setState(
+                                                () => _selectedRackIds.clear(),
+                                              ),
+                                              icon: const Icon(
+                                                Icons.close,
+                                                size: 16,
+                                                color: Colors.white70,
+                                              ),
+                                              tooltip: 'Limpiar selección',
+                                              visualDensity:
+                                                  VisualDensity.compact,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
                             ],
                           );
                         },
@@ -1065,11 +1508,14 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     final normPos = _rackPositions[rk.id] ?? const Offset(0.25, 0.35);
     final baseSize = _rackSizes[rk.id] ?? const Size(120.0, 90.0);
     final rot = _rackRotations[rk.id] ?? 0;
+    final isSelected = _selectedRackIds.contains(rk.id);
 
     final boxW = baseSize.width;
     final boxH = baseSize.height;
-    final leftPx = (normPos.dx * canvasW).clamp(8.0, (canvasW - boxW - 8.0).clamp(8.0, canvasW));
-    final topPx = (normPos.dy * canvasH).clamp(8.0, (canvasH - boxH - 8.0).clamp(8.0, canvasH));
+    final leftPx = (normPos.dx * canvasW)
+        .clamp(8.0, (canvasW - boxW - 8.0).clamp(8.0, canvasW));
+    final topPx = (normPos.dy * canvasH)
+        .clamp(8.0, (canvasH - boxH - 8.0).clamp(8.0, canvasH));
 
     final isCold = rk.aisleType == 'cold';
     final frontStripColor = isCold
@@ -1081,33 +1527,80 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       top: topPx,
       width: boxW,
       height: boxH,
-      child: GestureDetector(
-        onTap: () => widget.onOpenRack(rk.id),
-        onPanUpdate: (details) {
-          setState(() {
-            final cur = _rackPositions[rk.id] ?? normPos;
-            final nextX = (cur.dx + details.delta.dx / canvasW).clamp(0.01, 0.92);
-            final nextY = (cur.dy + details.delta.dy / canvasH).clamp(0.01, 0.90);
-            _rackPositions[rk.id] = Offset(nextX, nextY);
-          });
-        },
-        onPanEnd: (_) => _saveRackGeometry(rk.id),
-        child: Container(
-          decoration: BoxDecoration(
-            color: const Color(0xFF0F172A),
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(
-              color: const Color(0xFF38BDF8),
-              width: 1.8,
-            ),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x33000000),
-                blurRadius: 8,
-                offset: Offset(0, 3),
+      child: Tooltip(
+        message:
+            '${rk.code} (${rk.name})\n• 1 Clic: Seleccionar Rack (Mayús+Clic para selección múltiple)\n• Doble Clic: Abrir en 3. Rack Editor\n• Arrastrar: Mover Rack (o grupo seleccionado)',
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            setState(() {
+              if (_isShiftPressed) {
+                if (_selectedRackIds.contains(rk.id)) {
+                  _selectedRackIds.remove(rk.id);
+                } else {
+                  _selectedRackIds.add(rk.id);
+                }
+              } else {
+                _selectedRackIds
+                  ..clear()
+                  ..add(rk.id);
+              }
+            });
+          },
+          onDoubleTap: () => widget.onOpenRack(rk.id),
+          onPanStart: (_) {
+            if (!_selectedRackIds.contains(rk.id)) {
+              setState(() {
+                if (!_isShiftPressed) {
+                  _selectedRackIds.clear();
+                }
+                _selectedRackIds.add(rk.id);
+              });
+            }
+          },
+          onPanUpdate: (details) {
+            final dxNorm = details.delta.dx / canvasW;
+            final dyNorm = details.delta.dy / canvasH;
+            final targetIds = _selectedRackIds.contains(rk.id)
+                ? _selectedRackIds
+                : <int>{rk.id};
+            setState(() {
+              for (final id in targetIds) {
+                final cur = _rackPositions[id] ?? const Offset(0.25, 0.35);
+                final nextX = (cur.dx + dxNorm).clamp(0.01, 0.92);
+                final nextY = (cur.dy + dyNorm).clamp(0.01, 0.90);
+                _rackPositions[id] = Offset(nextX, nextY);
+              }
+            });
+          },
+          onPanEnd: (_) {
+            final targetIds = _selectedRackIds.contains(rk.id)
+                ? _selectedRackIds.toList()
+                : <int>[rk.id];
+            _saveMultipleRacksGeometry(targetIds);
+          },
+          child: Container(
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? const Color(0xFF1E3A8A)
+                  : const Color(0xFF0F172A),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: isSelected
+                    ? const Color(0xFFFACC15)
+                    : const Color(0xFF38BDF8),
+                width: isSelected ? 2.8 : 1.8,
               ),
-            ],
-          ),
+              boxShadow: [
+                BoxShadow(
+                  color: isSelected
+                      ? const Color(0x66FACC15)
+                      : const Color(0x33000000),
+                  blurRadius: isSelected ? 12 : 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
           child: Stack(
             clipBehavior: Clip.none,
             children: [
@@ -1282,6 +1775,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
               ),
             ],
           ),
+        ),
         ),
       ),
     );

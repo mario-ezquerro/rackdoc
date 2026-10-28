@@ -38,8 +38,11 @@ class _RackEditorViewState extends State<RackEditorView> {
   bool _loading = true;
   String? _error;
 
-  // Cara activa del rack ('front' o 'back')
-  String _activeFace = 'front';
+  // Cara activa del rack ('front', 'back' o 'both' para ver Delante + Detrás a la vez)
+  String _activeFace = 'both';
+
+  // Mostrar / Ocultar foto de referencia / bisel realista en los equipos montados
+  bool _showEquipmentPhotos = false;
 
   // Filtro de visualización de cables ('all' | 'network' | 'fiber' | 'power')
   String _cableFilter = 'all';
@@ -69,22 +72,33 @@ class _RackEditorViewState extends State<RackEditorView> {
   final TransformationController _transformController =
       TransformationController();
 
-  // Dimensiones constantes del dibujo técnico del Rack (estilo Patchbox CAD) + Zona Exterior Schuko
+  // Dimensiones constantes del dibujo técnico del Rack (estilo Patchbox CAD) + Vista Dual (Front + Back) + Zona Exterior
   static const double _canvasWidth = 1140.0;
+  static const double _dualCanvasWidth = 1890.0;
   static const double _rackOuterLeft = 104.0;
   static const double _rackOuterWidth = 628.0;
   static const double _rackInnerLeft = 152.0;
   static const double _rackInnerWidth = 532.0;
+  static const double _backRackOuterLeft = 836.0;
+  static const double _backRackInnerLeft = 884.0;
+  static const double _dualFaceGap = 104.0;
   static const double _railWidth = 18.0;
-  static const double _rackTopMargin = 58.0;
+  static const double _rackTopMargin = 76.0;
   static const double _uHeightPx = 42.0;
 
-  // Coordenadas del cuadro de Tomas Eléctricas Exteriores (fuera del rack a la derecha)
+  // Coordenadas del cuadro de Tomas Eléctricas y de Fibra Exteriores (fuera del rack a la derecha)
   static const double _extZoneLeft = 785.0;
+  static const double _dualExtZoneLeft = 1530.0;
   static const double _extZoneWidth = 315.0;
-  static const double _extCardTopStart = 96.0;
+  static const double _extCardTopStart = 114.0;
   static const double _extCardHeight = 128.0;
   static const double _extCardGap = 18.0;
+
+  bool get _isDualFace => _activeFace == 'both';
+  double get _effectiveExtZoneLeft =>
+      _isDualFace ? _dualExtZoneLeft : _extZoneLeft;
+  double get _effectiveCanvasWidth =>
+      _isDualFace ? _dualCanvasWidth : _canvasWidth;
 
   bool get _canEdit => widget.currentUser?.canEdit ?? true;
   bool get _canConnectRemote => widget.currentUser?.canConnectRemote ?? true;
@@ -224,8 +238,8 @@ class _RackEditorViewState extends State<RackEditorView> {
     return port.relX;
   }
 
-  double _computeVisualRelY(RackDeviceModel dev, PortModel port) {
-    final facePorts = dev.portsForFace(_activeFace);
+  double _computeVisualRelY(RackDeviceModel dev, PortModel port, String face) {
+    final facePorts = dev.portsForFace(face);
     final hasTwoRows = facePorts.any((p) => p.rowIndex > 0);
     if (hasTwoRows) {
       return port.rowIndex == 0 ? 0.34 : 0.72;
@@ -266,32 +280,53 @@ class _RackEditorViewState extends State<RackEditorView> {
   }
 
   /// Calcula la coordenada exacta (x, y) en el lienzo de cada puerto visible en la cara activa
-  /// MÁS las tomas eléctricas y de fibra exteriores que siempre son visibles fuera del rack.
+  /// (o en AMBAS caras Front y Back cuando `_activeFace == 'both'`) MÁS las tomas exteriores.
   Map<int, Offset> _computePortCoordinates(RackDetailModel rack) {
     final map = <int, Offset>{};
     final totalU = rack.totalUnits;
 
-    // 1. Dispositivos montados dentro del Rack (visibles tanto en Front como en Back)
+    // 1. Dispositivos montados dentro del Rack
     for (final dev in rack.devices) {
       if (dev.isExternalFeed) continue;
-      if (!dev.isVisibleOnFace(_activeFace)) continue;
 
       final topU = dev.endU;
       final devTopY = _rackTopMargin + (totalU - topU) * _uHeightPx;
-      final devHeight = dev.template.uHeight * _uHeightPx;
+      final devHeight = dev.uHeight * _uHeightPx;
 
-      final facePorts = dev.portsForFace(_activeFace);
-      for (final p in facePorts) {
-        final rx = _computeVisualRelX(dev, p);
-        final ry = _computeVisualRelY(dev, p);
-        final px = _rackInnerLeft + rx * _rackInnerWidth;
-        final py = devTopY + ry * devHeight;
-        map[p.id] = Offset(px, py);
+      if (_isDualFace) {
+        // En modo Dual (Front + Back), calculamos tanto los puertos Front (izquierda) como los Back (derecha)
+        for (final p in dev.portsForFace('front')) {
+          final rx = _computeVisualRelX(dev, p);
+          final ry = _computeVisualRelY(dev, p, 'front');
+          map[p.id] = Offset(
+            _rackInnerLeft + rx * _rackInnerWidth,
+            devTopY + ry * devHeight,
+          );
+        }
+        for (final p in dev.portsForFace('back')) {
+          final rx = _computeVisualRelX(dev, p);
+          final ry = _computeVisualRelY(dev, p, 'back');
+          map[p.id] = Offset(
+            _backRackInnerLeft + rx * _rackInnerWidth,
+            devTopY + ry * devHeight,
+          );
+        }
+      } else {
+        if (!dev.isVisibleOnFace(_activeFace)) continue;
+        final facePorts = dev.portsForFace(_activeFace);
+        for (final p in facePorts) {
+          final rx = _computeVisualRelX(dev, p);
+          final ry = _computeVisualRelY(dev, p, _activeFace);
+          final px = _rackInnerLeft + rx * _rackInnerWidth;
+          final py = devTopY + ry * devHeight;
+          map[p.id] = Offset(px, py);
+        }
       }
     }
 
     // 2. Tomas Exteriores (Eléctricas Schuko y de Fibra Óptica fuera del rack a la derecha)
     final extOutlets = _getExternalOutlets(rack);
+    final extLeft = _effectiveExtZoneLeft;
     double runningCardTop = _extCardTopStart;
     for (int idx = 0; idx < extOutlets.length; idx++) {
       final ext = extOutlets[idx];
@@ -301,7 +336,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         final port = ext.ports[pIdx];
         final localCenter = _externalPortLocalCenter(ext, pIdx);
         map[port.id] = Offset(
-          _extZoneLeft + localCenter.dx,
+          extLeft + localCenter.dx,
           cardTop + localCenter.dy,
         );
       }
@@ -355,13 +390,13 @@ class _RackEditorViewState extends State<RackEditorView> {
   }
 
   /// Busca la unidad U libre más cercana hacia arriba (`direction = 1`) o hacia abajo (`direction = -1`)
-  /// donde quepa el equipo completo (`dev.template.uHeight` unidades U libres).
+  /// donde quepa el equipo completo (`dev.uHeight` unidades U libres).
   int? _findNearestFreeU(
     RackDetailModel rack,
     RackDeviceModel dev,
     int direction,
   ) {
-    final uHeight = dev.template.uHeight;
+    final uHeight = dev.uHeight;
     final maxStartU = rack.totalUnits - uHeight + 1;
     int candidate = dev.startU + direction;
     while (candidate >= 1 && candidate <= maxStartU) {
@@ -373,13 +408,64 @@ class _RackEditorViewState extends State<RackEditorView> {
     return null;
   }
 
+  Future<void> _quickAdjustDeviceUHeight(
+    RackDeviceModel dev,
+    int newUHeight,
+  ) async {
+    if (!_canEdit) return;
+    final rack = _rack;
+    if (rack == null) return;
+    final clamped = newUHeight.clamp(1, 16);
+    if (clamped == dev.uHeight) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    if (!_canFitAtU(rack, dev.startU, clamped, excludeDeviceId: dev.id)) {
+      final blocker = _findBlockingDevice(
+        rack,
+        dev.startU,
+        clamped,
+        excludeDeviceId: dev.id,
+      );
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            blocker != null
+                ? 'No se puede ampliar "${dev.code}" a ${clamped}U en U${dev.startU}-U${dev.startU + clamped - 1}: choca con "${blocker.code}" (U${blocker.startU}).'
+                : 'No cabe "${dev.code}" con ${clamped}U en U${dev.startU} (excede U${rack.totalUnits}).',
+          ),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+      return;
+    }
+
+    try {
+      final updatedCustom = Map<String, dynamic>.from(dev.customFields);
+      updatedCustom['u_height_override'] = clamped;
+      await widget.api.updateDevice(dev.id, {'custom_fields': updatedCustom});
+      await _loadRack();
+      messenger.showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 2),
+          content: Text(
+            'Altura de "${dev.code}" actualizada a ${clamped}U (ocupa U${dev.startU}${clamped > 1 ? '-U${dev.startU + clamped - 1}' : ''}).',
+          ),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
+      );
+    }
+  }
+
   Future<void> _moveDeviceToU(RackDeviceModel dev, int targetStartU) async {
     if (!_canEdit) return;
     final rack = _rack;
     if (rack == null) return;
     if (targetStartU == dev.startU) return;
 
-    final uHeight = dev.template.uHeight;
+    final uHeight = dev.uHeight;
     final targetEndU = targetStartU + uHeight - 1;
     final messenger = ScaffoldMessenger.of(context);
 
@@ -404,7 +490,7 @@ class _RackEditorViewState extends State<RackEditorView> {
     if (blocker != null) {
       final rangeLabel =
           uHeight > 1 ? 'U$targetStartU-U$targetEndU' : 'U$targetStartU';
-      final blockerRange = blocker.template.uHeight > 1
+      final blockerRange = blocker.uHeight > 1
           ? 'U${blocker.startU}-U${blocker.endU}'
           : 'U${blocker.startU}';
       messenger.showSnackBar(
@@ -446,7 +532,7 @@ class _RackEditorViewState extends State<RackEditorView> {
     if (!_canEdit) return;
     final rack = _rack;
     if (rack == null) return;
-    final uHeight = dev.template.uHeight;
+    final uHeight = dev.uHeight;
     final maxU = rack.totalUnits - uHeight + 1;
 
     final freePositions = <int>[
@@ -598,116 +684,147 @@ class _RackEditorViewState extends State<RackEditorView> {
     final maskCtrl = TextEditingController(text: '255.255.255.0');
     final gwCtrl = TextEditingController(text: '10.28.1.1');
 
+    int chosenUHeight = tpl.uHeight;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(
-          'Montar ${tpl.modelName} en U$targetStartU (Autorrellena Front y Back)',
-        ),
-        content: SizedBox(
-          width: 440,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  margin: const EdgeInsets.only(bottom: 10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEFF6FF),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFF93C5FD)),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(
-                        Icons.sync_alt,
-                        size: 16,
-                        color: Color(0xFF1D4ED8),
-                      ),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Al montar este equipo en Front, su parte trasera (fuentes PSU / puertos traseros) se rellena automáticamente en la vista Back.',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Color(0xFF1E3A8A),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => AlertDialog(
+          title: Text(
+            'Montar ${tpl.modelName} en U$targetStartU (Autorrellena Front y Back)',
+          ),
+          content: SizedBox(
+            width: 460,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEFF6FF),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xFF93C5FD)),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(
+                          Icons.sync_alt,
+                          size: 16,
+                          color: Color(0xFF1D4ED8),
+                        ),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Al montar este equipo en Front, su parte trasera (fuentes PSU / puertos traseros) se rellena automáticamente en la vista Back.',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF1E3A8A),
+                            ),
                           ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: codeCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Código en Rack (ej. SW04, BDJ01)',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: hostnameCtrl,
+                          decoration:
+                              const InputDecoration(labelText: 'Hostname'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 1,
+                        child: DropdownButtonFormField<int>(
+                          initialValue: chosenUHeight.clamp(1, 16),
+                          decoration: const InputDecoration(
+                            labelText: 'Altura (U)',
+                          ),
+                          items: List.generate(16, (idx) => idx + 1)
+                              .map(
+                                (uVal) => DropdownMenuItem<int>(
+                                  value: uVal,
+                                  child: Text('${uVal}U'),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            if (v != null) {
+                              setModal(() => chosenUHeight = v);
+                            }
+                          },
                         ),
                       ),
                     ],
                   ),
-                ),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: codeCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Código en Rack (ej. SW04, SRV03)',
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: nameCtrl,
+                    decoration:
+                        const InputDecoration(labelText: 'Nombre Descriptivo'),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: fqdnCtrl,
+                    decoration: const InputDecoration(labelText: 'FQDN'),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: ipCtrl,
+                          decoration:
+                              const InputDecoration(labelText: 'Dirección IP'),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextField(
-                        controller: hostnameCtrl,
-                        decoration: const InputDecoration(labelText: 'Hostname'),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: maskCtrl,
+                          decoration:
+                              const InputDecoration(labelText: 'Máscara'),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: nameCtrl,
-                  decoration:
-                      const InputDecoration(labelText: 'Nombre Descriptivo'),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: fqdnCtrl,
-                  decoration: const InputDecoration(labelText: 'FQDN'),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: ipCtrl,
-                        decoration:
-                            const InputDecoration(labelText: 'Dirección IP'),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: gwCtrl,
+                          decoration:
+                              const InputDecoration(labelText: 'Gateway'),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: TextField(
-                        controller: maskCtrl,
-                        decoration: const InputDecoration(labelText: 'Máscara'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: TextField(
-                        controller: gwCtrl,
-                        decoration: const InputDecoration(labelText: 'Gateway'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Montar en el Rack'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Montar en el Rack'),
-          ),
-        ],
       ),
     );
 
@@ -721,11 +838,14 @@ class _RackEditorViewState extends State<RackEditorView> {
         'hostname': hostnameCtrl.text.trim(),
         'fqdn': fqdnCtrl.text.trim(),
         'start_u': targetStartU,
-        'mounted_face': _activeFace,
+        'mounted_face': _activeFace == 'back' ? 'back' : 'front',
         'ip_address': ipCtrl.text.trim(),
         'subnet_mask': maskCtrl.text.trim(),
         'gateway': gwCtrl.text.trim(),
         'monitoring_enabled': ipCtrl.text.trim().isNotEmpty,
+        'custom_fields': {
+          if (chosenUHeight != tpl.uHeight) 'u_height_override': chosenUHeight,
+        },
       });
       await _loadRack();
       setState(() {
@@ -1093,6 +1213,833 @@ class _RackEditorViewState extends State<RackEditorView> {
             SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
           );
         }
+      }
+    }
+  }
+
+  // ===========================================================================
+  // CONEXIÓN DE FIBRA / CABLE ENTRE DISTINTOS RACKS (INTER-RACK PATCHING)
+  // ===========================================================================
+  Future<void> _showInterRackConnectionDialog({
+    RackDeviceModel? initialSourceDev,
+    PortModel? initialSourcePort,
+  }) async {
+    if (!_canEdit) return;
+    final rack = _rack;
+    if (rack == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+
+    List<Map<String, dynamic>> otherRacks = [];
+    try {
+      otherRacks = await widget.api.getInterRackTargets(rack.id);
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Error obteniendo otros racks: $e'),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+      return;
+    }
+
+    if (otherRacks.isEmpty) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No hay otros Racks dados de alta en el Datacenter para conectar fibra/cable Inter-Rack.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    // Puertos ocupados en el rack actual
+    final occupiedLocalPorts = <int>{};
+    for (final c in rack.connections) {
+      occupiedLocalPorts.add(c.sourcePortId);
+      occupiedLocalPorts.add(c.targetPortId);
+    }
+
+    final localDevices =
+        rack.devices.where((d) => !d.isExternalFeed && d.ports.isNotEmpty).toList();
+    if (localDevices.isEmpty) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Este rack no tiene equipos con puertos para conectar.'),
+        ),
+      );
+      return;
+    }
+
+    RackDeviceModel selectedLocalDev = initialSourceDev != null &&
+            !initialSourceDev.isExternalFeed
+        ? initialSourceDev
+        : localDevices.first;
+
+    List<PortModel> freeLocalPortsFor(RackDeviceModel d) => d.ports
+        .where((p) => !occupiedLocalPorts.contains(p.id) || p.id == initialSourcePort?.id)
+        .toList();
+
+    List<PortModel> localPorts = freeLocalPortsFor(selectedLocalDev);
+    PortModel? selectedLocalPort = initialSourcePort ??
+        (localPorts.isNotEmpty ? localPorts.first : null);
+
+    Map<String, dynamic> selectedTargetRack = otherRacks.first;
+    List<Map<String, dynamic>> targetDevicesFor(Map<String, dynamic> rk) =>
+        ((rk['devices'] ?? []) as List)
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+
+    List<Map<String, dynamic>> targetDevs = targetDevicesFor(selectedTargetRack);
+    Map<String, dynamic>? selectedTargetDev =
+        targetDevs.isNotEmpty ? targetDevs.first : null;
+
+    List<Map<String, dynamic>> freeTargetPortsFor(Map<String, dynamic>? d) {
+      if (d == null) return [];
+      return ((d['ports'] ?? []) as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .where((p) => p['occupied'] != true)
+          .toList();
+    }
+
+    List<Map<String, dynamic>> targetPorts =
+        freeTargetPortsFor(selectedTargetDev);
+    Map<String, dynamic>? selectedTargetPort =
+        targetPorts.isNotEmpty ? targetPorts.first : null;
+
+    final isInitialFiber = (selectedLocalPort?.portType.contains('fiber') ?? false) ||
+        (selectedLocalPort?.portType.contains('sfp') ?? false);
+    String cableType = isInitialFiber ? 'fiber_om4' : 'fiber_os2';
+    String colorHex = isInitialFiber ? '#0284C7' : '#F59E0B';
+    final labelCtrl = TextEditingController(
+      text:
+          'Troncal Fibra ${rack.code} ➔ ${selectedTargetRack['code']}',
+    );
+    final vlanCtrl = TextEditingController(text: '');
+    final lengthCtrl = TextEditingController(text: '12.0');
+
+    const fiberPalette = [
+      '#0284C7', // Aqua OM4
+      '#F59E0B', // Amarillo OS2 Monomodo
+      '#7C3AED', // Violeta OM4/OM5
+      '#10B981', // Verde Trunk
+      '#2563EB', // Azul Red
+      '#DC2626', // Rojo
+      '#EA580C', // Naranja OM2
+      '#334155', // Negro DAC
+    ];
+
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.cable, color: Color(0xFF0284C7), size: 22),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Conectar Fibra / Cable hacia Otro Rack (Inter-Rack)',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 540,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF0F9FF),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFBAE6FD)),
+                    ),
+                    child: const Text(
+                      '💡 Las fibras o cables entre Racks se trazan hacia la Bandeja Aérea Inter-Rack superior con una etiqueta interactiva (⇢ RACK destino) que te permite saltar al otro Rack con 1 clic.',
+                      style: TextStyle(fontSize: 11.5, color: Color(0xFF0369A1)),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // 1. ORIGEN EN ESTE RACK
+                  Text(
+                    '1. ORIGEN EN ESTE RACK (${rack.code} — ${rack.name})',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF1E3A8A),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: DropdownButtonFormField<RackDeviceModel>(
+                          initialValue: selectedLocalDev,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Equipo Origen (Este Rack)',
+                            isDense: true,
+                          ),
+                          items: localDevices
+                              .map(
+                                (d) => DropdownMenuItem(
+                                  value: d,
+                                  child: Text(
+                                    'U${d.startU} • ${d.code} (${d.name})',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (val) {
+                            if (val == null) return;
+                            setModal(() {
+                              selectedLocalDev = val;
+                              localPorts = freeLocalPortsFor(val);
+                              selectedLocalPort =
+                                  localPorts.isNotEmpty ? localPorts.first : null;
+                            });
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 2,
+                        child: DropdownButtonFormField<PortModel>(
+                          initialValue: selectedLocalPort,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Boca / Conector Libre',
+                            isDense: true,
+                          ),
+                          items: localPorts
+                              .map(
+                                (p) => DropdownMenuItem(
+                                  value: p,
+                                  child: Text(
+                                    '${p.portNumber} (${p.face.toUpperCase()} • ${p.portType})',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (val) =>
+                              setModal(() => selectedLocalPort = val),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 24),
+                  // 2. DESTINO EN OTRO RACK
+                  const Text(
+                    '2. DESTINO EN OTRO RACK DEL CPD',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF047857),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<Map<String, dynamic>>(
+                    initialValue: selectedTargetRack,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Rack Destino',
+                      isDense: true,
+                    ),
+                    items: otherRacks
+                        .map(
+                          (rk) => DropdownMenuItem(
+                            value: rk,
+                            child: Text(
+                              '${rk['code']} — ${rk['name']} (${rk['floor_name']} • ${rk['room_name']})',
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (rk) {
+                      if (rk == null) return;
+                      setModal(() {
+                        selectedTargetRack = rk;
+                        targetDevs = targetDevicesFor(rk);
+                        selectedTargetDev =
+                            targetDevs.isNotEmpty ? targetDevs.first : null;
+                        targetPorts = freeTargetPortsFor(selectedTargetDev);
+                        selectedTargetPort =
+                            targetPorts.isNotEmpty ? targetPorts.first : null;
+                        labelCtrl.text =
+                            'Troncal Fibra ${rack.code} ➔ ${rk['code']}';
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: DropdownButtonFormField<Map<String, dynamic>>(
+                          initialValue: selectedTargetDev,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Equipo en Rack Destino',
+                            isDense: true,
+                          ),
+                          items: targetDevs
+                              .map(
+                                (d) => DropdownMenuItem(
+                                  value: d,
+                                  child: Text(
+                                    'U${d['start_u']} • ${d['code']} (${d['name']})',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (d) {
+                            setModal(() {
+                              selectedTargetDev = d;
+                              targetPorts = freeTargetPortsFor(d);
+                              selectedTargetPort = targetPorts.isNotEmpty
+                                  ? targetPorts.first
+                                  : null;
+                            });
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 2,
+                        child: DropdownButtonFormField<Map<String, dynamic>>(
+                          initialValue: selectedTargetPort,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Puerto Destino Libre',
+                            isDense: true,
+                          ),
+                          items: targetPorts
+                              .map(
+                                (p) => DropdownMenuItem(
+                                  value: p,
+                                  child: Text(
+                                    '${p['port_number']} (${p['face'].toString().toUpperCase()} • ${p['port_type']})',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (p) =>
+                              setModal(() => selectedTargetPort = p),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 22),
+                  // 3. PROPIEDADES DE LA FIBRA / CABLE TRONCAL
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: DropdownButtonFormField<String>(
+                          initialValue: cableType,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Tipo de Fibra / Cable',
+                            isDense: true,
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'fiber_om4',
+                              child: Text('Fibra Multimodo OM4 (Aqua)'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'fiber_os2',
+                              child: Text('Fibra Monomodo OS2 (Amarilla)'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'utp_cat6a',
+                              child: Text('Red Cobre UTP Cat.6a'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'power_ac',
+                              child: Text('Línea Eléctrica AC'),
+                            ),
+                          ],
+                          onChanged: (v) {
+                            if (v == null) return;
+                            setModal(() {
+                              cableType = v;
+                              if (v == 'fiber_om4') colorHex = '#0284C7';
+                              if (v == 'fiber_os2') colorHex = '#F59E0B';
+                              if (v == 'utp_cat6a') colorHex = '#2563EB';
+                              if (v == 'power_ac') colorHex = '#DC2626';
+                            });
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 1,
+                        child: TextField(
+                          controller: lengthCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Longitud (m)',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 1,
+                        child: TextField(
+                          controller: vlanCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'VLAN / SAN ID',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    children: fiberPalette.map((hex) {
+                      final isSel = colorHex.toUpperCase() == hex.toUpperCase();
+                      final col = CableGeometryBuilder.parseHexColor(hex);
+                      return GestureDetector(
+                        onTap: () => setModal(() => colorHex = hex),
+                        child: Container(
+                          width: 24,
+                          height: 24,
+                          decoration: BoxDecoration(
+                            color: col,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isSel ? Colors.black : Colors.white,
+                              width: isSel ? 2.4 : 1.2,
+                            ),
+                          ),
+                          child: isSel
+                              ? const Icon(
+                                  Icons.check,
+                                  size: 13,
+                                  color: Colors.white,
+                                )
+                              : null,
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: labelCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Etiqueta de la Fibra / Enlace Inter-Rack',
+                      isDense: true,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton.icon(
+              onPressed: (selectedLocalPort == null || selectedTargetPort == null)
+                  ? null
+                  : () => Navigator.pop(ctx, true),
+              icon: const Icon(Icons.add_link, size: 16),
+              label: const Text('Conectar entre Racks'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    setState(() {
+      _pendingSourcePort = null;
+      _pendingSourceDevice = null;
+    });
+
+    if (confirmed == true &&
+        selectedLocalPort != null &&
+        selectedTargetPort != null) {
+      try {
+        final created = await widget.api.createConnection({
+          'source_port_id': selectedLocalPort!.id,
+          'target_port_id': selectedTargetPort!['id'] as int,
+          'cable_type': cableType,
+          'color_hex': colorHex,
+          'routing_channel': 'right',
+          'label': labelCtrl.text.trim(),
+          'vlan': int.tryParse(vlanCtrl.text.trim()),
+          'length_m': double.tryParse(lengthCtrl.text.trim()) ?? 12.0,
+        });
+        await _loadRack();
+        setState(() {
+          _selectedConnectionId = created.id;
+          _selectedDeviceId = null;
+        });
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              'Fibra / Cable Inter-Rack conectado hacia ${selectedTargetRack['code']} (${selectedTargetDev?['code']}:${selectedTargetPort!['port_number']}).',
+            ),
+          ),
+        );
+      } catch (e) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
+        );
+      }
+    }
+  }
+
+  // ===========================================================================
+  // BUSCADOR DE FOTOS DE REFERENCIA EN INTERNET PARA PLANTILLAS Y EQUIPOS
+  // ===========================================================================
+  Future<void> _showHardwarePhotoSearchDialog({
+    DeviceTemplateModel? template,
+    RackDeviceModel? device,
+  }) async {
+    final tpl = template ?? device?.template;
+    if (tpl == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+
+    final queryCtrl = TextEditingController(
+      text: '${tpl.manufacturer} ${tpl.modelName}',
+    );
+    final urlCtrl = TextEditingController(
+      text: device?.photoUrl.isNotEmpty == true
+          ? device!.photoUrl
+          : tpl.photoUrl,
+    );
+    List<Map<String, dynamic>> searchResults = [];
+    bool searching = false;
+    String? searchError;
+    bool applyToTemplateLibrary = true;
+
+    Future<void> triggerSearch(StateSetter setModal) async {
+      final q = queryCtrl.text.trim();
+      if (q.isEmpty) return;
+      setModal(() {
+        searching = true;
+        searchError = null;
+      });
+      try {
+        final res = await widget.api.searchHardwarePhotos(q);
+        setModal(() {
+          searchResults = res;
+          searching = false;
+        });
+      } catch (e) {
+        setModal(() {
+          searchError = '$e';
+          searching = false;
+        });
+      }
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        bool initialTriggered = false;
+        return StatefulBuilder(
+          builder: (ctx, setModal) {
+            if (!initialTriggered) {
+              initialTriggered = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                triggerSearch(setModal);
+              });
+            }
+            return AlertDialog(
+              title: Row(
+                children: [
+                  const Icon(
+                    Icons.photo_camera_outlined,
+                    color: Color(0xFF1D4ED8),
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Foto de Referencia — ${tpl.manufacturer} ${tpl.modelName}',
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: 600,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Busca referencias fotográficas en Internet (Wikimedia Commons), pega una URL de imagen de catálogo del fabricante o sube una foto local:',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: Color(0xFF475569),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: queryCtrl,
+                              onSubmitted: (_) => triggerSearch(setModal),
+                              decoration: const InputDecoration(
+                                labelText:
+                                    'Buscar en Internet (ej. Dell PowerEdge, NetApp AFF, Cisco Switch, IBM FlashSystem...)',
+                                isDense: true,
+                                prefixIcon: Icon(Icons.search, size: 18),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          FilledButton.tonalIcon(
+                            onPressed:
+                                searching ? null : () => triggerSearch(setModal),
+                            icon: const Icon(Icons.travel_explore, size: 16),
+                            label: Text(searching ? 'Buscando...' : 'Buscar Web'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      if (searching)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 18),
+                          child: Center(child: CircularProgressIndicator()),
+                        )
+                      else if (searchError != null)
+                        Text(
+                          'Aviso: $searchError',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFFDC2626),
+                          ),
+                        )
+                      else if (searchResults.isNotEmpty) ...[
+                        const Text(
+                          'Resultados encontrados en Internet (haz clic en una foto para usarla):',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF1E293B),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        SizedBox(
+                          height: 135,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: searchResults.length,
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(width: 8),
+                            itemBuilder: (_, idx) {
+                              final item = searchResults[idx];
+                              final thumb =
+                                  (item['thumb_url'] ?? '').toString();
+                              final title = (item['title'] ?? '').toString();
+                              final isSel = urlCtrl.text.trim() == thumb;
+                              return InkWell(
+                                onTap: () =>
+                                    setModal(() => urlCtrl.text = thumb),
+                                child: Container(
+                                  width: 165,
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: isSel
+                                        ? const Color(0xFFDBEAFE)
+                                        : const Color(0xFFF8FAFC),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: isSel
+                                          ? const Color(0xFF2563EB)
+                                          : const Color(0xFFCBD5E1),
+                                      width: isSel ? 2.2 : 1.0,
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      Expanded(
+                                        child: ClipRRect(
+                                          borderRadius:
+                                              BorderRadius.circular(4),
+                                          child: Image.network(
+                                            thumb,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (_, _, _) =>
+                                                const Center(
+                                              child: Icon(
+                                                Icons.broken_image_outlined,
+                                                size: 22,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: urlCtrl,
+                              onChanged: (_) => setModal(() {}),
+                              decoration: const InputDecoration(
+                                labelText:
+                                    'URL de Foto del Equipo (o déjalo vacío para Bisel Técnico CAD)',
+                                isDense: true,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              setModal(() => urlCtrl.text = '');
+                            },
+                            icon: const Icon(Icons.clear, size: 15),
+                            label: const Text('Quitar'),
+                          ),
+                        ],
+                      ),
+                      if (urlCtrl.text.trim().isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          height: 68,
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0F172A),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Image.network(
+                            urlCtrl.text.trim(),
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, _, _) => const Center(
+                              child: Text(
+                                'Previsualización no disponible para esta URL',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (device != null) ...[
+                        const SizedBox(height: 8),
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          value: applyToTemplateLibrary,
+                          onChanged: (v) => setModal(
+                            () => applyToTemplateLibrary = v ?? true,
+                          ),
+                          title: Text(
+                            'Guardar también como foto por defecto del modelo "${tpl.modelName}" en la Librería',
+                            style: const TextStyle(fontSize: 11.5),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton.icon(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  icon: const Icon(Icons.save_outlined, size: 16),
+                  label: const Text('Guardar Foto y Activar Vista Foto'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      final newUrl = urlCtrl.text.trim();
+      try {
+        if (device != null) {
+          final updatedCf = Map<String, dynamic>.from(device.customFields);
+          updatedCf['photo_url'] = newUrl;
+          updatedCf['show_photo'] = true;
+          await widget.api.updateDevice(device.id, {
+            'custom_fields': updatedCf,
+          });
+        }
+        if (device == null || applyToTemplateLibrary) {
+          await widget.api.updateTemplate(tpl.id, {'photo_url': newUrl});
+          widget.onTemplatesChanged();
+        }
+        await _loadRack();
+        setState(() => _showEquipmentPhotos = true);
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              newUrl.isNotEmpty
+                  ? 'Foto de referencia asociada a "${tpl.modelName}" y modo Foto Equipos activado.'
+                  : 'Foto personalizada eliminada (usando bisel realista automático).',
+            ),
+          ),
+        );
+      } catch (e) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
+        );
       }
     }
   }
@@ -1987,7 +2934,12 @@ class _RackEditorViewState extends State<RackEditorView> {
         _rackTopMargin + rack.totalUnits * _uHeightPx + 75.0;
 
     final portCoords = _computePortCoordinates(rack);
-    const outboundAnchor = Offset(_rackOuterLeft + _rackOuterWidth - 36, 22);
+    final outboundAnchor = Offset(
+      (_isDualFace ? _backRackOuterLeft : _rackOuterLeft) +
+          _rackOuterWidth -
+          36,
+      22,
+    );
 
     final computedRoutes = CableGeometryBuilder.computeRoutes(
       connections: rack.connections,
@@ -1996,6 +2948,10 @@ class _RackEditorViewState extends State<RackEditorView> {
       currentRackId: rack.id,
       leftChannelBaseX: _rackInnerLeft - 24.0,
       rightChannelBaseX: _rackInnerLeft + _rackInnerWidth + 24.0,
+      backLeftChannelBaseX: _isDualFace ? (_backRackInnerLeft - 24.0) : null,
+      backRightChannelBaseX: _isDualFace
+          ? (_backRackInnerLeft + _rackInnerWidth + 24.0)
+          : null,
       outboundAnchor: outboundAnchor,
       cableFilter: _cableFilter,
     );
@@ -2017,12 +2973,18 @@ class _RackEditorViewState extends State<RackEditorView> {
     final draggingDevId = _draggingData is RackDeviceModel
         ? (_draggingData as RackDeviceModel).id
         : null;
-    final occupiedUsOnFace = <int>{};
+    final occupiedUsFront = <int>{};
+    final occupiedUsBack = <int>{};
     for (final d in rack.devices) {
       if (d.id == draggingDevId) continue;
-      if (d.isVisibleOnFace(_activeFace)) {
+      if (d.isVisibleOnFace('front')) {
         for (int u = d.startU; u <= d.endU; u++) {
-          occupiedUsOnFace.add(u);
+          occupiedUsFront.add(u);
+        }
+      }
+      if (d.isVisibleOnFace('back')) {
+        for (int u = d.startU; u <= d.endU; u++) {
+          occupiedUsBack.add(u);
         }
       }
     }
@@ -2189,7 +3151,7 @@ class _RackEditorViewState extends State<RackEditorView> {
               ),
               const Spacer(),
 
-              // Barra rápida cuando hay un equipo seleccionado: Subir 1U, Bajar 1U, Cambiar U, Borrar Equipo
+              // Barra rápida cuando hay un equipo seleccionado: Subir 1U, Bajar 1U, Ajustar U ocupadas, Foto, Cable Inter-Rack, Borrar Equipo
               if (_canEdit && selDev != null && !selDev.isExternalFeed)
                 Container(
                   margin: const EdgeInsets.only(right: 10),
@@ -2206,7 +3168,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        '${selDev.code} (U${selDev.startU}): ',
+                        '${selDev.code} (U${selDev.startU}•${selDev.uHeight}U): ',
                         style: const TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w800,
@@ -2219,8 +3181,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                             : null,
                         icon: const Icon(Icons.arrow_upward_rounded, size: 15),
                         tooltip: nextFreeUpU != null
-                            ? 'Subir a siguiente posición con ${selDev.template.uHeight}U libres (U$nextFreeUpU)'
-                            : 'No hay ${selDev.template.uHeight}U libres por encima',
+                            ? 'Subir a siguiente posición con ${selDev.uHeight}U libres (U$nextFreeUpU)'
+                            : 'No hay ${selDev.uHeight}U libres por encima',
                         visualDensity: VisualDensity.compact,
                       ),
                       IconButton(
@@ -2232,9 +3194,91 @@ class _RackEditorViewState extends State<RackEditorView> {
                           size: 15,
                         ),
                         tooltip: nextFreeDownU != null
-                            ? 'Bajar a siguiente posición con ${selDev.template.uHeight}U libres (U$nextFreeDownU)'
-                            : 'No hay ${selDev.template.uHeight}U libres por debajo',
+                            ? 'Bajar a siguiente posición con ${selDev.uHeight}U libres (U$nextFreeDownU)'
+                            : 'No hay ${selDev.uHeight}U libres por debajo',
                         visualDensity: VisualDensity.compact,
+                      ),
+                      // Control rápido de cuántas U ocupa (especialmente útil para Bandejas y equipos misceláneos)
+                      Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: const Color(0xFF93C5FD)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            InkWell(
+                              onTap: selDev.uHeight > 1
+                                  ? () => _quickAdjustDeviceUHeight(
+                                        selDev,
+                                        selDev.uHeight - 1,
+                                      )
+                                  : null,
+                              child: const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 3),
+                                child: Icon(
+                                  Icons.remove,
+                                  size: 12,
+                                  color: Color(0xFF1D4ED8),
+                                ),
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 3,
+                              ),
+                              child: Text(
+                                '${selDev.uHeight}U',
+                                style: const TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF1E3A8A),
+                                ),
+                              ),
+                            ),
+                            InkWell(
+                              onTap: selDev.uHeight < 16
+                                  ? () => _quickAdjustDeviceUHeight(
+                                        selDev,
+                                        selDev.uHeight + 1,
+                                      )
+                                  : null,
+                              child: const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 3),
+                                child: Icon(
+                                  Icons.add,
+                                  size: 12,
+                                  color: Color(0xFF1D4ED8),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () =>
+                            _showHardwarePhotoSearchDialog(device: selDev),
+                        icon: const Icon(Icons.photo_camera_outlined, size: 14),
+                        label: const Text(
+                          'Foto',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () => _showInterRackConnectionDialog(
+                          initialSourceDev: selDev,
+                        ),
+                        icon: const Icon(Icons.compare_arrows, size: 14),
+                        label: const Text(
+                          'A Otro Rack',
+                          style: TextStyle(fontSize: 11),
+                        ),
                       ),
                       TextButton.icon(
                         onPressed: () => _showMoveDeviceToUDialog(selDev),
@@ -2251,7 +3295,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         ),
                         icon: const Icon(Icons.delete_outline, size: 15),
                         label: const Text(
-                          'Borrar Equipo',
+                          'Borrar',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
@@ -2331,11 +3375,55 @@ class _RackEditorViewState extends State<RackEditorView> {
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        'Tirando cable desde ${_pendingSourceDevice?.code}:${_pendingSourcePort?.portNumber} — Haz clic en la boca destino',
+                        'Tirando desde ${_pendingSourceDevice?.code}:${_pendingSourcePort?.portNumber} — Clic en boca Front/Back',
                         style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                           color: Color(0xFF1E3A8A),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      InkWell(
+                        onTap: () {
+                          final srcDev = _pendingSourceDevice;
+                          final srcPort = _pendingSourcePort;
+                          setState(() {
+                            _pendingSourcePort = null;
+                            _pendingSourceDevice = null;
+                          });
+                          _showInterRackConnectionDialog(
+                            initialSourceDev: srcDev,
+                            initialSourcePort: srcPort,
+                          );
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1D4ED8),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.compare_arrows,
+                                size: 12,
+                                color: Colors.white,
+                              ),
+                              SizedBox(width: 4),
+                              Text(
+                                'Llevar a Otro Rack...',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -2404,12 +3492,12 @@ class _RackEditorViewState extends State<RackEditorView> {
           ),
         ),
 
-        // 2. CUERPO CENTRAL EN 3 COLUMNAS: Catálogo Izquierdo | Lienzo Central 42U (Estilo Patchbox) + Tomas Exteriores | Panel Derecho
+        // 2. CUERPO CENTRAL EN 3 COLUMNAS: Catálogo Izquierdo | Lienzo Central 42U (Front+Back / Individual) + Tomas Exteriores | Panel Derecho
         Expanded(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // COLUMNA IZQUIERDA: Librería de Dispositivos
+              // COLUMNA IZQUIERDA: Librería de Dispositivos (con Storage SAN, Storage NAS, Ventiladores y Bandejas U editables)
               DeviceCatalogPanel(
                 templates: widget.templates,
                 selectedTemplateForClickMount: _selectedTemplateForClick,
@@ -2417,6 +3505,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                   setState(() => _selectedTemplateForClick = tpl);
                 },
                 onCreateCustomTemplate: _showCreateCustomTemplateDialog,
+                onConfigureTemplatePhoto: (tpl) =>
+                    _showHardwarePhotoSearchDialog(template: tpl),
                 selectedLibraryGroup: _selectedLibraryGroup,
                 onSelectLibraryGroup: (group) {
                   setState(() => _selectedLibraryGroup = group);
@@ -2426,7 +3516,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                 canEdit: _canEdit,
               ),
 
-              // COLUMNA CENTRAL: Lienzo interactivo del Rack con diseño técnico tipo Patchbox
+              // COLUMNA CENTRAL: Lienzo interactivo del Rack con soporte simultáneo Front + Back y Bandeja Inter-Rack
               Expanded(
                 child: Container(
                   color: const Color(0xFFF4F5F7),
@@ -2434,9 +3524,9 @@ class _RackEditorViewState extends State<RackEditorView> {
                     children: [
                       InteractiveViewer(
                         transformationController: _transformController,
-                        minScale: 0.45,
+                        minScale: 0.38,
                         maxScale: 2.8,
-                        boundaryMargin: const EdgeInsets.all(260),
+                        boundaryMargin: const EdgeInsets.all(320),
                         constrained: false,
                         child: MouseRegion(
                           onHover: (event) {
@@ -2481,387 +3571,115 @@ class _RackEditorViewState extends State<RackEditorView> {
                               }
                             },
                             child: SizedBox(
-                              width: _canvasWidth,
+                              width: _effectiveCanvasWidth,
                               height: totalCanvasHeight,
                               child: Stack(
                                 clipBehavior: Clip.none,
                                 children: [
-                                  // A1. Cabezal superior del armario Rack (igual a la imagen de referencia)
-                                  Positioned(
-                                    left: _rackOuterLeft,
-                                    top: _rackTopMargin - 42,
-                                    width: _rackOuterWidth,
-                                    height: 22,
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFF8FAFC),
-                                        border: Border.all(
-                                          color: const Color(0xFF334155),
-                                          width: 1.4,
-                                        ),
-                                      ),
-                                      child: Align(
-                                        alignment: Alignment.bottomCenter,
-                                        child: Container(
-                                          height: 4,
-                                          decoration: const BoxDecoration(
-                                            border: Border(
-                                              top: BorderSide(
-                                                color: Color(0xFF334155),
-                                                width: 1.2,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
+                                  if (_isDualFace) ...[
+                                    // BASTIDOR 1 (IZQUIERDA): ALZADO DELANTERO (FRONT)
+                                    ..._buildSingleRackCabinetStack(
+                                      rack: rack,
+                                      face: 'front',
+                                      faceBannerLabel: 'FRONT (DELANTE)',
+                                      faceBannerColor: const Color(0xFF0F172A),
+                                      outerLeft: _rackOuterLeft,
+                                      innerLeft: _rackInnerLeft,
+                                      occupiedUsOnFace: occupiedUsFront,
+                                      connectedPortColors: connectedPortColors,
+                                      showDropPreview: true,
                                     ),
-                                  ),
 
-                                  // A2. Marco exterior de doble pared del Armario Rack (estilo CAD de la imagen)
-                                  Positioned(
-                                    left: _rackOuterLeft,
-                                    top: _rackTopMargin - 20,
-                                    width: _rackOuterWidth,
-                                    height: rack.totalUnits * _uHeightPx + 40,
-                                    child: Container(
-                                      padding: const EdgeInsets.all(6),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFF8FAFC),
-                                        border: Border.all(
-                                          color: const Color(0xFF334155),
-                                          width: 1.5,
-                                        ),
-                                      ),
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFFFDFEFE),
-                                          border: Border.all(
-                                            color: const Color(0xFF475569),
-                                            width: 1.2,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-
-                                  // A3. Raíles verticales perforados de 19" con los 3 agujeros cuadrados por cada U
-                                  Positioned(
-                                    left: _rackInnerLeft - _railWidth,
-                                    top: _rackTopMargin,
-                                    width: _railWidth,
-                                    height: rack.totalUnits * _uHeightPx,
-                                    child: _buildPerforated19InchRail(
-                                      rack.totalUnits,
-                                    ),
-                                  ),
-                                  Positioned(
-                                    left: _rackInnerLeft + _rackInnerWidth,
-                                    top: _rackTopMargin,
-                                    width: _railWidth,
-                                    height: rack.totalUnits * _uHeightPx,
-                                    child: _buildPerforated19InchRail(
-                                      rack.totalUnits,
-                                    ),
-                                  ),
-
-                                  // A4. Línea vertical continua de la regla U a la izquierda del armario
-                                  Positioned(
-                                    left: _rackOuterLeft - 18,
-                                    top: _rackTopMargin,
-                                    width: 1.5,
-                                    height: rack.totalUnits * _uHeightPx,
-                                    child: Container(
-                                      color: const Color(0xFF475569),
-                                    ),
-                                  ),
-
-                                  // B. Regla numerada de Unidades U (42 .. 1) y Slots vacíos (DragTarget para Plantillas y para Mover Equipos)
-                                  for (int u = rack.totalUnits; u >= 1; u--) ...[
+                                    // PASAMUROS CENTRAL FRONT ↔ BACK
                                     Positioned(
-                                      left: _rackOuterLeft - 56,
-                                      top: _rackTopMargin +
-                                          (rack.totalUnits - u) * _uHeightPx,
-                                      width: 44,
-                                      height: _uHeightPx,
-                                      child: Stack(
-                                        clipBehavior: Clip.none,
-                                        children: [
-                                          // Marca horizontal superior de la regla U
-                                          Positioned(
-                                            right: 2,
-                                            top: 0,
-                                            child: Container(
-                                              width: 6,
-                                              height: 1.3,
-                                              color: const Color(0xFF475569),
-                                            ),
-                                          ),
-                                          if (u == 1)
-                                            Positioned(
-                                              right: 2,
-                                              bottom: 0,
-                                              child: Container(
-                                                width: 6,
-                                                height: 1.3,
-                                                color: const Color(0xFF475569),
+                                      left:
+                                          _rackOuterLeft + _rackOuterWidth + 28,
+                                      top: _rackTopMargin - 42,
+                                      width: _dualFaceGap - 56,
+                                      height:
+                                          rack.totalUnits * _uHeightPx + 62,
+                                      child: IgnorePointer(
+                                        child: Column(
+                                          children: [
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 8,
+                                                vertical: 4,
                                               ),
-                                            ),
-                                          Center(
-                                            child: Padding(
-                                              padding: const EdgeInsets.only(
-                                                right: 10,
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF1E293B),
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                border: Border.all(
+                                                  color:
+                                                      const Color(0xFF38BDF8),
+                                                ),
                                               ),
-                                              child: Text(
-                                                '$u',
-                                                style: const TextStyle(
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.w500,
-                                                  color: Color(0xFF334155),
+                                              child: const Text(
+                                                '⇄ PASAMUROS F↔B',
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 8.5,
+                                                  fontWeight: FontWeight.w800,
                                                 ),
                                               ),
                                             ),
-                                          ),
-                                        ],
+                                            Expanded(
+                                              child: Container(
+                                                width: 2,
+                                                margin:
+                                                    const EdgeInsets.symmetric(
+                                                  vertical: 6,
+                                                ),
+                                                color: const Color(0xFFCBD5E1),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
 
-                                    // Slot U libre (acepta arrastrar un equipo nuevo O mover un equipo ya montado)
-                                    if (!occupiedUsOnFace.contains(u))
-                                      Positioned(
-                                        left: _rackInnerLeft,
-                                        top: _rackTopMargin +
-                                            (rack.totalUnits - u) * _uHeightPx,
-                                        width: _rackInnerWidth,
-                                        height: _uHeightPx,
-                                        child: DragTarget<Object>(
-                                          onWillAcceptWithDetails: (details) {
-                                            if (!_canEdit) return false;
-                                            if (details.data
-                                                    is! DeviceTemplateModel &&
-                                                details.data
-                                                    is! RackDeviceModel) {
-                                              return false;
-                                            }
-                                            if (_hoveredDropU != u ||
-                                                _draggingData != details.data) {
-                                              WidgetsBinding.instance
-                                                  .addPostFrameCallback((_) {
-                                                if (mounted) {
-                                                  setState(() {
-                                                    _draggingData =
-                                                        details.data;
-                                                    _hoveredDropU = u;
-                                                  });
-                                                }
-                                              });
-                                            }
-                                            return true;
-                                          },
-                                          onLeave: (_) {
-                                            if (_hoveredDropU == u) {
-                                              WidgetsBinding.instance
-                                                  .addPostFrameCallback((_) {
-                                                if (mounted &&
-                                                    _hoveredDropU == u) {
-                                                  setState(
-                                                    () => _hoveredDropU = null,
-                                                  );
-                                                }
-                                              });
-                                            }
-                                          },
-                                          onAcceptWithDetails: (details) {
-                                            _handleDropOnUSlot(
-                                              details.data,
-                                              u,
-                                            );
-                                          },
-                                          builder: (ctx, candidate, _) {
-                                            final isHovering =
-                                                candidate.isNotEmpty;
-                                            return InkWell(
-                                              onTap: (_canEdit &&
-                                                      _selectedTemplateForClick !=
-                                                          null)
-                                                  ? () =>
-                                                      _handleDropOrMountTemplate(
-                                                        _selectedTemplateForClick!,
-                                                        u,
-                                                      )
-                                                  : null,
-                                              child: Container(
-                                                decoration: BoxDecoration(
-                                                  color: isHovering
-                                                      ? const Color(0xFFDBEAFE)
-                                                      : Colors.transparent,
-                                                  border: Border(
-                                                    bottom: BorderSide(
-                                                      color: const Color(
-                                                        0xFFE2E8F0,
-                                                      ).withValues(alpha: 0.55),
-                                                      width: 0.7,
-                                                    ),
-                                                  ),
-                                                ),
-                                                child: Center(
-                                                  child: Container(
-                                                    width: 20,
-                                                    height: 20,
-                                                    decoration: BoxDecoration(
-                                                      shape: BoxShape.circle,
-                                                      border: Border.all(
-                                                        color: isHovering
-                                                            ? const Color(
-                                                                0xFF2563EB,
-                                                              )
-                                                            : const Color(
-                                                                0xFF64748B,
-                                                              ),
-                                                        width: 1.2,
-                                                      ),
-                                                    ),
-                                                    child: Icon(
-                                                      Icons.add,
-                                                      size: 13,
-                                                      color: isHovering
-                                                          ? const Color(
-                                                              0xFF2563EB,
-                                                            )
-                                                          : const Color(
-                                                              0xFF64748B,
-                                                            ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                            );
-                                          },
-                                        ),
-                                      ),
+                                    // BASTIDOR 2 (DERECHA): ALZADO TRASERO (BACK)
+                                    ..._buildSingleRackCabinetStack(
+                                      rack: rack,
+                                      face: 'back',
+                                      faceBannerLabel: 'BACK (DETRÁS)',
+                                      faceBannerColor: const Color(0xFF1E3A8A),
+                                      outerLeft: _backRackOuterLeft,
+                                      innerLeft: _backRackInnerLeft,
+                                      occupiedUsOnFace: occupiedUsBack,
+                                      connectedPortColors: connectedPortColors,
+                                      showDropPreview: false,
+                                    ),
+                                  ] else ...[
+                                    // MODO INDIVIDUAL (SOLO FRONT O SOLO BACK)
+                                    ..._buildSingleRackCabinetStack(
+                                      rack: rack,
+                                      face: _activeFace,
+                                      faceBannerLabel: _activeFace == 'front'
+                                          ? 'FRONT (DELANTE)'
+                                          : 'BACK (DETRÁS)',
+                                      faceBannerColor: _activeFace == 'front'
+                                          ? const Color(0xFF0F172A)
+                                          : const Color(0xFF1E3A8A),
+                                      outerLeft: _rackOuterLeft,
+                                      innerLeft: _rackInnerLeft,
+                                      occupiedUsOnFace: _activeFace == 'front'
+                                          ? occupiedUsFront
+                                          : occupiedUsBack,
+                                      connectedPortColors: connectedPortColors,
+                                      showDropPreview: true,
+                                    ),
                                   ],
 
-                                  // C. Dispositivos Montados (visibles en Front y autorrellenados en Back)
-                                  for (final dev in rack.devices)
-                                    if (dev.isVisibleOnFace(_activeFace))
-                                      _buildMountedDeviceWidget(
-                                        dev: dev,
-                                        totalUnits: rack.totalUnits,
-                                        connectedPortColors:
-                                            connectedPortColors,
-                                      ),
-
-                                  // C1. Previsualización Multi-U en tiempo real al arrastrar un equipo (Verde = U libres suficientes, Rojo = Ocupado / No cabe)
-                                  if (_hoveredDropU != null &&
-                                      _draggingData != null)
-                                    Builder(
-                                      builder: (_) {
-                                        final int uH =
-                                            _draggingData is RackDeviceModel
-                                                ? (_draggingData
-                                                        as RackDeviceModel)
-                                                    .template
-                                                    .uHeight
-                                                : (_draggingData
-                                                        as DeviceTemplateModel)
-                                                    .uHeight;
-                                        final int? exId =
-                                            _draggingData is RackDeviceModel
-                                                ? (_draggingData
-                                                        as RackDeviceModel)
-                                                    .id
-                                                : null;
-                                        final int startU = _hoveredDropU!;
-                                        final int endU = startU + uH - 1;
-                                        final bool canFit = _canFitAtU(
-                                          rack,
-                                          startU,
-                                          uH,
-                                          excludeDeviceId: exId,
-                                        );
-                                        final int clampedEndU = endU.clamp(
-                                          1,
-                                          rack.totalUnits,
-                                        );
-                                        final double topPx = _rackTopMargin +
-                                            (rack.totalUnits - clampedEndU) *
-                                                _uHeightPx;
-                                        final double boxH =
-                                            (clampedEndU - startU + 1) *
-                                                _uHeightPx;
-                                        final String rangeTxt = uH > 1
-                                            ? 'U$startU - U$endU ($uH U)'
-                                            : 'U$startU (1U)';
-                                        return Positioned(
-                                          left: _rackInnerLeft,
-                                          top: topPx,
-                                          width: _rackInnerWidth,
-                                          height: boxH,
-                                          child: IgnorePointer(
-                                            child: Container(
-                                              decoration: BoxDecoration(
-                                                color: (canFit
-                                                        ? const Color(
-                                                            0xFF16A34A,
-                                                          )
-                                                        : const Color(
-                                                            0xFFDC2626,
-                                                          ))
-                                                    .withValues(alpha: 0.22),
-                                                border: Border.all(
-                                                  color: canFit
-                                                      ? const Color(0xFF16A34A)
-                                                      : const Color(0xFFDC2626),
-                                                  width: 2.2,
-                                                ),
-                                                borderRadius:
-                                                    BorderRadius.circular(4),
-                                              ),
-                                              child: Center(
-                                                child: Container(
-                                                  padding: const EdgeInsets
-                                                      .symmetric(
-                                                    horizontal: 10,
-                                                    vertical: 3,
-                                                  ),
-                                                  decoration: BoxDecoration(
-                                                    color: canFit
-                                                        ? const Color(
-                                                            0xFF15803D,
-                                                          )
-                                                        : const Color(
-                                                            0xFFB91C1C,
-                                                          ),
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                      12,
-                                                    ),
-                                                  ),
-                                                  child: Text(
-                                                    canFit
-                                                        ? '✓ Soltar en $rangeTxt (${uH}U libres)'
-                                                        : '✕ No cabe en $rangeTxt (necesita ${uH}U libres)',
-                                                    style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 10.5,
-                                                      fontWeight:
-                                                          FontWeight.w800,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                    ),
-
-                                  // C2. TOMAS ELÉCTRICAS EXTERIORES (ENCHUFES SCHUKO FUERA DEL RACK)
+                                  // C2. TOMAS ELÉCTRICAS EXTERIORES Y CAJAS EXTERIORES DE FIBRA
                                   _buildExternalPowerOutletsZone(
                                     extOutlets: extOutlets,
                                     connectedPortColors: connectedPortColors,
                                   ),
 
-                                  // D. Capa de Cables Ortogonales
+                                  // D. Capa de Cables Ortogonales (Intra-Rack, Front↔Back e Inter-Rack)
                                   Positioned.fill(
                                     child: IgnorePointer(
                                       child: CustomPaint(
@@ -2879,77 +3697,250 @@ class _RackEditorViewState extends State<RackEditorView> {
                                     ),
                                   ),
 
-                                  // E. Indicador superior derecho OUTBOUND
-                                  if (outboundConnections.isNotEmpty)
-                                    Positioned(
-                                      left: outboundAnchor.dx - 55,
-                                      top: 6,
-                                      child: PopupMenuButton<ConnectionModel>(
-                                        tooltip:
-                                            'Conexiones hacia otros Racks de la Sala',
-                                        onSelected: (conn) {
-                                          final otherRackId =
-                                              conn.sourceInfo.rackId != rack.id
-                                                  ? conn.sourceInfo.rackId
-                                                  : conn.targetInfo.rackId;
-                                          widget.onSwitchRack(otherRackId);
-                                        },
-                                        itemBuilder: (ctx) =>
-                                            outboundConnections.map((c) {
-                                          final other =
-                                              c.sourceInfo.rackId != rack.id
-                                                  ? c.sourceInfo
-                                                  : c.targetInfo;
-                                          return PopupMenuItem(
-                                            value: c,
-                                            child: Text(
-                                              'Ir a ${other.rackCode} (${other.deviceCode}:${other.portNumber}) — ${c.label}',
-                                              style: const TextStyle(
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          );
-                                        }).toList(),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 5,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFF0F172A),
-                                            borderRadius:
-                                                BorderRadius.circular(16),
-                                            border: Border.all(
-                                              color: const Color(0xFF10B981),
-                                              width: 1.5,
-                                            ),
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Container(
-                                                width: 8,
-                                                height: 8,
-                                                decoration: const BoxDecoration(
-                                                  color: Color(0xFF10B981),
-                                                  shape: BoxShape.circle,
-                                                ),
-                                              ),
-                                              const SizedBox(width: 6),
-                                              const Text(
-                                                'OUTBOUND',
-                                                style: TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.w800,
-                                                  letterSpacing: 0.5,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
+                                  // E. BANDEJA AÉREA INTER-RACK SUPERIOR CON PÍLDORAS INTERACTIVAS DE SALTO A OTROS RACKS
+                                  Positioned(
+                                    left: _rackOuterLeft,
+                                    top: 4,
+                                    width: _isDualFace
+                                        ? (_backRackOuterLeft +
+                                            _rackOuterWidth -
+                                            _rackOuterLeft)
+                                        : _rackOuterWidth,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF0F172A),
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(
+                                          color: outboundConnections.isNotEmpty
+                                              ? const Color(0xFF10B981)
+                                              : const Color(0xFF475569),
+                                          width: 1.5,
                                         ),
+                                        boxShadow: const [
+                                          BoxShadow(
+                                            color: Color(0x22000000),
+                                            blurRadius: 8,
+                                            offset: Offset(0, 2),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          const Icon(
+                                            Icons.compare_arrows_rounded,
+                                            size: 16,
+                                            color: Color(0xFF38BDF8),
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            'BANDEJA AÉREA INTER-RACK (${outboundConnections.length} fibras/cables hacia otros Racks):',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 10.5,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: outboundConnections.isEmpty
+                                                ? const Text(
+                                                    'Ningún cable sale a otro Rack aún. Pulsa "+ Conectar con Otro Rack" para enlazar fibras/cables entre Racks.',
+                                                    style: TextStyle(
+                                                      color: Color(0xFF94A3B8),
+                                                      fontSize: 10,
+                                                    ),
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  )
+                                                : SingleChildScrollView(
+                                                    scrollDirection:
+                                                        Axis.horizontal,
+                                                    child: Row(
+                                                      children:
+                                                          outboundConnections
+                                                              .map((c) {
+                                                        final isSrcHere = c
+                                                                .sourceInfo
+                                                                .rackId ==
+                                                            rack.id;
+                                                        final localEnd =
+                                                            isSrcHere
+                                                                ? c.sourceInfo
+                                                                : c.targetInfo;
+                                                        final remoteEnd =
+                                                            isSrcHere
+                                                                ? c.targetInfo
+                                                                : c.sourceInfo;
+                                                        final cCol =
+                                                            CableGeometryBuilder
+                                                                .parseHexColor(
+                                                          c.colorHex,
+                                                        );
+                                                        final isSel =
+                                                            _selectedConnectionId ==
+                                                                c.id;
+                                                        return Padding(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .only(
+                                                            right: 6,
+                                                          ),
+                                                          child: InkWell(
+                                                            onTap: () {
+                                                              setState(() {
+                                                                _selectedConnectionId =
+                                                                    c.id;
+                                                                _selectedDeviceId =
+                                                                    null;
+                                                              });
+                                                            },
+                                                            onDoubleTap: () {
+                                                              widget
+                                                                  .onSwitchRack(
+                                                                remoteEnd
+                                                                    .rackId,
+                                                              );
+                                                            },
+                                                            child: Tooltip(
+                                                              message:
+                                                                  'Clic: Resaltar cable (${localEnd.deviceCode}:${localEnd.portNumber} ➔ ${remoteEnd.rackCode} ${remoteEnd.deviceCode}:${remoteEnd.portNumber})\nDoble Clic o icono ↗: Abrir ${remoteEnd.rackCode} en el Rack Editor',
+                                                              child: Container(
+                                                                padding:
+                                                                    const EdgeInsets
+                                                                        .symmetric(
+                                                                  horizontal: 8,
+                                                                  vertical: 3,
+                                                                ),
+                                                                decoration:
+                                                                    BoxDecoration(
+                                                                  color: isSel
+                                                                      ? cCol
+                                                                      : const Color(
+                                                                          0xFF1E293B,
+                                                                        ),
+                                                                  borderRadius:
+                                                                      BorderRadius
+                                                                          .circular(
+                                                                    14,
+                                                                  ),
+                                                                  border:
+                                                                      Border.all(
+                                                                    color: cCol,
+                                                                    width: 1.5,
+                                                                  ),
+                                                                ),
+                                                                child: Row(
+                                                                  mainAxisSize:
+                                                                      MainAxisSize
+                                                                          .min,
+                                                                  children: [
+                                                                    Container(
+                                                                      width: 7,
+                                                                      height: 7,
+                                                                      decoration:
+                                                                          BoxDecoration(
+                                                                        color: isSel
+                                                                            ? Colors.white
+                                                                            : cCol,
+                                                                        shape: BoxShape
+                                                                            .circle,
+                                                                      ),
+                                                                    ),
+                                                                    const SizedBox(
+                                                                      width: 5,
+                                                                    ),
+                                                                    Text(
+                                                                      '${localEnd.deviceCode}:${localEnd.portNumber} ⇢ ${remoteEnd.rackCode} (${remoteEnd.deviceCode}:${remoteEnd.portNumber})',
+                                                                      style:
+                                                                          const TextStyle(
+                                                                        color: Colors
+                                                                            .white,
+                                                                        fontSize:
+                                                                            9.8,
+                                                                        fontWeight:
+                                                                            FontWeight.w700,
+                                                                      ),
+                                                                    ),
+                                                                    const SizedBox(
+                                                                      width: 5,
+                                                                    ),
+                                                                    InkWell(
+                                                                      onTap: () =>
+                                                                          widget
+                                                                              .onSwitchRack(
+                                                                        remoteEnd
+                                                                            .rackId,
+                                                                      ),
+                                                                      child:
+                                                                          const Icon(
+                                                                        Icons
+                                                                            .open_in_new,
+                                                                        size:
+                                                                            11,
+                                                                        color: Color(
+                                                                          0xFF38BDF8,
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                                  ],
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        );
+                                                      }).toList(),
+                                                    ),
+                                                  ),
+                                          ),
+                                          if (_canEdit) ...[
+                                            const SizedBox(width: 8),
+                                            InkWell(
+                                              onTap: () =>
+                                                  _showInterRackConnectionDialog(),
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 9,
+                                                  vertical: 4,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color:
+                                                      const Color(0xFF0284C7),
+                                                  borderRadius:
+                                                      BorderRadius.circular(6),
+                                                ),
+                                                child: const Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.add_link,
+                                                      size: 13,
+                                                      color: Colors.white,
+                                                    ),
+                                                    SizedBox(width: 4),
+                                                    Text(
+                                                      '+ Conectar con Otro Rack',
+                                                      style: TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 10,
+                                                        fontWeight:
+                                                            FontWeight.w800,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ],
                                       ),
                                     ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -2957,7 +3948,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         ),
                       ),
 
-                      // Controles Flotantes Superiores Izquierdos: [Front | Back] + Zoom + Filtro de Cables
+                      // Controles Flotantes Superiores Izquierdos: [♊ Front + Back | Front | Back] + [📷 Foto Equipos ON/OFF] + Filtro de Cables
                       Positioned(
                         top: 14,
                         left: 14,
@@ -3021,9 +4012,9 @@ class _RackEditorViewState extends State<RackEditorView> {
                                 ],
                               ),
                             ),
-                            const SizedBox(width: 12),
+                            const SizedBox(width: 10),
 
-                            // Conmutador [Front | Back]
+                            // Conmutador [♊ Front + Back | Front | Back]
                             Container(
                               decoration: BoxDecoration(
                                 color: Colors.white,
@@ -3034,6 +4025,12 @@ class _RackEditorViewState extends State<RackEditorView> {
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
+                                  _FaceToggleButton(
+                                    label: '♊ Front + Back',
+                                    active: _activeFace == 'both',
+                                    onTap: () =>
+                                        setState(() => _activeFace = 'both'),
+                                  ),
                                   _FaceToggleButton(
                                     label: 'Front',
                                     active: _activeFace == 'front',
@@ -3050,7 +4047,62 @@ class _RackEditorViewState extends State<RackEditorView> {
                               ),
                             ),
 
-                            const SizedBox(width: 12),
+                            const SizedBox(width: 10),
+
+                            // Conmutador de Foto Real / Bisel de Equipos ON / OFF
+                            InkWell(
+                              onTap: () => setState(
+                                () => _showEquipmentPhotos =
+                                    !_showEquipmentPhotos,
+                              ),
+                              borderRadius: BorderRadius.circular(6),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 7,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _showEquipmentPhotos
+                                      ? const Color(0xFF0F172A)
+                                      : Colors.white,
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color: _showEquipmentPhotos
+                                        ? const Color(0xFF38BDF8)
+                                        : const Color(0xFFCBD5E1),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      _showEquipmentPhotos
+                                          ? Icons.photo_camera
+                                          : Icons.photo_camera_outlined,
+                                      size: 14,
+                                      color: _showEquipmentPhotos
+                                          ? const Color(0xFF38BDF8)
+                                          : const Color(0xFF475569),
+                                    ),
+                                    const SizedBox(width: 5),
+                                    Text(
+                                      _showEquipmentPhotos
+                                          ? 'Foto Equipos: ON'
+                                          : 'Foto Equipos: OFF',
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: _showEquipmentPhotos
+                                            ? Colors.white
+                                            : const Color(0xFF475569),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+
+                            const SizedBox(width: 10),
 
                             // Filtro rápido por Tipo de Cable
                             Container(
@@ -3125,6 +4177,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                 },
                 onNavigateToRack: widget.onSwitchRack,
                 onDeleteRack: _canEdit ? _confirmDeleteCurrentRack : null,
+                onConfigureDevicePhoto: (dev) =>
+                    _showHardwarePhotoSearchDialog(device: dev),
                 currentUser: widget.currentUser,
               ),
             ],
@@ -3132,6 +4186,347 @@ class _RackEditorViewState extends State<RackEditorView> {
         ),
       ],
     );
+  }
+
+  /// Construye un armario Rack completo (estructura metálica, raíles 19", regla U, slots vacíos y equipos de esa cara).
+  List<Widget> _buildSingleRackCabinetStack({
+    required RackDetailModel rack,
+    required String face,
+    required String faceBannerLabel,
+    required Color faceBannerColor,
+    required double outerLeft,
+    required double innerLeft,
+    required Set<int> occupiedUsOnFace,
+    required Map<int, Color> connectedPortColors,
+    required bool showDropPreview,
+  }) {
+    return [
+      // A0. Etiqueta de Cara del Bastidor (FRONT / BACK)
+      Positioned(
+        left: outerLeft,
+        top: _rackTopMargin - 66,
+        width: _rackOuterWidth,
+        height: 22,
+        child: Container(
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: faceBannerColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
+          ),
+          child: Text(
+            '${rack.code} — $faceBannerLabel',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.6,
+            ),
+          ),
+        ),
+      ),
+
+      // A1. Cabezal superior del armario Rack
+      Positioned(
+        left: outerLeft,
+        top: _rackTopMargin - 42,
+        width: _rackOuterWidth,
+        height: 22,
+        child: Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFC),
+            border: Border.all(
+              color: const Color(0xFF334155),
+              width: 1.4,
+            ),
+          ),
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              height: 4,
+              decoration: const BoxDecoration(
+                border: Border(
+                  top: BorderSide(
+                    color: Color(0xFF334155),
+                    width: 1.2,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+
+      // A2. Marco exterior de doble pared del Armario Rack
+      Positioned(
+        left: outerLeft,
+        top: _rackTopMargin - 20,
+        width: _rackOuterWidth,
+        height: rack.totalUnits * _uHeightPx + 40,
+        child: Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFC),
+            border: Border.all(
+              color: const Color(0xFF334155),
+              width: 1.5,
+            ),
+          ),
+          child: Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFFFDFEFE),
+              border: Border.all(
+                color: const Color(0xFF475569),
+                width: 1.2,
+              ),
+            ),
+          ),
+        ),
+      ),
+
+      // A3. Raíles verticales perforados de 19" con los 3 agujeros cuadrados por cada U
+      Positioned(
+        left: innerLeft - _railWidth,
+        top: _rackTopMargin,
+        width: _railWidth,
+        height: rack.totalUnits * _uHeightPx,
+        child: _buildPerforated19InchRail(rack.totalUnits),
+      ),
+      Positioned(
+        left: innerLeft + _rackInnerWidth,
+        top: _rackTopMargin,
+        width: _railWidth,
+        height: rack.totalUnits * _uHeightPx,
+        child: _buildPerforated19InchRail(rack.totalUnits),
+      ),
+
+      // A4. Línea vertical continua de la regla U a la izquierda del armario
+      Positioned(
+        left: outerLeft - 18,
+        top: _rackTopMargin,
+        width: 1.5,
+        height: rack.totalUnits * _uHeightPx,
+        child: Container(color: const Color(0xFF475569)),
+      ),
+
+      // B. Regla numerada de Unidades U (42 .. 1) y Slots vacíos
+      for (int u = rack.totalUnits; u >= 1; u--) ...[
+        Positioned(
+          left: outerLeft - 56,
+          top: _rackTopMargin + (rack.totalUnits - u) * _uHeightPx,
+          width: 44,
+          height: _uHeightPx,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                right: 2,
+                top: 0,
+                child: Container(
+                  width: 6,
+                  height: 1.3,
+                  color: const Color(0xFF475569),
+                ),
+              ),
+              if (u == 1)
+                Positioned(
+                  right: 2,
+                  bottom: 0,
+                  child: Container(
+                    width: 6,
+                    height: 1.3,
+                    color: const Color(0xFF475569),
+                  ),
+                ),
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: Text(
+                    '$u',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF334155),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        if (!occupiedUsOnFace.contains(u))
+          Positioned(
+            left: innerLeft,
+            top: _rackTopMargin + (rack.totalUnits - u) * _uHeightPx,
+            width: _rackInnerWidth,
+            height: _uHeightPx,
+            child: DragTarget<Object>(
+              onWillAcceptWithDetails: (details) {
+                if (!_canEdit) return false;
+                if (details.data is! DeviceTemplateModel &&
+                    details.data is! RackDeviceModel) {
+                  return false;
+                }
+                if (_hoveredDropU != u || _draggingData != details.data) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) {
+                      setState(() {
+                        _draggingData = details.data;
+                        _hoveredDropU = u;
+                      });
+                    }
+                  });
+                }
+                return true;
+              },
+              onLeave: (_) {
+                if (_hoveredDropU == u) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted && _hoveredDropU == u) {
+                      setState(() => _hoveredDropU = null);
+                    }
+                  });
+                }
+              },
+              onAcceptWithDetails: (details) {
+                _handleDropOnUSlot(details.data, u);
+              },
+              builder: (ctx, candidate, _) {
+                final isHovering = candidate.isNotEmpty;
+                return InkWell(
+                  onTap: (_canEdit && _selectedTemplateForClick != null)
+                      ? () => _handleDropOrMountTemplate(
+                            _selectedTemplateForClick!,
+                            u,
+                          )
+                      : null,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: isHovering
+                          ? const Color(0xFFDBEAFE)
+                          : Colors.transparent,
+                      border: Border(
+                        bottom: BorderSide(
+                          color: const Color(0xFFE2E8F0)
+                              .withValues(alpha: 0.55),
+                          width: 0.7,
+                        ),
+                      ),
+                    ),
+                    child: Center(
+                      child: Container(
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: isHovering
+                                ? const Color(0xFF2563EB)
+                                : const Color(0xFF64748B),
+                            width: 1.2,
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.add,
+                          size: 13,
+                          color: isHovering
+                              ? const Color(0xFF2563EB)
+                              : const Color(0xFF64748B),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+      ],
+
+      // C. Dispositivos Montados en esta cara (Front o Back)
+      for (final dev in rack.devices)
+        if (dev.isVisibleOnFace(face))
+          _buildMountedDeviceWidget(
+            dev: dev,
+            face: face,
+            innerLeft: innerLeft,
+            totalUnits: rack.totalUnits,
+            connectedPortColors: connectedPortColors,
+          ),
+
+      // C1. Previsualización Multi-U en tiempo real al arrastrar un equipo
+      if (showDropPreview && _hoveredDropU != null && _draggingData != null)
+        Builder(
+          builder: (_) {
+            final int uH = _draggingData is RackDeviceModel
+                ? (_draggingData as RackDeviceModel).uHeight
+                : (_draggingData as DeviceTemplateModel).uHeight;
+            final int? exId = _draggingData is RackDeviceModel
+                ? (_draggingData as RackDeviceModel).id
+                : null;
+            final int startU = _hoveredDropU!;
+            final int endU = startU + uH - 1;
+            final bool canFit = _canFitAtU(
+              rack,
+              startU,
+              uH,
+              excludeDeviceId: exId,
+            );
+            final int clampedEndU = endU.clamp(1, rack.totalUnits);
+            final double topPx = _rackTopMargin +
+                (rack.totalUnits - clampedEndU) * _uHeightPx;
+            final double boxH = (clampedEndU - startU + 1) * _uHeightPx;
+            final String rangeTxt =
+                uH > 1 ? 'U$startU - U$endU ($uH U)' : 'U$startU (1U)';
+            return Positioned(
+              left: innerLeft,
+              top: topPx,
+              width: _rackInnerWidth,
+              height: boxH,
+              child: IgnorePointer(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: (canFit
+                            ? const Color(0xFF16A34A)
+                            : const Color(0xFFDC2626))
+                        .withValues(alpha: 0.22),
+                    border: Border.all(
+                      color: canFit
+                          ? const Color(0xFF16A34A)
+                          : const Color(0xFFDC2626),
+                      width: 2.2,
+                    ),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: canFit
+                            ? const Color(0xFF15803D)
+                            : const Color(0xFFB91C1C),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        canFit
+                            ? '✓ Soltar en $rangeTxt (${uH}U libres)'
+                            : '✕ No cabe en $rangeTxt (necesita ${uH}U libres)',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+    ];
   }
 
   /// Dibuja el raíl vertical de 19 pulgadas con las 3 perforaciones cuadradas por cada U (idéntico a la imagen).
@@ -3190,7 +4585,7 @@ class _RackEditorViewState extends State<RackEditorView> {
     final totalHeight = runningTopInZone + 40.0;
 
     return Positioned(
-      left: _extZoneLeft,
+      left: _effectiveExtZoneLeft,
       top: _rackTopMargin - 20,
       width: _extZoneWidth,
       height: totalHeight + 60,
@@ -3726,23 +5121,28 @@ class _RackEditorViewState extends State<RackEditorView> {
   }
 
   // ===========================================================================
-  // CHASIS DE EQUIPO MONTADO EN RACK (ESTILO TÉCNICO PATCHBOX + ARRASTRAR DIRECTO A U LIBRE)
+  // CHASIS DE EQUIPO MONTADO EN RACK (ESTILO TÉCNICO PATCHBOX + FOTO REAL/BISEL + ARRASTRAR A U LIBRE)
   // ===========================================================================
   Widget _buildMountedDeviceWidget({
     required RackDeviceModel dev,
+    required String face,
+    required double innerLeft,
     required int totalUnits,
     required Map<int, Color> connectedPortColors,
   }) {
     final topU = dev.endU;
     final topY = _rackTopMargin + (totalUnits - topU) * _uHeightPx;
-    final heightPx = dev.template.uHeight * _uHeightPx;
+    final heightPx = dev.uHeight * _uHeightPx;
     final isSelected = dev.id == _selectedDeviceId;
     final isHovered = dev.id == _hoveredDeviceId;
-    final facePorts = dev.portsForFace(_activeFace);
-    final isRearAutoView = dev.mountedFace != _activeFace;
+    final facePorts = dev.portsForFace(face);
+    final isRearAutoView = dev.mountedFace != face;
     final rack = _rack;
     final nextUpU = rack != null ? _findNearestFreeU(rack, dev, 1) : null;
     final nextDownU = rack != null ? _findNearestFreeU(rack, dev, -1) : null;
+    final isTray = dev.template.category == 'rack_tray' ||
+        dev.template.modelName.toLowerCase().contains('bandeja');
+    final isRoofFan = dev.template.isRoofFan;
 
     final isOnline = dev.status == 'online';
     final isOffline = dev.status == 'offline';
@@ -3761,9 +5161,11 @@ class _RackEditorViewState extends State<RackEditorView> {
               ? const Color(0xFFFEE2E2)
               : (isSelected
                   ? const Color(0xFFF8FAFF)
-                  : (isRearAutoView
-                      ? const Color(0xFFF8FAFC)
-                      : Colors.white)),
+                  : (isTray
+                      ? const Color(0xFFF1F5F9)
+                      : (isRearAutoView
+                          ? const Color(0xFFF8FAFC)
+                          : Colors.white))),
           border: Border.symmetric(
             horizontal: BorderSide(
               color: isSelected
@@ -3776,20 +5178,30 @@ class _RackEditorViewState extends State<RackEditorView> {
         child: Stack(
           clipBehavior: Clip.none,
           children: [
+            // Fondo de Foto de Referencia o Bisel Gráfico Industrial (cuando "Foto Equipos: ON" está activo, o siempre para Ventiladores/Bandejas)
+            if (_showEquipmentPhotos || isTray || isRoofFan)
+              Positioned(
+                left: _railWidth + 24,
+                right: _railWidth + 4,
+                top: 1,
+                bottom: 1,
+                child: _buildRealisticPhotoBezelOverlay(dev, face),
+              ),
+
             // Orejetas laterales de anclaje sobre el raíl de 19" izquierdo y derecho
             Positioned(
               left: 0,
               top: 0,
               bottom: 0,
               width: _railWidth,
-              child: _buildDeviceMountingEar(dev.template.uHeight),
+              child: _buildDeviceMountingEar(dev.uHeight),
             ),
             Positioned(
               right: 0,
               top: 0,
               bottom: 0,
               width: _railWidth,
-              child: _buildDeviceMountingEar(dev.template.uHeight),
+              child: _buildDeviceMountingEar(dev.uHeight),
             ),
 
             // Código del equipo rotado 90° en vertical a la izquierda (con punto de estado Heartbeat Verde/Rojo/Ámbar)
@@ -3834,17 +5246,28 @@ class _RackEditorViewState extends State<RackEditorView> {
               ),
             ),
 
-            // Información sutil cuando tiene pocas bocas en esta cara (ej. parte trasera con PSU o servidor)
+            // Información sutil cuando tiene pocas bocas en esta cara (ej. parte trasera con PSU o servidor o cabina SAN/NAS)
             if (facePorts.length <= 12)
               Positioned(
                 left: _railWidth + 28,
                 top: 3,
-                child: Text(
-                  '${dev.name}${isRearAutoView ? ' • [Back U${dev.startU}]' : ''}${dev.ipAddress.isNotEmpty ? ' • ${dev.ipAddress}' : ''}${dev.monitoringEnabled ? ' • HB:${dev.monitorMethod.toUpperCase()}' : ''}',
-                  style: const TextStyle(
-                    fontSize: 8.5,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF64748B),
+                child: Container(
+                  padding: _showEquipmentPhotos && dev.photoUrl.isNotEmpty
+                      ? const EdgeInsets.symmetric(horizontal: 5, vertical: 1)
+                      : EdgeInsets.zero,
+                  decoration: _showEquipmentPhotos && dev.photoUrl.isNotEmpty
+                      ? BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.86),
+                          borderRadius: BorderRadius.circular(3),
+                        )
+                      : null,
+                  child: Text(
+                    '${dev.name}${dev.uHeight > 1 ? ' (${dev.uHeight}U)' : ''}${isRearAutoView ? ' • [${face.toUpperCase()} U${dev.startU}]' : ''}${dev.ipAddress.isNotEmpty ? ' • ${dev.ipAddress}' : ''}${dev.monitoringEnabled ? ' • HB:${dev.monitorMethod.toUpperCase()}' : ''}',
+                    style: const TextStyle(
+                      fontSize: 8.5,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF334155),
+                    ),
                   ),
                 ),
               ),
@@ -3854,11 +5277,12 @@ class _RackEditorViewState extends State<RackEditorView> {
               _buildPortWidget(
                 dev: dev,
                 port: port,
+                face: face,
                 devHeight: heightPx,
                 connectedColor: connectedPortColors[port.id],
               ),
 
-            // Controles rápidos flotantes en el propio equipo (Arrastrar, Subir a U libre, Bajar a U libre, Borrar)
+            // Controles rápidos flotantes en el propio equipo (Arrastrar, Subir, Bajar, U Ocupadas -/+, Foto, Cable a Otro Rack, Borrar)
             if (_canEdit && (isHovered || isSelected))
               Positioned(
                 left: _railWidth + 24,
@@ -3893,8 +5317,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                               : null,
                           child: Tooltip(
                             message: nextUpU != null
-                                ? 'Subir a U$nextUpU (${dev.template.uHeight}U libres)'
-                                : 'No hay ${dev.template.uHeight}U libres más arriba',
+                                ? 'Subir a U$nextUpU (${dev.uHeight}U libres)'
+                                : 'No hay ${dev.uHeight}U libres más arriba',
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 3,
@@ -3915,8 +5339,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                               : null,
                           child: Tooltip(
                             message: nextDownU != null
-                                ? 'Bajar a U$nextDownU (${dev.template.uHeight}U libres)'
-                                : 'No hay ${dev.template.uHeight}U libres más abajo',
+                                ? 'Bajar a U$nextDownU (${dev.uHeight}U libres)'
+                                : 'No hay ${dev.uHeight}U libres más abajo',
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 3,
@@ -3938,7 +5362,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                 'Elegir U libre destino (Actual: U${dev.startU})',
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
+                                horizontal: 3,
                               ),
                               child: Text(
                                 'U${dev.startU}',
@@ -3947,6 +5371,102 @@ class _RackEditorViewState extends State<RackEditorView> {
                                   fontWeight: FontWeight.bold,
                                   color: Color(0xFF93C5FD),
                                 ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        // Selector rápido -/+ de cuántas U ocupa en el propio chasis
+                        Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 3),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 3,
+                            vertical: 0.5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E293B),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: const Color(0xFF475569)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              InkWell(
+                                onTap: dev.uHeight > 1
+                                    ? () => _quickAdjustDeviceUHeight(
+                                          dev,
+                                          dev.uHeight - 1,
+                                        )
+                                    : null,
+                                child: const Tooltip(
+                                  message: 'Reducir 1U de altura',
+                                  child: Icon(
+                                    Icons.remove,
+                                    size: 11,
+                                    color: Color(0xFF38BDF8),
+                                  ),
+                                ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 3,
+                                ),
+                                child: Text(
+                                  '${dev.uHeight}U',
+                                  style: const TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                              InkWell(
+                                onTap: dev.uHeight < 16
+                                    ? () => _quickAdjustDeviceUHeight(
+                                          dev,
+                                          dev.uHeight + 1,
+                                        )
+                                    : null,
+                                child: const Tooltip(
+                                  message: 'Ampliar +1U de altura',
+                                  child: Icon(
+                                    Icons.add,
+                                    size: 11,
+                                    color: Color(0xFF38BDF8),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        InkWell(
+                          onTap: () =>
+                              _showHardwarePhotoSearchDialog(device: dev),
+                          child: const Tooltip(
+                            message:
+                                'Buscar o cambiar Foto de Referencia del equipo',
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 3),
+                              child: Icon(
+                                Icons.photo_camera_outlined,
+                                size: 12.5,
+                                color: Color(0xFF38BDF8),
+                              ),
+                            ),
+                          ),
+                        ),
+                        InkWell(
+                          onTap: () => _showInterRackConnectionDialog(
+                            initialSourceDev: dev,
+                          ),
+                          child: const Tooltip(
+                            message:
+                                'Conectar fibra/cable desde este equipo hacia otro Rack',
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 3),
+                              child: Icon(
+                                Icons.compare_arrows,
+                                size: 13,
+                                color: Color(0xFF34D399),
                               ),
                             ),
                           ),
@@ -3976,7 +5496,7 @@ class _RackEditorViewState extends State<RackEditorView> {
     }
 
     return Positioned(
-      left: _rackInnerLeft - _railWidth,
+      left: innerLeft - _railWidth,
       top: topY,
       width: _rackInnerWidth + _railWidth * 2,
       height: heightPx,
@@ -4086,7 +5606,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'Moviendo ${dev.code} (${dev.name}) • Requiere ${dev.template.uHeight}U libres',
+                        'Moviendo ${dev.code} (${dev.name}) • Requiere ${dev.uHeight}U libres',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 11.5,
@@ -4110,7 +5630,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                 ),
                 child: Center(
                   child: Text(
-                    'Moviendo ${dev.code} (${dev.template.uHeight}U) — Suelta en una posición con ${dev.template.uHeight}U libres',
+                    'Moviendo ${dev.code} (${dev.uHeight}U) — Suelta en una posición con ${dev.uHeight}U libres',
                     style: const TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w700,
@@ -4125,6 +5645,170 @@ class _RackEditorViewState extends State<RackEditorView> {
         },
       ),
     );
+  }
+
+  /// Dibuja la Foto de Referencia de Internet (si existe y Foto Equipos está ON) o un bisel realista industrial.
+  Widget _buildRealisticPhotoBezelOverlay(RackDeviceModel dev, String face) {
+    final hasPhoto = _showEquipmentPhotos && dev.photoUrl.isNotEmpty;
+    final cat = dev.template.category;
+    final isRoofFan = dev.template.isRoofFan;
+    final isTray = cat == 'rack_tray' ||
+        dev.template.modelName.toLowerCase().contains('bandeja');
+    final isStorageOrServer =
+        cat == 'storage_san' || cat == 'storage_nas' || cat == 'server';
+
+    if (hasPhoto) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(2),
+        child: Opacity(
+          opacity: 0.34,
+          child: Image.network(
+            dev.photoUrl,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => const SizedBox.shrink(),
+          ),
+        ),
+      );
+    }
+
+    if (isRoofFan) {
+      // Módulo de Ventiladores de Techo 1U con 4 turbinas y pantalla digital de temperatura
+      return IgnorePointer(
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(width: 90),
+            for (int f = 0; f < 4; f++)
+              Container(
+                width: 28,
+                height: 28,
+                margin: const EdgeInsets.symmetric(horizontal: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F5F9),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: const Color(0xFF475569),
+                    width: 1.4,
+                  ),
+                ),
+                child: const Icon(
+                  Icons.cyclone,
+                  size: 17,
+                  color: Color(0xFF0284C7),
+                ),
+              ),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F172A),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: const Color(0xFF10B981)),
+              ),
+              child: const Text(
+                '21.4°C • FAN OK',
+                style: TextStyle(
+                  color: Color(0xFF4ADE80),
+                  fontSize: 7.5,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (isTray) {
+      // Bandeja de Rack perforada con indicación de U ocupadas
+      return IgnorePointer(
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+          decoration: BoxDecoration(
+            color: const Color(0xFFE2E8F0).withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(3),
+            border: Border(
+              bottom: const BorderSide(color: Color(0xFF475569), width: 3.0),
+              left: const BorderSide(color: Color(0xFF64748B), width: 1.5),
+              right: const BorderSide(color: Color(0xFF64748B), width: 1.5),
+              top: BorderSide(
+                color: const Color(0xFF94A3B8).withValues(alpha: 0.5),
+                width: 0.8,
+              ),
+            ),
+          ),
+          child: Center(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.layers_outlined,
+                  size: 13,
+                  color: Color(0xFF475569),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'BANDEJA RACK 19" • OCUPA ${dev.uHeight}U (U${dev.startU}${dev.uHeight > 1 ? '-U${dev.endU}' : ''})',
+                  style: const TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF334155),
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_showEquipmentPhotos && isStorageOrServer && face == 'front') {
+      // Bisel frontal de bahías NVMe/SAS para cabinas SAN/NAS (Dell, NetApp, IBM, Pure) y Servidores
+      final bayCols = dev.uHeight >= 2 ? 12 : 8;
+      return IgnorePointer(
+        child: Padding(
+          padding: const EdgeInsets.only(
+            left: 140,
+            right: 70,
+            top: 16,
+            bottom: 4,
+          ),
+          child: Row(
+            children: [
+              for (int b = 0; b < bayCols; b++)
+                Expanded(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E293B).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(2),
+                      border: Border.all(
+                        color: const Color(0xFF64748B).withValues(alpha: 0.35),
+                        width: 0.8,
+                      ),
+                    ),
+                    child: Align(
+                      alignment: Alignment.topRight,
+                      child: Container(
+                        width: 3.5,
+                        height: 3.5,
+                        margin: const EdgeInsets.all(2),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF10B981),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return const SizedBox.shrink();
   }
 
   Widget _buildDeviceMountingEar(int uHeight) {
@@ -4156,6 +5840,7 @@ class _RackEditorViewState extends State<RackEditorView> {
   Widget _buildPortWidget({
     required RackDeviceModel dev,
     required PortModel port,
+    required String face,
     required double devHeight,
     required Color? connectedColor,
   }) {
@@ -4171,7 +5856,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         port.portType == 'fiber_lc' && dev.template.category == 'gateway';
 
     final rx = _computeVisualRelX(dev, port);
-    final ry = _computeVisualRelY(dev, port);
+    final ry = _computeVisualRelY(dev, port, face);
 
     final jackW = isMalePlug
         ? 22.0
@@ -4183,7 +5868,7 @@ class _RackEditorViewState extends State<RackEditorView> {
     final centerX = _railWidth + rx * _rackInnerWidth;
     final centerY = ry * devHeight;
 
-    final facePorts = dev.portsForFace(_activeFace);
+    final facePorts = dev.portsForFace(face);
     final hasTwoRows = facePorts.any((p) => p.rowIndex > 0);
     final labelBelow = hasTwoRows && port.rowIndex > 0;
 

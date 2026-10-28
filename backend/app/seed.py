@@ -327,6 +327,61 @@ def seed_initial_data(db: Session):
             "default_color": "#FFFFFF",
             "layout_spec": {"front": [], "back": []},
         },
+        {
+            "category": "miscellaneous",
+            "manufacturer": "Rittal / APC",
+            "model_name": "Ventiladores de Techo 1U (Smart Roof Fan + ETH)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F0F9FF",
+            "layout_spec": {
+                "front": [
+                    {
+                        "port_type": "rj45",
+                        "prefix": "ETH",
+                        "count": 1,
+                        "rows": 1,
+                        "start_x": 0.16,
+                        "end_x": 0.20,
+                    },
+                    {
+                        "port_type": "power_plug_male",
+                        "prefix": "MACHO-IN",
+                        "count": 1,
+                        "rows": 1,
+                        "start_x": 0.86,
+                        "end_x": 0.90,
+                    },
+                ],
+                "back": [
+                    {
+                        "port_type": "rj45",
+                        "prefix": "ETH-R",
+                        "count": 1,
+                        "rows": 1,
+                        "start_x": 0.16,
+                        "end_x": 0.20,
+                    },
+                    {
+                        "port_type": "power_c14",
+                        "prefix": "PSU",
+                        "count": 1,
+                        "rows": 1,
+                        "start_x": 0.86,
+                        "end_x": 0.90,
+                    },
+                ],
+            },
+        },
+        {
+            "category": "miscellaneous",
+            "manufacturer": "Rittal",
+            "model_name": "Bandeja Regulable en U (1U por defecto — U Editable)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {"front": [], "back": []},
+        },
     ]
 
     tpl_map: dict[str, DeviceTemplate] = {}
@@ -1859,6 +1914,592 @@ def sync_system_defaults(db: Session):
             "default_color": "#F1F5F9",
             "layout_spec": _srv_spec("IPMI-F", "IPMI", nics=4, sfps=4, psus=4),
         },
+
+        # --- MISCELLANEOUS & BANDEJAS (Ventiladores de Techo 1U con ETH + Bandejas de 1U con U Editable) ---
+        {
+            "library_group": "Patching & Passive",
+            "category": "miscellaneous",
+            "manufacturer": "Rittal / APC",
+            "model_name": "Ventiladores de Techo 1U (Smart Roof Fan + ETH)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F0F9FF",
+            "layout_spec": {
+                "front": [
+                    {
+                        "port_type": "rj45",
+                        "prefix": "ETH",
+                        "count": 1,
+                        "rows": 1,
+                        "start_x": 0.16,
+                        "end_x": 0.20,
+                    },
+                    {
+                        "port_type": "power_plug_male",
+                        "prefix": "MACHO-IN",
+                        "count": 1,
+                        "rows": 1,
+                        "start_x": 0.86,
+                        "end_x": 0.90,
+                    },
+                ],
+                "back": [
+                    {
+                        "port_type": "rj45",
+                        "prefix": "ETH-R",
+                        "count": 1,
+                        "rows": 1,
+                        "start_x": 0.16,
+                        "end_x": 0.20,
+                    },
+                    {
+                        "port_type": "power_c14",
+                        "prefix": "PSU",
+                        "count": 1,
+                        "rows": 1,
+                        "start_x": 0.86,
+                        "end_x": 0.90,
+                    },
+                ],
+            },
+        },
+        {
+            "library_group": "Patching & Passive",
+            "category": "miscellaneous",
+            "manufacturer": "Rittal",
+            "model_name": "Bandeja Regulable en U (1U por defecto — U Editable)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {"front": [], "back": []},
+        },
+        {
+            "library_group": "Patching & Passive",
+            "category": "rack_tray",
+            "manufacturer": "Rittal",
+            "model_name": "Bandeja Telescópica Extraíble 1U (U Editable)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {"front": [], "back": []},
+        },
+
+        # --- STORAGE - SAN (Dell EMC, NetApp, IBM, HPE, Pure Storage, Hitachi — 14 modelos reales del mercado) ---
+        {
+            "library_group": "Storage - SAN",
+            "category": "storage_san",
+            "manufacturer": "NetApp",
+            "model_name": "NetApp AFF A400 (4U All-Flash NVMe SAN HA Pair)",
+            "u_height": 4,
+            "is_full_depth": True,
+            "default_color": "#EFF6FF",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "BMC", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "fiber_lc", "prefix": "FC32G-", "count": 8, "rows": 2, "start_x": 0.30, "end_x": 0.62},
+                    {"port_type": "sfp_plus", "prefix": "NVMe25G-", "count": 4, "rows": 2, "start_x": 0.68, "end_x": 0.88},
+                ],
+                "back": [
+                    {"port_type": "rj45", "prefix": "e0M", "count": 2, "rows": 1, "start_x": 0.12, "end_x": 0.20},
+                    {"port_type": "fiber_lc", "prefix": "FC-", "count": 8, "rows": 2, "start_x": 0.26, "end_x": 0.56},
+                    {"port_type": "sfp_plus", "prefix": "HA-", "count": 4, "rows": 1, "start_x": 0.60, "end_x": 0.74},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 4, "rows": 2, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - SAN",
+            "category": "storage_san",
+            "manufacturer": "NetApp",
+            "model_name": "NetApp AFF A250 (2U All-Flash NVMe SAN/FC)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#EFF6FF",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "fiber_lc", "prefix": "FC32G-", "count": 4, "rows": 1, "start_x": 0.32, "end_x": 0.58},
+                    {"port_type": "sfp_plus", "prefix": "25GbE-", "count": 4, "rows": 1, "start_x": 0.64, "end_x": 0.88},
+                ],
+                "back": [
+                    {"port_type": "rj45", "prefix": "e0M", "count": 2, "rows": 1, "start_x": 0.12, "end_x": 0.20},
+                    {"port_type": "fiber_lc", "prefix": "FC-", "count": 4, "rows": 1, "start_x": 0.28, "end_x": 0.52},
+                    {"port_type": "sfp_plus", "prefix": "CNA-", "count": 4, "rows": 1, "start_x": 0.56, "end_x": 0.74},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.80, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - SAN",
+            "category": "storage_san",
+            "manufacturer": "NetApp",
+            "model_name": "NetApp ASA A150 (2U Enterprise SAN FC/iSCSI)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#EFF6FF",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "fiber_lc", "prefix": "FC16G-", "count": 4, "rows": 1, "start_x": 0.34, "end_x": 0.62},
+                    {"port_type": "sfp_plus", "prefix": "iSCSI-", "count": 4, "rows": 1, "start_x": 0.66, "end_x": 0.88},
+                ],
+                "back": [
+                    {"port_type": "rj45", "prefix": "e0M", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "fiber_lc", "prefix": "FC-", "count": 4, "rows": 1, "start_x": 0.30, "end_x": 0.60},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - SAN",
+            "category": "storage_san",
+            "manufacturer": "NetApp",
+            "model_name": "NetApp E-Series EF600 (2U NVMe Block SAN Array)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#EFF6FF",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "fiber_lc", "prefix": "FC32G-", "count": 8, "rows": 2, "start_x": 0.34, "end_x": 0.86},
+                ],
+                "back": [
+                    {"port_type": "fiber_lc", "prefix": "FC-", "count": 8, "rows": 2, "start_x": 0.20, "end_x": 0.68},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - SAN",
+            "category": "storage_san",
+            "manufacturer": "Dell EMC",
+            "model_name": "Dell PowerStore 1200T (2U All-Flash NVMe SAN)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "fiber_lc", "prefix": "FC32G-", "count": 8, "rows": 2, "start_x": 0.32, "end_x": 0.64},
+                    {"port_type": "sfp_plus", "prefix": "25GbE-", "count": 4, "rows": 2, "start_x": 0.70, "end_x": 0.88},
+                ],
+                "back": [
+                    {"port_type": "rj45", "prefix": "SVC", "count": 2, "rows": 1, "start_x": 0.12, "end_x": 0.20},
+                    {"port_type": "fiber_lc", "prefix": "FC-", "count": 8, "rows": 2, "start_x": 0.26, "end_x": 0.64},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - SAN",
+            "category": "storage_san",
+            "manufacturer": "Dell EMC",
+            "model_name": "Dell PowerStore 5200T (2U Enterprise NVMe FC SAN)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "fiber_lc", "prefix": "FC32G-", "count": 8, "rows": 2, "start_x": 0.30, "end_x": 0.64},
+                    {"port_type": "sfp_plus", "prefix": "iSCSI-", "count": 4, "rows": 2, "start_x": 0.70, "end_x": 0.88},
+                ],
+                "back": [
+                    {"port_type": "fiber_lc", "prefix": "FC-", "count": 8, "rows": 2, "start_x": 0.20, "end_x": 0.68},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - SAN",
+            "category": "storage_san",
+            "manufacturer": "Dell EMC",
+            "model_name": "Dell PowerVault ME5024 (2U 24-Bay FC/iSCSI SAN)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "fiber_lc", "prefix": "FC16G-", "count": 8, "rows": 2, "start_x": 0.34, "end_x": 0.86},
+                ],
+                "back": [
+                    {"port_type": "fiber_lc", "prefix": "FC-", "count": 8, "rows": 2, "start_x": 0.20, "end_x": 0.68},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - SAN",
+            "category": "storage_san",
+            "manufacturer": "Dell EMC",
+            "model_name": "Dell PowerMax 2500 (4U Mission-Critical NVMe SAN)",
+            "u_height": 4,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.12, "end_x": 0.20},
+                    {"port_type": "fiber_lc", "prefix": "FC64G-", "count": 12, "rows": 2, "start_x": 0.28, "end_x": 0.88},
+                ],
+                "back": [
+                    {"port_type": "fiber_lc", "prefix": "FC-", "count": 12, "rows": 2, "start_x": 0.18, "end_x": 0.72},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 4, "rows": 2, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - SAN",
+            "category": "storage_san",
+            "manufacturer": "IBM",
+            "model_name": "IBM FlashSystem 5200 (1U NVMe All-Flash SAN)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "fiber_lc", "prefix": "FC32G-", "count": 4, "rows": 1, "start_x": 0.34, "end_x": 0.62},
+                    {"port_type": "sfp_plus", "prefix": "25GbE-", "count": 4, "rows": 1, "start_x": 0.66, "end_x": 0.88},
+                ],
+                "back": [
+                    {"port_type": "fiber_lc", "prefix": "FC-", "count": 4, "rows": 1, "start_x": 0.24, "end_x": 0.56},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - SAN",
+            "category": "storage_san",
+            "manufacturer": "IBM",
+            "model_name": "IBM FlashSystem 7300 (2U Enterprise NVMe FC SAN)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "fiber_lc", "prefix": "FC32G-", "count": 8, "rows": 2, "start_x": 0.32, "end_x": 0.66},
+                    {"port_type": "sfp_plus", "prefix": "iSCSI-", "count": 4, "rows": 2, "start_x": 0.72, "end_x": 0.88},
+                ],
+                "back": [
+                    {"port_type": "fiber_lc", "prefix": "FC-", "count": 8, "rows": 2, "start_x": 0.20, "end_x": 0.68},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - SAN",
+            "category": "storage_san",
+            "manufacturer": "IBM",
+            "model_name": "IBM FlashSystem 9500 (4U Tier-0 Mission-Critical SAN)",
+            "u_height": 4,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.12, "end_x": 0.20},
+                    {"port_type": "fiber_lc", "prefix": "FC64G-", "count": 12, "rows": 2, "start_x": 0.28, "end_x": 0.88},
+                ],
+                "back": [
+                    {"port_type": "fiber_lc", "prefix": "FC-", "count": 12, "rows": 2, "start_x": 0.18, "end_x": 0.72},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 4, "rows": 2, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - SAN",
+            "category": "storage_san",
+            "manufacturer": "HPE",
+            "model_name": "HPE Alletra 6050 (4U All-Flash NVMe SAN)",
+            "u_height": 4,
+            "is_full_depth": True,
+            "default_color": "#ECFDF5",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "fiber_lc", "prefix": "FC32G-", "count": 8, "rows": 2, "start_x": 0.32, "end_x": 0.86},
+                ],
+                "back": [
+                    {"port_type": "fiber_lc", "prefix": "FC-", "count": 8, "rows": 2, "start_x": 0.20, "end_x": 0.68},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 4, "rows": 2, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - SAN",
+            "category": "storage_san",
+            "manufacturer": "Pure Storage",
+            "model_name": "Pure Storage FlashArray//X70 R4 (3U 100% NVMe SAN)",
+            "u_height": 3,
+            "is_full_depth": True,
+            "default_color": "#FFF7ED",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "fiber_lc", "prefix": "FC32G-", "count": 8, "rows": 2, "start_x": 0.32, "end_x": 0.66},
+                    {"port_type": "sfp_plus", "prefix": "NVMe-", "count": 4, "rows": 2, "start_x": 0.72, "end_x": 0.88},
+                ],
+                "back": [
+                    {"port_type": "fiber_lc", "prefix": "FC-", "count": 8, "rows": 2, "start_x": 0.20, "end_x": 0.68},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - SAN",
+            "category": "storage_san",
+            "manufacturer": "Hitachi Vantara",
+            "model_name": "Hitachi VSP E590 (2U All-Flash NVMe FC SAN)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#FEF2F2",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "SVP", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "fiber_lc", "prefix": "FC32G-", "count": 8, "rows": 2, "start_x": 0.34, "end_x": 0.86},
+                ],
+                "back": [
+                    {"port_type": "fiber_lc", "prefix": "FC-", "count": 8, "rows": 2, "start_x": 0.20, "end_x": 0.68},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+
+        # --- STORAGE - NAS (NetApp FAS/AFF, Dell PowerScale/Isilon/Unity, IBM Scale, Synology, QNAP — 12 modelos) ---
+        {
+            "library_group": "Storage - NAS",
+            "category": "storage_nas",
+            "manufacturer": "NetApp",
+            "model_name": "NetApp FAS2750 (2U 24-Bay Hybrid Flash NAS)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#EFF6FF",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "rj45", "prefix": "10G-", "count": 4, "rows": 1, "start_x": 0.32, "end_x": 0.56},
+                    {"port_type": "sfp_plus", "prefix": "SFP-", "count": 4, "rows": 1, "start_x": 0.62, "end_x": 0.88},
+                ],
+                "back": [
+                    {"port_type": "rj45", "prefix": "e0M", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "sfp_plus", "prefix": "NAS-", "count": 4, "rows": 1, "start_x": 0.30, "end_x": 0.64},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - NAS",
+            "category": "storage_nas",
+            "manufacturer": "NetApp",
+            "model_name": "NetApp FAS8300 (4U Enterprise Scale-Out NAS)",
+            "u_height": 4,
+            "is_full_depth": True,
+            "default_color": "#EFF6FF",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "sfp_plus", "prefix": "25GbE-", "count": 8, "rows": 2, "start_x": 0.32, "end_x": 0.86},
+                ],
+                "back": [
+                    {"port_type": "sfp_plus", "prefix": "NAS-", "count": 8, "rows": 2, "start_x": 0.20, "end_x": 0.68},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 4, "rows": 2, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - NAS",
+            "category": "storage_nas",
+            "manufacturer": "NetApp",
+            "model_name": "NetApp AFF C250 (2U Capacity QLC Flash NAS)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#EFF6FF",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "sfp_plus", "prefix": "25GbE-", "count": 4, "rows": 1, "start_x": 0.36, "end_x": 0.86},
+                ],
+                "back": [
+                    {"port_type": "sfp_plus", "prefix": "NAS-", "count": 4, "rows": 1, "start_x": 0.24, "end_x": 0.64},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - NAS",
+            "category": "storage_nas",
+            "manufacturer": "Dell EMC",
+            "model_name": "Dell PowerScale (Isilon) F200 (1U All-Flash NAS)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "iDRAC", "count": 1, "rows": 1, "start_x": 0.14, "end_x": 0.18},
+                    {"port_type": "sfp_plus", "prefix": "25GbE-", "count": 4, "rows": 1, "start_x": 0.34, "end_x": 0.86},
+                ],
+                "back": [
+                    {"port_type": "sfp_plus", "prefix": "NAS-", "count": 4, "rows": 1, "start_x": 0.24, "end_x": 0.64},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - NAS",
+            "category": "storage_nas",
+            "manufacturer": "Dell EMC",
+            "model_name": "Dell PowerScale (Isilon) F600 (2U NVMe Scale-Out NAS)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "sfp_plus", "prefix": "100GbE-", "count": 4, "rows": 1, "start_x": 0.34, "end_x": 0.86},
+                ],
+                "back": [
+                    {"port_type": "sfp_plus", "prefix": "NAS-", "count": 4, "rows": 1, "start_x": 0.24, "end_x": 0.64},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - NAS",
+            "category": "storage_nas",
+            "manufacturer": "Dell EMC",
+            "model_name": "Dell PowerScale H700 (4U High-Capacity Hybrid NAS)",
+            "u_height": 4,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "sfp_plus", "prefix": "40GbE-", "count": 8, "rows": 2, "start_x": 0.34, "end_x": 0.86},
+                ],
+                "back": [
+                    {"port_type": "sfp_plus", "prefix": "NAS-", "count": 8, "rows": 2, "start_x": 0.20, "end_x": 0.68},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 4, "rows": 2, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - NAS",
+            "category": "storage_nas",
+            "manufacturer": "Dell EMC",
+            "model_name": "Dell Unity XT 480F (2U Unified All-Flash NAS/SAN)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "rj45", "prefix": "10GbE-", "count": 4, "rows": 1, "start_x": 0.32, "end_x": 0.56},
+                    {"port_type": "sfp_plus", "prefix": "25GbE-", "count": 4, "rows": 1, "start_x": 0.62, "end_x": 0.88},
+                ],
+                "back": [
+                    {"port_type": "sfp_plus", "prefix": "CNA-", "count": 4, "rows": 1, "start_x": 0.24, "end_x": 0.64},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - NAS",
+            "category": "storage_nas",
+            "manufacturer": "IBM",
+            "model_name": "IBM Storage Scale System 3500 (2U GPFS NVMe NAS)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.22},
+                    {"port_type": "sfp_plus", "prefix": "100GbE-", "count": 4, "rows": 1, "start_x": 0.36, "end_x": 0.86},
+                ],
+                "back": [
+                    {"port_type": "sfp_plus", "prefix": "GPFS-", "count": 4, "rows": 1, "start_x": 0.24, "end_x": 0.64},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - NAS",
+            "category": "storage_nas",
+            "manufacturer": "Synology",
+            "model_name": "Synology RackStation RS3621xs+ (2U 12-Bay Xeon NAS)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "1GbE-", "count": 4, "rows": 1, "start_x": 0.16, "end_x": 0.42},
+                    {"port_type": "rj45", "prefix": "10GbE-", "count": 2, "rows": 1, "start_x": 0.48, "end_x": 0.62},
+                    {"port_type": "sfp_plus", "prefix": "SFP-", "count": 2, "rows": 1, "start_x": 0.68, "end_x": 0.84},
+                ],
+                "back": [
+                    {"port_type": "rj45", "prefix": "LAN-", "count": 4, "rows": 1, "start_x": 0.20, "end_x": 0.56},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - NAS",
+            "category": "storage_nas",
+            "manufacturer": "Synology",
+            "model_name": "Synology FlashStation FS3410 (2U 24-Bay All-Flash NAS)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "MGMT", "count": 1, "rows": 1, "start_x": 0.14, "end_x": 0.18},
+                    {"port_type": "rj45", "prefix": "10GbE-", "count": 2, "rows": 1, "start_x": 0.28, "end_x": 0.44},
+                    {"port_type": "sfp_plus", "prefix": "25GbE-", "count": 4, "rows": 1, "start_x": 0.52, "end_x": 0.86},
+                ],
+                "back": [
+                    {"port_type": "sfp_plus", "prefix": "SFP-", "count": 4, "rows": 1, "start_x": 0.24, "end_x": 0.64},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - NAS",
+            "category": "storage_nas",
+            "manufacturer": "QNAP",
+            "model_name": "QNAP TS-h1886XU-RP R2 (2U ZFS QuTS hero 10GbE NAS)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "2.5G-", "count": 4, "rows": 1, "start_x": 0.16, "end_x": 0.46},
+                    {"port_type": "sfp_plus", "prefix": "10G-SFP-", "count": 2, "rows": 1, "start_x": 0.56, "end_x": 0.78},
+                ],
+                "back": [
+                    {"port_type": "rj45", "prefix": "LAN-", "count": 4, "rows": 1, "start_x": 0.20, "end_x": 0.56},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
+        {
+            "library_group": "Storage - NAS",
+            "category": "storage_nas",
+            "manufacturer": "QNAP",
+            "model_name": "QNAP TDS-h2489FU (2U Dual-Xeon 24x NVMe All-Flash NAS)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {
+                "front": [
+                    {"port_type": "rj45", "prefix": "2.5G-", "count": 2, "rows": 1, "start_x": 0.14, "end_x": 0.24},
+                    {"port_type": "sfp_plus", "prefix": "25GbE-", "count": 4, "rows": 1, "start_x": 0.36, "end_x": 0.86},
+                ],
+                "back": [
+                    {"port_type": "sfp_plus", "prefix": "25G-", "count": 4, "rows": 1, "start_x": 0.24, "end_x": 0.64},
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 2, "rows": 1, "start_x": 0.78, "end_x": 0.90},
+                ],
+            },
+        },
     ]
     for et in extra_templates:
         exists = (
@@ -1868,7 +2509,7 @@ def sync_system_defaults(db: Session):
         )
         if not exists:
             db.add(DeviceTemplate(**et))
-        elif et["category"] == "pdu":
+        elif et["category"] in ("pdu", "miscellaneous"):
             exists.layout_spec = et["layout_spec"]
     db.flush()
 

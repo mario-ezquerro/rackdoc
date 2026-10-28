@@ -3,6 +3,9 @@ from pathlib import Path
 from typing import Optional
 import uuid
 import base64
+import json
+import urllib.parse
+import urllib.request
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, Response
@@ -26,6 +29,7 @@ from .models import (
 from .schemas import (
     DeviceTemplateSchema,
     DeviceTemplateCreate,
+    DeviceTemplateUpdate,
     DeviceLibraryImportRequest,
     ExternalOutletCreate,
     ExternalOutletUpdate,
@@ -201,6 +205,22 @@ def _serialize_connection(c: Connection) -> ConnectionSchema:
     )
 
 
+def _effective_device_u_height(
+    template: Optional[DeviceTemplate],
+    custom_fields: Optional[dict],
+) -> int:
+    cf = custom_fields or {}
+    override = cf.get("u_height_override")
+    if override is not None:
+        try:
+            val = int(override)
+            if 1 <= val <= 48:
+                return val
+        except (ValueError, TypeError):
+            pass
+    return template.u_height if template else 1
+
+
 def _check_u_collision(
     db: Session,
     rack: Rack,
@@ -231,7 +251,8 @@ def _check_u_collision(
             continue
         if exclude_device_id is not None and other.id == exclude_device_id:
             continue
-        other_end = other.start_u + other.template.u_height - 1
+        other_u_height = _effective_device_u_height(other.template, other.custom_fields)
+        other_end = other.start_u + other_u_height - 1
         u_overlaps = not (end_u < other.start_u or start_u > other_end)
         if not u_overlaps:
             continue
@@ -326,7 +347,7 @@ def get_locations_tree(db: Session = Depends(get_db)):
                             "fqdn": d.fqdn or "",
                             "ip_address": d.ip_address or "",
                             "start_u": d.start_u,
-                            "u_height": d.template.u_height if d.template else 1,
+                            "u_height": _effective_device_u_height(d.template, d.custom_fields),
                             "category": d.template.category if d.template else "server",
                             "manufacturer": d.template.manufacturer if d.template else "",
                             "model_name": d.template.model_name if d.template else "",
@@ -612,6 +633,92 @@ def create_device_template(payload: DeviceTemplateCreate, db: Session = Depends(
     return tpl
 
 
+@app.get("/api/templates/search-photo")
+def search_hardware_photos(q: str = "server rack"):
+    """Busca imágenes de referencia de equipos hardware en Internet (Wikimedia Commons API)."""
+    query_str = (q or "").strip()
+    if not query_str:
+        return {"query": q, "results": []}
+
+    results = []
+    search_variants = [query_str, f"{query_str} server", f"{query_str} rack"]
+    seen_urls = set()
+
+    for variant in search_variants:
+        if len(results) >= 10:
+            break
+        params = urllib.parse.urlencode(
+            {
+                "action": "query",
+                "generator": "search",
+                "gsrsearch": f"filetype:bitmap {variant}",
+                "gsrnamespace": "6",
+                "gsrlimit": "8",
+                "prop": "imageinfo",
+                "iiprop": "url|dimensions|extmetadata",
+                "iiurlwidth": "640",
+                "format": "json",
+            }
+        )
+        api_url = f"https://commons.wikimedia.org/w/api.php?{params}"
+        try:
+            req = urllib.request.Request(
+                api_url,
+                headers={"User-Agent": "RackDoc8-DCIM/1.3 (https://github.com/mario-ezquerro/rackdoc)"},
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+                pages = (data.get("query") or {}).get("pages") or {}
+                for _, page in pages.items():
+                    title = str(page.get("title", "")).replace("File:", "")
+                    iinfo = (page.get("imageinfo") or [{}])[0]
+                    thumb_url = iinfo.get("thumburl") or iinfo.get("url") or ""
+                    full_url = iinfo.get("url") or thumb_url
+                    if not thumb_url or thumb_url in seen_urls:
+                        continue
+                    seen_urls.add(thumb_url)
+                    results.append(
+                        {
+                            "title": title,
+                            "thumb_url": thumb_url,
+                            "url": full_url,
+                            "width": iinfo.get("width", 0),
+                            "height": iinfo.get("height", 0),
+                            "source": "Wikimedia Commons",
+                        }
+                    )
+        except Exception:
+            continue
+
+    return {"query": query_str, "results": results[:12]}
+
+
+@app.put("/api/templates/{template_id}", response_model=DeviceTemplateSchema)
+def update_device_template(
+    template_id: int,
+    payload: DeviceTemplateUpdate,
+    db: Session = Depends(get_db),
+):
+    tpl = db.query(DeviceTemplate).filter(DeviceTemplate.id == template_id).first()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Plantilla no encontrada")
+
+    updates = payload.model_dump(exclude_unset=True)
+    photo_url = updates.pop("photo_url", None)
+
+    for k, v in updates.items():
+        setattr(tpl, k, v)
+
+    if photo_url is not None:
+        spec = dict(tpl.layout_spec or {})
+        spec["photo_url"] = photo_url.strip()
+        tpl.layout_spec = spec
+
+    db.commit()
+    db.refresh(tpl)
+    return tpl
+
+
 @app.delete("/api/templates/{template_id}")
 def delete_device_template(template_id: int, db: Session = Depends(get_db)):
     tpl = db.query(DeviceTemplate).filter(DeviceTemplate.id == template_id).first()
@@ -742,6 +849,77 @@ def list_all_racks(db: Session = Depends(get_db)):
             }
         )
     return out
+
+
+@app.get("/api/racks/{rack_id}/inter-rack-targets")
+def get_inter_rack_targets(rack_id: int, db: Session = Depends(get_db)):
+    """Devuelve todos los demás Racks del CPD con sus equipos y puertos libres/ocupados para conectar fibras/cables Inter-Rack."""
+    all_racks = (
+        db.query(Rack)
+        .options(
+            joinedload(Rack.room).joinedload(Room.floor).joinedload(Floor.location),
+            joinedload(Rack.aisle),
+            joinedload(Rack.devices).joinedload(RackDevice.template),
+            joinedload(Rack.devices).joinedload(RackDevice.ports),
+        )
+        .filter(Rack.id != rack_id)
+        .all()
+    )
+
+    all_conns = db.query(Connection).all()
+    occupied_port_ids = set()
+    for c in all_conns:
+        occupied_port_ids.add(c.source_port_id)
+        occupied_port_ids.add(c.target_port_id)
+
+    out = []
+    for rk in all_racks:
+        loc = rk.room.floor.location if (rk.room and rk.room.floor) else None
+        devs_out = []
+        for d in sorted(rk.devices, key=lambda x: x.start_u, reverse=True):
+            if d.mounted_face == "external":
+                continue
+            ports_out = [
+                {
+                    "id": p.id,
+                    "port_number": p.port_number,
+                    "port_type": p.port_type,
+                    "face": p.face,
+                    "occupied": p.id in occupied_port_ids,
+                }
+                for p in d.ports
+            ]
+            if not ports_out:
+                continue
+            devs_out.append(
+                {
+                    "id": d.id,
+                    "code": d.code,
+                    "name": d.name,
+                    "start_u": d.start_u,
+                    "u_height": _effective_device_u_height(d.template, d.custom_fields),
+                    "category": d.template.category if d.template else "server",
+                    "manufacturer": d.template.manufacturer if d.template else "",
+                    "model_name": d.template.model_name if d.template else "",
+                    "ports": ports_out,
+                }
+            )
+        out.append(
+            {
+                "id": rk.id,
+                "code": rk.code,
+                "name": rk.name,
+                "total_units": rk.total_units,
+                "location_code": loc.code if loc else "",
+                "location_name": loc.name if loc else "",
+                "floor_name": rk.room.floor.name if (rk.room and rk.room.floor) else "",
+                "room_name": rk.room.name if rk.room else "",
+                "aisle_name": rk.aisle.name if rk.aisle else "Sin pasillo",
+                "devices": devs_out,
+            }
+        )
+    return out
+
 
 
 @app.get("/api/racks/{rack_id}")
@@ -907,17 +1085,28 @@ def add_device_to_rack(rack_id: int, payload: RackDeviceCreate, db: Session = De
     if not template:
         raise HTTPException(status_code=404, detail="Plantilla de dispositivo no encontrada")
 
+    effective_u_height = _effective_device_u_height(template, payload.custom_fields)
     _check_u_collision(
         db=db,
         rack=rack,
         start_u=payload.start_u,
-        u_height=template.u_height,
+        u_height=effective_u_height,
         mounted_face=payload.mounted_face,
         is_full_depth=template.is_full_depth,
     )
 
     default_links = payload.management_links
-    if not default_links and template.category in ("switch", "router", "firewall", "server", "pdu", "ups", "gateway"):
+    if not default_links and template.category in (
+        "switch",
+        "router",
+        "firewall",
+        "server",
+        "pdu",
+        "ups",
+        "gateway",
+        "storage_san",
+        "storage_nas",
+    ):
         default_links = [
             {"protocol": "ssh", "port": 22, "username": "admin", "label": "SSH CLI"},
             {"protocol": "https", "port": 443, "username": "admin", "label": "Web UI"},
@@ -969,13 +1158,20 @@ def update_rack_device(device_id: int, payload: RackDeviceUpdate, db: Session = 
     updates = payload.model_dump(exclude_unset=True)
     new_start_u = updates.get("start_u", device.start_u)
     new_face = updates.get("mounted_face", device.mounted_face)
+    new_custom_fields = updates.get("custom_fields", device.custom_fields)
+    old_u_height = _effective_device_u_height(device.template, device.custom_fields)
+    new_u_height = _effective_device_u_height(device.template, new_custom_fields)
 
-    if new_start_u != device.start_u or new_face != device.mounted_face:
+    if (
+        new_start_u != device.start_u
+        or new_face != device.mounted_face
+        or new_u_height != old_u_height
+    ):
         _check_u_collision(
             db=db,
             rack=device.rack,
             start_u=new_start_u,
-            u_height=device.template.u_height,
+            u_height=new_u_height,
             mounted_face=new_face,
             is_full_depth=True,
             exclude_device_id=device.id,

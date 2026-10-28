@@ -99,12 +99,24 @@ class CableGeometryBuilder {
     required int currentRackId,
     required double leftChannelBaseX,
     required double rightChannelBaseX,
+    double? backLeftChannelBaseX,
+    double? backRightChannelBaseX,
     required Offset outboundAnchor,
     required String cableFilter,
   }) {
     final routes = <ComputedCableRoute>[];
     int leftLaneIdx = 0;
     int rightLaneIdx = 0;
+    int centerBridgeLaneIdx = 0;
+    int backLeftLaneIdx = 0;
+    int backRightLaneIdx = 0;
+
+    final isDualView = activeFace == 'both' &&
+        backLeftChannelBaseX != null &&
+        backRightChannelBaseX != null;
+    final dualSplitX = isDualView
+        ? (rightChannelBaseX + backLeftChannelBaseX) / 2.0
+        : double.infinity;
 
     for (int i = 0; i < connections.length; i++) {
       final conn = connections[i];
@@ -121,12 +133,50 @@ class CableGeometryBuilder {
       }
 
       final color = parseHexColor(conn.colorHex);
-      final centerX = (leftChannelBaseX + rightChannelBaseX) / 2.0;
+      final frontCenterX = (leftChannelBaseX + rightChannelBaseX) / 2.0;
 
-      // Caso 1: Ambos puertos visibles en la cara activa (misma cara, mismo rack)
+      // Caso 1: Ambos puertos visibles en el lienzo actual (ya sea en la misma cara o entre Front y Back en vista Dual)
       if (pSource != null && pTarget != null) {
         final dyDiff = (pTarget.dy - pSource.dy).abs();
         final dxDiff = (pTarget.dx - pSource.dx).abs();
+
+        // Subcaso 1A (Vista Dual Front+Back): Cable que pasa de DELANTE (Front) a DETRÁS (Back) dentro del mismo Rack
+        final srcInFront = isDualView && pSource.dx < dualSplitX;
+        final tgtInFront = isDualView && pTarget.dx < dualSplitX;
+        final isExternalEnd =
+            conn.sourceInfo.face == 'external' || conn.targetInfo.face == 'external';
+
+        if (isDualView && (srcInFront != tgtInFront) && !isExternalEnd) {
+          final laneIdx = centerBridgeLaneIdx++;
+          final bridgeX = dualSplitX + ((laneIdx % 7) - 3) * 4.2;
+          final stub1 = ((i % 3) - 1) * 2.5 + 8.5;
+          final stub2 = (((i + 1) % 3) - 1) * 2.5 + 8.5;
+          final y1 = pSource.dy + (pTarget.dy >= pSource.dy ? stub1 : -stub1);
+          final y2 = pTarget.dy + (pSource.dy >= pTarget.dy ? stub2 : -stub2);
+
+          final pts = <Offset>[
+            pSource,
+            Offset(pSource.dx, y1),
+            Offset(bridgeX, y1),
+            Offset(bridgeX, y2),
+            Offset(pTarget.dx, y2),
+            pTarget,
+          ];
+          final midBridgeY = (y1 + y2) / 2.0;
+          routes.add(
+            ComputedCableRoute(
+              connection: conn,
+              path: buildRoundedOrthogonalPath(pts, radius: 6.0),
+              points: pts,
+              color: color,
+              badgePosition: Offset(bridgeX - 24, midBridgeY),
+              badgeText: '⇄ F↔B',
+              isPassThrough: true,
+              isOutbound: false,
+            ),
+          );
+          continue;
+        }
 
         // Si es un latiguillo corto entre unidades U adyacentes (como Patchbox/PatchPanel <-> Switch),
         // trazar puente directo vertical limpio igual que en la vista técnica de referencia.
@@ -153,17 +203,32 @@ class CableGeometryBuilder {
           continue;
         }
 
+        final bothOnBackInDual =
+            isDualView && !srcInFront && !tgtInFront && !isExternalEnd;
+        final activeLeftBase =
+            bothOnBackInDual ? backLeftChannelBaseX : leftChannelBaseX;
+        final activeRightBase =
+            (bothOnBackInDual || (isDualView && isExternalEnd))
+                ? backRightChannelBaseX
+                : rightChannelBaseX;
+        final activeCenterX = (activeLeftBase + activeRightBase) / 2.0;
+
         String side = conn.routingChannel;
         if (side != 'left' && side != 'right') {
           final avgX = (pSource.dx + pTarget.dx) / 2.0;
-          side = (avgX <= centerX) ? 'left' : 'right';
+          side = (avgX <= activeCenterX) ? 'left' : 'right';
         }
 
-        final laneIndex = (side == 'left') ? (leftLaneIdx++) : (rightLaneIdx++);
+        final int laneIndex;
+        if (bothOnBackInDual) {
+          laneIndex = (side == 'left') ? (backLeftLaneIdx++) : (backRightLaneIdx++);
+        } else {
+          laneIndex = (side == 'left') ? (leftLaneIdx++) : (rightLaneIdx++);
+        }
         final laneOffset = (laneIndex % 7) * 3.2;
         final channelX = (side == 'left')
-            ? (leftChannelBaseX - laneOffset)
-            : (rightChannelBaseX + laneOffset);
+            ? (activeLeftBase - laneOffset)
+            : (activeRightBase + laneOffset);
 
         final stub1 = ((i % 3) - 1) * 2.5 + 8.5;
         final stub2 = (((i + 1) % 3) - 1) * 2.5 + 8.5;
@@ -197,8 +262,10 @@ class CableGeometryBuilder {
       final otherInfo = (pSource != null) ? conn.targetInfo : conn.sourceInfo;
 
       if (conn.isOutbound || otherInfo.rackId != currentRackId) {
+        final onBackInDual = isDualView && activePoint.dx >= dualSplitX;
+        final baseRight = onBackInDual ? backRightChannelBaseX : rightChannelBaseX;
         final laneIndex = rightLaneIdx++;
-        final channelX = rightChannelBaseX + 18.0 + (laneIndex % 6) * 4.5;
+        final channelX = baseRight + 18.0 + (laneIndex % 6) * 4.5;
         final yStub = activePoint.dy + 10.0;
 
         final pts = <Offset>[
@@ -216,7 +283,8 @@ class CableGeometryBuilder {
             points: pts,
             color: color,
             badgePosition: Offset(channelX - 24, outboundAnchor.dy + 18),
-            badgeText: '➔ ${otherInfo.rackCode} (${otherInfo.deviceCode}:${otherInfo.portNumber})',
+            badgeText:
+                '➔ ${otherInfo.rackCode} • U${otherInfo.startU} ${otherInfo.deviceCode}:${otherInfo.portNumber}',
             isPassThrough: false,
             isOutbound: true,
           ),
@@ -224,8 +292,8 @@ class CableGeometryBuilder {
         continue;
       }
 
-      // Caso 3: Conexión PASS-THROUGH (cruza entre la cara FRONT y la cara BACK del mismo rack)
-      final useLeft = activePoint.dx <= centerX;
+      // Caso 3: Conexión PASS-THROUGH (cruza entre la cara FRONT y la cara BACK del mismo rack en vista simple)
+      final useLeft = activePoint.dx <= frontCenterX;
       final laneIndex = useLeft ? (leftLaneIdx++) : (rightLaneIdx++);
       final channelX = useLeft
           ? (leftChannelBaseX - 8.0 - (laneIndex % 6) * 4.0)

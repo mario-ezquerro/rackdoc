@@ -264,14 +264,17 @@ def generate_datacenter_excel(
 
 def generate_excel_import_template() -> BytesIO:
     """
-    Genera una plantilla Excel (.xlsx) de ejemplo lista para rellenar e importar en RackDoc:
-    - Hoja 1: 1_Racks_y_Sedes (para dar de alta o actualizar Sedes, Plantas, Salas y Racks)
-    - Hoja 2: 2_Equipos_y_Hosts (para montar o actualizar switches, servidores, PDUs, IPs y Heartbeat)
-    - Hoja 3: 3_Instrucciones_y_Librerias (guía rápida de campos y librerías soportadas)
+    Genera una plantilla Excel (.xlsx) de ejemplo multi-datacenter, multi-planta, multi-rack y con
+    equipos variados (Switches, Servidores, SAN, NAS, Ventiladores de Techo 1U con ETH, Bandejas U editables, PDUs)
+    y conexiones (Intra-Rack, Front<->Back e Inter-Rack) lista para importar en RackDoc:
+    - Hoja 1: 1_Racks_y_Sedes (3 Datacenters, 5 Plantas y 10 Racks)
+    - Hoja 2: 2_Equipos_y_Hosts (28 equipos repartidos en los Racks)
+    - Hoja 3: 3_Conexiones_y_Fibras (Latiguillos UTP, Fibras Front<->Back, Fibras Inter-Rack y Alimentación)
+    - Hoja 4: 4_Instrucciones_y_Librerias (Guía de referencia)
     """
     wb = Workbook()
 
-    # Hoja 1: Racks y Sedes
+    # Hoja 1: Racks y Sedes (3 Datacenters, múltiples plantas y 10 Racks)
     ws_racks = wb.active
     ws_racks.title = "1_Racks_y_Sedes"
     ws_racks.append([
@@ -288,23 +291,27 @@ def generate_excel_import_template() -> BytesIO:
         "Responsable",
         "Notas",
     ])
-    ws_racks.append([
-        "HQ",
-        "Headquarter",
-        "Floor 2 - Core CPD",
-        "28 - Sala Servidores",
-        "Pasillo Frío A (Core)",
-        "RK005_NEW",
-        "Rack Expansión Core 05",
-        42,
-        "Rittal",
-        "VX IT 42U",
-        "Equipo Infraestructura",
-        "Rack de ejemplo importado desde Excel",
-    ])
+
+    sample_racks = [
+        # DATACENTER 1: MADRID CORE (MAD-DC1) — Planta 1 y Planta 2
+        ("MAD-DC1", "Madrid Core Datacenter", "Planta 1 - Sala Producción Core", "Sala 101 - Core & Storage", "Pasillo Frío A (Core)", "RK-MAD-01", "Rack Core Networking & ODF 01", 42, "Rittal", "VX IT 42U", "Carlos Mendoza", "Cabecera óptica y switches Core"),
+        ("MAD-DC1", "Madrid Core Datacenter", "Planta 1 - Sala Producción Core", "Sala 101 - Core & Storage", "Pasillo Frío A (Core)", "RK-MAD-02", "Rack Compute Virtualización 02", 42, "Rittal", "VX IT 42U", "Carlos Mendoza", "Nodos Proxmox / VMware conectados por fibra a RK-MAD-01 y RK-MAD-03"),
+        ("MAD-DC1", "Madrid Core Datacenter", "Planta 1 - Sala Producción Core", "Sala 101 - Core & Storage", "Pasillo Frío B (Storage)", "RK-MAD-03", "Rack Cabinas SAN & NAS 03", 42, "Schneider APC", "NetShelter SX 42U", "Elena Gómez", "Cabinas Dell PowerStore, NetApp AFF e IBM FlashSystem"),
+        ("MAD-DC1", "Madrid Core Datacenter", "Planta 2 - Cloud & IA", "Sala 201 - Clúster Kubernetes", "Pasillo Frío C (Cloud)", "RK-MAD-04", "Rack K8s Workers & NVMe 04", 42, "Rittal", "VX IT 42U", "David Ruiz", "Clúster Kubernetes de alta densidad"),
+        ("MAD-DC1", "Madrid Core Datacenter", "Planta 2 - Cloud & IA", "Sala 201 - Clúster Kubernetes", "Pasillo Frío C (Cloud)", "RK-MAD-05", "Rack NAS Backup & Archivo 05", 42, "Rittal", "VX IT 42U", "David Ruiz", "Repositorio inmutable NAS Synology/QNAP/PowerScale"),
+        # DATACENTER 2: BARCELONA EDGE (BCN-DC2) — Planta 1 y Planta Sótano
+        ("BCN-DC2", "Barcelona Edge 22@ Datacenter", "Planta 1 - Sala Principal 22@", "Sala B1 - Producción", "Pasillo Frío A (BCN)", "RK-BCN-01", "Rack Networking & Firewall BCN 01", 42, "Rittal", "VX IT 42U", "Marc Puig", "Cabecera de red y seguridad BCN"),
+        ("BCN-DC2", "Barcelona Edge 22@ Datacenter", "Planta 1 - Sala Principal 22@", "Sala B1 - Producción", "Pasillo Frío A (BCN)", "RK-BCN-02", "Rack Storage SAN/NAS & Compute BCN 02", 42, "Schneider APC", "NetShelter SX 42U", "Marc Puig", "Almacenamiento unificado NetApp y nodos Dell"),
+        ("BCN-DC2", "Barcelona Edge 22@ Datacenter", "Planta Sótano - Meet-Me & Telco", "Sala B0 - Operadores Fibra", "Fila MMR-01", "RK-BCN-03", "Rack Operadores & Dark Fiber BCN 03", 42, "Rittal", "TS IT 42U", "Laura Vidal", "Interconexión de fibra oscura metropolitana"),
+        # DATACENTER 3: VALENCIA CONTINGENCIA DRP (VAL-DR3) — Planta 1
+        ("VAL-DR3", "Valencia Contingencia DRP", "Planta 1 - Sala Búnker DRP", "Sala V1 - Réplica Síncrona", "Pasillo Frío DR-A", "RK-VAL-01", "Rack Core & Réplica SAN VAL 01", 42, "Rittal", "VX IT 42U", "Sergio Navarro", "Cabina Pure Storage y enlaces DWDM"),
+        ("VAL-DR3", "Valencia Contingencia DRP", "Planta 1 - Sala Búnker DRP", "Sala V1 - Réplica Síncrona", "Pasillo Frío DR-A", "RK-VAL-02", "Rack Recuperación Desastres VAL 02", 42, "Rittal", "VX IT 42U", "Sergio Navarro", "Clúster de contingencia y NAS backup"),
+    ]
+    for r_row in sample_racks:
+        ws_racks.append(list(r_row))
     _style_worksheet(ws_racks)
 
-    # Hoja 2: Equipos y Hosts
+    # Hoja 2: Equipos y Hosts (28 equipos variados en los 10 Racks)
     ws_devs = wb.create_sheet(title="2_Equipos_y_Hosts")
     ws_devs.append([
         "Código Rack",
@@ -330,117 +337,106 @@ def generate_excel_import_template() -> BytesIO:
         "Nº Serie",
         "Notas",
     ])
-    ws_devs.append([
-        "RK001_M",
-        18,
-        2,
-        "FRONT",
-        "SRV-HP-09",
-        "Nodo Virtualización Proxmox 09",
-        "Host - HP",
-        "HPE",
-        "ProLiant DL380 Gen11 24SFF",
-        "pve09",
-        "pve09.hq.rackdoc.local",
-        "10.28.0.59",
-        "255.255.255.0",
-        "10.28.0.1",
-        10,
-        "SI",
-        "https",
-        8006,
-        "https://10.28.0.59:8006/api2/json/version",
-        "root",
-        "CZ24090099",
-        "Importado desde plantilla Excel",
-    ])
-    ws_devs.append([
-        "RK005_NEW",
-        40,
-        1,
-        "FRONT",
-        "SW-TOR-05",
-        "Switch Top of Rack 48p",
-        "Network",
-        "Cisco",
-        "Catalyst 9300-48P",
-        "sw-tor-05",
-        "sw-tor-05.hq.rackdoc.local",
-        "10.28.0.105",
-        "255.255.255.0",
-        "10.28.0.1",
-        10,
-        "SI",
-        "ssh",
-        22,
-        "",
-        "admin",
-        "FCW2345L099",
-        "Switch principal del nuevo rack",
-    ])
-    ws_devs.append([
-        "RK005_NEW",
-        20,
-        2,
-        "FRONT",
-        "SRV-SM-01",
-        "Storage Server ZFS",
-        "Host - Supermicro",
-        "Supermicro",
-        "SuperServer 2U Hyper SYS-221H-TNR (8x NVMe)",
-        "zfs-sm-01",
-        "zfs01.hq.rackdoc.local",
-        "10.28.0.120",
-        "255.255.255.0",
-        "10.28.0.1",
-        20,
-        "SI",
-        "icmp",
-        22,
-        "",
-        "admin",
-        "SM20269911",
-        "Servidor Supermicro importado por Excel",
-    ])
+
+    sample_devs = [
+        # --- RK-MAD-01 (Madrid Planta 1 - Core Networking & ODF) ---
+        ("RK-MAD-01", 42, 1, "FRONT", "FAN-MAD-01", "Ventiladores Techo Smart ETH 01", "Organizers", "Rittal / APC", "Ventiladores de Techo 1U (Smart Roof Fan + ETH)", "fan-mad01", "fan01.mad.rackdoc.local", "10.10.1.42", "255.255.255.0", "10.10.1.1", 10, "SI", "http", 80, "/status", "admin", "FAN-2026-001", "Sonda térmica + Ethernet RJ45"),
+        ("RK-MAD-01", 40, 1, "FRONT", "ODF-MAD-01", "Bandeja Fibra Inter-Rack 24x LC", "Organizers", "Corning", "Patch Panel Fibra Óptica 24x LC Duplex 1U", "", "", "", "", "", "", "NO", "icmp", 22, "", "admin", "COR-ODF-001", "Cabecera de fibras hacia RK-MAD-02 y RK-MAD-03"),
+        ("RK-MAD-01", 38, 1, "FRONT", "FW-MAD-01", "Firewall Perimetral FortiGate 200F", "Network", "Fortinet", "FortiGate 200F Next-Gen Firewall", "fw-mad01", "fw01.mad.rackdoc.local", "10.10.1.2", "255.255.255.0", "10.10.1.1", 10, "SI", "https", 443, "/login", "admin", "FG200F-9911", "Clúster HA Activo"),
+        ("RK-MAD-01", 36, 1, "FRONT", "SW-MAD-CORE1", "Switch Core Fibra 10G/25G", "Network", "Arista", "DCS-7050SX3-48YC8 1U", "sw-mad-core1", "sw-core1.mad.rackdoc.local", "10.10.1.10", "255.255.255.0", "10.10.1.1", 10, "SI", "ssh", 22, "", "admin", "ARI-7050-01", "Switch de agregación óptica"),
+        ("RK-MAD-01", 34, 1, "FRONT", "SW-MAD-ACC1", "Switch Acceso PoE+ 48 Bocas", "Network", "Cisco", "Catalyst 9300-48P", "sw-mad-acc1", "sw-acc1.mad.rackdoc.local", "10.10.1.11", "255.255.255.0", "10.10.1.1", 10, "SI", "ssh", 22, "", "admin", "FCW2401A01", "Gestión y acceso LAN"),
+        ("RK-MAD-01", 28, 2, "FRONT", "TRAY-MAD-01", "Bandeja Sonda Óptica y Módem (Ocupa 2U)", "Organizers", "RackDoc Custom", "Bandeja Regulable en U (1U por defecto — U Editable)", "", "", "", "", "", "", "NO", "icmp", 22, "", "admin", "TRAY-001", "Bandeja configurada a 2U de altura"),
+        ("RK-MAD-01", 4, 1, "BACK", "PDU-MAD-01", "Regleta PDU Trasera Schuko 8 Tomas", "Power", "APC / Schuko", "PDU Regleta Rack 19\" 8x Enchufes Schuko + Macho IN", "", "", "", "", "", "", "NO", "icmp", 22, "", "admin", "PDU-MAD-01", "Montada en cara trasera (BACK)"),
+
+        # --- RK-MAD-02 (Madrid Planta 1 - Compute Virtualización) ---
+        ("RK-MAD-02", 42, 1, "FRONT", "FAN-MAD-02", "Ventiladores Techo Smart ETH 02", "Organizers", "Rittal / APC", "Ventiladores de Techo 1U (Smart Roof Fan + ETH)", "fan-mad02", "fan02.mad.rackdoc.local", "10.10.1.43", "255.255.255.0", "10.10.1.1", 10, "SI", "http", 80, "/status", "admin", "FAN-2026-002", "Ventilación activa"),
+        ("RK-MAD-02", 40, 1, "FRONT", "ODF-MAD-02", "Bandeja Fibra 24x LC (Enlace a RK-MAD-01/03)", "Organizers", "Corning", "Patch Panel Fibra Óptica 24x LC Duplex 1U", "", "", "", "", "", "", "NO", "icmp", 22, "", "admin", "COR-ODF-002", "Puente óptico inter-rack"),
+        ("RK-MAD-02", 38, 1, "FRONT", "SW-MAD-TOR2", "Switch ToR Compute 48p", "Network", "Cisco", "Catalyst 9300-48P", "sw-mad-tor2", "sw-tor2.mad.rackdoc.local", "10.10.1.12", "255.255.255.0", "10.10.1.1", 10, "SI", "ssh", 22, "", "admin", "FCW2401A02", "Top of Rack Compute"),
+        ("RK-MAD-02", 30, 2, "FRONT", "ESX-MAD-01", "Hipervisor VMware / ProLiant DL380 Gen11", "Host - HP", "HPE", "ProLiant DL380 Gen11 24SFF", "esx-mad01", "esx01.mad.rackdoc.local", "10.10.1.51", "255.255.255.0", "10.10.1.1", 20, "SI", "https", 443, "/ui", "root", "CZ2601001", "Conectado por FC a SAN en RK-MAD-03"),
+        ("RK-MAD-02", 26, 2, "FRONT", "ESX-MAD-02", "Hipervisor VMware / PowerEdge R760", "Host - Dell", "Dell EMC", "PowerEdge R760 2U (Dual Xeon)", "esx-mad02", "esx02.mad.rackdoc.local", "10.10.1.52", "255.255.255.0", "10.10.1.1", 20, "SI", "https", 443, "/ui", "root", "DL760-002", "Conectado por fibra a RK-MAD-03"),
+        ("RK-MAD-02", 2, 2, "FRONT", "UPS-MAD-02", "SAI Doble Conversión 3000VA", "Power", "APC", "Smart-UPS 3000VA LCD RM 2U", "ups-mad02", "ups02.mad.rackdoc.local", "10.10.1.92", "255.255.255.0", "10.10.1.1", 10, "SI", "snmp", 161, "", "admin", "APC-3000-02", "Respaldo eléctrico Compute"),
+
+        # --- RK-MAD-03 (Madrid Planta 1 - Cabinas SAN & NAS) ---
+        ("RK-MAD-03", 40, 1, "FRONT", "ODF-MAD-03", "Bandeja Fibra SAN 24x LC", "Organizers", "Corning", "Patch Panel Fibra Óptica 24x LC Duplex 1U", "", "", "", "", "", "", "NO", "icmp", 22, "", "admin", "COR-ODF-003", "Recepción fibras desde RK-MAD-01 y RK-MAD-02"),
+        ("RK-MAD-03", 34, 2, "FRONT", "SAN-DELL-01", "Cabina All-Flash Dell PowerStore 1200T", "Storage - SAN", "Dell EMC", "PowerStore 1200T All-Flash NVMe SAN 2U", "san-dell01", "powerstore01.mad.rackdoc.local", "10.10.2.10", "255.255.255.0", "10.10.2.1", 30, "SI", "https", 443, "/", "admin", "PST1200-01", "LUNs producción VMware"),
+        ("RK-MAD-03", 28, 4, "FRONT", "SAN-NETAPP-01", "Cabina NetApp AFF A400 Dual Controller", "Storage - SAN", "NetApp", "AFF A400 All-Flash SAN 4U (HA Dual Controller)", "san-netapp01", "affa400.mad.rackdoc.local", "10.10.2.11", "255.255.255.0", "10.10.2.1", 30, "SI", "https", 443, "/sysmgr", "admin", "NTAP-A400-01", "Cabina crítica 4U"),
+        ("RK-MAD-03", 22, 2, "FRONT", "SAN-IBM-01", "Cabina IBM FlashSystem 5200 NVMe", "Storage - SAN", "IBM", "FlashSystem 5200 NVMe FC SAN 2U", "san-ibm01", "fs5200.mad.rackdoc.local", "10.10.2.12", "255.255.255.0", "10.10.2.1", 30, "SI", "https", 443, "/", "superuser", "IBM-FS52-01", "Bases de datos Oracle/ DB2"),
+        ("RK-MAD-03", 16, 2, "FRONT", "NAS-SYNO-01", "Servidor NAS Synology RS3621xs+ 12 Bahías", "Storage - NAS", "Synology", "RackStation RS3621xs+ 2U 12-Bay NAS", "nas-syno01", "syno01.mad.rackdoc.local", "10.10.2.20", "255.255.255.0", "10.10.2.1", 30, "SI", "https", 5001, "/", "admin", "SYNO-3621-01", "Repositorios NFS y SMB"),
+
+        # --- RK-MAD-04 & RK-MAD-05 (Madrid Planta 2 - Cloud & IA) ---
+        ("RK-MAD-04", 40, 1, "FRONT", "SW-MAD-K8S", "Switch Cloud Leaf 25G/100G", "Network", "Arista", "DCS-7050SX3-48YC8 1U", "sw-mad-k8s", "sw-k8s.mad.rackdoc.local", "10.10.20.10", "255.255.255.0", "10.10.20.1", 20, "SI", "ssh", 22, "", "admin", "ARI-K8S-01", "Leaf Switch Planta 2"),
+        ("RK-MAD-04", 32, 2, "FRONT", "K8S-NODE-01", "Worker IA Supermicro Hyper NVMe", "Host - Supermicro", "Supermicro", "SuperServer 2U Hyper SYS-221H-TNR (8x NVMe)", "k8s-node01", "k8s01.mad.rackdoc.local", "10.10.20.51", "255.255.255.0", "10.10.20.1", 20, "SI", "ssh", 22, "", "ubuntu", "SM-K8S-01", "Nodo GPU/NVMe"),
+        ("RK-MAD-05", 30, 2, "FRONT", "NAS-ISILON-01", "Nodo Dell PowerScale F600 NVMe NAS", "Storage - NAS", "Dell EMC", "PowerScale F600 All-Flash NVMe NAS 2U", "nas-isilon01", "powerscale01.mad.rackdoc.local", "10.10.20.60", "255.255.255.0", "10.10.20.1", 30, "SI", "https", 8080, "/", "root", "PS-F600-01", "Data Lake IA & S3"),
+
+        # --- RK-BCN-01, RK-BCN-02 & RK-BCN-03 (Barcelona Edge 22@ - Planta 1 y Sótano) ---
+        ("RK-BCN-01", 42, 1, "FRONT", "FAN-BCN-01", "Ventiladores Techo Smart BCN 01", "Organizers", "Rittal / APC", "Ventiladores de Techo 1U (Smart Roof Fan + ETH)", "fan-bcn01", "fan01.bcn.rackdoc.local", "10.20.1.42", "255.255.255.0", "10.20.1.1", 10, "SI", "http", 80, "/status", "admin", "FAN-BCN-01", "Control térmico BCN"),
+        ("RK-BCN-01", 38, 1, "FRONT", "SW-BCN-CORE1", "Switch Core BCN 48p", "Network", "Cisco", "Catalyst 9300-48P", "sw-bcn-core1", "sw-core1.bcn.rackdoc.local", "10.20.1.10", "255.255.255.0", "10.20.1.1", 10, "SI", "ssh", 22, "", "admin", "FCW-BCN-01", "Core Switch Barcelona"),
+        ("RK-BCN-02", 32, 4, "FRONT", "NAS-NETAPP-BCN", "Cabina Unificada NetApp FAS8300 4U", "Storage - NAS", "NetApp", "FAS8300 Unified Enterprise NAS 4U", "nas-bcn01", "fas8300.bcn.rackdoc.local", "10.20.1.30", "255.255.255.0", "10.20.1.1", 30, "SI", "https", 443, "/", "admin", "NTAP-BCN-01", "Almacenamiento corporativo BCN"),
+        ("RK-BCN-02", 24, 2, "FRONT", "SRV-BCN-01", "Servidor HPE ProLiant DL380 Gen11 BCN", "Host - HP", "HPE", "ProLiant DL380 Gen11 24SFF", "srv-bcn01", "srv01.bcn.rackdoc.local", "10.20.1.51", "255.255.255.0", "10.20.1.1", 20, "SI", "https", 443, "/", "Administrator", "CZ-BCN-051", "Host principal Barcelona"),
+        ("RK-BCN-03", 40, 1, "FRONT", "ODF-BCN-MMR", "Cabecera Fibra Oscura Operadores 24x LC", "Organizers", "Corning", "Patch Panel Fibra Óptica 24x LC Duplex 1U", "", "", "", "", "", "", "NO", "icmp", 22, "", "admin", "ODF-MMR-01", "Planta Sótano Meet-Me Room"),
+
+        # --- RK-VAL-01 & RK-VAL-02 (Valencia Contingencia DRP - Planta 1) ---
+        ("RK-VAL-01", 34, 3, "FRONT", "SAN-PURE-VAL", "Cabina Pure Storage FlashArray//X50 R4 3U", "Storage - SAN", "Pure Storage", "FlashArray//X50 R4 All-NVMe SAN 3U", "san-val01", "purex50.val.rackdoc.local", "10.30.1.20", "255.255.255.0", "10.30.1.1", 30, "SI", "https", 443, "/", "pureuser", "PURE-X50-01", "Réplica ActiveCluster DRP"),
+        ("RK-VAL-02", 30, 2, "FRONT", "NAS-QNAP-VAL", "Cabina QNAP ZFS All-Flash TS-h1290FX", "Storage - NAS", "QNAP", "TS-h1290FX ZFS All-Flash U.2 NVMe NAS 2U", "nas-val01", "qnap01.val.rackdoc.local", "10.30.1.30", "255.255.255.0", "10.30.1.1", 30, "SI", "https", 8080, "/", "admin", "QNAP-VAL-01", "Backup DRP Valencia"),
+    ]
+    for d_row in sample_devs:
+        ws_devs.append(list(d_row))
     _style_worksheet(ws_devs)
 
-    # Hoja 3: Instrucciones
-    ws_help = wb.create_sheet(title="3_Instrucciones_y_Librerias")
+    # Hoja 3: Conexiones y Fibras (Intra-Rack, Front<->Back e Inter-Rack)
+    ws_conns = wb.create_sheet(title="3_Conexiones_y_Fibras")
+    ws_conns.append([
+        "Rack Origen",
+        "Equipo Origen",
+        "Boca Origen",
+        "Rack Destino",
+        "Equipo Destino",
+        "Boca Destino",
+        "Tipo de Cable",
+        "Color Hex",
+        "Etiqueta / Circuito",
+        "VLAN",
+        "Longitud (m)",
+    ])
+    sample_conns = [
+        # Conexiones Intra-Rack y Front<->Back en RK-MAD-01
+        ("RK-MAD-01", "FAN-MAD-01", "ETH1", "RK-MAD-01", "SW-MAD-ACC1", "1", "utp_cat6a", "#2563EB", "Telemetría Ventilador Techo -> SW-MAD-ACC1", 10, 1.5),
+        ("RK-MAD-01", "FW-MAD-01", "F1", "RK-MAD-01", "SW-MAD-CORE1", "SFP1", "fiber_om4", "#0284C7", "Uplink Óptico 10G Firewall -> Core", 10, 2.0),
+        ("RK-MAD-01", "SW-MAD-CORE1", "SFP2", "RK-MAD-01", "ODF-MAD-01", "LC1", "fiber_om4", "#0284C7", "Puente Óptico Core -> ODF-MAD-01", 10, 1.5),
+        ("RK-MAD-01", "SW-MAD-ACC1", "PSU1", "RK-MAD-01", "PDU-MAD-01", "SCHUKO-1", "power_ac", "#DC2626", "Alimentación Front<->Back SW-MAD-ACC1 -> PDU Trasera", "", 1.8),
+        # Conexiones Inter-Rack (de un Rack a otro Rack)
+        ("RK-MAD-01", "ODF-MAD-01", "R-LC1", "RK-MAD-02", "ODF-MAD-02", "R-LC1", "fiber_om4", "#0284C7", "Troncal Fibra OM4 Inter-Rack RK-MAD-01 <-> RK-MAD-02", 20, 12.0),
+        ("RK-MAD-01", "ODF-MAD-01", "R-LC2", "RK-MAD-03", "ODF-MAD-03", "R-LC1", "fiber_os2", "#F59E0B", "Troncal Fibra OS2 Inter-Rack RK-MAD-01 <-> RK-MAD-03", 30, 15.0),
+        ("RK-MAD-02", "ESX-MAD-01", "SFP1", "RK-MAD-03", "SAN-DELL-01", "FC1", "fiber_om4", "#0284C7", "Fibre Channel 32G Inter-Rack ESX-MAD-01 -> PowerStore SAN", 30, 10.0),
+        ("RK-MAD-02", "ESX-MAD-02", "SFP1", "RK-MAD-03", "SAN-NETAPP-01", "FC1", "fiber_om4", "#7C3AED", "Fibre Channel 32G Inter-Rack ESX-MAD-02 -> NetApp AFF A400", 30, 10.0),
+        ("RK-BCN-01", "SW-BCN-CORE1", "SFP49", "RK-BCN-02", "NAS-NETAPP-BCN", "25G-1", "fiber_om4", "#0284C7", "Enlace 25GbE Inter-Rack BCN Core -> NetApp FAS8300", 30, 8.0),
+    ]
+    for c_row in sample_conns:
+        ws_conns.append(list(c_row))
+    _style_worksheet(ws_conns)
+
+    # Hoja 4: Instrucciones
+    ws_help = wb.create_sheet(title="4_Instrucciones_y_Librerias")
     ws_help.append(["Campo / Columna", "Descripción y Valores Permitidos", "Ejemplo"])
     ws_help.append([
         "1_Racks_y_Sedes",
-        "Si el Código Rack no existe, RackDoc crea automáticamente la Sede, Planta, Sala y el Rack (con sus 2 tomas eléctricas exteriores).",
-        "RK005_NEW",
+        "Crea o actualiza múltiples Datacenters (Sedes), Plantas, Salas, Pasillos y Racks (incluyendo sus tomas exteriores eléctricas y de fibra).",
+        "MAD-DC1 / BCN-DC2 / VAL-DR3",
     ])
     ws_help.append([
-        "Código Rack",
-        "Código del Rack donde se montará el equipo (ej. RK001_M, RK003_B, RK005_NEW).",
-        "RK001_M",
+        "2_Equipos_y_Hosts",
+        "Monta automáticamente Switches, Firewalls, Servidores, Cabinas Storage - SAN, Cabinas Storage - NAS, Ventiladores de Techo 1U con ETH y Bandejas con U editables.",
+        "SAN-DELL-01, FAN-MAD-01, TRAY-MAD-01",
     ])
     ws_help.append([
-        "Unidad U Inicial",
-        "Posición U inferior donde empieza el equipo (1 a 42). También acepta formato 'U18' o 'U18-U19'.",
-        "18",
+        "3_Conexiones_y_Fibras",
+        "Conecta automáticamente cables UTP, fibras ópticas y enchufes tanto dentro del mismo Rack (Front<->Front o Front<->Back) como entre distintos Racks (Inter-Rack).",
+        "RK-MAD-02 -> RK-MAD-03",
     ])
     ws_help.append([
-        "Librería",
-        "Network | Power | Host - HP | Host - Dell | Host - Supermicro | Organizers",
-        "Host - HP",
-    ])
-    ws_help.append([
-        "Heartbeat Activo",
-        "SI / TRUE / 1 para activar la monitorización en verde/rojo del equipo.",
-        "SI",
-    ])
-    ws_help.append([
-        "Método Heartbeat",
-        "icmp | ssh | https | http | tcp | snmp",
-        "https",
-    ])
-    ws_help.append([
-        "Compatibilidad Exportación",
-        "También puedes modificar y volver a importar directamente el archivo Excel descargado desde 'Descargar Inventario Completo (.xlsx)'.",
-        "RackDoc_Inventory.xlsx",
+        "Librerías Soportadas",
+        "Network | Storage - SAN | Storage - NAS | Host - HP | Host - Dell | Host - Supermicro | Organizers | Power",
+        "Storage - SAN",
     ])
     _style_worksheet(ws_help)
 
@@ -512,7 +508,17 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
 
                 loc = db.query(Location).filter(Location.code == loc_code).first()
                 if not loc:
-                    loc = Location(code=loc_code, name=loc_name, latitude=40.4168, longitude=-3.7038)
+                    existing_locs = db.query(Location).count()
+                    loc_pos_x = min(0.85, 0.25 + (existing_locs % 4) * 0.18)
+                    loc_pos_y = min(0.82, 0.30 + (existing_locs // 4) * 0.22)
+                    loc = Location(
+                        code=loc_code,
+                        name=loc_name,
+                        latitude=40.4168,
+                        longitude=-3.7038,
+                        pos_x=loc_pos_x,
+                        pos_y=loc_pos_y,
+                    )
                     db.add(loc)
                     db.flush()
 
@@ -522,7 +528,8 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
                     .first()
                 )
                 if not fl:
-                    fl = Floor(location_id=loc.id, name=floor_name, level_number=1)
+                    fl_cnt = db.query(Floor).filter(Floor.location_id == loc.id).count()
+                    fl = Floor(location_id=loc.id, name=floor_name, level_number=fl_cnt + 1)
                     db.add(fl)
                     db.flush()
 
@@ -548,6 +555,9 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
 
                 rk = db.query(Rack).filter(Rack.code == rack_code).first()
                 if not rk:
+                    racks_in_room = db.query(Rack).filter(Rack.room_id == rm.id).count()
+                    rk_pos_x = min(0.84, 0.14 + (racks_in_room % 4) * 0.18)
+                    rk_pos_y = min(0.80, 0.24 + (racks_in_room // 4) * 0.26)
                     rk = Rack(
                         room_id=rm.id,
                         aisle_id=aisle.id,
@@ -558,6 +568,8 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
                         model_name=model,
                         responsible_person=resp,
                         notes=notes,
+                        pos_x=rk_pos_x,
+                        pos_y=rk_pos_y,
                     )
                     db.add(rk)
                     db.flush()
@@ -765,9 +777,14 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
                     existing_dev.notes = notes or existing_dev.notes
                     cf = dict(existing_dev.custom_fields or {})
                     cf["heartbeat_config"] = hb_cfg
+                    if u_height != tpl.u_height:
+                        cf["u_height_override"] = u_height
                     existing_dev.custom_fields = cf
                     devices_updated += 1
                 else:
+                    init_cf: Dict[str, Any] = {"heartbeat_config": hb_cfg}
+                    if u_height != tpl.u_height:
+                        init_cf["u_height_override"] = u_height
                     new_dev = RackDevice(
                         rack_id=rk.id,
                         template_id=tpl.id,
@@ -791,13 +808,100 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
                         status="online" if hb_enabled else "unknown",
                         last_ping_ms=1.2 if hb_enabled else None,
                         serial_number=serial,
-                        custom_fields={"heartbeat_config": hb_cfg},
+                        custom_fields=init_cf,
                         notes=notes,
                     )
                     db.add(new_dev)
                     db.flush()
                     create_ports_from_template(db, new_dev, tpl)
                     devices_created += 1
+
+    # 3. Procesar hoja de Conexiones si existe ('3_Conexiones_y_Fibras')
+    conn_sheet = wb["3_Conexiones_y_Fibras"] if "3_Conexiones_y_Fibras" in wb.sheetnames else None
+    if conn_sheet is not None:
+        c_rows = list(conn_sheet.iter_rows(values_only=True))
+        if len(c_rows) > 1:
+            c_headers = [str(h or "").strip().lower() for h in c_rows[0]]
+
+            def c_val(row_tuple, *candidates) -> str:
+                for c in candidates:
+                    for idx, h in enumerate(c_headers):
+                        if c == h or c in h:
+                            if idx < len(row_tuple):
+                                v = row_tuple[idx]
+                                return "" if v is None else str(v).strip()
+                return ""
+
+            for row in c_rows[1:]:
+                s_rack_code = c_val(row, "rack origen")
+                s_dev_code = c_val(row, "equipo origen")
+                s_port_num = c_val(row, "boca origen")
+                t_rack_code = c_val(row, "rack destino")
+                t_dev_code = c_val(row, "equipo destino")
+                t_port_num = c_val(row, "boca destino")
+                if not (s_rack_code and s_dev_code and s_port_num and t_rack_code and t_dev_code and t_port_num):
+                    continue
+                s_rk = db.query(Rack).filter(Rack.code == s_rack_code).first()
+                t_rk = db.query(Rack).filter(Rack.code == t_rack_code).first()
+                if not s_rk or not t_rk:
+                    continue
+                s_dev = (
+                    db.query(RackDevice)
+                    .filter(RackDevice.rack_id == s_rk.id, RackDevice.code == s_dev_code)
+                    .first()
+                )
+                t_dev = (
+                    db.query(RackDevice)
+                    .filter(RackDevice.rack_id == t_rk.id, RackDevice.code == t_dev_code)
+                    .first()
+                )
+                if not s_dev or not t_dev:
+                    continue
+                sp = (
+                    db.query(Port)
+                    .filter(Port.device_id == s_dev.id, Port.port_number == s_port_num)
+                    .first()
+                )
+                tp = (
+                    db.query(Port)
+                    .filter(Port.device_id == t_dev.id, Port.port_number == t_port_num)
+                    .first()
+                )
+                if not sp:
+                    sp = db.query(Port).filter(Port.device_id == s_dev.id).first()
+                if not tp:
+                    tp = db.query(Port).filter(Port.device_id == t_dev.id).first()
+                if not sp or not tp or sp.id == tp.id:
+                    continue
+                busy = (
+                    db.query(Connection)
+                    .filter(
+                        (Connection.source_port_id.in_([sp.id, tp.id]))
+                        | (Connection.target_port_id.in_([sp.id, tp.id]))
+                    )
+                    .first()
+                )
+                if busy:
+                    continue
+                cable_type = c_val(row, "tipo de cable") or "fiber_om4"
+                color_hex = c_val(row, "color hex") or "#0284C7"
+                label = c_val(row, "etiqueta") or f"{s_dev_code}:{sp.port_number} -> {t_dev_code}:{tp.port_number}"
+                vlan_s = c_val(row, "vlan")
+                vlan_val = int(float(vlan_s)) if vlan_s.replace(".", "", 1).isdigit() else None
+                len_s = c_val(row, "longitud")
+                len_val = float(len_s) if len_s.replace(".", "", 1).isdigit() else 2.0
+                db.add(
+                    Connection(
+                        source_port_id=sp.id,
+                        target_port_id=tp.id,
+                        cable_type=cable_type,
+                        color_hex=color_hex,
+                        routing_channel="auto",
+                        label=label,
+                        vlan=vlan_val,
+                        length_m=len_val,
+                    )
+                )
 
     db.commit()
     return {

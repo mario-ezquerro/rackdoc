@@ -204,6 +204,38 @@ class RackDocApiClient {
     return DeviceTemplateModel.fromJson(Map<String, dynamic>.from(data));
   }
 
+  Future<DeviceTemplateModel> updateTemplate(
+    int templateId,
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/templates/$templateId'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    final data = _decodeResponse(res) as Map;
+    return DeviceTemplateModel.fromJson(Map<String, dynamic>.from(data));
+  }
+
+  Future<List<Map<String, dynamic>>> searchHardwarePhotos(String query) async {
+    final uri = Uri.parse('$baseUrl/templates/search-photo').replace(
+      queryParameters: {'q': query},
+    );
+    final res = await http.get(uri, headers: _headers);
+    final data = _decodeResponse(res) as Map;
+    final list = (data['results'] ?? []) as List;
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> getInterRackTargets(int rackId) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/racks/$rackId/inter-rack-targets'),
+      headers: _headers,
+    );
+    final data = _decodeResponse(res) as List;
+    return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
   Future<RackDetailModel> getRackDetail(int rackId) async {
     final res = await http.get(Uri.parse('$baseUrl/racks/$rackId'), headers: _headers);
     final data = _decodeResponse(res) as Map;

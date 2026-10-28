@@ -292,6 +292,17 @@ class DeviceTemplateModel {
     );
   }
 
+  String get photoUrl => (layoutSpec['photo_url'] ?? '').toString().trim();
+
+  bool get isAdjustableU =>
+      (layoutSpec['adjustable_u'] == true) ||
+      category == 'rack_tray' ||
+      category == 'miscellaneous';
+
+  bool get isRoofFan =>
+      (layoutSpec['device_subtype'] ?? '') == 'roof_fan' ||
+      modelName.toLowerCase().contains('ventilador');
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'category': category,
@@ -403,7 +414,26 @@ class RackDeviceModel {
     required this.ports,
   });
 
-  int get endU => startU + template.uHeight - 1;
+  int get uHeight {
+    final override = customFields['u_height_override'];
+    if (override != null) {
+      final parsed = int.tryParse(override.toString());
+      if (parsed != null && parsed >= 1 && parsed <= 48) {
+        return parsed;
+      }
+    }
+    return template.uHeight;
+  }
+
+  int get endU => startU + uHeight - 1;
+
+  String get photoUrl {
+    final customPhoto = (customFields['photo_url'] ?? '').toString().trim();
+    if (customPhoto.isNotEmpty) return customPhoto;
+    return template.photoUrl;
+  }
+
+  bool get showPhotoOverride => customFields['show_photo'] != false;
 
   bool get isExternalFeed =>
       mountedFace == 'external' || (customFields['is_external_feed'] == true);

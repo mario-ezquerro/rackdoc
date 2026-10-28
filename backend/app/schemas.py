@@ -53,6 +53,18 @@ class DeviceTemplateCreate(BaseModel):
     layout_spec: Dict[str, Any] = {}
 
 
+class DeviceTemplateUpdate(BaseModel):
+    library_group: Optional[str] = None
+    category: Optional[str] = None
+    manufacturer: Optional[str] = None
+    model_name: Optional[str] = None
+    u_height: Optional[int] = None
+    is_full_depth: Optional[bool] = None
+    default_color: Optional[str] = None
+    layout_spec: Optional[Dict[str, Any]] = None
+    photo_url: Optional[str] = None
+
+
 class DeviceLibraryImportRequest(BaseModel):
     library_group: Optional[str] = None
     templates: List[Dict[str, Any]] = []

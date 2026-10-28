@@ -14,6 +14,7 @@ class PropertiesPanel extends StatefulWidget {
   final ValueChanged<String> onSwitchFace;
   final ValueChanged<int> onNavigateToRack;
   final VoidCallback? onDeleteRack;
+  final ValueChanged<RackDeviceModel>? onConfigureDevicePhoto;
   final UserModel? currentUser;
 
   const PropertiesPanel({
@@ -27,6 +28,7 @@ class PropertiesPanel extends StatefulWidget {
     required this.onSwitchFace,
     required this.onNavigateToRack,
     this.onDeleteRack,
+    this.onConfigureDevicePhoto,
     this.currentUser,
   });
 
@@ -65,6 +67,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
   late TextEditingController _devSerialCtrl;
   late TextEditingController _devNotesCtrl;
   late TextEditingController _devStartUCtrl;
+  int _devUHeight = 1;
   String _devMountedFace = 'front';
   bool _devMonitorEnabled = false;
   String _devMonitorMethod = 'icmp';
@@ -105,6 +108,8 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
       _initRackControllers();
     }
     if (oldWidget.selectedDevice?.id != widget.selectedDevice?.id ||
+        oldWidget.selectedDevice?.uHeight != widget.selectedDevice?.uHeight ||
+        oldWidget.selectedDevice?.photoUrl != widget.selectedDevice?.photoUrl ||
         oldWidget.selectedDevice?.status != widget.selectedDevice?.status ||
         oldWidget.selectedDevice?.lastPingMs != widget.selectedDevice?.lastPingMs) {
       _initDeviceControllers();
@@ -144,6 +149,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
     _devSerialCtrl = TextEditingController(text: d?.serialNumber ?? '');
     _devNotesCtrl = TextEditingController(text: d?.notes ?? '');
     _devStartUCtrl = TextEditingController(text: '${d?.startU ?? 1}');
+    _devUHeight = d?.uHeight ?? 1;
     _devMountedFace = d?.mountedFace ?? 'front';
     _devMonitorEnabled = d?.monitoringEnabled ?? false;
     const validMethods = {'icmp', 'ssh', 'https', 'http', 'tcp', 'snmp'};
@@ -250,6 +256,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
       _devMonitorPort =
           int.tryParse(_devMonitorPortCtrl.text.trim()) ?? _devMonitorPort;
       _devCustomFields['heartbeat_config'] = _buildHeartbeatConfigMap();
+      _devCustomFields['u_height_override'] = _devUHeight;
       await widget.api.updateDevice(d.id, {
         'code': _devCodeCtrl.text.trim(),
         'name': _devNameCtrl.text.trim(),
@@ -1140,9 +1147,66 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
 
         const Divider(height: 22),
 
-        // SECCIÓN C: CONFIGURACIÓN DE RED (HOSTNAME, FQDN, IP, MÁSCARA, GATEWAY, VLAN)
+        // SECCIÓN C: CONFIGURACIÓN DE RED Y OCUPACIÓN U (HOSTNAME, FQDN, IP, ALTURA U, FOTO)
+        if (widget.onConfigureDevicePhoto != null) ...[
+          Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.photo_camera_outlined,
+                  size: 18,
+                  color: Color(0xFF1D4ED8),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Foto de Referencia del Equipo',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                      Text(
+                        d.photoUrl.isNotEmpty
+                            ? 'Imagen configurada (visible con modo Foto ON)'
+                            : 'Bisel realista automático o busca foto en Internet',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: () => widget.onConfigureDevicePhoto!(d),
+                  icon: const Icon(Icons.image_search_outlined, size: 14),
+                  label: const Text(
+                    'Buscar Foto',
+                    style: TextStyle(fontSize: 11),
+                  ),
+                  style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         const Text(
-          'Red e Identificación',
+          'Red, Posición y Altura en U',
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w700,
@@ -1153,11 +1217,46 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         Row(
           children: [
             Expanded(
+              flex: 2,
               child: _CompactInput(label: 'Código Rack *', controller: _devCodeCtrl),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 6),
             Expanded(
-              child: _CompactInput(label: 'Unidad U Inicial', controller: _devStartUCtrl),
+              flex: 1,
+              child: _CompactInput(label: 'U Inicial', controller: _devStartUCtrl),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              flex: 1,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: DropdownButtonFormField<int>(
+                  initialValue: _devUHeight.clamp(1, 16),
+                  isDense: true,
+                  decoration: _compactDecoration(label: 'Ocupa (U)'),
+                  items: List.generate(16, (idx) => idx + 1)
+                      .map(
+                        (uVal) => DropdownMenuItem<int>(
+                          value: uVal,
+                          child: Text(
+                            '${uVal}U',
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: _canEdit
+                      ? (v) {
+                          if (v != null) {
+                            setState(() => _devUHeight = v);
+                          }
+                        }
+                      : null,
+                ),
+              ),
             ),
           ],
         ),
@@ -1273,8 +1372,12 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
             .where((e) => !const {
                   'heartbeat_config',
                   'is_external_feed',
+                  'feed_type',
                   'feed_color',
                   'socket_count',
+                  'u_height_override',
+                  'photo_url',
+                  'show_photo',
                 }.contains(e.key))
             .isEmpty)
           const Padding(
@@ -1289,8 +1392,12 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
               .where((e) => !const {
                     'heartbeat_config',
                     'is_external_feed',
+                    'feed_type',
                     'feed_color',
                     'socket_count',
+                    'u_height_override',
+                    'photo_url',
+                    'show_photo',
                   }.contains(e.key))
               .map((entry) {
             return Container(

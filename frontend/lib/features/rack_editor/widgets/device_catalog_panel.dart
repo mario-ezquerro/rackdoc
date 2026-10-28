@@ -10,6 +10,7 @@ class DeviceCatalogPanel extends StatefulWidget {
   final ValueChanged<String> onSelectLibraryGroup;
   final VoidCallback onExportLibrary;
   final VoidCallback onImportLibrary;
+  final ValueChanged<DeviceTemplateModel>? onConfigureTemplatePhoto;
   final bool canEdit;
 
   const DeviceCatalogPanel({
@@ -22,6 +23,7 @@ class DeviceCatalogPanel extends StatefulWidget {
     required this.onSelectLibraryGroup,
     required this.onExportLibrary,
     required this.onImportLibrary,
+    this.onConfigureTemplatePhoto,
     this.canEdit = true,
   });
 
@@ -39,6 +41,8 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
     'Host - HP',
     'Host - Dell',
     'Host - Supermicro',
+    'Storage - SAN',
+    'Storage - NAS',
     'Patching & Passive',
   ];
 
@@ -50,12 +54,14 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
     'pdu': 'Power — PDU y Enchufes Schuko',
     'ups': 'Power — UPS / SAI',
     'server': 'Server / Host (HP / Dell / Supermicro)',
+    'storage_san': 'Storage — SAN (FC / NVMe / iSCSI)',
+    'storage_nas': 'Storage — NAS (Scale-Out / Enterprise)',
     'patch_panel': 'Patch Panel',
     'patchbox': 'Patchbox',
     'cable_manager': 'Cable Manager',
-    'rack_tray': 'Rack Tray',
+    'rack_tray': 'Rack Tray (Bandejas U Editable)',
     'rack_tray_device': 'Rack Tray Device',
-    'miscellaneous': 'Miscellaneous',
+    'miscellaneous': 'Miscellaneous (Ventiladores / Bandejas / Ciegos)',
   };
 
   static IconData _iconForCategory(String cat) {
@@ -68,6 +74,10 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
         return Icons.security_outlined;
       case 'server':
         return Icons.dns_outlined;
+      case 'storage_san':
+        return Icons.storage_rounded;
+      case 'storage_nas':
+        return Icons.folder_shared_outlined;
       case 'patch_panel':
       case 'patchbox':
         return Icons.view_week_outlined;
@@ -441,13 +451,48 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
                                               crossAxisAlignment:
                                                   CrossAxisAlignment.start,
                                               children: [
-                                                Text(
-                                                  tpl.modelName,
-                                                  style: const TextStyle(
-                                                    fontSize: 11,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: Color(0xFF0F172A),
-                                                  ),
+                                                Row(
+                                                  children: [
+                                                    Expanded(
+                                                      child: Text(
+                                                        tpl.modelName,
+                                                        style: const TextStyle(
+                                                          fontSize: 11,
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                          color:
+                                                              Color(0xFF0F172A),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    if (tpl.isAdjustableU)
+                                                      Container(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .symmetric(
+                                                          horizontal: 4,
+                                                          vertical: 1,
+                                                        ),
+                                                        decoration:
+                                                            BoxDecoration(
+                                                          color: const Color(
+                                                              0xFFEDE9FE),
+                                                          borderRadius:
+                                                              BorderRadius
+                                                                  .circular(4),
+                                                        ),
+                                                        child: const Text(
+                                                          'U Edit.',
+                                                          style: TextStyle(
+                                                            fontSize: 8.5,
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                            color: Color(
+                                                                0xFF6D28D9),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                  ],
                                                 ),
                                                 Text(
                                                   '${tpl.manufacturer} • ${tpl.uHeight}U • [${tpl.libraryGroup}]',
@@ -459,6 +504,48 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
                                               ],
                                             ),
                                           ),
+                                          if (widget.canEdit &&
+                                              widget.onConfigureTemplatePhoto !=
+                                                  null)
+                                            InkWell(
+                                              onTap: () => widget
+                                                  .onConfigureTemplatePhoto!(tpl),
+                                              borderRadius:
+                                                  BorderRadius.circular(4),
+                                              child: Tooltip(
+                                                message: tpl.photoUrl.isNotEmpty
+                                                    ? 'Foto de referencia activa (clic para cambiar o buscar en Internet)'
+                                                    : 'Buscar/asociar foto de referencia en Internet para esta plantilla',
+                                                child: Container(
+                                                  padding:
+                                                      const EdgeInsets.all(4),
+                                                  decoration: BoxDecoration(
+                                                    color: tpl.photoUrl
+                                                            .isNotEmpty
+                                                        ? const Color(
+                                                            0xFFDCFCE7)
+                                                        : const Color(
+                                                            0xFFF1F5F9),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            4),
+                                                  ),
+                                                  child: Icon(
+                                                    tpl.photoUrl.isNotEmpty
+                                                        ? Icons.photo_camera
+                                                        : Icons
+                                                            .add_a_photo_outlined,
+                                                    size: 13,
+                                                    color: tpl.photoUrl
+                                                            .isNotEmpty
+                                                        ? const Color(
+                                                            0xFF15803D)
+                                                        : const Color(
+                                                            0xFF64748B),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
                                         ],
                                       ),
                                     ),
