@@ -1706,6 +1706,8 @@ class _RackDocShellState extends State<RackDocShell> {
         setState(() => _activeNav = 'datacenter');
       },
       onSwitchRack: (rId) => _openRack(rId),
+      onJumpToRackAndDevice: (rId, devId) =>
+          _openRack(rId, highlightDeviceId: devId),
       onTemplatesChanged: _refreshTemplates,
       currentUser: _currentUser,
     );

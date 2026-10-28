@@ -16,6 +16,7 @@ class RackEditorView extends StatefulWidget {
   final List<DeviceTemplateModel> templates;
   final VoidCallback onBackToLocations;
   final ValueChanged<int> onSwitchRack;
+  final void Function(int rackId, int? deviceId)? onJumpToRackAndDevice;
   final VoidCallback onTemplatesChanged;
   final UserModel? currentUser;
 
@@ -27,6 +28,7 @@ class RackEditorView extends StatefulWidget {
     required this.templates,
     required this.onBackToLocations,
     required this.onSwitchRack,
+    this.onJumpToRackAndDevice,
     required this.onTemplatesChanged,
     this.currentUser,
   });
@@ -693,6 +695,153 @@ class _RackEditorViewState extends State<RackEditorView> {
     }
   }
 
+  /// Extrae el número de bocas RJ45, SFP/Fibra, PSU y Schuko tanto de FRONT como de BACK desde un layout_spec.
+  Map<String, int> _extractPortCountsFromSpec(
+    Map<String, dynamic> spec, {
+    String category = 'switch',
+  }) {
+    int fRj = 0, fSfp = 0, fPsu = 0, fSch = 0;
+    int bRj = 0, bSfp = 0, bPsu = 0, bSch = 0;
+
+    void parseFace(dynamic rawList, bool isFront) {
+      if (rawList is! List) return;
+      for (final g in rawList) {
+        if (g is! Map) continue;
+        final pt = (g['port_type'] ?? 'rj45').toString().toLowerCase();
+        final cnt = int.tryParse('${g['count'] ?? 0}') ?? 0;
+        if (cnt <= 0) continue;
+        if (pt.contains('sfp') || pt.contains('fiber') || pt.contains('qsfp')) {
+          if (isFront) {
+            fSfp += cnt;
+          } else {
+            bSfp += cnt;
+          }
+        } else if (pt.contains('schuko')) {
+          if (isFront) {
+            fSch += cnt;
+          } else {
+            bSch += cnt;
+          }
+        } else if (pt.contains('power') || pt.contains('c14') || pt.contains('c13')) {
+          if (isFront) {
+            fPsu += cnt;
+          } else {
+            bPsu += cnt;
+          }
+        } else {
+          if (isFront) {
+            fRj += cnt;
+          } else {
+            bRj += cnt;
+          }
+        }
+      }
+    }
+
+    parseFace(spec['front'], true);
+    parseFace(spec['back'], false);
+
+    if (spec['back'] == null &&
+        bRj == 0 &&
+        bSfp == 0 &&
+        bPsu == 0 &&
+        bSch == 0 &&
+        category != 'rack_tray') {
+      bPsu = 2;
+    }
+
+    return {
+      'front_rj45': fRj,
+      'front_sfp': fSfp,
+      'front_psu': fPsu,
+      'front_schuko': fSch,
+      'back_rj45': bRj,
+      'back_sfp': bSfp,
+      'back_psu': bPsu,
+      'back_schuko': bSch,
+    };
+  }
+
+  /// Construye la lista de grupos de puertos (RJ45, SFP/Fibra, PSU C14, Schuko) para una cara ('front' o 'back')
+  /// repartiendo proporcionalmente el espacio horizontal [0.14 .. 0.92] para que no se solapen.
+  List<Map<String, dynamic>> _buildFacePortGroups({
+    required int rj45Count,
+    required int sfpCount,
+    required int psuCount,
+    required int schukoCount,
+    required bool isBackFace,
+  }) {
+    final rawBlocks = <Map<String, dynamic>>[];
+    if (psuCount > 0) {
+      rawBlocks.add({
+        'port_type': 'power_c14',
+        'prefix': isBackFace ? 'PSU' : 'F-PSU',
+        'count': psuCount,
+        'rows': 1,
+        'weight': psuCount.clamp(1, 4).toDouble() * 1.2,
+      });
+    }
+    if (rj45Count > 0) {
+      rawBlocks.add({
+        'port_type': 'rj45',
+        'prefix': isBackFace ? 'B-ETH' : '',
+        'count': rj45Count,
+        'rows': rj45Count >= 12 ? 2 : 1,
+        'weight': (rj45Count >= 12 ? (rj45Count / 2.0) : rj45Count.toDouble())
+            .clamp(2.0, 16.0),
+      });
+    }
+    if (sfpCount > 0) {
+      rawBlocks.add({
+        'port_type': 'sfp_plus',
+        'prefix': isBackFace ? 'B-SFP' : 'SFP',
+        'count': sfpCount,
+        'rows': sfpCount >= 6 ? 2 : 1,
+        'weight': (sfpCount >= 6 ? (sfpCount / 2.0) : sfpCount.toDouble())
+                .clamp(1.5, 10.0) *
+            1.15,
+      });
+    }
+    if (schukoCount > 0) {
+      rawBlocks.add({
+        'port_type': 'power_schuko',
+        'prefix': isBackFace ? 'B-SCH' : 'SCH',
+        'count': schukoCount,
+        'rows': 1,
+        'weight': schukoCount.clamp(1, 10).toDouble() * 1.3,
+      });
+    }
+
+    if (rawBlocks.isEmpty) return [];
+
+    final totalWeight =
+        rawBlocks.fold<double>(0.0, (sum, b) => sum + (b['weight'] as double));
+    const double minX = 0.14;
+    const double maxX = 0.92;
+    final double gap = rawBlocks.length > 1 ? 0.04 : 0.0;
+    final double usableWidth = maxX - minX - gap * (rawBlocks.length - 1);
+
+    double cursor = minX;
+    final result = <Map<String, dynamic>>[];
+    for (int i = 0; i < rawBlocks.length; i++) {
+      final b = rawBlocks[i];
+      final w = b['weight'] as double;
+      final span = usableWidth * (w / totalWeight);
+      final sx = cursor;
+      final ex = (cursor + span).clamp(sx + 0.04, maxX);
+      result.add({
+        'port_type': b['port_type'],
+        'prefix': b['prefix'],
+        'count': b['count'],
+        'rows': b['rows'],
+        'start_x': double.parse(sx.toStringAsFixed(3)),
+        'end_x': double.parse(ex.toStringAsFixed(3)),
+      });
+      cursor = ex + gap;
+    }
+    return result;
+  }
+
   // ===========================================================================
   // GESTIÓN DE EQUIPOS PEQUEÑOS / NO ENRACABLES DENTRO DE UNA BANDEJA (TRAY)
   // ===========================================================================
@@ -739,6 +888,17 @@ class _RackEditorViewState extends State<RackEditorView> {
       return 'EQ$index';
     }
 
+    final initialCounts = _extractPortCountsFromSpec(
+      selectedTpl.layoutSpec,
+      category: selectedTpl.category,
+    );
+    final fRjCtrl = TextEditingController(text: '${initialCounts['front_rj45']}');
+    final fSfpCtrl = TextEditingController(text: '${initialCounts['front_sfp']}');
+    final fPsuCtrl = TextEditingController(text: '${initialCounts['front_psu']}');
+    final bRjCtrl = TextEditingController(text: '${initialCounts['back_rj45']}');
+    final bSfpCtrl = TextEditingController(text: '${initialCounts['back_sfp']}');
+    final bPsuCtrl = TextEditingController(text: '${initialCounts['back_psu']}');
+
     final codeCtrl = TextEditingController(
       text: suggestCodeFor(selectedTpl, items.length + 1),
     );
@@ -748,6 +908,25 @@ class _RackEditorViewState extends State<RackEditorView> {
     final ipCtrl = TextEditingController(
       text: '10.28.1.${60 + trayDev.startU * 2 + items.length}',
     );
+
+    Map<String, dynamic> buildTrayItemSpec() {
+      return {
+        'front': _buildFacePortGroups(
+          rj45Count: int.tryParse(fRjCtrl.text.trim()) ?? 0,
+          sfpCount: int.tryParse(fSfpCtrl.text.trim()) ?? 0,
+          psuCount: int.tryParse(fPsuCtrl.text.trim()) ?? 0,
+          schukoCount: 0,
+          isBackFace: false,
+        ),
+        'back': _buildFacePortGroups(
+          rj45Count: int.tryParse(bRjCtrl.text.trim()) ?? 0,
+          sfpCount: int.tryParse(bSfpCtrl.text.trim()) ?? 0,
+          psuCount: int.tryParse(bPsuCtrl.text.trim()) ?? 0,
+          schukoCount: 0,
+          isBackFace: true,
+        ),
+      };
+    }
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -773,7 +952,7 @@ class _RackEditorViewState extends State<RackEditorView> {
             ],
           ),
           content: SizedBox(
-            width: 580,
+            width: 610,
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -787,7 +966,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                       border: Border.all(color: const Color(0xFF93C5FD)),
                     ),
                     child: const Text(
-                      '💡 En una Bandeja puedes colocar hasta 4 equipos pequeños o de sobremesa (Routers, Mini-Switches, ONTs, Mini-PCs / NUC / ThinkCentre / Mac mini / Raspberry Pi). RackDoc genera automáticamente las bocas RJ45, SFP y tomas eléctricas de cada equipo sobre la bandeja.',
+                      '💡 En una Bandeja puedes colocar hasta 4 equipos pequeños o de sobremesa (Routers, Mini-Switches, ONTs, Mini-PCs). Puedes definir sus bocas RJ45, SFP Fibra y Tomas Eléctricas tanto por DELANTE (Front) como por DETRÁS (Back).',
                       style: TextStyle(fontSize: 11.5, color: Color(0xFF1E3A8A)),
                     ),
                   ),
@@ -944,6 +1123,16 @@ class _RackEditorViewState extends State<RackEditorView> {
                         selectedTpl = t;
                         codeCtrl.text = suggestCodeFor(t, items.length + 1);
                         nameCtrl.text = '${t.manufacturer} ${t.modelName}';
+                        final cnts = _extractPortCountsFromSpec(
+                          t.layoutSpec,
+                          category: t.category,
+                        );
+                        fRjCtrl.text = '${cnts['front_rj45']}';
+                        fSfpCtrl.text = '${cnts['front_sfp']}';
+                        fPsuCtrl.text = '${cnts['front_psu']}';
+                        bRjCtrl.text = '${cnts['back_rj45']}';
+                        bSfpCtrl.text = '${cnts['back_sfp']}';
+                        bPsuCtrl.text = '${cnts['back_psu']}';
                       });
                     },
                   ),
@@ -985,6 +1174,85 @@ class _RackEditorViewState extends State<RackEditorView> {
                     ],
                   ),
                   const SizedBox(height: 10),
+                  const Text(
+                    'Bocas en FRONT (Delante) y BACK (Detrás) de este mini-equipo:',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF334155),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: fRjCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'RJ45 (Front)',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: TextField(
+                          controller: fSfpCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'SFP Fibra (Front)',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: TextField(
+                          controller: fPsuCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'PSU (Front)',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: bRjCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'RJ45 (Back)',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: TextField(
+                          controller: bSfpCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'SFP Fibra (Back)',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: TextField(
+                          controller: bPsuCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'PSU (Back)',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
                   Align(
                     alignment: Alignment.centerRight,
                     child: FilledButton.tonalIcon(
@@ -1006,6 +1274,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                   'manufacturer': selectedTpl.manufacturer,
                                   'model_name': selectedTpl.modelName,
                                   'ip_address': ipCtrl.text.trim(),
+                                  'layout_spec': buildTrayItemSpec(),
                                 });
                                 codeCtrl.text = suggestCodeFor(
                                   selectedTpl,
@@ -1032,8 +1301,6 @@ class _RackEditorViewState extends State<RackEditorView> {
             ),
             FilledButton.icon(
               onPressed: () {
-                // Si el usuario abrió el diálogo arrastrando un mini-equipo y aún no pulsó "+ Añadir a la Bandeja",
-                // lo añadimos automáticamente al pulsar Guardar si la lista no cambió o si venía preseleccionado.
                 if (initialAddTemplate != null &&
                     items.length == trayDev.trayItems.length &&
                     items.length < 4) {
@@ -1048,6 +1315,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     'manufacturer': selectedTpl.manufacturer,
                     'model_name': selectedTpl.modelName,
                     'ip_address': ipCtrl.text.trim(),
+                    'layout_spec': buildTrayItemSpec(),
                   });
                 }
                 Navigator.pop(ctx, true);
@@ -1208,19 +1476,37 @@ class _RackEditorViewState extends State<RackEditorView> {
     final maskCtrl = TextEditingController(text: '255.255.255.0');
     final gwCtrl = TextEditingController(text: '10.28.1.1');
 
+    final initialCounts = _extractPortCountsFromSpec(
+      tpl.layoutSpec,
+      category: tpl.category,
+    );
+    final fRjCtrl = TextEditingController(text: '${initialCounts['front_rj45']}');
+    final fSfpCtrl = TextEditingController(text: '${initialCounts['front_sfp']}');
+    final fPsuCtrl = TextEditingController(text: '${initialCounts['front_psu']}');
+    final fSchCtrl = TextEditingController(
+      text: '${initialCounts['front_schuko']}',
+    );
+    final bRjCtrl = TextEditingController(text: '${initialCounts['back_rj45']}');
+    final bSfpCtrl = TextEditingController(text: '${initialCounts['back_sfp']}');
+    final bPsuCtrl = TextEditingController(text: '${initialCounts['back_psu']}');
+    final bSchCtrl = TextEditingController(
+      text: '${initialCounts['back_schuko']}',
+    );
+
     int chosenUHeight = tpl.uHeight;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModal) => AlertDialog(
           title: Text(
-            'Montar ${tpl.modelName} en U$targetStartU (Autorrellena Front y Back)',
+            'Montar ${tpl.modelName} en U$targetStartU (Configura Front y Back)',
           ),
           content: SizedBox(
-            width: 460,
+            width: 520,
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
                     padding: const EdgeInsets.all(8),
@@ -1240,7 +1526,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Al montar este equipo en Front, su parte trasera (fuentes PSU / puertos traseros) se rellena automáticamente en la vista Back.',
+                            'Puedes personalizar cuántas bocas RJ45, SFP Fibra, Tomas PSU y Schuko lleva este equipo tanto por DELANTE (Front) como por DETRÁS (Back).',
                             style: TextStyle(
                               fontSize: 11,
                               color: Color(0xFF1E3A8A),
@@ -1257,7 +1543,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         child: TextField(
                           controller: codeCtrl,
                           decoration: const InputDecoration(
-                            labelText: 'Código en Rack (ej. SW04, BDJ01)',
+                            labelText: 'Código en Rack (ej. SW04, SRV02)',
                           ),
                         ),
                       ),
@@ -1334,6 +1620,122 @@ class _RackEditorViewState extends State<RackEditorView> {
                       ),
                     ],
                   ),
+                  if (!tpl.isRackTray && !tpl.isRoofFan) ...[
+                    const Divider(height: 22),
+                    const Text(
+                      '1. BOCAS EN CARA DELANTERA (FRONT):',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF0F172A),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: fRjCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'RJ45 (Front)',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: fSfpCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'SFP Fibra (Front)',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: fPsuCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Tomas PSU (Front)',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: fSchCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Schuko (Front)',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      '2. BOCAS EN CARA TRASERA (BACK):',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF1E3A8A),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: bRjCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'RJ45 (Back)',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: bSfpCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'SFP Fibra (Back)',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: bPsuCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Tomas PSU (Back)',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: bSchCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Schuko (Back)',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1354,6 +1756,20 @@ class _RackEditorViewState extends State<RackEditorView> {
 
     if (confirmed != true) return;
 
+    final newCounts = {
+      'front_rj45': int.tryParse(fRjCtrl.text.trim()) ?? 0,
+      'front_sfp': int.tryParse(fSfpCtrl.text.trim()) ?? 0,
+      'front_psu': int.tryParse(fPsuCtrl.text.trim()) ?? 0,
+      'front_schuko': int.tryParse(fSchCtrl.text.trim()) ?? 0,
+      'back_rj45': int.tryParse(bRjCtrl.text.trim()) ?? 0,
+      'back_sfp': int.tryParse(bSfpCtrl.text.trim()) ?? 0,
+      'back_psu': int.tryParse(bPsuCtrl.text.trim()) ?? 0,
+      'back_schuko': int.tryParse(bSchCtrl.text.trim()) ?? 0,
+    };
+    final bool portsCustomized = !tpl.isRackTray &&
+        !tpl.isRoofFan &&
+        newCounts.entries.any((e) => initialCounts[e.key] != e.value);
+
     try {
       final created = await widget.api.addDeviceToRack(rack.id, {
         'template_id': tpl.id,
@@ -1369,6 +1785,23 @@ class _RackEditorViewState extends State<RackEditorView> {
         'monitoring_enabled': ipCtrl.text.trim().isNotEmpty,
         'custom_fields': {
           if (chosenUHeight != tpl.uHeight) 'u_height_override': chosenUHeight,
+          if (portsCustomized)
+            'custom_layout_spec': {
+              'front': _buildFacePortGroups(
+                rj45Count: newCounts['front_rj45']!,
+                sfpCount: newCounts['front_sfp']!,
+                psuCount: newCounts['front_psu']!,
+                schukoCount: newCounts['front_schuko']!,
+                isBackFace: false,
+              ),
+              'back': _buildFacePortGroups(
+                rj45Count: newCounts['back_rj45']!,
+                sfpCount: newCounts['back_sfp']!,
+                psuCount: newCounts['back_psu']!,
+                schukoCount: newCounts['back_schuko']!,
+                isBackFace: true,
+              ),
+            },
         },
       });
       await _loadRack();
@@ -3143,11 +3576,261 @@ class _RackEditorViewState extends State<RackEditorView> {
     }
   }
 
+  Future<void> _showConfigureDevicePortsDialog(RackDeviceModel dev) async {
+    if (!_canEdit) return;
+    if (dev.isRackTray) {
+      await _showManageTrayItemsDialog(dev);
+      return;
+    }
+    final messenger = ScaffoldMessenger.of(context);
+
+    int countTypeOnFace(String face, bool Function(String) match) {
+      return dev
+          .portsForFace(face)
+          .where((p) => match(p.portType.toLowerCase()))
+          .length;
+    }
+
+    final fRjCtrl = TextEditingController(
+      text: '${countTypeOnFace('front', (t) => t.contains('rj45') || t.contains('eth'))}',
+    );
+    final fSfpCtrl = TextEditingController(
+      text: '${countTypeOnFace('front', (t) => t.contains('sfp') || t.contains('fiber') || t.contains('qsfp'))}',
+    );
+    final fPsuCtrl = TextEditingController(
+      text: '${countTypeOnFace('front', (t) => (t.contains('power') || t.contains('c14') || t.contains('c13')) && !t.contains('schuko'))}',
+    );
+    final fSchCtrl = TextEditingController(
+      text: '${countTypeOnFace('front', (t) => t.contains('schuko'))}',
+    );
+
+    final bRjCtrl = TextEditingController(
+      text: '${countTypeOnFace('back', (t) => t.contains('rj45') || t.contains('eth'))}',
+    );
+    final bSfpCtrl = TextEditingController(
+      text: '${countTypeOnFace('back', (t) => t.contains('sfp') || t.contains('fiber') || t.contains('qsfp'))}',
+    );
+    final bPsuCtrl = TextEditingController(
+      text: '${countTypeOnFace('back', (t) => (t.contains('power') || t.contains('c14') || t.contains('c13')) && !t.contains('schuko'))}',
+    );
+    final bSchCtrl = TextEditingController(
+      text: '${countTypeOnFace('back', (t) => t.contains('schuko'))}',
+    );
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(
+              Icons.settings_input_component_rounded,
+              color: Color(0xFF1D4ED8),
+              size: 20,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Configurar Bocas FRONT y BACK — ${dev.code} (${dev.name})',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 520,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Define cuántas bocas RJ45 (Cobre), SFP/Fibra Óptica, Tomas Eléctricas PSU (C14) y Enchufes Schuko tiene este equipo tanto por DELANTE (Front) como por DETRÁS (Back):',
+                style: TextStyle(fontSize: 11.5, color: Color(0xFF475569)),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                '1. BOCAS EN CARA DELANTERA (FRONT):',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF0F172A),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: fRjCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'RJ45 (Front)',
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: fSfpCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'SFP Fibra (Front)',
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: fPsuCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Tomas PSU (Front)',
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: fSchCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Schuko (Front)',
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                '2. BOCAS EN CARA TRASERA (BACK):',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF1E3A8A),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: bRjCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'RJ45 (Back)',
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: bSfpCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'SFP Fibra (Back)',
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: bPsuCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Tomas PSU (Back)',
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: bSchCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Schuko (Back)',
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.save_outlined, size: 16),
+            label: const Text('Guardar Bocas Front & Back'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        final updatedCustom = Map<String, dynamic>.from(dev.customFields);
+        updatedCustom['custom_layout_spec'] = {
+          'front': _buildFacePortGroups(
+            rj45Count: int.tryParse(fRjCtrl.text.trim()) ?? 0,
+            sfpCount: int.tryParse(fSfpCtrl.text.trim()) ?? 0,
+            psuCount: int.tryParse(fPsuCtrl.text.trim()) ?? 0,
+            schukoCount: int.tryParse(fSchCtrl.text.trim()) ?? 0,
+            isBackFace: false,
+          ),
+          'back': _buildFacePortGroups(
+            rj45Count: int.tryParse(bRjCtrl.text.trim()) ?? 0,
+            sfpCount: int.tryParse(bSfpCtrl.text.trim()) ?? 0,
+            psuCount: int.tryParse(bPsuCtrl.text.trim()) ?? 0,
+            schukoCount: int.tryParse(bSchCtrl.text.trim()) ?? 0,
+            isBackFace: true,
+          ),
+        };
+        await widget.api.updateDevice(dev.id, {
+          'custom_fields': updatedCustom,
+        });
+        await _loadRack();
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              'Bocas Front y Back de "${dev.code}" actualizadas correctamente.',
+            ),
+          ),
+        );
+      } catch (e) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
+        );
+      }
+    }
+  }
+
   Future<void> _showCreateCustomTemplateDialog() async {
     if (!_canEdit) return;
     String category = _selectedLibraryGroup == 'Power'
         ? 'pdu'
-        : (_selectedLibraryGroup.startsWith('Host') ? 'server' : 'switch');
+        : (_selectedLibraryGroup == 'Bandeja - Equipos Mini'
+            ? 'rack_tray_device'
+            : (_selectedLibraryGroup.startsWith('Host')
+                ? 'server'
+                : (_selectedLibraryGroup == 'Storage - SAN'
+                    ? 'storage_san'
+                    : (_selectedLibraryGroup == 'Storage - NAS'
+                        ? 'storage_nas'
+                        : 'switch'))));
     final libraryCtrl = TextEditingController(
       text: _selectedLibraryGroup == 'all' ? 'Network' : _selectedLibraryGroup,
     );
@@ -3158,20 +3841,40 @@ class _RackEditorViewState extends State<RackEditorView> {
     );
     final modelCtrl = TextEditingController(text: 'Custom Device 1U');
     final uCtrl = TextEditingController(text: '1');
+
+    // Bocas en Cara Delantera (FRONT)
     final frontRj45Ctrl = TextEditingController(
-      text: category == 'pdu' ? '0' : '24',
+      text: category == 'pdu' ? '0' : (category == 'server' ? '2' : '24'),
     );
     final frontFiberCtrl = TextEditingController(
-      text: category == 'pdu' ? '0' : '4',
+      text: category == 'pdu' ? '0' : (category == 'server' ? '0' : '4'),
     );
+    final frontPowerCtrl = TextEditingController(text: '0');
     final frontSchukoCtrl = TextEditingController(
       text: category == 'pdu' ? '6' : '0',
     );
+
+    // Bocas en Cara Trasera (BACK) — RJ45, SFP Fibra, Tomas PSU y Schuko
+    final backRj45Ctrl = TextEditingController(
+      text: category == 'server' ? '4' : '0',
+    );
+    final backFiberCtrl = TextEditingController(
+      text: (category == 'server' ||
+              category == 'storage_san' ||
+              category == 'storage_nas')
+          ? '4'
+          : '0',
+    );
     final backPowerCtrl = TextEditingController(text: '2');
+    final backSchukoCtrl = TextEditingController(text: '0');
+
     bool isFullDepth = true;
 
     const presetGroups = [
       'Network',
+      'Bandeja - Equipos Mini',
+      'Storage - SAN',
+      'Storage - NAS',
       'Power',
       'Host - HP',
       'Host - Dell',
@@ -3183,9 +3886,9 @@ class _RackEditorViewState extends State<RackEditorView> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModal) => AlertDialog(
-          title: const Text('Crear Nuevo Equipo en Librería'),
+          title: const Text('Crear Nuevo Equipo en Librería (Con Puertos Front y Back)'),
           content: SizedBox(
-            width: 460,
+            width: 540,
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -3211,13 +3914,41 @@ class _RackEditorViewState extends State<RackEditorView> {
                               category = 'pdu';
                               frontRj45Ctrl.text = '0';
                               frontFiberCtrl.text = '0';
+                              frontPowerCtrl.text = '0';
                               frontSchukoCtrl.text = '8';
+                              backRj45Ctrl.text = '0';
+                              backFiberCtrl.text = '0';
+                              backPowerCtrl.text = '2';
+                              backSchukoCtrl.text = '0';
                             } else if (g.startsWith('Host')) {
                               category = 'server';
-                              frontRj45Ctrl.text = '4';
-                              frontFiberCtrl.text = '2';
+                              frontRj45Ctrl.text = '2';
+                              frontFiberCtrl.text = '0';
+                              frontPowerCtrl.text = '0';
                               frontSchukoCtrl.text = '0';
+                              backRj45Ctrl.text = '4';
+                              backFiberCtrl.text = '2';
+                              backPowerCtrl.text = '2';
+                              backSchukoCtrl.text = '0';
                               isFullDepth = true;
+                            } else if (g == 'Storage - SAN' ||
+                                g == 'Storage - NAS') {
+                              category = g == 'Storage - SAN'
+                                  ? 'storage_san'
+                                  : 'storage_nas';
+                              frontRj45Ctrl.text = '2';
+                              frontFiberCtrl.text = '4';
+                              backRj45Ctrl.text = '4';
+                              backFiberCtrl.text = '8';
+                              backPowerCtrl.text = '2';
+                              isFullDepth = true;
+                            } else if (g == 'Bandeja - Equipos Mini') {
+                              category = 'rack_tray_device';
+                              frontRj45Ctrl.text = '5';
+                              frontFiberCtrl.text = '1';
+                              backRj45Ctrl.text = '1';
+                              backFiberCtrl.text = '0';
+                              backPowerCtrl.text = '1';
                             }
                           });
                         },
@@ -3229,7 +3960,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     controller: libraryCtrl,
                     decoration: const InputDecoration(
                       labelText:
-                          'Nombre de Librería (ej. Network, Power, Host - HP)',
+                          'Nombre de Librería (ej. Network, Power, Host - HP, Bandeja - Equipos Mini)',
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -3249,6 +3980,20 @@ class _RackEditorViewState extends State<RackEditorView> {
                         child: Text('Server / Host (HP, Dell, etc.)'),
                       ),
                       DropdownMenuItem(
+                        value: 'storage_san',
+                        child: Text('Storage SAN (Cabina Fibra/NVMe)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'storage_nas',
+                        child: Text('Storage NAS (Almacenamiento Red)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'rack_tray_device',
+                        child: Text(
+                          'Bandeja - Equipo Mini (Router / Switch / Mini-PC sobre Bandeja)',
+                        ),
+                      ),
+                      DropdownMenuItem(
                         value: 'pdu',
                         child: Text('Power — PDU / Regleta Enchufes Schuko'),
                       ),
@@ -3262,7 +4007,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                       ),
                       DropdownMenuItem(
                         value: 'rack_tray',
-                        child: Text('Rack Tray (Bandeja)'),
+                        child: Text('Rack Tray (Bandeja 19")'),
                       ),
                     ],
                     onChanged: (v) => setModal(() => category = v ?? 'switch'),
@@ -3304,14 +4049,25 @@ class _RackEditorViewState extends State<RackEditorView> {
                     value: isFullDepth,
                     onChanged: (v) => setModal(() => isFullDepth = v),
                   ),
-                  const Divider(),
+                  const Divider(height: 18),
+                  const Text(
+                    '1. BOCAS EN CARA DELANTERA (FRONT):',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
                   Row(
                     children: [
                       Expanded(
                         child: TextField(
                           controller: frontRj45Ctrl,
+                          keyboardType: TextInputType.number,
                           decoration: const InputDecoration(
                             labelText: 'RJ45 (Front)',
+                            isDense: true,
                           ),
                         ),
                       ),
@@ -3319,8 +4075,21 @@ class _RackEditorViewState extends State<RackEditorView> {
                       Expanded(
                         child: TextField(
                           controller: frontFiberCtrl,
+                          keyboardType: TextInputType.number,
                           decoration: const InputDecoration(
                             labelText: 'SFP Fibra (Front)',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: frontPowerCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Tomas PSU (Front)',
+                            isDense: true,
                           ),
                         ),
                       ),
@@ -3328,8 +4097,45 @@ class _RackEditorViewState extends State<RackEditorView> {
                       Expanded(
                         child: TextField(
                           controller: frontSchukoCtrl,
+                          keyboardType: TextInputType.number,
                           decoration: const InputDecoration(
                             labelText: 'Schuko (Front)',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    '2. BOCAS EN CARA TRASERA (BACK — RJ45, SFP Fibra y Electricidad):',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF1E3A8A),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: backRj45Ctrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'RJ45 (Back)',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: backFiberCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'SFP Fibra (Back)',
+                            isDense: true,
                           ),
                         ),
                       ),
@@ -3337,8 +4143,21 @@ class _RackEditorViewState extends State<RackEditorView> {
                       Expanded(
                         child: TextField(
                           controller: backPowerCtrl,
+                          keyboardType: TextInputType.number,
                           decoration: const InputDecoration(
                             labelText: 'Tomas PSU (Back)',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: backSchukoCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Schuko (Back)',
+                            isDense: true,
                           ),
                         ),
                       ),
@@ -3363,54 +4182,21 @@ class _RackEditorViewState extends State<RackEditorView> {
     );
 
     if (confirmed == true) {
-      final rjCount = int.tryParse(frontRj45Ctrl.text.trim()) ?? 0;
-      final sfpCount = int.tryParse(frontFiberCtrl.text.trim()) ?? 0;
-      final schukoCount = int.tryParse(frontSchukoCtrl.text.trim()) ?? 0;
-      final psuCount = int.tryParse(backPowerCtrl.text.trim()) ?? 0;
+      final frontGroups = _buildFacePortGroups(
+        rj45Count: int.tryParse(frontRj45Ctrl.text.trim()) ?? 0,
+        sfpCount: int.tryParse(frontFiberCtrl.text.trim()) ?? 0,
+        psuCount: int.tryParse(frontPowerCtrl.text.trim()) ?? 0,
+        schukoCount: int.tryParse(frontSchukoCtrl.text.trim()) ?? 0,
+        isBackFace: false,
+      );
 
-      final frontGroups = <Map<String, dynamic>>[];
-      if (rjCount > 0) {
-        frontGroups.add({
-          'port_type': 'rj45',
-          'prefix': '',
-          'count': rjCount,
-          'rows': rjCount >= 12 ? 2 : 1,
-          'start_x': 0.22,
-          'end_x': (sfpCount > 0 || schukoCount > 0) ? 0.68 : 0.90,
-        });
-      }
-      if (sfpCount > 0) {
-        frontGroups.add({
-          'port_type': 'sfp_plus',
-          'prefix': 'SFP',
-          'count': sfpCount,
-          'rows': sfpCount >= 4 ? 2 : 1,
-          'start_x': 0.72,
-          'end_x': 0.92,
-        });
-      }
-      if (schukoCount > 0) {
-        frontGroups.add({
-          'port_type': 'power_schuko',
-          'prefix': 'SCH',
-          'count': schukoCount,
-          'rows': 1,
-          'start_x': rjCount > 0 ? 0.70 : 0.18,
-          'end_x': 0.90,
-        });
-      }
-
-      final backGroups = <Map<String, dynamic>>[];
-      if (psuCount > 0) {
-        backGroups.add({
-          'port_type': 'power_c14',
-          'prefix': 'PSU',
-          'count': psuCount,
-          'rows': 1,
-          'start_x': 0.15,
-          'end_x': 0.40,
-        });
-      }
+      final backGroups = _buildFacePortGroups(
+        rj45Count: int.tryParse(backRj45Ctrl.text.trim()) ?? 0,
+        sfpCount: int.tryParse(backFiberCtrl.text.trim()) ?? 0,
+        psuCount: int.tryParse(backPowerCtrl.text.trim()) ?? 0,
+        schukoCount: int.tryParse(backSchukoCtrl.text.trim()) ?? 0,
+        isBackFace: true,
+      );
 
       final targetLib = libraryCtrl.text.trim().isEmpty
           ? 'General'
@@ -3938,6 +4724,21 @@ class _RackEditorViewState extends State<RackEditorView> {
                         ),
                       TextButton.icon(
                         onPressed: () =>
+                            _showConfigureDevicePortsDialog(selDev),
+                        icon: const Icon(
+                          Icons.settings_input_component,
+                          size: 14,
+                        ),
+                        label: const Text(
+                          'Bocas F/B',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () =>
                             _showHardwarePhotoSearchDialog(device: selDev),
                         icon: const Icon(Icons.photo_camera_outlined, size: 14),
                         label: const Text(
@@ -4372,6 +5173,308 @@ class _RackEditorViewState extends State<RackEditorView> {
                                     ),
                                   ),
 
+                                  // D2. OPCIÓN 3: BANDEROLAS "CROSS-CONNECT" CLICABLES EN EL LATERAL DEL RACK
+                                  ...computedRoutes
+                                      .where(
+                                        (r) =>
+                                            r.isOutbound &&
+                                            r.badgePosition != null,
+                                      )
+                                      .map((r) {
+                                    final c = r.connection;
+                                    final isSrcHere =
+                                        c.sourceInfo.rackId == rack.id;
+                                    final localEnd = isSrcHere
+                                        ? c.sourceInfo
+                                        : c.targetInfo;
+                                    final remoteEnd = isSrcHere
+                                        ? c.targetInfo
+                                        : c.sourceInfo;
+                                    final cCol =
+                                        CableGeometryBuilder.parseHexColor(
+                                      c.colorHex,
+                                    );
+                                    final isSel =
+                                        _selectedConnectionId == c.id;
+                                    final isHov =
+                                        _hoveredConnectionId == c.id;
+                                    final pin = r.badgePosition!;
+                                    return Positioned(
+                                      left: pin.dx + 4,
+                                      top: pin.dy - 12,
+                                      child: MouseRegion(
+                                        onEnter: (_) => setState(
+                                          () => _hoveredConnectionId = c.id,
+                                        ),
+                                        onExit: (_) {
+                                          if (_hoveredConnectionId == c.id) {
+                                            setState(
+                                              () => _hoveredConnectionId = null,
+                                            );
+                                          }
+                                        },
+                                        child: GestureDetector(
+                                          onTap: () {
+                                            setState(() {
+                                              _selectedConnectionId = c.id;
+                                              _selectedDeviceId = null;
+                                            });
+                                          },
+                                          onDoubleTap: () {
+                                            if (widget.onJumpToRackAndDevice !=
+                                                null) {
+                                              widget.onJumpToRackAndDevice!(
+                                                remoteEnd.rackId,
+                                                remoteEnd.deviceId,
+                                              );
+                                            } else {
+                                              widget.onSwitchRack(
+                                                remoteEnd.rackId,
+                                              );
+                                            }
+                                          },
+                                          child: Tooltip(
+                                            message:
+                                                'BANDEROLA CROSS-CONNECT INTER-RACK\n'
+                                                '• Origen local: ${localEnd.deviceCode}:${localEnd.portNumber} (${localEnd.face.toUpperCase()})\n'
+                                                '• Destino remoto: ${remoteEnd.rackCode} • ${remoteEnd.deviceCode}:${remoteEnd.portNumber}\n'
+                                                '• 1 Clic: Seleccionar cable y ver propiedades\n'
+                                                '• Doble Clic o botón ↗: Saltar a ${remoteEnd.rackCode} resaltando ${remoteEnd.deviceCode}',
+                                            child: AnimatedContainer(
+                                              duration: const Duration(
+                                                milliseconds: 140,
+                                              ),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 7,
+                                                vertical: 3.5,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: isSel
+                                                    ? cCol
+                                                    : (isHov
+                                                        ? const Color(
+                                                            0xFF1E293B,
+                                                          )
+                                                        : const Color(
+                                                            0xFF0F172A,
+                                                          )),
+                                                borderRadius:
+                                                    const BorderRadius.only(
+                                                  topLeft: Radius.circular(3),
+                                                  bottomLeft:
+                                                      Radius.circular(3),
+                                                  topRight:
+                                                      Radius.circular(12),
+                                                  bottomRight:
+                                                      Radius.circular(12),
+                                                ),
+                                                border: Border.all(
+                                                  color: isSel || isHov
+                                                      ? Colors.white
+                                                      : cCol,
+                                                  width:
+                                                      isSel || isHov ? 1.8 : 1.4,
+                                                ),
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: cCol.withValues(
+                                                      alpha: isSel || isHov
+                                                          ? 0.48
+                                                          : 0.25,
+                                                    ),
+                                                    blurRadius:
+                                                        isSel || isHov ? 8 : 4,
+                                                    offset: const Offset(0, 2),
+                                                  ),
+                                                ],
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Container(
+                                                    width: 7,
+                                                    height: 7,
+                                                    decoration: BoxDecoration(
+                                                      color: isSel
+                                                          ? Colors.white
+                                                          : cCol,
+                                                      shape: BoxShape.circle,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  const Icon(
+                                                    Icons.label_important,
+                                                    size: 11,
+                                                    color: Color(0xFF38BDF8),
+                                                  ),
+                                                  const SizedBox(width: 3),
+                                                  Text(
+                                                    '➔ ${remoteEnd.rackCode} • ${remoteEnd.deviceCode}:${remoteEnd.portNumber}',
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 9.2,
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                      letterSpacing: 0.1,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 5),
+                                                  InkWell(
+                                                    onTap: () {
+                                                      if (widget
+                                                              .onJumpToRackAndDevice !=
+                                                          null) {
+                                                        widget
+                                                            .onJumpToRackAndDevice!(
+                                                          remoteEnd.rackId,
+                                                          remoteEnd.deviceId,
+                                                        );
+                                                      } else {
+                                                        widget.onSwitchRack(
+                                                          remoteEnd.rackId,
+                                                        );
+                                                      }
+                                                    },
+                                                    child: Container(
+                                                      padding:
+                                                          const EdgeInsets.all(
+                                                        2,
+                                                      ),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.white
+                                                            .withValues(
+                                                          alpha: 0.16,
+                                                        ),
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(4),
+                                                      ),
+                                                      child: const Icon(
+                                                        Icons.open_in_new,
+                                                        size: 10,
+                                                        color:
+                                                            Color(0xFF38BDF8),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  }),
+
+                                  // D3. BANDEROLA CROSS-CONNECT FLOTANTE DE CONEXIÓN RÁPIDA CUANDO HAY UN PUERTO ORIGEN SELECCIONADO
+                                  if (_pendingSourcePort != null &&
+                                      activeSourceOffset != null)
+                                    Builder(
+                                      builder: (_) {
+                                        final srcPort = _pendingSourcePort!;
+                                        RackDeviceModel? srcDev;
+                                        for (final d in rack.devices) {
+                                          if (d.ports.any(
+                                            (p) => p.id == srcPort.id,
+                                          )) {
+                                            srcDev = d;
+                                            break;
+                                          }
+                                        }
+                                        final isBack =
+                                            (srcPort.face).toLowerCase() ==
+                                                'back';
+                                        final flagLeft = (_isDualFace && isBack)
+                                            ? (_backRackOuterLeft +
+                                                _rackOuterWidth +
+                                                12)
+                                            : (_rackOuterLeft +
+                                                _rackOuterWidth +
+                                                12);
+                                        return Positioned(
+                                          left: flagLeft,
+                                          top: activeSourceOffset.dy - 14,
+                                          child: Material(
+                                            color: Colors.transparent,
+                                            child: InkWell(
+                                              onTap: () {
+                                                final dev = srcDev;
+                                                final port = srcPort;
+                                                setState(() {
+                                                  _pendingSourcePort = null;
+                                                });
+                                                _showInterRackConnectionDialog(
+                                                  initialSourceDev: dev,
+                                                  initialSourcePort: port,
+                                                );
+                                              },
+                                              borderRadius:
+                                                  BorderRadius.circular(14),
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 10,
+                                                  vertical: 5,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  gradient:
+                                                      const LinearGradient(
+                                                    colors: [
+                                                      Color(0xFF0284C7),
+                                                      Color(0xFF2563EB),
+                                                    ],
+                                                  ),
+                                                  borderRadius:
+                                                      const BorderRadius.only(
+                                                    topLeft: Radius.circular(4),
+                                                    bottomLeft:
+                                                        Radius.circular(4),
+                                                    topRight:
+                                                        Radius.circular(14),
+                                                    bottomRight:
+                                                        Radius.circular(14),
+                                                  ),
+                                                  border: Border.all(
+                                                    color: Colors.white,
+                                                    width: 1.5,
+                                                  ),
+                                                  boxShadow: const [
+                                                    BoxShadow(
+                                                      color: Color(0x550284C7),
+                                                      blurRadius: 10,
+                                                      offset: Offset(0, 3),
+                                                    ),
+                                                  ],
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    const Icon(
+                                                      Icons.label_important,
+                                                      size: 13,
+                                                      color: Colors.white,
+                                                    ),
+                                                    const SizedBox(width: 5),
+                                                    Text(
+                                                      '🏷️ ➔ Conectar ${srcDev?.code ?? ''}:${srcPort.portNumber} a Otro Rack...',
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 10,
+                                                        fontWeight:
+                                                            FontWeight.w900,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+
                                   // E. BANDEJA AÉREA INTER-RACK SUPERIOR CON PÍLDORAS INTERACTIVAS DE SALTO A OTROS RACKS
                                   Positioned(
                                     left: _rackOuterLeft,
@@ -4474,11 +5577,23 @@ class _RackEditorViewState extends State<RackEditorView> {
                                                               });
                                                             },
                                                             onDoubleTap: () {
-                                                              widget
-                                                                  .onSwitchRack(
-                                                                remoteEnd
-                                                                    .rackId,
-                                                              );
+                                                              if (widget
+                                                                      .onJumpToRackAndDevice !=
+                                                                  null) {
+                                                                widget
+                                                                    .onJumpToRackAndDevice!(
+                                                                  remoteEnd
+                                                                      .rackId,
+                                                                  remoteEnd
+                                                                      .deviceId,
+                                                                );
+                                                              } else {
+                                                                widget
+                                                                    .onSwitchRack(
+                                                                  remoteEnd
+                                                                      .rackId,
+                                                                );
+                                                              }
                                                             },
                                                             child: Tooltip(
                                                               message:
@@ -4544,12 +5659,19 @@ class _RackEditorViewState extends State<RackEditorView> {
                                                                       width: 5,
                                                                     ),
                                                                     InkWell(
-                                                                      onTap: () =>
-                                                                          widget
-                                                                              .onSwitchRack(
-                                                                        remoteEnd
-                                                                            .rackId,
-                                                                      ),
+                                                                      onTap: () {
+                                                                        if (widget.onJumpToRackAndDevice !=
+                                                                            null) {
+                                                                          widget.onJumpToRackAndDevice!(
+                                                                            remoteEnd.rackId,
+                                                                            remoteEnd.deviceId,
+                                                                          );
+                                                                        } else {
+                                                                          widget.onSwitchRack(
+                                                                            remoteEnd.rackId,
+                                                                          );
+                                                                        }
+                                                                      },
                                                                       child:
                                                                           const Icon(
                                                                         Icons

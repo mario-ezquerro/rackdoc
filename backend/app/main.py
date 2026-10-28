@@ -1141,9 +1141,87 @@ def add_device_to_rack(rack_id: int, payload: RackDeviceCreate, db: Session = De
     create_ports_from_template(db, device, template)
     if (payload.custom_fields or {}).get("tray_items") is not None:
         _sync_tray_items_ports(db, device)
+    elif (payload.custom_fields or {}).get("custom_layout_spec") is not None:
+        _sync_custom_device_ports(db, device)
     db.commit()
     db.refresh(device)
     return device
+
+
+def _sync_custom_device_ports(db: Session, device: RackDevice):
+    """Sincroniza los puertos Front y Back de un equipo montado a partir de custom_fields['custom_layout_spec']."""
+    cf = dict(device.custom_fields or {})
+    spec = cf.get("custom_layout_spec")
+    if not isinstance(spec, dict):
+        return
+
+    existing_by_key = {(p.face, p.port_number): p for p in list(device.ports)}
+    desired_keys: set[tuple[str, str]] = set()
+
+    for tpl_face in ("front", "back"):
+        face_groups = list(spec.get(tpl_face) or [])
+        if device.mounted_face == "back":
+            effective_face = "back" if tpl_face == "front" else "front"
+        else:
+            effective_face = tpl_face
+
+        for group in face_groups:
+            port_type = str(group.get("port_type", "rj45"))
+            prefix = str(group.get("prefix", ""))
+            count = int(group.get("count", 0))
+            if count <= 0:
+                continue
+            rows = max(1, int(group.get("rows", 1)))
+            start_x = float(group.get("start_x", 0.12))
+            end_x = float(group.get("end_x", 0.88))
+            start_num = int(group.get("start_num", 1))
+
+            cols = max(1, (count + rows - 1) // rows)
+            for idx in range(count):
+                r = idx % rows
+                c = idx // rows
+                num = start_num + idx
+                p_num = f"{prefix}{num}" if prefix else str(num)
+                rel_x = (
+                    start_x + (end_x - start_x) * (c / max(1, cols - 1))
+                    if cols > 1
+                    else (start_x + end_x) / 2.0
+                )
+                rel_y = (
+                    0.32 if (rows > 1 and r == 0) else (0.68 if rows > 1 else 0.5)
+                )
+                key = (effective_face, p_num)
+                desired_keys.add(key)
+                if key in existing_by_key:
+                    ep = existing_by_key[key]
+                    ep.port_type = port_type
+                    ep.row_index = r
+                    ep.col_index = c
+                    ep.rel_x = round(rel_x, 4)
+                    ep.rel_y = round(rel_y, 4)
+                    ep.label = f"{device.code}:{p_num}"
+                else:
+                    db.add(
+                        Port(
+                            rack_device_id=device.id,
+                            port_number=p_num,
+                            label=f"{device.code}:{p_num}",
+                            face=effective_face,
+                            port_type=port_type,
+                            row_index=r,
+                            col_index=c,
+                            rel_x=round(rel_x, 4),
+                            rel_y=round(rel_y, 4),
+                        )
+                    )
+
+    stale_ports = [p for k, p in existing_by_key.items() if k not in desired_keys]
+    if stale_ports:
+        stale_ids = [p.id for p in stale_ports]
+        _delete_connections_for_port_ids(db, stale_ids)
+        for sp in stale_ports:
+            db.delete(sp)
+    db.flush()
 
 
 def _sync_tray_items_ports(db: Session, device: RackDevice):
@@ -1164,16 +1242,23 @@ def _sync_tray_items_ports(db: Session, device: RackDevice):
                 if tpl_id
                 else None
             )
-            spec = dict((tpl.layout_spec if tpl else item.get("layout_spec")) or {})
+            # Priorizar layout_spec personalizado del ítem (si el usuario definió bocas Front/Back específicas)
+            item_spec = item.get("layout_spec")
+            spec = dict(
+                (item_spec if isinstance(item_spec, dict) and item_spec else (tpl.layout_spec if tpl else None))
+                or {}
+            )
             front_groups = list(
                 spec.get("front")
-                or [
+                if "front" in spec
+                else [
                     {"port_type": "rj45", "prefix": "ETH", "count": 2},
                 ]
             )
             back_groups = list(
                 spec.get("back")
-                or [
+                if "back" in spec
+                else [
                     {"port_type": "power_c14", "prefix": "DC", "count": 1},
                 ]
             )
@@ -1269,8 +1354,11 @@ def update_rack_device(device_id: int, payload: RackDeviceUpdate, db: Session = 
     for k, v in updates.items():
         setattr(device, k, v)
 
-    if "custom_fields" in updates and (device.custom_fields or {}).get("tray_items") is not None:
-        _sync_tray_items_ports(db, device)
+    if "custom_fields" in updates:
+        if (device.custom_fields or {}).get("tray_items") is not None:
+            _sync_tray_items_ports(db, device)
+        elif (device.custom_fields or {}).get("custom_layout_spec") is not None:
+            _sync_custom_device_ports(db, device)
 
     db.commit()
     db.refresh(device)

@@ -110,6 +110,8 @@ class CableGeometryBuilder {
     int centerBridgeLaneIdx = 0;
     int backLeftLaneIdx = 0;
     int backRightLaneIdx = 0;
+    final usedFrontFlagYs = <double>[];
+    final usedBackFlagYs = <double>[];
 
     final isDualView = activeFace == 'both' &&
         backLeftChannelBaseX != null &&
@@ -257,7 +259,7 @@ class CableGeometryBuilder {
         continue;
       }
 
-      // Caso 2: Conexión OUTBOUND hacia otro rack distinto
+      // Caso 2: Conexión OUTBOUND hacia otro rack distinto -> Banderola "Cross-Connect" lateral a la altura del equipo (Opción 3)
       final activePoint = pSource ?? pTarget!;
       final otherInfo = (pSource != null) ? conn.targetInfo : conn.sourceInfo;
 
@@ -265,24 +267,36 @@ class CableGeometryBuilder {
         final onBackInDual = isDualView && activePoint.dx >= dualSplitX;
         final baseRight = onBackInDual ? backRightChannelBaseX : rightChannelBaseX;
         final laneIndex = rightLaneIdx++;
-        final channelX = baseRight + 18.0 + (laneIndex % 6) * 4.5;
-        final yStub = activePoint.dy + 10.0;
+        final channelX = baseRight + 10.0 + (laneIndex % 4) * 3.5;
+        final flagPinX = baseRight + 28.0;
+        final yStub = activePoint.dy + 7.0;
+
+        // Evitar solapamiento vertical si hay varias banderolas Cross-Connect en la misma U
+        final usedYs = onBackInDual ? usedBackFlagYs : usedFrontFlagYs;
+        double flagY = activePoint.dy;
+        int attempt = 0;
+        while (usedYs.any((y) => (y - flagY).abs() < 24.0) && attempt < 16) {
+          attempt++;
+          flagY = activePoint.dy +
+              (attempt.isOdd ? 1 : -1) * ((attempt + 1) ~/ 2) * 25.0;
+        }
+        usedYs.add(flagY);
 
         final pts = <Offset>[
           activePoint,
           Offset(activePoint.dx, yStub),
           Offset(channelX, yStub),
-          Offset(channelX, outboundAnchor.dy),
-          outboundAnchor,
+          Offset(channelX, flagY),
+          Offset(flagPinX, flagY),
         ];
 
         routes.add(
           ComputedCableRoute(
             connection: conn,
-            path: buildRoundedOrthogonalPath(pts, radius: 7.0),
+            path: buildRoundedOrthogonalPath(pts, radius: 5.5),
             points: pts,
             color: color,
-            badgePosition: Offset(channelX - 24, outboundAnchor.dy + 18),
+            badgePosition: Offset(flagPinX, flagY),
             badgeText:
                 '➔ ${otherInfo.rackCode} • U${otherInfo.startU} ${otherInfo.deviceCode}:${otherInfo.portNumber}',
             isPassThrough: false,
