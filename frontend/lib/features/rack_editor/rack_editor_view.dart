@@ -12,6 +12,7 @@ import 'widgets/properties_panel.dart';
 class RackEditorView extends StatefulWidget {
   final RackDocApiClient api;
   final int rackId;
+  final int? initialHighlightDeviceId;
   final List<DeviceTemplateModel> templates;
   final VoidCallback onBackToLocations;
   final ValueChanged<int> onSwitchRack;
@@ -22,6 +23,7 @@ class RackEditorView extends StatefulWidget {
     super.key,
     required this.api,
     required this.rackId,
+    this.initialHighlightDeviceId,
     required this.templates,
     required this.onBackToLocations,
     required this.onSwitchRack,
@@ -38,7 +40,7 @@ class _RackEditorViewState extends State<RackEditorView> {
   bool _loading = true;
   String? _error;
 
-  // Cara activa del rack ('front', 'back' o 'both' para ver Delante + Detrás a la vez)
+  // Cara activa del rack ('front', 'back' o 'both' para ver Front & Back a la vez)
   String _activeFace = 'both';
 
   // Mostrar / Ocultar foto de referencia / bisel realista en los equipos montados
@@ -47,14 +49,16 @@ class _RackEditorViewState extends State<RackEditorView> {
   // Filtro de visualización de cables ('all' | 'network' | 'fiber' | 'power')
   String _cableFilter = 'all';
 
-  // Librería seleccionada en el catálogo izquierdo ('all' | 'Network' | 'Power' | 'Host - HP' | ...)
+  // Librería seleccionada en el catálogo izquierdo ('all' | 'Bandeja - Equipos Mini' | 'Network' | 'Power' | ...)
   String _selectedLibraryGroup = 'all';
 
-  // Selección activa para el panel derecho y hover para controles rápidos
+  // Selección activa para el panel derecho, resaltado desde búsqueda/alarma y hover para controles rápidos
   int? _selectedDeviceId;
+  int? _highlightedDeviceId;
   int? _hoveredDeviceId;
   int? _selectedConnectionId;
   int? _hoveredConnectionId;
+  final TextEditingController _rackQuickSearchCtrl = TextEditingController();
 
   // Estado durante el arrastre (Drag & Drop) de un equipo ya colocado o desde el catálogo
   Object? _draggingData;
@@ -106,18 +110,54 @@ class _RackEditorViewState extends State<RackEditorView> {
   @override
   void initState() {
     super.initState();
+    _highlightedDeviceId = widget.initialHighlightDeviceId;
+    _selectedDeviceId = widget.initialHighlightDeviceId;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _applyFaceCameraZoom(_activeFace);
+    });
     _loadRack();
+  }
+
+  @override
+  void dispose() {
+    _rackQuickSearchCtrl.dispose();
+    _transformController.dispose();
+    super.dispose();
   }
 
   @override
   void didUpdateWidget(covariant RackEditorView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.rackId != widget.rackId) {
-      _selectedDeviceId = null;
+      _highlightedDeviceId = widget.initialHighlightDeviceId;
+      _selectedDeviceId = widget.initialHighlightDeviceId;
       _selectedConnectionId = null;
       _pendingSourcePort = null;
       _loadRack();
+    } else if (oldWidget.initialHighlightDeviceId !=
+            widget.initialHighlightDeviceId &&
+        widget.initialHighlightDeviceId != null) {
+      setState(() {
+        _highlightedDeviceId = widget.initialHighlightDeviceId;
+        _selectedDeviceId = widget.initialHighlightDeviceId;
+      });
     }
+  }
+
+  void _applyFaceCameraZoom(String face) {
+    final m = Matrix4.identity();
+    if (face == 'both') {
+      // Escala inicial ~0.58 para que tanto el bastidor FRONT (delante) como el BACK (detrás) se vean enteros a la vez
+      m.scaleByDouble(0.58, 0.58, 1.0, 1.0);
+    } else {
+      m.scaleByDouble(0.84, 0.84, 1.0, 1.0);
+    }
+    _transformController.value = m;
+  }
+
+  void _setFaceMode(String face) {
+    setState(() => _activeFace = face);
+    _applyFaceCameraZoom(face);
   }
 
   Future<void> _confirmDeleteCurrentRack() async {
@@ -625,16 +665,424 @@ class _RackEditorViewState extends State<RackEditorView> {
     }
   }
 
-  Future<void> _handleDropOnUSlot(Object droppedData, int targetStartU) async {
+  Future<void> _handleDropOnUSlot(
+    Object droppedData,
+    int targetStartU, {
+    RackDeviceModel? targetMountedDevice,
+  }) async {
     if (!_canEdit) return;
     setState(() {
       _draggingData = null;
       _hoveredDropU = null;
     });
+    // Si suelta un mini-equipo de bandeja ("Bandeja - Equipos Mini") sobre una Bandeja ya montada
+    if (droppedData is DeviceTemplateModel &&
+        droppedData.isTrayMiniDevice &&
+        targetMountedDevice != null &&
+        targetMountedDevice.isRackTray) {
+      await _showManageTrayItemsDialog(
+        targetMountedDevice,
+        initialAddTemplate: droppedData,
+      );
+      return;
+    }
     if (droppedData is RackDeviceModel) {
       await _moveDeviceToU(droppedData, targetStartU);
     } else if (droppedData is DeviceTemplateModel) {
       await _handleDropOrMountTemplate(droppedData, targetStartU);
+    }
+  }
+
+  // ===========================================================================
+  // GESTIÓN DE EQUIPOS PEQUEÑOS / NO ENRACABLES DENTRO DE UNA BANDEJA (TRAY)
+  // ===========================================================================
+  Future<void> _showManageTrayItemsDialog(
+    RackDeviceModel trayDev, {
+    DeviceTemplateModel? initialAddTemplate,
+  }) async {
+    if (!_canEdit) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final miniTemplates =
+        widget.templates.where((t) => t.isTrayMiniDevice).toList();
+    if (miniTemplates.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No se encontraron plantillas en la librería "Bandeja - Equipos Mini".',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final items = trayDev.trayItems
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+
+    DeviceTemplateModel selectedTpl = initialAddTemplate ?? miniTemplates.first;
+
+    String suggestCodeFor(DeviceTemplateModel t, int index) {
+      final m = t.modelName.toUpperCase();
+      if (m.contains('ONT') || m.contains('GPON')) return 'ONT$index';
+      if (m.contains('FORTI')) return 'FW$index';
+      if (m.contains('MIKROTIK') || m.contains('CISCO') || m.contains('RUTX')) {
+        return 'RTR$index';
+      }
+      if (m.contains('SWITCH')) return 'SWM$index';
+      if (m.contains('CONVERSOR')) return 'MC$index';
+      if (m.contains('NUC') ||
+          m.contains('TINY') ||
+          m.contains('MAC') ||
+          m.contains('RASPBERRY')) {
+        return 'PC$index';
+      }
+      return 'EQ$index';
+    }
+
+    final codeCtrl = TextEditingController(
+      text: suggestCodeFor(selectedTpl, items.length + 1),
+    );
+    final nameCtrl = TextEditingController(
+      text: '${selectedTpl.manufacturer} ${selectedTpl.modelName}',
+    );
+    final ipCtrl = TextEditingController(
+      text: '10.28.1.${60 + trayDev.startU * 2 + items.length}',
+    );
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => AlertDialog(
+          title: Row(
+            children: [
+              const Icon(
+                Icons.inbox_outlined,
+                color: Color(0xFF1D4ED8),
+                size: 22,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Equipos Alojados en Bandeja ${trayDev.code} (U${trayDev.startU})',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 580,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEFF6FF),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF93C5FD)),
+                    ),
+                    child: const Text(
+                      '💡 En una Bandeja puedes colocar hasta 4 equipos pequeños o de sobremesa (Routers, Mini-Switches, ONTs, Mini-PCs / NUC / ThinkCentre / Mac mini / Raspberry Pi). RackDoc genera automáticamente las bocas RJ45, SFP y tomas eléctricas de cada equipo sobre la bandeja.',
+                      style: TextStyle(fontSize: 11.5, color: Color(0xFF1E3A8A)),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    '1. EQUIPOS ACTUALMENTE EN LA BANDEJA (${items.length} / 4 máx.):',
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (items.isEmpty)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(
+                            Icons.info_outline,
+                            size: 16,
+                            color: Color(0xFF64748B),
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'La bandeja está vacía. Selecciona abajo un Router, Switch o Mini-PC para colocarlo encima.',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: Color(0xFF64748B),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    ...items.asMap().entries.map((entry) {
+                      final idx = entry.key;
+                      final it = entry.value;
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFCBD5E1)),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1E293B),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                '#${idx + 1} • ${it['code'] ?? 'EQ${idx + 1}'}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${it['name'] ?? it['model_name'] ?? 'Mini Equipo'}',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF0F172A),
+                                    ),
+                                  ),
+                                  Text(
+                                    'Modelo: ${it['manufacturer'] ?? ''} ${it['model_name'] ?? ''}${it['ip_address']?.toString().isNotEmpty == true ? ' • IP: ${it['ip_address']}' : ''}',
+                                    style: const TextStyle(
+                                      fontSize: 10.5,
+                                      color: Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: () {
+                                setModal(() {
+                                  items.removeAt(idx);
+                                });
+                              },
+                              icon: const Icon(
+                                Icons.delete_outline,
+                                size: 17,
+                                color: Color(0xFFDC2626),
+                              ),
+                              tooltip: 'Sacar este equipo de la bandeja',
+                              visualDensity: VisualDensity.compact,
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+
+                  const Divider(height: 24),
+                  const Text(
+                    '2. METER NUEVO EQUIPO EN ESTA BANDEJA (Routers, Switches, ONTs, Mini-PCs):',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF1E3A8A),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<DeviceTemplateModel>(
+                    initialValue: selectedTpl,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Modelo de la Librería "Bandeja - Equipos Mini"',
+                      isDense: true,
+                    ),
+                    items: miniTemplates
+                        .map(
+                          (t) => DropdownMenuItem(
+                            value: t,
+                            child: Text(
+                              '${t.manufacturer} — ${t.modelName}',
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (t) {
+                      if (t == null) return;
+                      setModal(() {
+                        selectedTpl = t;
+                        codeCtrl.text = suggestCodeFor(t, items.length + 1);
+                        nameCtrl.text = '${t.manufacturer} ${t.modelName}';
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: codeCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Código (ej. ONT1, SWM1, NUC1)',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 3,
+                        child: TextField(
+                          controller: nameCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Nombre / Función en Bandeja',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: ipCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'IP (Opcional)',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton.tonalIcon(
+                      onPressed: items.length >= 4
+                          ? null
+                          : () {
+                              setModal(() {
+                                items.add({
+                                  'template_id': selectedTpl.id,
+                                  'code': codeCtrl.text.trim().isEmpty
+                                      ? suggestCodeFor(
+                                          selectedTpl,
+                                          items.length + 1,
+                                        )
+                                      : codeCtrl.text.trim().toUpperCase(),
+                                  'name': nameCtrl.text.trim().isEmpty
+                                      ? '${selectedTpl.manufacturer} ${selectedTpl.modelName}'
+                                      : nameCtrl.text.trim(),
+                                  'manufacturer': selectedTpl.manufacturer,
+                                  'model_name': selectedTpl.modelName,
+                                  'ip_address': ipCtrl.text.trim(),
+                                });
+                                codeCtrl.text = suggestCodeFor(
+                                  selectedTpl,
+                                  items.length + 1,
+                                );
+                              });
+                            },
+                      icon: const Icon(Icons.add_box_outlined, size: 16),
+                      label: Text(
+                        items.length >= 4
+                            ? 'Bandeja llena (máx. 4 equipos)'
+                            : '+ Añadir a la Bandeja (${items.length}/4)',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton.icon(
+              onPressed: () {
+                // Si el usuario abrió el diálogo arrastrando un mini-equipo y aún no pulsó "+ Añadir a la Bandeja",
+                // lo añadimos automáticamente al pulsar Guardar si la lista no cambió o si venía preseleccionado.
+                if (initialAddTemplate != null &&
+                    items.length == trayDev.trayItems.length &&
+                    items.length < 4) {
+                  items.add({
+                    'template_id': selectedTpl.id,
+                    'code': codeCtrl.text.trim().isEmpty
+                        ? suggestCodeFor(selectedTpl, items.length + 1)
+                        : codeCtrl.text.trim().toUpperCase(),
+                    'name': nameCtrl.text.trim().isEmpty
+                        ? '${selectedTpl.manufacturer} ${selectedTpl.modelName}'
+                        : nameCtrl.text.trim(),
+                    'manufacturer': selectedTpl.manufacturer,
+                    'model_name': selectedTpl.modelName,
+                    'ip_address': ipCtrl.text.trim(),
+                  });
+                }
+                Navigator.pop(ctx, true);
+              },
+              icon: const Icon(Icons.save_outlined, size: 16),
+              label: const Text('Guardar Bandeja y Generar Puertos'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        final updatedCustom = Map<String, dynamic>.from(trayDev.customFields);
+        updatedCustom['tray_items'] = items;
+        await widget.api.updateDevice(trayDev.id, {
+          'custom_fields': updatedCustom,
+        });
+        await _loadRack();
+        setState(() {
+          _selectedDeviceId = trayDev.id;
+        });
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              'Bandeja "${trayDev.code}" actualizada con ${items.length} equipo(s) alojado(s) y sus bocas RJ45/Fibra/PSU sincronizadas.',
+            ),
+          ),
+        );
+      } catch (e) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
+        );
+      }
     }
   }
 
@@ -645,6 +1093,82 @@ class _RackEditorViewState extends State<RackEditorView> {
     if (!_canEdit) return;
     final rack = _rack;
     if (rack == null) return;
+
+    // Si es un equipo de "Bandeja - Equipos Mini" (Router sobremesa, Mini-Switch, ONT, Mini-PC)
+    // y se suelta en una U donde ya hay una Bandeja, lo metemos en esa bandeja.
+    // Si se suelta en una U libre, montamos automáticamente una Bandeja 1U con este mini-equipo dentro.
+    if (tpl.isTrayMiniDevice) {
+      for (final d in rack.devices) {
+        if (d.isRackTray && targetStartU >= d.startU && targetStartU <= d.endU) {
+          await _showManageTrayItemsDialog(d, initialAddTemplate: tpl);
+          return;
+        }
+      }
+      final trayTemplate = widget.templates.firstWhere(
+        (t) => t.isRackTray,
+        orElse: () => tpl,
+      );
+      if (!_canFitAtU(rack, targetStartU, 1)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Para colocar "${tpl.modelName}" en U$targetStartU hace falta una Bandeja en esa U o que U$targetStartU esté libre.',
+            ),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+        return;
+      }
+      try {
+        final trayCount = rack.devices.where((d) => d.isRackTray).length + 1;
+        final createdTray = await widget.api.addDeviceToRack(rack.id, {
+          'template_id': trayTemplate.id,
+          'code': 'BDJ$trayCount',
+          'name': 'Bandeja 19" (${tpl.modelName})',
+          'hostname': 'bdj$trayCount',
+          'fqdn': '',
+          'start_u': targetStartU,
+          'mounted_face': 'front',
+          'ip_address': '10.28.1.${60 + targetStartU}',
+          'subnet_mask': '255.255.255.0',
+          'gateway': '10.28.1.1',
+          'monitoring_enabled': true,
+          'custom_fields': {
+            'tray_items': [
+              {
+                'template_id': tpl.id,
+                'code': 'EQ1',
+                'name': '${tpl.manufacturer} ${tpl.modelName}',
+                'manufacturer': tpl.manufacturer,
+                'model_name': tpl.modelName,
+                'ip_address': '10.28.1.${60 + targetStartU}',
+              },
+            ],
+          },
+        });
+        await _loadRack();
+        setState(() {
+          _selectedDeviceId = createdTray.id;
+          _selectedTemplateForClick = null;
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Bandeja BDJ$trayCount montada en U$targetStartU con "${tpl.manufacturer} ${tpl.modelName}" alojado encima. Pulsa "+ Equipos en Bandeja" para meter más.',
+              ),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
+          );
+        }
+      }
+      return;
+    }
 
     // Verificar antes de abrir el formulario que existan suficientes unidades U libres consecutivas
     final targetEndU = targetStartU + tpl.uHeight - 1;
@@ -3151,7 +3675,132 @@ class _RackEditorViewState extends State<RackEditorView> {
               ),
               const Spacer(),
 
-              // Barra rápida cuando hay un equipo seleccionado: Subir 1U, Bajar 1U, Ajustar U ocupadas, Foto, Cable Inter-Rack, Borrar Equipo
+              // Selector / Buscador rápido de Equipos o Alarmas en este Rack (con resaltado de fondo gris)
+              PopupMenuButton<int>(
+                tooltip:
+                    'Buscar o localizar un equipo / alarma en este Rack (resaltado con fondo gris)',
+                onSelected: (devId) {
+                  setState(() {
+                    _selectedDeviceId = devId;
+                    _highlightedDeviceId = devId;
+                  });
+                },
+                itemBuilder: (ctx) {
+                  final list = rack.devices
+                      .where((d) => !d.isExternalFeed)
+                      .toList()
+                    ..sort((a, b) => b.startU.compareTo(a.startU));
+                  return list.map((d) {
+                    final isAlarm =
+                        d.monitoringEnabled && d.status != 'online';
+                    return PopupMenuItem<int>(
+                      value: d.id,
+                      child: Row(
+                        children: [
+                          Icon(
+                            isAlarm
+                                ? Icons.warning_amber_rounded
+                                : (d.isRackTray
+                                    ? Icons.inbox_outlined
+                                    : Icons.dns_outlined),
+                            size: 16,
+                            color: isAlarm
+                                ? const Color(0xFFDC2626)
+                                : const Color(0xFF334155),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'U${d.startU} • ${d.code} — ${d.name}${d.isRackTray && d.trayItems.isNotEmpty ? ' [${d.trayItems.length} mini-eq]' : ''}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: d.id == _highlightedDeviceId ||
+                                        d.id == _selectedDeviceId
+                                    ? FontWeight.w800
+                                    : FontWeight.w600,
+                                color: isAlarm
+                                    ? const Color(0xFFB91C1C)
+                                    : const Color(0xFF0F172A),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList();
+                },
+                child: Container(
+                  margin: const EdgeInsets.only(right: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _highlightedDeviceId != null
+                        ? const Color(0xFFE2E8F0)
+                        : const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.search_rounded,
+                        size: 15,
+                        color: Color(0xFF334155),
+                      ),
+                      SizedBox(width: 5),
+                      Text(
+                        'Localizar en Rack',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF1E293B),
+                        ),
+                      ),
+                      SizedBox(width: 3),
+                      Icon(
+                        Icons.arrow_drop_down,
+                        size: 16,
+                        color: Color(0xFF475569),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Conmutador directo en barra superior: [Front | Back | Front & Back]
+              Container(
+                margin: const EdgeInsets.only(right: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(7),
+                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _FaceToggleButton(
+                      label: 'Front',
+                      active: _activeFace == 'front',
+                      onTap: () => _setFaceMode('front'),
+                    ),
+                    _FaceToggleButton(
+                      label: 'Back',
+                      active: _activeFace == 'back',
+                      onTap: () => _setFaceMode('back'),
+                    ),
+                    _FaceToggleButton(
+                      label: 'Front & Back',
+                      active: _activeFace == 'both',
+                      onTap: () => _setFaceMode('both'),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Barra rápida cuando hay un equipo seleccionado: Subir 1U, Bajar 1U, Ajustar U ocupadas, Equipos en Bandeja, Foto, Cable Inter-Rack, Borrar Equipo
               if (_canEdit && selDev != null && !selDev.isExternalFeed)
                 Container(
                   margin: const EdgeInsets.only(right: 10),
@@ -3261,6 +3910,32 @@ class _RackEditorViewState extends State<RackEditorView> {
                           ],
                         ),
                       ),
+                      if (selDev.isRackTray)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: FilledButton.tonalIcon(
+                            onPressed: () =>
+                                _showManageTrayItemsDialog(selDev),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFFEDE9FE),
+                              foregroundColor: const Color(0xFF6D28D9),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 9,
+                                vertical: 4,
+                              ),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            icon: const Icon(Icons.inbox_outlined, size: 14),
+                            label: Text(
+                              '+ Equipos en Bandeja (${selDev.trayItems.length})',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ),
                       TextButton.icon(
                         onPressed: () =>
                             _showHardwarePhotoSearchDialog(device: selDev),
@@ -4014,7 +4689,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             ),
                             const SizedBox(width: 10),
 
-                            // Conmutador [♊ Front + Back | Front | Back]
+                            // Conmutador [Front | Back | Front & Back]
                             Container(
                               decoration: BoxDecoration(
                                 color: Colors.white,
@@ -4026,22 +4701,19 @@ class _RackEditorViewState extends State<RackEditorView> {
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   _FaceToggleButton(
-                                    label: '♊ Front + Back',
-                                    active: _activeFace == 'both',
-                                    onTap: () =>
-                                        setState(() => _activeFace = 'both'),
-                                  ),
-                                  _FaceToggleButton(
                                     label: 'Front',
                                     active: _activeFace == 'front',
-                                    onTap: () =>
-                                        setState(() => _activeFace = 'front'),
+                                    onTap: () => _setFaceMode('front'),
                                   ),
                                   _FaceToggleButton(
                                     label: 'Back',
                                     active: _activeFace == 'back',
-                                    onTap: () =>
-                                        setState(() => _activeFace = 'back'),
+                                    onTap: () => _setFaceMode('back'),
+                                  ),
+                                  _FaceToggleButton(
+                                    label: 'Front & Back',
+                                    active: _activeFace == 'both',
+                                    onTap: () => _setFaceMode('both'),
                                   ),
                                 ],
                               ),
@@ -5134,6 +5806,7 @@ class _RackEditorViewState extends State<RackEditorView> {
     final topY = _rackTopMargin + (totalUnits - topU) * _uHeightPx;
     final heightPx = dev.uHeight * _uHeightPx;
     final isSelected = dev.id == _selectedDeviceId;
+    final isHighlighted = dev.id == _highlightedDeviceId;
     final isHovered = dev.id == _hoveredDeviceId;
     final facePorts = dev.portsForFace(face);
     final isRearAutoView = dev.mountedFace != face;
@@ -5157,10 +5830,11 @@ class _RackEditorViewState extends State<RackEditorView> {
     Widget buildChassisContent({required bool isDropTarget}) {
       return Container(
         decoration: BoxDecoration(
+          // Cuando el equipo es seleccionado o localizado desde búsqueda/alarma, aplicamos un fondo grisáceo destacado
           color: isDropTarget
               ? const Color(0xFFFEE2E2)
-              : (isSelected
-                  ? const Color(0xFFF8FAFF)
+              : ((isHighlighted || isSelected)
+                  ? const Color(0xFFD1D5DB)
                   : (isTray
                       ? const Color(0xFFF1F5F9)
                       : (isRearAutoView
@@ -5168,16 +5842,52 @@ class _RackEditorViewState extends State<RackEditorView> {
                           : Colors.white))),
           border: Border.symmetric(
             horizontal: BorderSide(
-              color: isSelected
-                  ? const Color(0xFF2563EB)
+              color: (isHighlighted || isSelected)
+                  ? const Color(0xFF1E293B)
                   : const Color(0xFFCBD5E1),
-              width: isSelected ? 1.6 : 0.9,
+              width: (isHighlighted || isSelected) ? 2.0 : 0.9,
             ),
           ),
+          boxShadow: (isHighlighted || isSelected)
+              ? [
+                  BoxShadow(
+                    color: const Color(0xFF475569).withValues(alpha: 0.28),
+                    blurRadius: 8,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : null,
         ),
         child: Stack(
           clipBehavior: Clip.none,
           children: [
+            // Etiqueta de equipo localizado a la izquierda de la regla U cuando viene de búsqueda/alarma
+            if (isHighlighted || isSelected)
+              Positioned(
+                left: -68,
+                top: (heightPx / 2) - 10,
+                child: IgnorePointer(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF334155),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '▶ U${dev.startU}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
             // Fondo de Foto de Referencia o Bisel Gráfico Industrial (cuando "Foto Equipos: ON" está activo, o siempre para Ventiladores/Bandejas)
             if (_showEquipmentPhotos || isTray || isRoofFan)
               Positioned(
@@ -5247,7 +5957,7 @@ class _RackEditorViewState extends State<RackEditorView> {
             ),
 
             // Información sutil cuando tiene pocas bocas en esta cara (ej. parte trasera con PSU o servidor o cabina SAN/NAS)
-            if (facePorts.length <= 12)
+            if (facePorts.length <= 12 && !(isTray && dev.trayItems.isNotEmpty))
               Positioned(
                 left: _railWidth + 28,
                 top: 3,
@@ -5282,7 +5992,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                 connectedColor: connectedPortColors[port.id],
               ),
 
-            // Controles rápidos flotantes en el propio equipo (Arrastrar, Subir, Bajar, U Ocupadas -/+, Foto, Cable a Otro Rack, Borrar)
+            // Controles rápidos flotantes en el propio equipo (Arrastrar, Subir, Bajar, U Ocupadas -/+, Equipos en Bandeja, Foto, Cable a Otro Rack, Borrar)
             if (_canEdit && (isHovered || isSelected))
               Positioned(
                 left: _railWidth + 24,
@@ -5438,6 +6148,46 @@ class _RackEditorViewState extends State<RackEditorView> {
                             ],
                           ),
                         ),
+                        if (isTray)
+                          InkWell(
+                            onTap: () => _showManageTrayItemsDialog(dev),
+                            child: Tooltip(
+                              message:
+                                  'Colocar o gestionar Mini-Equipos dentro de esta Bandeja (Routers, Switches, Mini-PCs)',
+                              child: Container(
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 3,
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 5,
+                                  vertical: 1,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF7C3AED),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.inbox_outlined,
+                                      size: 11,
+                                      color: Colors.white,
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      '+ Equipos (${dev.trayItems.length})',
+                                      style: const TextStyle(
+                                        fontSize: 8.5,
+                                        fontWeight: FontWeight.w800,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
                         InkWell(
                           onTap: () =>
                               _showHardwarePhotoSearchDialog(device: dev),
@@ -5529,7 +6279,11 @@ class _RackEditorViewState extends State<RackEditorView> {
           }
         },
         onAcceptWithDetails: (details) {
-          _handleDropOnUSlot(details.data, dev.startU);
+          _handleDropOnUSlot(
+            details.data,
+            dev.startU,
+            targetMountedDevice: dev,
+          );
         },
         builder: (ctx, candidate, _) {
           final isDropTarget = candidate.isNotEmpty;
@@ -5543,8 +6297,19 @@ class _RackEditorViewState extends State<RackEditorView> {
             },
             child: GestureDetector(
               onTap: () {
+                if (_canEdit &&
+                    isTray &&
+                    _selectedTemplateForClick != null &&
+                    _selectedTemplateForClick!.isTrayMiniDevice) {
+                  _showManageTrayItemsDialog(
+                    dev,
+                    initialAddTemplate: _selectedTemplateForClick,
+                  );
+                  return;
+                }
                 setState(() {
                   _selectedDeviceId = dev.id;
+                  _highlightedDeviceId = dev.id;
                   _selectedConnectionId = null;
                 });
               },
@@ -5657,7 +6422,7 @@ class _RackEditorViewState extends State<RackEditorView> {
     final isStorageOrServer =
         cat == 'storage_san' || cat == 'storage_nas' || cat == 'server';
 
-    if (hasPhoto) {
+    if (hasPhoto && !(isTray && dev.trayItems.isNotEmpty)) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(2),
         child: Opacity(
@@ -5720,45 +6485,124 @@ class _RackEditorViewState extends State<RackEditorView> {
     }
 
     if (isTray) {
-      // Bandeja de Rack perforada con indicación de U ocupadas
+      final trayItems = dev.trayItems;
+      // Bandeja de Rack perforada con soporte visual para Mini-Equipos apoyados encima (Routers, Switches, Mini-PCs)
       return IgnorePointer(
         child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
           decoration: BoxDecoration(
             color: const Color(0xFFE2E8F0).withValues(alpha: 0.55),
             borderRadius: BorderRadius.circular(3),
             border: Border(
-              bottom: const BorderSide(color: Color(0xFF475569), width: 3.0),
+              bottom: const BorderSide(color: Color(0xFF334155), width: 3.5),
               left: const BorderSide(color: Color(0xFF64748B), width: 1.5),
               right: const BorderSide(color: Color(0xFF64748B), width: 1.5),
               top: BorderSide(
-                color: const Color(0xFF94A3B8).withValues(alpha: 0.5),
+                color: const Color(0xFF94A3B8).withValues(alpha: 0.45),
                 width: 0.8,
               ),
             ),
           ),
-          child: Center(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(
-                  Icons.layers_outlined,
-                  size: 13,
-                  color: Color(0xFF475569),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  'BANDEJA RACK 19" • OCUPA ${dev.uHeight}U (U${dev.startU}${dev.uHeight > 1 ? '-U${dev.endU}' : ''})',
-                  style: const TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF334155),
-                    letterSpacing: 0.5,
+          child: trayItems.isEmpty
+              ? Center(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.inbox_outlined,
+                        size: 13,
+                        color: Color(0xFF475569),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'BANDEJA RACK 19" (${dev.uHeight}U) • Arrastra aquí equipos de "Bandeja - Equipos Mini" o pulsa "+ Equipos"',
+                        style: const TextStyle(
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF334155),
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : Padding(
+                  padding: const EdgeInsets.only(
+                    left: 4,
+                    right: 4,
+                    top: 2,
+                    bottom: 3,
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (int idx = 0; idx < trayItems.length; idx++)
+                        Expanded(
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 3),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1E293B)
+                                  .withValues(alpha: 0.88),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                color: const Color(0xFF64748B),
+                                width: 1.1,
+                              ),
+                            ),
+                            child: Align(
+                              alignment: Alignment.topLeft,
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    (trayItems[idx]['model_name'] ?? '')
+                                                .toString()
+                                                .toLowerCase()
+                                                .contains('switch')
+                                        ? Icons.commit
+                                        : ((trayItems[idx]['model_name'] ?? '')
+                                                    .toString()
+                                                    .toLowerCase()
+                                                    .contains('pc') ||
+                                                (trayItems[idx]['model_name'] ??
+                                                        '')
+                                                    .toString()
+                                                    .toLowerCase()
+                                                    .contains('nuc') ||
+                                                (trayItems[idx]['model_name'] ??
+                                                        '')
+                                                    .toString()
+                                                    .toLowerCase()
+                                                    .contains('raspberry')
+                                            ? Icons.computer
+                                            : Icons.router_outlined),
+                                    size: 11,
+                                    color: const Color(0xFF38BDF8),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      '${trayItems[idx]['code'] ?? 'MINI-${idx + 1}'}: ${trayItems[idx]['name'] ?? trayItems[idx]['model_name'] ?? ''}'
+                                      '${(trayItems[idx]['ip_address'] ?? '').toString().isNotEmpty ? ' (${trayItems[idx]['ip_address']})' : ''}',
+                                      style: const TextStyle(
+                                        fontSize: 8.0,
+                                        fontWeight: FontWeight.w800,
+                                        color: Colors.white,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-              ],
-            ),
-          ),
         ),
       );
     }

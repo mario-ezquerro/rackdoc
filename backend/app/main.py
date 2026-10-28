@@ -1139,9 +1139,98 @@ def add_device_to_rack(rack_id: int, payload: RackDeviceCreate, db: Session = De
     db.flush()
 
     create_ports_from_template(db, device, template)
+    if (payload.custom_fields or {}).get("tray_items") is not None:
+        _sync_tray_items_ports(db, device)
     db.commit()
     db.refresh(device)
     return device
+
+
+def _sync_tray_items_ports(db: Session, device: RackDevice):
+    """Sincroniza los puertos reales (Front y Back) de todos los mini-equipos colocados encima de una Bandeja."""
+    cf = dict(device.custom_fields or {})
+    tray_items = list(cf.get("tray_items") or [])
+    existing_by_key = {(p.face, p.port_number): p for p in list(device.ports)}
+    desired_keys: set[tuple[str, str]] = set()
+
+    n = len(tray_items)
+    if n > 0:
+        seg_w = 0.90 / n
+        for idx, item in enumerate(tray_items):
+            item_code = str(item.get("code") or f"EQ{idx + 1}").strip()
+            tpl_id = item.get("template_id")
+            tpl = (
+                db.query(DeviceTemplate).filter(DeviceTemplate.id == int(tpl_id)).first()
+                if tpl_id
+                else None
+            )
+            spec = dict((tpl.layout_spec if tpl else item.get("layout_spec")) or {})
+            front_groups = list(
+                spec.get("front")
+                or [
+                    {"port_type": "rj45", "prefix": "ETH", "count": 2},
+                ]
+            )
+            back_groups = list(
+                spec.get("back")
+                or [
+                    {"port_type": "power_c14", "prefix": "DC", "count": 1},
+                ]
+            )
+
+            box_left = 0.05 + idx * seg_w + 0.02
+            box_right = 0.05 + (idx + 1) * seg_w - 0.02
+
+            for face_name, groups in (("front", front_groups), ("back", back_groups)):
+                flat_ports: list[tuple[str, str]] = []
+                for g in groups:
+                    p_type = str(g.get("port_type", "rj45"))
+                    prefix = str(g.get("prefix", "P"))
+                    cnt = max(1, int(g.get("count", 1)))
+                    for k in range(1, cnt + 1):
+                        p_short = f"{prefix}{k}" if cnt > 1 or not prefix else prefix
+                        flat_ports.append((f"{item_code}-{p_short}", p_type))
+
+                total_p = len(flat_ports)
+                for p_i, (p_num, p_type) in enumerate(flat_ports):
+                    rx = (
+                        (box_left + box_right) / 2.0
+                        if total_p <= 1
+                        else box_left
+                        + (box_right - box_left) * (p_i / float(total_p - 1))
+                    )
+                    ry = 0.62 if face_name == "front" else 0.56
+                    key = (face_name, p_num)
+                    desired_keys.add(key)
+                    if key in existing_by_key:
+                        ep = existing_by_key[key]
+                        ep.port_type = p_type
+                        ep.rel_x = round(rx, 4)
+                        ep.rel_y = round(ry, 4)
+                        ep.col_index = p_i
+                        ep.label = f"{device.code}:{p_num}"
+                    else:
+                        db.add(
+                            Port(
+                                rack_device_id=device.id,
+                                port_number=p_num,
+                                label=f"{device.code}:{p_num}",
+                                face=face_name,
+                                port_type=p_type,
+                                row_index=0,
+                                col_index=p_i,
+                                rel_x=round(rx, 4),
+                                rel_y=round(ry, 4),
+                            )
+                        )
+
+    stale_ports = [p for k, p in existing_by_key.items() if k not in desired_keys]
+    if stale_ports:
+        stale_ids = [p.id for p in stale_ports]
+        _delete_connections_for_port_ids(db, stale_ids)
+        for sp in stale_ports:
+            db.delete(sp)
+    db.flush()
 
 
 @app.put("/api/devices/{device_id}", response_model=RackDeviceSchema)
@@ -1179,6 +1268,9 @@ def update_rack_device(device_id: int, payload: RackDeviceUpdate, db: Session = 
 
     for k, v in updates.items():
         setattr(device, k, v)
+
+    if "custom_fields" in updates and (device.custom_fields or {}).get("tray_items") is not None:
+        _sync_tray_items_ports(db, device)
 
     db.commit()
     db.refresh(device)

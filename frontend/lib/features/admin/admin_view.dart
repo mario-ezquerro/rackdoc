@@ -24,10 +24,77 @@ class _AdminViewState extends State<AdminView> {
   bool _loading = true;
   String? _error;
 
+  // Controladores del formulario rápido de Alta de Usuario Local (sin AD)
+  final TextEditingController _quickUsernameCtrl = TextEditingController();
+  final TextEditingController _quickFullNameCtrl = TextEditingController();
+  final TextEditingController _quickEmailCtrl = TextEditingController();
+  final TextEditingController _quickPasswordCtrl = TextEditingController();
+  String _quickRole = 'editor';
+  bool _creatingLocalUser = false;
+
   @override
   void initState() {
     super.initState();
     _loadAdminData();
+  }
+
+  @override
+  void dispose() {
+    _quickUsernameCtrl.dispose();
+    _quickFullNameCtrl.dispose();
+    _quickEmailCtrl.dispose();
+    _quickPasswordCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submitQuickLocalUser() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final uname = _quickUsernameCtrl.text.trim();
+    final pass = _quickPasswordCtrl.text.trim();
+    if (uname.isEmpty) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: const Text('Escribe un nombre de usuario (username) para dar de alta.'),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+      return;
+    }
+    setState(() => _creatingLocalUser = true);
+    try {
+      await widget.api.createUser({
+        'username': uname,
+        'full_name': _quickFullNameCtrl.text.trim().isEmpty
+            ? uname
+            : _quickFullNameCtrl.text.trim(),
+        'email': _quickEmailCtrl.text.trim().isEmpty
+            ? '$uname@rackdoc.local'
+            : _quickEmailCtrl.text.trim(),
+        'password': pass.isEmpty ? 'rackdoc123' : pass,
+        'role': _quickRole,
+        'auth_source': 'local',
+      });
+      _quickUsernameCtrl.clear();
+      _quickFullNameCtrl.clear();
+      _quickEmailCtrl.clear();
+      _quickPasswordCtrl.clear();
+      await _loadAdminData();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Usuario local "$uname" dado de alta correctamente con rol $_quickRole.',
+          ),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _creatingLocalUser = false);
+      }
+    }
   }
 
   Future<void> _loadAdminData() async {
@@ -1052,6 +1119,205 @@ class _AdminViewState extends State<AdminView> {
                 ),
               ),
             ],
+          ),
+
+          const SizedBox(height: 24),
+
+          // SECCIÓN 0: ALTA DIRECTA DE USUARIOS NUEVOS LOCALES (NO SOLO DE AD)
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFF93C5FD), width: 1.4),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x08000000),
+                  blurRadius: 8,
+                  offset: Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFDBEAFE),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Icon(
+                        Icons.person_add_alt_1_rounded,
+                        size: 18,
+                        color: Color(0xFF1D4ED8),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Dar de Alta Nuevo Usuario Local (Base de Datos RackDoc — Sin Active Directory)',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                          Text(
+                            'Crea cuentas de usuario locales con contraseña propia y asígnales directamente cualquiera de los 4 roles RBAC.',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: Color(0xFF475569),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _showCreateOrEditUserDialog(),
+                      icon: const Icon(Icons.open_in_new, size: 15),
+                      label: const Text('Formulario Completo'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: _quickUsernameCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Usuario (Username) *',
+                          hintText: 'ej. jgarcia, operador1',
+                          prefixIcon: const Icon(Icons.person_outline, size: 17),
+                          isDense: true,
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: _quickFullNameCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Nombre y Apellidos',
+                          hintText: 'ej. Javier García',
+                          prefixIcon: const Icon(Icons.badge_outlined, size: 17),
+                          isDense: true,
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: _quickEmailCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Correo Electrónico',
+                          hintText: 'ej. jgarcia@empresa.es',
+                          prefixIcon: const Icon(Icons.email_outlined, size: 17),
+                          isDense: true,
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: _quickPasswordCtrl,
+                        obscureText: true,
+                        onSubmitted: (_) => _submitQuickLocalUser(),
+                        decoration: InputDecoration(
+                          labelText: 'Contraseña *',
+                          hintText: 'Por defecto: rackdoc123',
+                          prefixIcon: const Icon(Icons.key_outlined, size: 17),
+                          isDense: true,
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _quickRole,
+                        isDense: true,
+                        decoration: InputDecoration(
+                          labelText: 'Rol RBAC',
+                          isDense: true,
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'admin',
+                            child: Text('admin (Total)', style: TextStyle(fontSize: 12)),
+                          ),
+                          DropdownMenuItem(
+                            value: 'editor',
+                            child: Text('editor (Editar)', style: TextStyle(fontSize: 12)),
+                          ),
+                          DropdownMenuItem(
+                            value: 'operator',
+                            child: Text('operator (SSH/Web)', style: TextStyle(fontSize: 12)),
+                          ),
+                          DropdownMenuItem(
+                            value: 'viewer',
+                            child: Text('viewer (Solo Ver)', style: TextStyle(fontSize: 12)),
+                          ),
+                        ],
+                        onChanged: (v) =>
+                            setState(() => _quickRole = v ?? 'editor'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    FilledButton.icon(
+                      onPressed:
+                          _creatingLocalUser ? null : _submitQuickLocalUser,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF1E3A8A),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 14,
+                        ),
+                      ),
+                      icon: const Icon(Icons.person_add_alt_1, size: 16),
+                      label: Text(
+                        _creatingLocalUser ? 'Creando...' : 'Dar de Alta',
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
 
           const SizedBox(height: 24),

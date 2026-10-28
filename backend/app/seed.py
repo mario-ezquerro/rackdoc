@@ -2500,6 +2500,246 @@ def sync_system_defaults(db: Session):
                 ],
             },
         },
+
+        # --- BANDEJA - EQUIPOS MINI (Equipos pequeños / no enracables para colocar encima de Bandejas: Routers, Mini-Switches, ONTs, Mini-PCs / NUC — 12 modelos) ---
+        {
+            "library_group": "Bandeja - Equipos Mini",
+            "category": "rack_tray_device",
+            "manufacturer": "Nokia / Huawei",
+            "model_name": "ONT / Conversor Fibra ISP GPON/XGS-PON (Sobre Bandeja)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {
+                "is_tray_item": True,
+                "tray_item_kind": "ont",
+                "front": [
+                    {"port_type": "fiber_lc", "prefix": "PON", "count": 1, "rows": 1, "start_x": 0.22, "end_x": 0.28},
+                    {"port_type": "rj45", "prefix": "LAN", "count": 4, "rows": 1, "start_x": 0.38, "end_x": 0.76},
+                ],
+                "back": [
+                    {"port_type": "power_c14", "prefix": "DC", "count": 1, "rows": 1, "start_x": 0.45, "end_x": 0.55},
+                ],
+            },
+        },
+        {
+            "library_group": "Bandeja - Equipos Mini",
+            "category": "rack_tray_device",
+            "manufacturer": "Fortinet",
+            "model_name": "FortiGate 40F / 60F Desktop Firewall (Sobre Bandeja)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#FEF2F2",
+            "layout_spec": {
+                "is_tray_item": True,
+                "tray_item_kind": "firewall",
+                "front": [
+                    {"port_type": "rj45", "prefix": "WAN", "count": 1, "rows": 1, "start_x": 0.20, "end_x": 0.26},
+                    {"port_type": "rj45", "prefix": "LAN", "count": 4, "rows": 1, "start_x": 0.34, "end_x": 0.76},
+                ],
+                "back": [
+                    {"port_type": "power_c14", "prefix": "DC", "count": 1, "rows": 1, "start_x": 0.45, "end_x": 0.55},
+                ],
+            },
+        },
+        {
+            "library_group": "Bandeja - Equipos Mini",
+            "category": "rack_tray_device",
+            "manufacturer": "MikroTik",
+            "model_name": "MikroTik hEX S / RB5009 Mini Router PoE+SFP (Sobre Bandeja)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#EFF6FF",
+            "layout_spec": {
+                "is_tray_item": True,
+                "tray_item_kind": "router",
+                "front": [
+                    {"port_type": "sfp_plus", "prefix": "SFP", "count": 1, "rows": 1, "start_x": 0.18, "end_x": 0.24},
+                    {"port_type": "rj45", "prefix": "ETH", "count": 5, "rows": 1, "start_x": 0.32, "end_x": 0.78},
+                ],
+                "back": [
+                    {"port_type": "power_c14", "prefix": "DC", "count": 1, "rows": 1, "start_x": 0.45, "end_x": 0.55},
+                ],
+            },
+        },
+        {
+            "library_group": "Bandeja - Equipos Mini",
+            "category": "rack_tray_device",
+            "manufacturer": "Cisco",
+            "model_name": "Cisco Catalyst / ISR 1100-4P Mini Router (Sobre Bandeja)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F0F9FF",
+            "layout_spec": {
+                "is_tray_item": True,
+                "tray_item_kind": "router",
+                "front": [
+                    {"port_type": "sfp_plus", "prefix": "WAN-SFP", "count": 1, "rows": 1, "start_x": 0.20, "end_x": 0.26},
+                    {"port_type": "rj45", "prefix": "GE", "count": 4, "rows": 1, "start_x": 0.36, "end_x": 0.76},
+                ],
+                "back": [
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 1, "rows": 1, "start_x": 0.45, "end_x": 0.55},
+                ],
+            },
+        },
+        {
+            "library_group": "Bandeja - Equipos Mini",
+            "category": "rack_tray_device",
+            "manufacturer": "Teltonika",
+            "model_name": "Teltonika RUTX50 Router 5G/4G LTE Dual-SIM (Sobre Bandeja)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {
+                "is_tray_item": True,
+                "tray_item_kind": "router",
+                "front": [
+                    {"port_type": "rj45", "prefix": "WAN", "count": 1, "rows": 1, "start_x": 0.22, "end_x": 0.28},
+                    {"port_type": "rj45", "prefix": "LAN", "count": 4, "rows": 1, "start_x": 0.36, "end_x": 0.76},
+                ],
+                "back": [
+                    {"port_type": "power_c14", "prefix": "DC", "count": 1, "rows": 1, "start_x": 0.45, "end_x": 0.55},
+                ],
+            },
+        },
+        {
+            "library_group": "Bandeja - Equipos Mini",
+            "category": "rack_tray_device",
+            "manufacturer": "Netgear / TP-Link",
+            "model_name": "Mini Switch 5 Bocas GbE Desktop (Sobre Bandeja)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {
+                "is_tray_item": True,
+                "tray_item_kind": "switch",
+                "front": [
+                    {"port_type": "rj45", "prefix": "P", "count": 5, "rows": 1, "start_x": 0.22, "end_x": 0.78},
+                ],
+                "back": [
+                    {"port_type": "power_c14", "prefix": "DC", "count": 1, "rows": 1, "start_x": 0.45, "end_x": 0.55},
+                ],
+            },
+        },
+        {
+            "library_group": "Bandeja - Equipos Mini",
+            "category": "rack_tray_device",
+            "manufacturer": "Ubiquiti / Cisco",
+            "model_name": "Mini Switch 8 Bocas PoE + 2 SFP Compacto (Sobre Bandeja)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {
+                "is_tray_item": True,
+                "tray_item_kind": "switch",
+                "front": [
+                    {"port_type": "rj45", "prefix": "P", "count": 8, "rows": 1, "start_x": 0.16, "end_x": 0.66},
+                    {"port_type": "sfp_plus", "prefix": "SFP", "count": 2, "rows": 1, "start_x": 0.72, "end_x": 0.84},
+                ],
+                "back": [
+                    {"port_type": "power_c14", "prefix": "PSU", "count": 1, "rows": 1, "start_x": 0.45, "end_x": 0.55},
+                ],
+            },
+        },
+        {
+            "library_group": "Bandeja - Equipos Mini",
+            "category": "rack_tray_device",
+            "manufacturer": "Allied Telesis / TP-Link",
+            "model_name": "Conversor de Medios Fibra Óptica ↔ RJ45 (Media Converter)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#FEFCE8",
+            "layout_spec": {
+                "is_tray_item": True,
+                "tray_item_kind": "converter",
+                "front": [
+                    {"port_type": "fiber_lc", "prefix": "FO", "count": 1, "rows": 1, "start_x": 0.34, "end_x": 0.42},
+                    {"port_type": "rj45", "prefix": "ETH", "count": 1, "rows": 1, "start_x": 0.56, "end_x": 0.64},
+                ],
+                "back": [
+                    {"port_type": "power_c14", "prefix": "DC", "count": 1, "rows": 1, "start_x": 0.45, "end_x": 0.55},
+                ],
+            },
+        },
+        {
+            "library_group": "Bandeja - Equipos Mini",
+            "category": "rack_tray_device",
+            "manufacturer": "Intel / ASUS",
+            "model_name": "Intel NUC Pro Mini PC (Ordenador Compacto Dual-LAN)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": {
+                "is_tray_item": True,
+                "tray_item_kind": "minipc",
+                "front": [
+                    {"port_type": "rj45", "prefix": "ETH", "count": 2, "rows": 1, "start_x": 0.38, "end_x": 0.62},
+                ],
+                "back": [
+                    {"port_type": "rj45", "prefix": "LAN", "count": 2, "rows": 1, "start_x": 0.32, "end_x": 0.52},
+                    {"port_type": "power_c14", "prefix": "DC", "count": 1, "rows": 1, "start_x": 0.64, "end_x": 0.72},
+                ],
+            },
+        },
+        {
+            "library_group": "Bandeja - Equipos Mini",
+            "category": "rack_tray_device",
+            "manufacturer": "Lenovo / Dell / HP",
+            "model_name": "ThinkCentre Tiny / OptiPlex Micro / EliteDesk Mini PC",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": {
+                "is_tray_item": True,
+                "tray_item_kind": "minipc",
+                "front": [
+                    {"port_type": "rj45", "prefix": "ETH", "count": 2, "rows": 1, "start_x": 0.38, "end_x": 0.62},
+                ],
+                "back": [
+                    {"port_type": "rj45", "prefix": "LAN", "count": 2, "rows": 1, "start_x": 0.32, "end_x": 0.52},
+                    {"port_type": "power_c14", "prefix": "DC", "count": 1, "rows": 1, "start_x": 0.64, "end_x": 0.72},
+                ],
+            },
+        },
+        {
+            "library_group": "Bandeja - Equipos Mini",
+            "category": "rack_tray_device",
+            "manufacturer": "Apple",
+            "model_name": "Mac mini Pro 10GbE (Mini Ordenador / Nodo Servidor)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {
+                "is_tray_item": True,
+                "tray_item_kind": "minipc",
+                "front": [
+                    {"port_type": "rj45", "prefix": "10GbE", "count": 1, "rows": 1, "start_x": 0.46, "end_x": 0.54},
+                ],
+                "back": [
+                    {"port_type": "rj45", "prefix": "10G-R", "count": 1, "rows": 1, "start_x": 0.38, "end_x": 0.46},
+                    {"port_type": "power_c14", "prefix": "AC", "count": 1, "rows": 1, "start_x": 0.58, "end_x": 0.66},
+                ],
+            },
+        },
+        {
+            "library_group": "Bandeja - Equipos Mini",
+            "category": "rack_tray_device",
+            "manufacturer": "Raspberry Pi / IoT",
+            "model_name": "Raspberry Pi 5 / Sonda Hardware Monitorización (PoE/ETH)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#ECFDF5",
+            "layout_spec": {
+                "is_tray_item": True,
+                "tray_item_kind": "minipc",
+                "front": [
+                    {"port_type": "rj45", "prefix": "ETH", "count": 1, "rows": 1, "start_x": 0.46, "end_x": 0.54},
+                ],
+                "back": [
+                    {"port_type": "power_c14", "prefix": "USB-C", "count": 1, "rows": 1, "start_x": 0.46, "end_x": 0.54},
+                ],
+            },
+        },
     ]
     for et in extra_templates:
         exists = (
@@ -2509,9 +2749,14 @@ def sync_system_defaults(db: Session):
         )
         if not exists:
             db.add(DeviceTemplate(**et))
-        elif et["category"] in ("pdu", "miscellaneous"):
+        elif et["category"] in ("pdu", "miscellaneous", "rack_tray_device"):
+            exists.library_group = et["library_group"]
             exists.layout_spec = et["layout_spec"]
     db.flush()
+
+    # Reasignar también la ONT preexistente al grupo "Bandeja - Equipos Mini"
+    for tpl_ont in db.query(DeviceTemplate).filter(DeviceTemplate.category == "rack_tray_device").all():
+        tpl_ont.library_group = "Bandeja - Equipos Mini"
 
     get_or_create_external_feed_template(db)
 

@@ -80,6 +80,12 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   @override
   void didUpdateWidget(covariant DatacenterFloorView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.initialFloorId != null &&
+        widget.initialFloorId != oldWidget.initialFloorId) {
+      _selectedFloorId = widget.initialFloorId;
+    } else if (widget.activeLocationId != oldWidget.activeLocationId) {
+      _selectedFloorId = widget.initialFloorId;
+    }
     _syncFloorState();
   }
 

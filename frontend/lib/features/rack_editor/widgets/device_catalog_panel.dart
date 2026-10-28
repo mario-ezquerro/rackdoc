@@ -36,6 +36,7 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
   String? _expandedCategory;
 
   static const List<String> _defaultLibraries = [
+    'Bandeja - Equipos Mini',
     'Network',
     'Power',
     'Host - HP',
@@ -47,6 +48,8 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
   ];
 
   static const Map<String, String> _categoryTitles = {
+    'rack_tray': 'Rack Tray (Bandejas U Editable)',
+    'rack_tray_device': 'Bandeja — Equipos Mini (Routers, Switches, Mini-PCs)',
     'switch': 'Switch (Network)',
     'router': 'Router (Network)',
     'firewall': 'Firewall (Network)',
@@ -59,8 +62,6 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
     'patch_panel': 'Patch Panel',
     'patchbox': 'Patchbox',
     'cable_manager': 'Cable Manager',
-    'rack_tray': 'Rack Tray (Bandejas U Editable)',
-    'rack_tray_device': 'Rack Tray Device',
     'miscellaneous': 'Miscellaneous (Ventiladores / Bandejas / Ciegos)',
   };
 

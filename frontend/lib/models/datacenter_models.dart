@@ -303,6 +303,16 @@ class DeviceTemplateModel {
       (layoutSpec['device_subtype'] ?? '') == 'roof_fan' ||
       modelName.toLowerCase().contains('ventilador');
 
+  bool get isRackTray =>
+      category == 'rack_tray' ||
+      (layoutSpec['device_subtype'] ?? '') == 'rack_tray' ||
+      modelName.toLowerCase().contains('bandeja');
+
+  bool get isTrayMiniDevice =>
+      category == 'rack_tray_device' ||
+      libraryGroup == 'Bandeja - Equipos Mini' ||
+      (layoutSpec['is_tray_item'] == true);
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'category': category,
@@ -448,6 +458,19 @@ class RackDeviceModel {
   int get socketCount =>
       int.tryParse((customFields['socket_count'] ?? ports.length).toString()) ??
       ports.length;
+
+  bool get isRackTray => template.isRackTray;
+
+  List<Map<String, dynamic>> get trayItems {
+    final raw = customFields['tray_items'];
+    if (raw is List) {
+      return raw
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    }
+    return const [];
+  }
 
   bool isVisibleOnFace(String activeFace) {
     if (isExternalFeed) return false;

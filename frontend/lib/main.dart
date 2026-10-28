@@ -44,7 +44,14 @@ class _RackDocShellState extends State<RackDocShell> {
   // Flujo jerárquico: 'locations' -> 'datacenter' -> 'rack_editor' -> 'dashboard' -> 'admin'
   String _activeNav = 'locations';
   int _activeLocationId = 1;
+  int? _activeFloorId;
   int _activeRackId = 1;
+  int? _highlightedDeviceId;
+
+  // Estado de expansión del árbol jerárquico en la columna izquierda ("DATACENTERS & RACKS"):
+  // Cada Datacenter tiene su triángulo (gira 90°) para mostrar sus Pisos, y cada Piso tiene su triángulo (gira 90°) para mostrar sus Racks.
+  final Set<int> _expandedLocationIds = {};
+  final Set<int> _expandedFloorIds = {};
 
   List<LocationNode> _locations = [];
   List<DeviceTemplateModel> _templates = [];
@@ -131,6 +138,17 @@ class _RackDocShellState extends State<RackDocShell> {
           _currentUser = activeUsr;
           _activeLocationId = defaultLocId;
           _activeRackId = defaultRackId;
+          if (_expandedLocationIds.isEmpty && locs.isNotEmpty) {
+            _expandedLocationIds.add(defaultLocId);
+            final defLoc = locs.firstWhere(
+              (l) => l.id == defaultLocId,
+              orElse: () => locs.first,
+            );
+            if (defLoc.floors.isNotEmpty) {
+              _expandedFloorIds.add(defLoc.floors.first.id);
+              _activeFloorId ??= defLoc.floors.first.id;
+            }
+          }
           _loading = false;
         });
       }
@@ -160,25 +178,34 @@ class _RackDocShellState extends State<RackDocShell> {
     }
   }
 
-  void _openDatacenter(int locationId) {
+  void _openDatacenter(int locationId, {int? floorId}) {
     setState(() {
       _activeLocationId = locationId;
+      _expandedLocationIds.add(locationId);
+      if (floorId != null) {
+        _activeFloorId = floorId;
+        _expandedFloorIds.add(floorId);
+      }
       _activeNav = 'datacenter';
     });
   }
 
-  void _openRack(int rackId) {
+  void _openRack(int rackId, {int? highlightDeviceId}) {
     for (final l in _locations) {
       for (final f in l.floors) {
         for (final r in f.rooms) {
           if (r.racks.any((rk) => rk.id == rackId)) {
             _activeLocationId = l.id;
+            _activeFloorId = f.id;
+            _expandedLocationIds.add(l.id);
+            _expandedFloorIds.add(f.id);
           }
         }
       }
     }
     setState(() {
       _activeRackId = rackId;
+      _highlightedDeviceId = highlightDeviceId;
       _activeNav = 'rack_editor';
     });
   }
@@ -1065,110 +1092,470 @@ class _RackDocShellState extends State<RackDocShell> {
                   onTap: () => setState(() => _activeNav = 'admin'),
                 ),
 
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
-                  child: Text(
-                    'DATACENTERS & RACKS',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF94A3B8),
-                      letterSpacing: 0.6,
-                    ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 12, 6),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'DATACENTERS & RACKS',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF94A3B8),
+                            letterSpacing: 0.6,
+                          ),
+                        ),
+                      ),
+                      Tooltip(
+                        message: 'Desplegar todo el árbol (Datacenters, Pisos y Racks)',
+                        child: InkWell(
+                          onTap: () {
+                            setState(() {
+                              for (final l in _locations) {
+                                _expandedLocationIds.add(l.id);
+                                for (final f in l.floors) {
+                                  _expandedFloorIds.add(f.id);
+                                }
+                              }
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(4),
+                          child: const Padding(
+                            padding: EdgeInsets.all(2),
+                            child: Icon(
+                              Icons.unfold_more_rounded,
+                              size: 14,
+                              color: Color(0xFF64748B),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      Tooltip(
+                        message: 'Plegar todo el árbol',
+                        child: InkWell(
+                          onTap: () {
+                            setState(() {
+                              _expandedLocationIds.clear();
+                              _expandedFloorIds.clear();
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(4),
+                          child: const Padding(
+                            padding: EdgeInsets.all(2),
+                            child: Icon(
+                              Icons.unfold_less_rounded,
+                              size: 14,
+                              color: Color(0xFF64748B),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 Expanded(
                   child: ListView(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
                     children: [
-                      for (final loc in _locations) ...[
-                        ListTile(
-                          dense: true,
-                          visualDensity: VisualDensity.compact,
-                          leading: Icon(
-                            Icons.business_rounded,
-                            size: 16,
-                            color: loc.offlineCount > 0
-                                ? const Color(0xFFDC2626)
-                                : const Color(0xFF0F172A),
-                          ),
-                          title: Text(
-                            '${loc.code} — ${loc.name}',
-                            style: const TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w800,
-                              color: Color(0xFF0F172A),
-                            ),
-                          ),
-                          subtitle: Text(
-                            _formatMonitoredInline(
-                              monitored: loc.monitoredCount,
-                              online: loc.onlineCount,
-                              offline: loc.offlineCount,
-                            ),
-                            style: const TextStyle(
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFF475569),
-                            ),
-                          ),
-                          onTap: () => _openDatacenter(loc.id),
-                        ),
-                        for (final fl in loc.floors)
-                          for (final rm in fl.rooms)
-                            for (final rk in rm.racks)
-                              Padding(
-                                padding: const EdgeInsets.only(left: 10),
-                                child: ListTile(
-                                  dense: true,
-                                  visualDensity: VisualDensity.compact,
-                                  shape: RoundedRectangleBorder(
+                      for (final loc in _locations)
+                        Builder(
+                          builder: (_) {
+                            final isLocExpanded =
+                                _expandedLocationIds.contains(loc.id);
+                            final isLocActive = _activeNav == 'datacenter' &&
+                                _activeLocationId == loc.id;
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                // NIVEL 1: DATACENTER (con Triángulo ▶ que gira 90° a ▼ para desplegar Pisos)
+                                Container(
+                                  margin: const EdgeInsets.only(bottom: 2),
+                                  decoration: BoxDecoration(
+                                    color: isLocActive
+                                        ? const Color(0xFFEFF6FF)
+                                        : Colors.transparent,
                                     borderRadius: BorderRadius.circular(6),
                                   ),
-                                  selected: _activeNav == 'rack_editor' &&
-                                      _activeRackId == rk.id,
-                                  selectedTileColor: const Color(0xFFEFF6FF),
-                                  leading: Icon(
-                                    Icons.dns_outlined,
-                                    size: 15,
-                                    color: rk.offlineCount > 0
-                                        ? const Color(0xFFDC2626)
-                                        : ((_activeNav == 'rack_editor' &&
-                                                _activeRackId == rk.id)
-                                            ? const Color(0xFF2563EB)
-                                            : const Color(0xFF64748B)),
+                                  child: Row(
+                                    children: [
+                                      InkWell(
+                                        borderRadius: BorderRadius.circular(6),
+                                        onTap: () {
+                                          setState(() {
+                                            if (isLocExpanded) {
+                                              _expandedLocationIds
+                                                  .remove(loc.id);
+                                            } else {
+                                              _expandedLocationIds.add(loc.id);
+                                            }
+                                          });
+                                        },
+                                        child: Padding(
+                                          padding: const EdgeInsets.fromLTRB(
+                                            6,
+                                            8,
+                                            4,
+                                            8,
+                                          ),
+                                          child: AnimatedRotation(
+                                            turns: isLocExpanded ? 0.25 : 0.0,
+                                            duration: const Duration(
+                                              milliseconds: 180,
+                                            ),
+                                            child: Icon(
+                                              Icons.play_arrow_rounded,
+                                              size: 17,
+                                              color: isLocExpanded
+                                                  ? const Color(0xFF1D4ED8)
+                                                  : const Color(0xFF475569),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: InkWell(
+                                          borderRadius:
+                                              BorderRadius.circular(6),
+                                          onTap: () {
+                                            setState(() {
+                                              if (!isLocExpanded) {
+                                                _expandedLocationIds
+                                                    .add(loc.id);
+                                              }
+                                            });
+                                            _openDatacenter(loc.id);
+                                          },
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 6,
+                                              horizontal: 4,
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                Icon(
+                                                  Icons.business_rounded,
+                                                  size: 15,
+                                                  color: loc.offlineCount > 0
+                                                      ? const Color(0xFFDC2626)
+                                                      : const Color(0xFF0F172A),
+                                                ),
+                                                const SizedBox(width: 6),
+                                                Expanded(
+                                                  child: Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      Text(
+                                                        '${loc.code} — ${loc.name}',
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                        style: TextStyle(
+                                                          fontSize: 11.5,
+                                                          fontWeight:
+                                                              FontWeight.w800,
+                                                          color: isLocActive
+                                                              ? const Color(
+                                                                  0xFF1D4ED8,
+                                                                )
+                                                              : const Color(
+                                                                  0xFF0F172A,
+                                                                ),
+                                                        ),
+                                                      ),
+                                                      Text(
+                                                        _formatMonitoredInline(
+                                                          monitored: loc
+                                                              .monitoredCount,
+                                                          online:
+                                                              loc.onlineCount,
+                                                          offline:
+                                                              loc.offlineCount,
+                                                          prefix:
+                                                              '${loc.floors.length} pisos',
+                                                        ),
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                        style: const TextStyle(
+                                                          fontSize: 9.5,
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                          color:
+                                                              Color(0xFF475569),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                  title: Text(
-                                    '${rk.code} (${rk.name})',
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      fontWeight:
-                                          (_activeNav == 'rack_editor' &&
-                                                  _activeRackId == rk.id)
-                                              ? FontWeight.w700
-                                              : FontWeight.w500,
-                                      color: (_activeNav == 'rack_editor' &&
-                                              _activeRackId == rk.id)
-                                          ? const Color(0xFF1D4ED8)
-                                          : const Color(0xFF334155),
-                                    ),
-                                  ),
-                                  subtitle: Text(
-                                    _formatMonitoredInline(
-                                      monitored: rk.monitoredCount,
-                                      online: rk.onlineCount,
-                                      offline: rk.offlineCount,
-                                      prefix: 'P${fl.levelNumber}',
-                                    ),
-                                    style: const TextStyle(
-                                      fontSize: 9.5,
-                                      color: Color(0xFF64748B),
-                                    ),
-                                  ),
-                                  onTap: () => _openRack(rk.id),
                                 ),
-                              ),
-                      ],
+
+                                // NIVEL 2: PISOS / PLANTAS DEL DATACENTER (cuando el triángulo del Datacenter está girado 90°)
+                                if (isLocExpanded)
+                                  for (final fl in loc.floors)
+                                    Builder(
+                                      builder: (_) {
+                                        final isFloorExpanded =
+                                            _expandedFloorIds.contains(fl.id);
+                                        final floorRacks = <RackSummary>[
+                                          for (final rm in fl.rooms)
+                                            ...rm.racks,
+                                        ];
+                                        final isFloorActive =
+                                            _activeNav == 'datacenter' &&
+                                                _activeLocationId == loc.id &&
+                                                _activeFloorId == fl.id;
+                                        return Padding(
+                                          padding:
+                                              const EdgeInsets.only(left: 14),
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.stretch,
+                                            children: [
+                                              Container(
+                                                margin: const EdgeInsets.only(
+                                                  bottom: 1,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: isFloorActive
+                                                      ? const Color(0xFFF1F5F9)
+                                                      : Colors.transparent,
+                                                  borderRadius:
+                                                      BorderRadius.circular(6),
+                                                ),
+                                                child: Row(
+                                                  children: [
+                                                    InkWell(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                        6,
+                                                      ),
+                                                      onTap: () {
+                                                        setState(() {
+                                                          if (isFloorExpanded) {
+                                                            _expandedFloorIds
+                                                                .remove(fl.id);
+                                                          } else {
+                                                            _expandedFloorIds
+                                                                .add(fl.id);
+                                                          }
+                                                        });
+                                                      },
+                                                      child: Padding(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .fromLTRB(
+                                                          4,
+                                                          6,
+                                                          4,
+                                                          6,
+                                                        ),
+                                                        child: AnimatedRotation(
+                                                          turns: isFloorExpanded
+                                                              ? 0.25
+                                                              : 0.0,
+                                                          duration:
+                                                              const Duration(
+                                                            milliseconds: 180,
+                                                          ),
+                                                          child: Icon(
+                                                            Icons
+                                                                .play_arrow_rounded,
+                                                            size: 15,
+                                                            color: isFloorExpanded
+                                                                ? const Color(
+                                                                    0xFF2563EB,
+                                                                  )
+                                                                : const Color(
+                                                                    0xFF64748B,
+                                                                  ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    Expanded(
+                                                      child: InkWell(
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(6),
+                                                        onTap: () {
+                                                          setState(() {
+                                                            if (!isFloorExpanded) {
+                                                              _expandedFloorIds
+                                                                  .add(fl.id);
+                                                            }
+                                                          });
+                                                          _openDatacenter(
+                                                            loc.id,
+                                                            floorId: fl.id,
+                                                          );
+                                                        },
+                                                        child: Padding(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .symmetric(
+                                                            vertical: 5,
+                                                            horizontal: 4,
+                                                          ),
+                                                          child: Row(
+                                                            children: [
+                                                              const Icon(
+                                                                Icons
+                                                                    .layers_outlined,
+                                                                size: 14,
+                                                                color: Color(
+                                                                  0xFF1E3A8A,
+                                                                ),
+                                                              ),
+                                                              const SizedBox(
+                                                                width: 5,
+                                                              ),
+                                                              Expanded(
+                                                                child: Text(
+                                                                  'P${fl.levelNumber} — ${fl.name} (${floorRacks.length})',
+                                                                  maxLines: 1,
+                                                                  overflow:
+                                                                      TextOverflow
+                                                                          .ellipsis,
+                                                                  style:
+                                                                      TextStyle(
+                                                                    fontSize:
+                                                                        11,
+                                                                    fontWeight: isFloorExpanded
+                                                                        ? FontWeight
+                                                                            .w700
+                                                                        : FontWeight
+                                                                            .w600,
+                                                                    color: const Color(
+                                                                      0xFF1E293B,
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+
+                                              // NIVEL 3: RACKS DEL PISO (cuando el triángulo del Piso está girado 90°)
+                                              if (isFloorExpanded)
+                                                for (final rk in floorRacks)
+                                                  Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                      left: 16,
+                                                      bottom: 1,
+                                                    ),
+                                                    child: ListTile(
+                                                      dense: true,
+                                                      visualDensity:
+                                                          VisualDensity.compact,
+                                                      contentPadding:
+                                                          const EdgeInsets
+                                                              .symmetric(
+                                                        horizontal: 8,
+                                                        vertical: 0,
+                                                      ),
+                                                      shape:
+                                                          RoundedRectangleBorder(
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(6),
+                                                      ),
+                                                      selected: _activeNav ==
+                                                              'rack_editor' &&
+                                                          _activeRackId ==
+                                                              rk.id,
+                                                      selectedTileColor:
+                                                          const Color(
+                                                        0xFFEFF6FF,
+                                                      ),
+                                                      leading: Icon(
+                                                        Icons.dns_outlined,
+                                                        size: 14,
+                                                        color: rk.offlineCount >
+                                                                0
+                                                            ? const Color(
+                                                                0xFFDC2626,
+                                                              )
+                                                            : ((_activeNav ==
+                                                                        'rack_editor' &&
+                                                                    _activeRackId ==
+                                                                        rk.id)
+                                                                ? const Color(
+                                                                    0xFF2563EB,
+                                                                  )
+                                                                : const Color(
+                                                                    0xFF64748B,
+                                                                  )),
+                                                      ),
+                                                      title: Text(
+                                                        '${rk.code} (${rk.name})',
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                          fontWeight: (_activeNav ==
+                                                                      'rack_editor' &&
+                                                                  _activeRackId ==
+                                                                      rk.id)
+                                                              ? FontWeight.w700
+                                                              : FontWeight.w500,
+                                                          color: (_activeNav ==
+                                                                      'rack_editor' &&
+                                                                  _activeRackId ==
+                                                                      rk.id)
+                                                              ? const Color(
+                                                                  0xFF1D4ED8,
+                                                                )
+                                                              : const Color(
+                                                                  0xFF334155,
+                                                                ),
+                                                        ),
+                                                      ),
+                                                      subtitle: Text(
+                                                        _formatMonitoredInline(
+                                                          monitored:
+                                                              rk.monitoredCount,
+                                                          online:
+                                                              rk.onlineCount,
+                                                          offline:
+                                                              rk.offlineCount,
+                                                        ),
+                                                        style: const TextStyle(
+                                                          fontSize: 9,
+                                                          color:
+                                                              Color(0xFF64748B),
+                                                        ),
+                                                      ),
+                                                      onTap: () =>
+                                                          _openRack(rk.id),
+                                                    ),
+                                                  ),
+                                            ],
+                                          ),
+                                        );
+                                      },
+                                    ),
+                              ],
+                            );
+                          },
+                        ),
                     ],
                   ),
                 ),
@@ -1274,7 +1661,11 @@ class _RackDocShellState extends State<RackDocShell> {
         api: _api,
         locations: _locations,
         activeLocationId: _activeLocationId,
-        onChangeLocation: (id) => setState(() => _activeLocationId = id),
+        initialFloorId: _activeFloorId,
+        onChangeLocation: (id) => setState(() {
+          _activeLocationId = id;
+          _activeFloorId = null;
+        }),
         onBackToLocations: () => setState(() => _activeNav = 'locations'),
         onOpenRack: _openRack,
         onRefresh: _refreshDataSilently,
@@ -1308,12 +1699,13 @@ class _RackDocShellState extends State<RackDocShell> {
     return RackEditorView(
       api: _api,
       rackId: _activeRackId,
+      initialHighlightDeviceId: _highlightedDeviceId,
       templates: _templates,
       onBackToLocations: () {
         _refreshDataSilently();
         setState(() => _activeNav = 'datacenter');
       },
-      onSwitchRack: _openRack,
+      onSwitchRack: (rId) => _openRack(rId),
       onTemplatesChanged: _refreshTemplates,
       currentUser: _currentUser,
     );
@@ -1777,142 +2169,153 @@ class _RackDocShellState extends State<RackDocShell> {
                     final pingMs = sys['last_ping_ms'];
                     final rackId = sys['rack_id'] as int;
 
-                    return Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
+                    final devId = sys['id'] as int?;
+
+                    return InkWell(
+                      onTap: () => _openRack(
+                        rackId,
+                        highlightDeviceId: devId,
                       ),
-                      decoration: BoxDecoration(
-                        color: isOffline
-                            ? const Color(0xFFFEF2F2)
-                            : Colors.transparent,
-                        border: const Border(
-                          bottom: BorderSide(color: Color(0xFFF1F5F9)),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
                         ),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: stCol.withValues(alpha: 0.14),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: stCol.withValues(alpha: 0.45),
+                        decoration: BoxDecoration(
+                          color: isOffline
+                              ? const Color(0xFFFEF2F2)
+                              : Colors.transparent,
+                          border: const Border(
+                            bottom: BorderSide(color: Color(0xFFF1F5F9)),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: stCol.withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: stCol.withValues(alpha: 0.45),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      color: stCol,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    isOnline
+                                        ? 'VERDE (ONLINE)'
+                                        : (isOffline
+                                            ? 'ROJO (OFFLINE)'
+                                            : st.toUpperCase()),
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w800,
+                                      color: stCol,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    color: stCol,
-                                    shape: BoxShape.circle,
+                            const SizedBox(width: 14),
+                            Expanded(
+                              flex: 3,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${sys['code']} — ${sys['name']}',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFF0F172A),
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  isOnline
-                                      ? 'VERDE (ONLINE)'
-                                      : (isOffline
-                                          ? 'ROJO (OFFLINE)'
-                                          : st.toUpperCase()),
-                                  style: TextStyle(
-                                    fontSize: 10.5,
-                                    fontWeight: FontWeight.w800,
-                                    color: stCol,
+                                  Text(
+                                    '${sys['model_name']} • Hostname: ${sys['hostname']?.toString().isNotEmpty == true ? sys['hostname'] : '-'}',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Color(0xFF64748B),
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            flex: 3,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${sys['code']} — ${sys['name']}',
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w800,
-                                    color: Color(0xFF0F172A),
+                            Expanded(
+                              flex: 2,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'IP: ${sys['ip_address']?.toString().isNotEmpty == true ? sys['ip_address'] : 'Sin IP'}',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF1E293B),
+                                    ),
                                   ),
-                                ),
-                                Text(
-                                  '${sys['model_name']} • Hostname: ${sys['hostname']?.toString().isNotEmpty == true ? sys['hostname'] : '-'}',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: Color(0xFF64748B),
+                                  Text(
+                                    'Heartbeat: $method (Puerto $port)${pingMs != null ? ' • $pingMs ms' : ''}',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Color(0xFF475569),
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                          Expanded(
-                            flex: 2,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'IP: ${sys['ip_address']?.toString().isNotEmpty == true ? sys['ip_address'] : 'Sin IP'}',
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                    color: Color(0xFF1E293B),
+                            Expanded(
+                              flex: 2,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${sys['location_code']} > ${sys['rack_code']} (U${sys['start_u']})',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF1E3A8A),
+                                    ),
                                   ),
-                                ),
-                                Text(
-                                  'Heartbeat: $method (Puerto $port)${pingMs != null ? ' • $pingMs ms' : ''}',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: Color(0xFF475569),
+                                  Text(
+                                    '${sys['floor_name']} • ${sys['rack_name']}',
+                                    style: const TextStyle(
+                                      fontSize: 10.5,
+                                      color: Color(0xFF64748B),
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                          Expanded(
-                            flex: 2,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${sys['location_code']} > ${sys['rack_code']} (U${sys['start_u']})',
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                    color: Color(0xFF1E3A8A),
-                                  ),
-                                ),
-                                Text(
-                                  '${sys['floor_name']} • ${sys['rack_name']}',
-                                  style: const TextStyle(
-                                    fontSize: 10.5,
-                                    color: Color(0xFF64748B),
-                                  ),
-                                ),
-                              ],
+                            FilledButton.tonalIcon(
+                              onPressed: () => _openRack(
+                                rackId,
+                                highlightDeviceId: devId,
+                              ),
+                              icon: const Icon(
+                                Icons.my_location_rounded,
+                                size: 15,
+                              ),
+                              label: const Text(
+                                'Localizar en Rack',
+                                style: TextStyle(fontSize: 11.5),
+                              ),
                             ),
-                          ),
-                          FilledButton.tonalIcon(
-                            onPressed: () => _openRack(rackId),
-                            icon: const Icon(
-                              Icons.developer_board_outlined,
-                              size: 15,
-                            ),
-                            label: const Text(
-                              'Ir al Rack',
-                              style: TextStyle(fontSize: 11.5),
-                            ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     );
                   }),
