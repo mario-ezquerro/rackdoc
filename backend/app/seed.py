@@ -1304,21 +1304,82 @@ def sync_system_defaults(db: Session):
                 t.library_group = "Host - HP"
             elif "dell" in t.manufacturer.lower():
                 t.library_group = "Host - Dell"
-            else:
+            elif "supermicro" in t.manufacturer.lower():
+                t.library_group = "Host - Supermicro"
+            elif not t.library_group or t.library_group == "Network":
                 t.library_group = "Host - HP"
         else:
             if t.library_group == "Network":
                 t.library_group = "Patching & Passive"
 
-    # Asegurar plantillas adicionales para 'Power' (Regleta Schuko, Enchufe Schuko Simple) y 'Host - HP'
+    def _srv_spec(front_mgmt: str, back_mgmt: str, nics: int = 4, sfps: int = 2, psus: int = 2):
+        back_list = [
+            {
+                "port_type": "rj45",
+                "prefix": back_mgmt,
+                "count": 1,
+                "rows": 1,
+                "start_x": 0.10,
+                "end_x": 0.14,
+            }
+        ]
+        if nics > 0:
+            back_list.append(
+                {
+                    "port_type": "rj45",
+                    "prefix": "NIC",
+                    "count": nics,
+                    "rows": 1,
+                    "start_x": 0.22,
+                    "end_x": 0.44,
+                }
+            )
+        if sfps > 0:
+            back_list.append(
+                {
+                    "port_type": "sfp_plus",
+                    "prefix": "SFP",
+                    "count": sfps,
+                    "rows": 1,
+                    "start_x": 0.50,
+                    "end_x": 0.66,
+                }
+            )
+        if psus > 0:
+            back_list.append(
+                {
+                    "port_type": "power_c14",
+                    "prefix": "PSU",
+                    "count": psus,
+                    "rows": 1,
+                    "start_x": 0.74,
+                    "end_x": 0.92,
+                }
+            )
+        return {
+            "front": [
+                {
+                    "port_type": "rj45",
+                    "prefix": front_mgmt,
+                    "count": 1,
+                    "rows": 1,
+                    "start_x": 0.88,
+                    "end_x": 0.92,
+                }
+            ],
+            "back": back_list,
+        }
+
+    # Asegurar plantillas adicionales para 'Power', 'Host - HP' (12 modelos), 'Host - Dell' (12 modelos) y 'Host - Supermicro' (11 modelos)
     extra_templates = [
+        # --- POWER ---
         {
             "library_group": "Power",
             "category": "pdu",
             "manufacturer": "Rittal",
             "model_name": "Regleta PDU 8x Enchufes Schuko 1U",
             "u_height": 1,
-            "is_full_depth": False,
+            "is_full_depth": True,
             "default_color": "#FEFCE8",
             "layout_spec": {
                 "front": [
@@ -1349,7 +1410,7 @@ def sync_system_defaults(db: Session):
             "manufacturer": "Schneider",
             "model_name": "Enchufe Schuko Simple / Doble Carril DIN 1U",
             "u_height": 1,
-            "is_full_depth": False,
+            "is_full_depth": True,
             "default_color": "#FEF2F2",
             "layout_spec": {
                 "front": [
@@ -1374,6 +1435,8 @@ def sync_system_defaults(db: Session):
                 ],
             },
         },
+
+        # --- HOST - HP (HPE ProLiant / Alletra / Apollo / SimpliVity — 12 modelos en total con DL380 Gen11) ---
         {
             "library_group": "Host - HP",
             "category": "server",
@@ -1382,52 +1445,351 @@ def sync_system_defaults(db: Session):
             "u_height": 1,
             "is_full_depth": True,
             "default_color": "#F1F5F9",
-            "layout_spec": {
-                "front": [
-                    {
-                        "port_type": "rj45",
-                        "prefix": "iLO-F",
-                        "count": 1,
-                        "rows": 1,
-                        "start_x": 0.88,
-                        "end_x": 0.90,
-                    }
-                ],
-                "back": [
-                    {
-                        "port_type": "rj45",
-                        "prefix": "iLO",
-                        "count": 1,
-                        "rows": 1,
-                        "start_x": 0.12,
-                        "end_x": 0.15,
-                    },
-                    {
-                        "port_type": "rj45",
-                        "prefix": "NIC",
-                        "count": 4,
-                        "rows": 1,
-                        "start_x": 0.24,
-                        "end_x": 0.44,
-                    },
-                    {
-                        "port_type": "sfp_plus",
-                        "prefix": "SFP",
-                        "count": 2,
-                        "rows": 1,
-                        "start_x": 0.52,
-                        "end_x": 0.62,
-                    },
-                    {
-                        "port_type": "power_c14",
-                        "prefix": "PSU",
-                        "count": 2,
-                        "rows": 1,
-                        "start_x": 0.78,
-                        "end_x": 0.90,
-                    },
-                ],
-            },
+            "layout_spec": _srv_spec("iLO-F", "iLO", nics=4, sfps=2, psus=2),
+        },
+        {
+            "library_group": "Host - HP",
+            "category": "server",
+            "manufacturer": "HPE",
+            "model_name": "ProLiant DL320 Gen11 (1U Single-Socket Edge)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("iLO-F", "iLO", nics=2, sfps=2, psus=2),
+        },
+        {
+            "library_group": "Host - HP",
+            "category": "server",
+            "manufacturer": "HPE",
+            "model_name": "ProLiant DL345 Gen11 (2U AMD EPYC Storage)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("iLO-F", "iLO", nics=4, sfps=2, psus=2),
+        },
+        {
+            "library_group": "Host - HP",
+            "category": "server",
+            "manufacturer": "HPE",
+            "model_name": "ProLiant DL365 Gen11 (1U Dual AMD EPYC)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("iLO-F", "iLO", nics=4, sfps=2, psus=2),
+        },
+        {
+            "library_group": "Host - HP",
+            "category": "server",
+            "manufacturer": "HPE",
+            "model_name": "ProLiant DL385 Gen11 (2U Dual AMD EPYC GPU)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("iLO-F", "iLO", nics=4, sfps=4, psus=2),
+        },
+        {
+            "library_group": "Host - HP",
+            "category": "server",
+            "manufacturer": "HPE",
+            "model_name": "ProLiant DL560 Gen11 (2U Quad-Socket SAP HANA)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("iLO-F", "iLO", nics=4, sfps=4, psus=4),
+        },
+        {
+            "library_group": "Host - HP",
+            "category": "server",
+            "manufacturer": "HPE",
+            "model_name": "ProLiant DL380a Gen11 (4U 4x GPU AI Workload)",
+            "u_height": 4,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("iLO-F", "iLO", nics=4, sfps=4, psus=4),
+        },
+        {
+            "library_group": "Host - HP",
+            "category": "server",
+            "manufacturer": "HPE",
+            "model_name": "ProLiant DL20 Gen11 (1U Short-Depth Branch)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("iLO-F", "iLO", nics=2, sfps=0, psus=2),
+        },
+        {
+            "library_group": "Host - HP",
+            "category": "server",
+            "manufacturer": "HPE",
+            "model_name": "ProLiant DL380 Gen10 Plus (2U Enterprise)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("iLO-F", "iLO", nics=4, sfps=2, psus=2),
+        },
+        {
+            "library_group": "Host - HP",
+            "category": "server",
+            "manufacturer": "HPE",
+            "model_name": "Alletra Storage Server 4120 (2U 24x NVMe)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("iLO-F", "iLO", nics=2, sfps=4, psus=2),
+        },
+        {
+            "library_group": "Host - HP",
+            "category": "server",
+            "manufacturer": "HPE",
+            "model_name": "Apollo 4200 Gen10 Plus (2U 28-Bay LFF Storage)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("iLO-F", "iLO", nics=4, sfps=2, psus=2),
+        },
+        {
+            "library_group": "Host - HP",
+            "category": "server",
+            "manufacturer": "HPE",
+            "model_name": "SimpliVity 380 Gen11 (2U Hyperconverged Node)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("iLO-F", "iLO", nics=4, sfps=4, psus=2),
+        },
+
+        # --- HOST - DELL (Dell PowerEdge / VxRail — 12 modelos en total con R660) ---
+        {
+            "library_group": "Host - Dell",
+            "category": "server",
+            "manufacturer": "Dell",
+            "model_name": "PowerEdge R760 (2U Dual Xeon Flagship)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("MGMT", "iDRAC", nics=4, sfps=2, psus=2),
+        },
+        {
+            "library_group": "Host - Dell",
+            "category": "server",
+            "manufacturer": "Dell",
+            "model_name": "PowerEdge R760xs (2U Virtualization & SDS)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("MGMT", "iDRAC", nics=4, sfps=2, psus=2),
+        },
+        {
+            "library_group": "Host - Dell",
+            "category": "server",
+            "manufacturer": "Dell",
+            "model_name": "PowerEdge R660xs (1U Dense Cloud Compute)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("MGMT", "iDRAC", nics=4, sfps=2, psus=2),
+        },
+        {
+            "library_group": "Host - Dell",
+            "category": "server",
+            "manufacturer": "Dell",
+            "model_name": "PowerEdge R6615 (1U Single AMD EPYC 9004)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("MGMT", "iDRAC", nics=2, sfps=2, psus=2),
+        },
+        {
+            "library_group": "Host - Dell",
+            "category": "server",
+            "manufacturer": "Dell",
+            "model_name": "PowerEdge R6625 (1U Dual AMD EPYC 9004)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("MGMT", "iDRAC", nics=4, sfps=2, psus=2),
+        },
+        {
+            "library_group": "Host - Dell",
+            "category": "server",
+            "manufacturer": "Dell",
+            "model_name": "PowerEdge R7615 (2U Single AMD EPYC NVMe)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("MGMT", "iDRAC", nics=4, sfps=2, psus=2),
+        },
+        {
+            "library_group": "Host - Dell",
+            "category": "server",
+            "manufacturer": "Dell",
+            "model_name": "PowerEdge R7625 (2U Dual AMD EPYC AI/DB)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("MGMT", "iDRAC", nics=4, sfps=4, psus=2),
+        },
+        {
+            "library_group": "Host - Dell",
+            "category": "server",
+            "manufacturer": "Dell",
+            "model_name": "PowerEdge R860 (2U Quad-Socket SAP HANA)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("MGMT", "iDRAC", nics=4, sfps=4, psus=4),
+        },
+        {
+            "library_group": "Host - Dell",
+            "category": "server",
+            "manufacturer": "Dell",
+            "model_name": "PowerEdge R960 (4U Quad-Socket Mission Critical)",
+            "u_height": 4,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("MGMT", "iDRAC", nics=4, sfps=4, psus=4),
+        },
+        {
+            "library_group": "Host - Dell",
+            "category": "server",
+            "manufacturer": "Dell",
+            "model_name": "PowerEdge R360 (1U Entry Xeon E-2400)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("MGMT", "iDRAC", nics=2, sfps=0, psus=2),
+        },
+        {
+            "library_group": "Host - Dell",
+            "category": "server",
+            "manufacturer": "Dell",
+            "model_name": "PowerEdge XE8640 (4U 4x H100 GPU AI Server)",
+            "u_height": 4,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("MGMT", "iDRAC", nics=4, sfps=4, psus=4),
+        },
+        {
+            "library_group": "Host - Dell",
+            "category": "server",
+            "manufacturer": "Dell",
+            "model_name": "VxRail P670F (2U All-Flash vSAN HCI Node)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("MGMT", "iDRAC", nics=4, sfps=4, psus=2),
+        },
+
+        # --- HOST - SUPERMICRO (Supermicro Hyper / A+ / CloudDC / Storage / BigTwin / GPU — 11 modelos) ---
+        {
+            "library_group": "Host - Supermicro",
+            "category": "server",
+            "manufacturer": "Supermicro",
+            "model_name": "Hyper SuperServer SYS-121H-TNR (1U Dual Xeon)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("IPMI-F", "IPMI", nics=4, sfps=2, psus=2),
+        },
+        {
+            "library_group": "Host - Supermicro",
+            "category": "server",
+            "manufacturer": "Supermicro",
+            "model_name": "Hyper SuperServer SYS-221H-TNR (2U Dual Xeon)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("IPMI-F", "IPMI", nics=4, sfps=2, psus=2),
+        },
+        {
+            "library_group": "Host - Supermicro",
+            "category": "server",
+            "manufacturer": "Supermicro",
+            "model_name": "A+ Server AS-1115HS-TNR (1U Single AMD EPYC)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("IPMI-F", "IPMI", nics=2, sfps=2, psus=2),
+        },
+        {
+            "library_group": "Host - Supermicro",
+            "category": "server",
+            "manufacturer": "Supermicro",
+            "model_name": "A+ Server AS-2115HS-TNR (2U 24x NVMe EPYC)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("IPMI-F", "IPMI", nics=4, sfps=2, psus=2),
+        },
+        {
+            "library_group": "Host - Supermicro",
+            "category": "server",
+            "manufacturer": "Supermicro",
+            "model_name": "A+ Server AS-2125HS-TNR (2U Dual AMD EPYC)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("IPMI-F", "IPMI", nics=4, sfps=4, psus=2),
+        },
+        {
+            "library_group": "Host - Supermicro",
+            "category": "server",
+            "manufacturer": "Supermicro",
+            "model_name": "CloudDC SYS-111C-NR (1U Single Xeon All-Flash)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("IPMI-F", "IPMI", nics=2, sfps=2, psus=2),
+        },
+        {
+            "library_group": "Host - Supermicro",
+            "category": "server",
+            "manufacturer": "Supermicro",
+            "model_name": "CloudDC SYS-621C-TN12R (2U 12-Bay LFF Hybrid)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("IPMI-F", "IPMI", nics=4, sfps=2, psus=2),
+        },
+        {
+            "library_group": "Host - Supermicro",
+            "category": "server",
+            "manufacturer": "Supermicro",
+            "model_name": "SuperStorage SSG-621E-ACR12H (2U Ceph/ZFS Storage)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("IPMI-F", "IPMI", nics=2, sfps=4, psus=2),
+        },
+        {
+            "library_group": "Host - Supermicro",
+            "category": "server",
+            "manufacturer": "Supermicro",
+            "model_name": "Petascale SYS-121E-NE316R (1U 16x E3.S NVMe)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("IPMI-F", "IPMI", nics=2, sfps=4, psus=2),
+        },
+        {
+            "library_group": "Host - Supermicro",
+            "category": "server",
+            "manufacturer": "Supermicro",
+            "model_name": "BigTwin SYS-221BT-HNTR (2U 4-Node HCI Chassis)",
+            "u_height": 2,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("IPMI-F", "IPMI", nics=4, sfps=4, psus=2),
+        },
+        {
+            "library_group": "Host - Supermicro",
+            "category": "server",
+            "manufacturer": "Supermicro",
+            "model_name": "GPU SuperServer SYS-421GE-TNRT (4U 8x GPU AI)",
+            "u_height": 4,
+            "is_full_depth": True,
+            "default_color": "#F1F5F9",
+            "layout_spec": _srv_spec("IPMI-F", "IPMI", nics=4, sfps=4, psus=4),
         },
     ]
     for et in extra_templates:

@@ -38,6 +38,7 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
     'Power',
     'Host - HP',
     'Host - Dell',
+    'Host - Supermicro',
     'Patching & Passive',
   ];
 
@@ -48,7 +49,7 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
     'gateway': 'Gateway / Voz',
     'pdu': 'Power — PDU y Enchufes Schuko',
     'ups': 'Power — UPS / SAI',
-    'server': 'Server / Host (HP / Dell)',
+    'server': 'Server / Host (HP / Dell / Supermicro)',
     'patch_panel': 'Patch Panel',
     'patchbox': 'Patchbox',
     'cable_manager': 'Cable Manager',

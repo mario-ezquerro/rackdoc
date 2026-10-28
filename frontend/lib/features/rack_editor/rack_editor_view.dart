@@ -1384,6 +1384,7 @@ class _RackEditorViewState extends State<RackEditorView> {
       'Power',
       'Host - HP',
       'Host - Dell',
+      'Host - Supermicro',
       'Patching & Passive',
     ];
 
