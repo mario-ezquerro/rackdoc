@@ -376,7 +376,7 @@ class RackDeviceModel {
 
   bool isVisibleOnFace(String activeFace) {
     if (isExternalFeed) return false;
-    return mountedFace == activeFace || template.isFullDepth;
+    return true;
   }
 
   List<PortModel> portsForFace(String activeFace) {

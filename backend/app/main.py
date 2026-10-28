@@ -201,19 +201,13 @@ def _check_u_collision(
         if not u_overlaps:
             continue
 
-        # Si cualquiera de los dos es full-depth o están en la misma cara, hay colisión
-        face_conflict = (
-            is_full_depth
-            or other.template.is_full_depth
-            or (mounted_face == other.mounted_face)
-        )
-        if face_conflict:
+        # Todo equipo montado en el rack ocupa la unidad U tanto en Front como en Back
+        if True:
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    f"Colisión en U{start_u}-U{end_u} ({mounted_face.upper()}) con el equipo "
-                    f"'{other.code}' (U{other.start_u}-U{other_end}, cara {other.mounted_face.upper()}"
-                    f"{', profundidad completa' if other.template.is_full_depth else ''})."
+                    f"Colisión en U{start_u}-U{end_u} con el equipo "
+                    f"'{other.code}' (U{other.start_u}-U{other_end})."
                 ),
             )
 
@@ -845,15 +839,35 @@ def update_rack_device(device_id: int, payload: RackDeviceUpdate, db: Session = 
     new_face = updates.get("mounted_face", device.mounted_face)
 
     if new_start_u != device.start_u or new_face != device.mounted_face:
-        _check_u_collision(
-            db=db,
-            rack=device.rack,
-            start_u=new_start_u,
-            u_height=device.template.u_height,
-            mounted_face=new_face,
-            is_full_depth=device.template.is_full_depth,
-            exclude_device_id=device.id,
-        )
+        end_u = new_start_u + device.template.u_height - 1
+        if new_start_u < 1 or end_u > device.rack.total_units:
+            raise HTTPException(
+                status_code=400,
+                detail=f"La posición U{new_start_u}-U{end_u} excede los límites del rack (1..{device.rack.total_units}U).",
+            )
+        # Comprobar si hay un único equipo en la U destino para intercambiar su posición automáticamente (Swap)
+        overlapping = [
+            other
+            for other in db.query(RackDevice)
+            .options(joinedload(RackDevice.template))
+            .filter(RackDevice.rack_id == device.rack_id)
+            .all()
+            if other.id != device.id
+            and other.mounted_face != "external"
+            and not (end_u < other.start_u or new_start_u > (other.start_u + other.template.u_height - 1))
+        ]
+        if len(overlapping) == 1 and overlapping[0].template.u_height == device.template.u_height:
+            overlapping[0].start_u = device.start_u
+        elif overlapping:
+            _check_u_collision(
+                db=db,
+                rack=device.rack,
+                start_u=new_start_u,
+                u_height=device.template.u_height,
+                mounted_face=new_face,
+                is_full_depth=True,
+                exclude_device_id=device.id,
+            )
 
     for k, v in updates.items():
         setattr(device, k, v)

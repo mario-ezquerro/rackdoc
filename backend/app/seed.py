@@ -21,16 +21,46 @@ def create_ports_from_template(db: Session, device: RackDevice, template: Device
     """
     Genera automáticamente todos los puertos (Front y Back) de un RackDevice
     a partir de la especificación layout_spec de su plantilla.
-    Si el equipo se monta en la cara trasera ('back') y no es full-depth,
-    sus puertos principales miran hacia la cara 'back' del rack.
+    Al montar un equipo en Front, rellena automáticamente su cara trasera (Back)
+    con sus puertos traseros (fuentes PSU, latiguillos traseros Krone/Cassette, etc.).
     """
-    spec = template.layout_spec or {}
+    spec = dict(template.layout_spec or {})
     created_ports: list[Port] = []
 
+    back_groups = list(spec.get("back", []))
+    if not back_groups and template.category != "external_outlet":
+        if template.category in ("patchbox", "patch_panel"):
+            back_groups = [
+                {
+                    "port_type": "rj45",
+                    "prefix": "R-",
+                    "count": 24,
+                    "rows": 2 if template.category == "patchbox" else 1,
+                    "start_x": 0.10,
+                    "end_x": 0.90,
+                }
+            ]
+        elif template.category in ("switch", "router", "firewall", "server", "gateway", "ups", "pdu"):
+            back_groups = [
+                {
+                    "port_type": "power_c14",
+                    "prefix": "PSU",
+                    "count": 2,
+                    "rows": 1,
+                    "start_x": 0.15,
+                    "end_x": 0.30,
+                }
+            ]
+
+    resolved_spec = {
+        "front": list(spec.get("front", [])),
+        "back": back_groups,
+    }
+
     for tpl_face in ("front", "back"):
-        face_groups = spec.get(tpl_face, [])
-        if device.mounted_face == "back" and not template.is_full_depth:
-            effective_face = "back"
+        face_groups = resolved_spec.get(tpl_face, [])
+        if device.mounted_face == "back":
+            effective_face = "back" if tpl_face == "front" else "front"
         else:
             effective_face = tpl_face
 
@@ -1411,6 +1441,78 @@ def sync_system_defaults(db: Session):
     db.flush()
 
     get_or_create_external_feed_template(db)
+
+    # Asegurar que todas las plantillas y dispositivos existentes autorrellenen Front y Back sin solaparse
+    for tpl in db.query(DeviceTemplate).all():
+        if tpl.category != "external_outlet":
+            tpl.is_full_depth = True
+            spec = dict(tpl.layout_spec or {})
+            if tpl.category == "patchbox" and not spec.get("back"):
+                spec["back"] = [
+                    {
+                        "port_type": "rj45",
+                        "prefix": "R-",
+                        "count": 24,
+                        "rows": 2,
+                        "start_x": 0.08,
+                        "end_x": 0.92,
+                    }
+                ]
+                tpl.layout_spec = spec
+
+    db.flush()
+
+    # Si PDU-B estaba en U36 (colisionando con Patch Panel A en U36), moverlo a U25 libre
+    pdu_b = db.query(RackDevice).filter(RackDevice.code == "PDU-B").first()
+    if pdu_b and pdu_b.start_u == 36:
+        pdu_b.start_u = 25
+
+    for pdu_dev in db.query(RackDevice).filter(RackDevice.code.in_(["PDU-A", "PDU-B"])).all():
+        for p in pdu_dev.ports:
+            if p.port_number.startswith("IN"):
+                p.face = "front"
+
+    # Asegurar que cualquier equipo montado en Front tenga también sus puertos traseros en Back
+    for dev in db.query(RackDevice).all():
+        if dev.mounted_face == "external":
+            continue
+        has_back = any(p.face == "back" for p in dev.ports)
+        if not has_back and dev.template:
+            spec = dict(dev.template.layout_spec or {})
+            back_groups = list(spec.get("back", []))
+            for group in back_groups:
+                port_type = group.get("port_type", "rj45")
+                prefix = group.get("prefix", "R-")
+                count = int(group.get("count", 0))
+                rows = int(group.get("rows", 1))
+                start_x = float(group.get("start_x", 0.12))
+                end_x = float(group.get("end_x", 0.88))
+                start_num = int(group.get("start_num", 1))
+                cols = max(1, (count + rows - 1) // rows)
+                for idx in range(count):
+                    r = idx % rows
+                    c = idx // rows
+                    num = start_num + idx
+                    p_num = f"{prefix}{num}" if prefix else str(num)
+                    rel_x = (
+                        start_x + (end_x - start_x) * (c / max(1, cols - 1))
+                        if cols > 1
+                        else (start_x + end_x) / 2.0
+                    )
+                    rel_y = 0.32 if (rows > 1 and r == 0) else (0.68 if rows > 1 else 0.5)
+                    db.add(
+                        Port(
+                            rack_device_id=dev.id,
+                            port_number=p_num,
+                            label=f"{dev.code}:{p_num}",
+                            face="back",
+                            port_type=port_type,
+                            row_index=r,
+                            col_index=c,
+                            rel_x=round(rel_x, 4),
+                            rel_y=round(rel_y, 4),
+                        )
+                    )
 
     # Asegurar que cada Rack tenga sus Tomas Exteriores Schuko (mínimo 1, por defecto 2: Línea A Roja y Línea B Azul)
     racks = db.query(Rack).all()

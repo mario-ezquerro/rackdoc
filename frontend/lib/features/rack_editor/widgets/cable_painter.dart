@@ -125,6 +125,34 @@ class CableGeometryBuilder {
 
       // Caso 1: Ambos puertos visibles en la cara activa (misma cara, mismo rack)
       if (pSource != null && pTarget != null) {
+        final dyDiff = (pTarget.dy - pSource.dy).abs();
+        final dxDiff = (pTarget.dx - pSource.dx).abs();
+
+        // Si es un latiguillo corto entre unidades U adyacentes (como Patchbox/PatchPanel <-> Switch),
+        // trazar puente directo vertical limpio igual que en la vista técnica de referencia.
+        if (conn.routingChannel == 'auto' &&
+            dyDiff <= 56.0 &&
+            dxDiff <= 110.0) {
+          final midY = (pSource.dy + pTarget.dy) / 2.0 + ((i % 3) - 1) * 2.2;
+          final directPts = <Offset>[
+            pSource,
+            Offset(pSource.dx, midY),
+            Offset(pTarget.dx, midY),
+            pTarget,
+          ];
+          routes.add(
+            ComputedCableRoute(
+              connection: conn,
+              path: buildRoundedOrthogonalPath(directPts, radius: 4.5),
+              points: directPts,
+              color: color,
+              isPassThrough: false,
+              isOutbound: false,
+            ),
+          );
+          continue;
+        }
+
         String side = conn.routingChannel;
         if (side != 'left' && side != 'right') {
           final avgX = (pSource.dx + pTarget.dx) / 2.0;
@@ -132,13 +160,13 @@ class CableGeometryBuilder {
         }
 
         final laneIndex = (side == 'left') ? (leftLaneIdx++) : (rightLaneIdx++);
-        final laneOffset = (laneIndex % 9) * 4.2;
+        final laneOffset = (laneIndex % 7) * 3.2;
         final channelX = (side == 'left')
             ? (leftChannelBaseX - laneOffset)
             : (rightChannelBaseX + laneOffset);
 
-        final stub1 = ((i % 3) - 1) * 3.5 + 10.0;
-        final stub2 = (((i + 1) % 3) - 1) * 3.5 + 10.0;
+        final stub1 = ((i % 3) - 1) * 2.5 + 8.5;
+        final stub2 = (((i + 1) % 3) - 1) * 2.5 + 8.5;
         final y1 = pSource.dy + (pTarget.dy >= pSource.dy ? stub1 : -stub1);
         final y2 = pTarget.dy + (pSource.dy >= pTarget.dy ? stub2 : -stub2);
 
@@ -154,7 +182,7 @@ class CableGeometryBuilder {
         routes.add(
           ComputedCableRoute(
             connection: conn,
-            path: buildRoundedOrthogonalPath(pts, radius: 6.5),
+            path: buildRoundedOrthogonalPath(pts, radius: 6.0),
             points: pts,
             color: color,
             isPassThrough: false,
