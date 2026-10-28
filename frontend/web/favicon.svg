@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1E3A8A"/>
+      <stop offset="100%" stop-color="#0F172A"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#bg)" stroke="#38BDF8" stroke-width="2.5"/>
+  <!-- 19-inch Rack Frame -->
+  <rect x="11" y="10" width="38" height="44" rx="3" fill="none" stroke="#E2E8F0" stroke-width="2.5"/>
+  <!-- Server Blade 1 -->
+  <rect x="15" y="15" width="30" height="8" rx="1.5" fill="#1E293B" stroke="#94A3B8" stroke-width="1"/>
+  <circle cx="19.5" cy="19" r="2.2" fill="#22C55E"/>
+  <rect x="25" y="17.5" width="16" height="3" rx="1" fill="#64748B"/>
+  <!-- Server Blade 2 -->
+  <rect x="15" y="27" width="30" height="8" rx="1.5" fill="#1E293B" stroke="#94A3B8" stroke-width="1"/>
+  <circle cx="19.5" cy="31" r="2.2" fill="#22C55E"/>
+  <rect x="25" y="29.5" width="16" height="3" rx="1" fill="#64748B"/>
+  <!-- Server Blade 3 -->
+  <rect x="15" y="39" width="30" height="8" rx="1.5" fill="#1E293B" stroke="#94A3B8" stroke-width="1"/>
+  <circle cx="19.5" cy="43" r="2.2" fill="#38BDF8"/>
+  <rect x="25" y="41.5" width="16" height="3" rx="1" fill="#64748B"/>
+  <!-- Badge 8 -->
+  <circle cx="47" cy="47" r="13" fill="#2563EB" stroke="#FFFFFF" stroke-width="2.2"/>
+  <text x="47" y="52.5" text-anchor="middle" font-family="Arial, sans-serif" font-weight="900" font-size="16" fill="#FFFFFF">8</text>
+</svg>

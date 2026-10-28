@@ -320,6 +320,29 @@ class RackDocApiClient {
     return uri.toString();
   }
 
+  String getExcelTemplateUrl() {
+    return '$baseUrl/reports/excel/template';
+  }
+
+  Future<Map<String, dynamic>> importExcelFile({
+    required String filename,
+    required List<int> fileBytes,
+  }) async {
+    final uri = Uri.parse('$baseUrl/reports/excel/import');
+    final req = http.MultipartRequest('POST', uri);
+    req.files.add(
+      http.MultipartFile.fromBytes(
+        'file',
+        fileBytes,
+        filename: filename,
+      ),
+    );
+    final streamed = await req.send();
+    final res = await http.Response.fromStream(streamed);
+    final data = _decodeResponse(res) as Map;
+    return Map<String, dynamic>.from(data);
+  }
+
   String resolvePlanImageUrl(String mapImageUrl) {
     if (mapImageUrl.isEmpty) return '';
     if (mapImageUrl.startsWith('http://') || mapImageUrl.startsWith('https://')) {

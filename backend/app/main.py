@@ -2,10 +2,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 import uuid
+import base64
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse, FileResponse, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session, joinedload
 
@@ -63,7 +63,11 @@ from .seed import (
     ensure_rack_external_outlets,
 )
 from .services.monitor import check_single_device, check_all_monitored_devices
-from .services.excel_export import generate_datacenter_excel
+from .services.excel_export import (
+    generate_datacenter_excel,
+    generate_excel_import_template,
+    import_datacenter_excel,
+)
 
 
 UPLOADS_DIR = DEFAULT_DB_PATH.parent / "uploads"
@@ -101,6 +105,27 @@ def _ensure_db_migrations():
                 pass
 
 
+_TRANSPARENT_1X1_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+)
+
+
+def _sanitize_missing_upload_urls(db: Session):
+    """Limpia URLs de planos subidos cuyo archivo físico ya no exista en disco."""
+    changed = False
+    for model_cls in (Location, Floor, Room):
+        rows = db.query(model_cls).all()
+        for row in rows:
+            url = (getattr(row, "map_image_url", None) or "").strip()
+            if url.startswith("/api/uploads/"):
+                fname = url.split("/api/uploads/")[-1].split("?")[0]
+                if not (UPLOADS_DIR / fname).is_file():
+                    row.map_image_url = ""
+                    changed = True
+    if changed:
+        db.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
@@ -109,6 +134,7 @@ async def lifespan(app: FastAPI):
     try:
         seed_initial_data(db)
         sync_system_defaults(db)
+        _sanitize_missing_upload_urls(db)
     finally:
         db.close()
     yield
@@ -117,11 +143,19 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="RackDoc DCIM API",
     description="API de Gestión Visual de Centros de Datos, Racks (Front/Back), Planos JPG/PNG/GIF, Red, Monitorización y Exportación Excel",
-    version="1.1.0",
+    version="1.2.0",
     lifespan=lifespan,
 )
 
-app.mount("/api/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
+
+@app.get("/api/uploads/{filename}")
+def get_uploaded_plan_file(filename: str, db: Session = Depends(get_db)):
+    safe_name = Path(filename).name
+    file_path = UPLOADS_DIR / safe_name
+    if file_path.is_file():
+        return FileResponse(str(file_path))
+    _sanitize_missing_upload_urls(db)
+    return Response(content=_TRANSPARENT_1X1_PNG, media_type="image/png")
 
 app.add_middleware(
     CORSMiddleware,
@@ -220,6 +254,7 @@ def health_check():
 
 @app.get("/api/locations")
 def get_locations_tree(db: Session = Depends(get_db)):
+    _sanitize_missing_upload_urls(db)
     locations = (
         db.query(Location)
         .options(
@@ -726,7 +761,16 @@ def get_rack_detail(rack_id: int, db: Session = Depends(get_db)):
     if not rack:
         raise HTTPException(status_code=404, detail="Rack no encontrado")
 
-    if not any(d.mounted_face == "external" for d in rack.devices):
+    ext_devs = [d for d in rack.devices if d.mounted_face == "external"]
+    has_power_ext = any(
+        (d.custom_fields or {}).get("feed_type", "power") == "power"
+        for d in ext_devs
+    )
+    has_fiber_ext = any(
+        (d.custom_fields or {}).get("feed_type") == "fiber"
+        for d in ext_devs
+    )
+    if not has_power_ext or not has_fiber_ext:
         ensure_rack_external_outlets(db, rack)
         db.commit()
         db.refresh(rack)
@@ -799,7 +843,16 @@ def update_rack(rack_id: int, payload: RackUpdate, db: Session = Depends(get_db)
     if not rack:
         raise HTTPException(status_code=404, detail="Rack no encontrado")
 
-    if not any(d.mounted_face == "external" for d in rack.devices):
+    ext_devs = [d for d in rack.devices if d.mounted_face == "external"]
+    has_power_ext = any(
+        (d.custom_fields or {}).get("feed_type", "power") == "power"
+        for d in ext_devs
+    )
+    has_fiber_ext = any(
+        (d.custom_fields or {}).get("feed_type") == "fiber"
+        for d in ext_devs
+    )
+    if not has_power_ext or not has_fiber_ext:
         ensure_rack_external_outlets(db, rack)
         db.commit()
         db.refresh(rack)
@@ -836,7 +889,16 @@ def add_device_to_rack(rack_id: int, payload: RackDeviceCreate, db: Session = De
     if not rack:
         raise HTTPException(status_code=404, detail="Rack no encontrado")
 
-    if not any(d.mounted_face == "external" for d in rack.devices):
+    ext_devs = [d for d in rack.devices if d.mounted_face == "external"]
+    has_power_ext = any(
+        (d.custom_fields or {}).get("feed_type", "power") == "power"
+        for d in ext_devs
+    )
+    has_fiber_ext = any(
+        (d.custom_fields or {}).get("feed_type") == "fiber"
+        for d in ext_devs
+    )
+    if not has_power_ext or not has_fiber_ext:
         ensure_rack_external_outlets(db, rack)
         db.commit()
         db.refresh(rack)
@@ -968,31 +1030,53 @@ def create_external_outlet(
     if not rack:
         raise HTTPException(status_code=404, detail="Rack no encontrado")
 
-    if not any(d.mounted_face == "external" for d in rack.devices):
+    ext_devs = [d for d in rack.devices if d.mounted_face == "external"]
+    has_power_ext = any(
+        (d.custom_fields or {}).get("feed_type", "power") == "power"
+        for d in ext_devs
+    )
+    has_fiber_ext = any(
+        (d.custom_fields or {}).get("feed_type") == "fiber"
+        for d in ext_devs
+    )
+    if not has_power_ext or not has_fiber_ext:
         ensure_rack_external_outlets(db, rack)
         db.commit()
         db.refresh(rack)
 
     tpl = get_or_create_external_feed_template(db)
+    f_type = "fiber" if (payload.feed_type or "").lower() == "fiber" else "power"
+    max_sc = 48 if f_type == "fiber" else 16
+    sc_val = max(1, min(max_sc, payload.socket_count))
     dev = RackDevice(
         rack_id=rack.id,
         template_id=tpl.id,
-        code=payload.code.strip() or "TOMA-EXT",
-        name=payload.name.strip() or "Línea Eléctrica Exterior (Schuko)",
+        code=payload.code.strip() or ("FIBRA-EXT" if f_type == "fiber" else "TOMA-EXT"),
+        name=payload.name.strip()
+        or (
+            "Toma Exterior de Fibra Óptica (LC/SC)"
+            if f_type == "fiber"
+            else "Línea Eléctrica Exterior (Schuko)"
+        ),
         hostname=payload.code.strip().lower(),
         start_u=max(1, min(rack.total_units, payload.start_u)),
         mounted_face="external",
         status="online",
         custom_fields={
             "is_external_feed": True,
+            "feed_type": f_type,
             "feed_color": payload.color_hex,
-            "socket_count": max(1, min(16, payload.socket_count)),
+            "socket_count": sc_val,
         },
-        notes="Acometida eléctrica Schuko exterior al rack",
+        notes=(
+            "Caja / Toma exterior de Fibra Óptica"
+            if f_type == "fiber"
+            else "Acometida eléctrica Schuko exterior al rack"
+        ),
     )
     db.add(dev)
     db.flush()
-    sync_external_outlet_ports(db, dev, payload.socket_count)
+    sync_external_outlet_ports(db, dev, sc_val)
     db.commit()
     db.refresh(dev)
     return dev
@@ -1015,6 +1099,10 @@ def update_external_outlet(
 
     cf = dict(dev.custom_fields or {})
     cf["is_external_feed"] = True
+    if payload.feed_type is not None:
+        cf["feed_type"] = "fiber" if payload.feed_type.lower() == "fiber" else "power"
+    f_type = str(cf.get("feed_type") or "power").lower()
+    max_sc = 48 if f_type == "fiber" else 16
 
     if payload.code is not None:
         dev.code = payload.code.strip()
@@ -1038,9 +1126,11 @@ def update_external_outlet(
             for c in conns:
                 c.color_hex = payload.color_hex.strip()
 
-    if payload.socket_count is not None:
-        sc = max(1, min(16, payload.socket_count))
+    if payload.socket_count is not None or payload.feed_type is not None:
+        raw_sc = payload.socket_count if payload.socket_count is not None else int(cf.get("socket_count") or 4)
+        sc = max(1, min(max_sc, raw_sc))
         cf["socket_count"] = sc
+        dev.custom_fields = cf
         sync_external_outlet_ports(db, dev, sc)
 
     dev.custom_fields = cf
@@ -1117,13 +1207,15 @@ def create_connection(payload: ConnectionCreate, db: Session = Depends(get_db)):
         )
 
     conn_data = payload.model_dump()
-    # Si uno de los extremos es una toma eléctrica exterior (Schuko), el cable adopta el color identificativo de esa línea
+    # Si uno de los extremos es una toma exterior (Eléctrica Schuko o Fibra Óptica), el cable adopta su color y tipo
     for end_dev in (sp.device, tp.device):
         if end_dev.mounted_face == "external":
-            feed_color = (end_dev.custom_fields or {}).get("feed_color")
+            cf = end_dev.custom_fields or {}
+            feed_color = cf.get("feed_color")
+            feed_type = str(cf.get("feed_type") or "power").lower()
             if feed_color:
                 conn_data["color_hex"] = feed_color
-                conn_data["cable_type"] = "power_ac"
+            conn_data["cable_type"] = "fiber_om4" if feed_type == "fiber" else "power_ac"
             break
 
     conn = Connection(**conn_data)
@@ -1241,6 +1333,39 @@ def export_excel_report(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.get("/api/reports/excel/template")
+def download_excel_import_template():
+    excel_io = generate_excel_import_template()
+    return StreamingResponse(
+        excel_io,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": 'attachment; filename="RackDoc_Plantilla_Importacion_Ejemplo.xlsx"'
+        },
+    )
+
+
+@app.post("/api/reports/excel/import")
+async def import_excel_report(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xlsm")):
+        raise HTTPException(
+            status_code=400,
+            detail="El archivo debe ser un documento Excel (.xlsx).",
+        )
+    content = await file.read()
+    try:
+        summary = import_datacenter_excel(db=db, file_bytes=content)
+        return {"status": "ok", **summary}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Error procesando el archivo Excel: {exc}",
+        )
 
 
 # ==============================================================================

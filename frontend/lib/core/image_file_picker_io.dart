@@ -11,3 +11,14 @@ Future<PickedImageFile?> pickPlanImageFileImpl() async {
   final bytes = await picked.readAsBytes();
   return PickedImageFile(name: picked.name, bytes: bytes);
 }
+
+Future<PickedImageFile?> pickExcelFileImpl() async {
+  final files = await FilePicker.pickFiles(
+    type: FileType.custom,
+    allowedExtensions: const ['xlsx', 'xlsm'],
+  );
+  if (files.isEmpty) return null;
+  final picked = files.first;
+  final bytes = await picked.readAsBytes();
+  return PickedImageFile(name: picked.name, bytes: bytes);
+}

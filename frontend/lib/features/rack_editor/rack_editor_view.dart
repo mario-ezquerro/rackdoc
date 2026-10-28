@@ -233,8 +233,40 @@ class _RackEditorViewState extends State<RackEditorView> {
     return 0.56;
   }
 
+  int _externalColsPerRow(RackDeviceModel ext) {
+    final count = ext.ports.isEmpty ? 1 : ext.ports.length;
+    if (ext.isFiberFeed) {
+      return count <= 8 ? count : 8;
+    }
+    return count <= 6 ? count : 6;
+  }
+
+  double _externalCardHeight(RackDeviceModel ext) {
+    final count = ext.ports.length;
+    if (count <= 0) return _extCardHeight;
+    final colsPerRow = _externalColsPerRow(ext);
+    final rows = ((count - 1) ~/ colsPerRow) + 1;
+    return 78.0 + rows * 50.0;
+  }
+
+  Offset _externalPortLocalCenter(RackDeviceModel ext, int pIdx) {
+    final count = ext.ports.length;
+    if (count <= 0) return const Offset(_extZoneWidth * 0.5, 84.0);
+    final colsPerRow = _externalColsPerRow(ext);
+    final rows = ((count - 1) ~/ colsPerRow) + 1;
+    final rowIdx = pIdx ~/ colsPerRow;
+    final colIdx = pIdx % colsPerRow;
+    final colsInThisRow =
+        (rowIdx == rows - 1) ? (count - rowIdx * colsPerRow) : colsPerRow;
+    final relX = colsInThisRow <= 1
+        ? 0.5
+        : (0.12 + (0.76 * colIdx / (colsInThisRow - 1)));
+    final centerY = 84.0 + rowIdx * 48.0;
+    return Offset(relX * _extZoneWidth, centerY);
+  }
+
   /// Calcula la coordenada exacta (x, y) en el lienzo de cada puerto visible en la cara activa
-  /// MÁS las tomas eléctricas exteriores (Schuko) que siempre son visibles fuera del rack.
+  /// MÁS las tomas eléctricas y de fibra exteriores que siempre son visibles fuera del rack.
   Map<int, Offset> _computePortCoordinates(RackDetailModel rack) {
     final map = <int, Offset>{};
     final totalU = rack.totalUnits;
@@ -258,19 +290,22 @@ class _RackEditorViewState extends State<RackEditorView> {
       }
     }
 
-    // 2. Tomas / Enchufes Schuko Exteriores (fuera del rack a la derecha)
+    // 2. Tomas Exteriores (Eléctricas Schuko y de Fibra Óptica fuera del rack a la derecha)
     final extOutlets = _getExternalOutlets(rack);
+    double runningCardTop = _extCardTopStart;
     for (int idx = 0; idx < extOutlets.length; idx++) {
       final ext = extOutlets[idx];
-      final cardTop = _extCardTopStart + idx * (_extCardHeight + _extCardGap);
-      final socketsTopCenterY = cardTop + 82.0;
+      final cardTop = runningCardTop;
       final count = ext.ports.length;
       for (int pIdx = 0; pIdx < count; pIdx++) {
         final port = ext.ports[pIdx];
-        final rel = count == 1 ? 0.5 : (0.14 + (0.72 * pIdx / (count - 1)));
-        final px = _extZoneLeft + rel * _extZoneWidth;
-        map[port.id] = Offset(px, socketsTopCenterY);
+        final localCenter = _externalPortLocalCenter(ext, pIdx);
+        map[port.id] = Offset(
+          _extZoneLeft + localCenter.dx,
+          cardTop + localCenter.dy,
+        );
       }
+      runningCardTop += _externalCardHeight(ext) + _extCardGap;
     }
 
     return map;
@@ -771,13 +806,16 @@ class _RackEditorViewState extends State<RackEditorView> {
     String defaultCableType = 'utp_cat6a';
     String defaultColor = '#2563EB';
     String? forcedExternalFeedName;
+    bool isExtFiber = false;
 
     if (srcDev.isExternalFeed) {
-      defaultCableType = 'power_ac';
+      isExtFiber = srcDev.isFiberFeed;
+      defaultCableType = isExtFiber ? 'fiber_om4' : 'power_ac';
       defaultColor = srcDev.feedColorHex;
       forcedExternalFeedName = '${srcDev.code} (${srcDev.name})';
     } else if (dev.isExternalFeed) {
-      defaultCableType = 'power_ac';
+      isExtFiber = dev.isFiberFeed;
+      defaultCableType = isExtFiber ? 'fiber_om4' : 'power_ac';
       defaultColor = dev.feedColorHex;
       forcedExternalFeedName = '${dev.code} (${dev.name})';
     } else if (srcPort.portType.contains('fiber') ||
@@ -799,7 +837,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         : 'auto';
     final labelCtrl = TextEditingController(
       text: forcedExternalFeedName != null
-          ? 'Alimentación $forcedExternalFeedName ➔ ${srcDev.isExternalFeed ? dev.code : srcDev.code}'
+          ? '${isExtFiber ? 'Fibra Exterior' : 'Alimentación'} $forcedExternalFeedName ➔ ${srcDev.isExternalFeed ? dev.code : srcDev.code}'
           : '${srcDev.code}:${srcPort.portNumber} ➔ ${dev.code}:${port.portNumber}',
     );
     final vlanCtrl = TextEditingController(
@@ -876,7 +914,9 @@ class _RackEditorViewState extends State<RackEditorView> {
                     child: Row(
                       children: [
                         Icon(
-                          Icons.electrical_services,
+                          isExtFiber
+                              ? Icons.settings_input_hdmi_outlined
+                              : Icons.electrical_services,
                           size: 16,
                           color: CableGeometryBuilder.parseHexColor(colorHex),
                         ),
@@ -1058,158 +1098,303 @@ class _RackEditorViewState extends State<RackEditorView> {
   }
 
   // ===========================================================================
-  // GESTIÓN DE TOMAS ELÉCTRICAS EXTERIORES (ENCHUFES SCHUKO FUERA DEL RACK)
+  // GESTIÓN DE TOMAS EXTERIORES (ELÉCTRICAS SCHUKO Y CAJAS DE FIBRA ÓPTICA)
   // ===========================================================================
+  Future<void> _quickAdjustExternalOutletCount(
+    RackDeviceModel ext,
+    int newCount,
+  ) async {
+    if (!_canEdit) return;
+    final maxAllowed = ext.isFiberFeed ? 48 : 16;
+    final clamped = newCount.clamp(1, maxAllowed);
+    if (clamped == ext.ports.length) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await widget.api.updateExternalOutlet(ext.id, {
+        'socket_count': clamped,
+        'feed_type': ext.feedType,
+      });
+      await _loadRack();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            '${ext.code}: ajustado a $clamped ${ext.isFiberFeed ? 'conectores de fibra' : 'enchufes Schuko'}.',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
+      );
+    }
+  }
+
   Future<void> _showAddOrEditExternalOutletDialog({
     RackDeviceModel? existing,
+    String initialFeedType = 'power',
   }) async {
     if (!_canEdit) return;
     final rack = _rack;
     if (rack == null) return;
     final messenger = ScaffoldMessenger.of(context);
 
-    final extCount = _getExternalOutlets(rack).length;
-    final nextLetter = String.fromCharCode(65 + extCount);
+    final extList = _getExternalOutlets(rack);
+    String feedType = existing?.feedType ?? initialFeedType;
+    final powerCount = extList.where((d) => !d.isFiberFeed).length;
+    final fiberCount = extList.where((d) => d.isFiberFeed).length;
+    final nextPowerLetter = String.fromCharCode(65 + powerCount);
+    final nextFiberNum = fiberCount + 1;
+
     const palette = [
       '#DC2626',
       '#2563EB',
+      '#0284C7',
+      '#F59E0B',
+      '#10B981',
       '#EA580C',
-      '#16A34A',
       '#7C3AED',
-      '#CA8A04',
       '#0F172A',
     ];
 
     final codeCtrl = TextEditingController(
-      text: existing?.code ?? 'TOMA-$nextLetter',
+      text: existing?.code ??
+          (feedType == 'fiber'
+              ? 'FIBRA-EXT-$nextFiberNum'
+              : 'TOMA-$nextPowerLetter'),
     );
     final nameCtrl = TextEditingController(
-      text: existing?.name ?? 'Línea $nextLetter (Cuadro Eléctrico Sala)',
+      text: existing?.name ??
+          (feedType == 'fiber'
+              ? 'Caja Exterior de Fibra Óptica $nextFiberNum (Acometida CPD)'
+              : 'Línea $nextPowerLetter (Cuadro Eléctrico Sala)'),
     );
     final socketsCtrl = TextEditingController(
-      text: '${existing?.socketCount ?? 4}',
+      text: '${existing?.socketCount ?? (feedType == 'fiber' ? 8 : 4)}',
     );
-    String selectedColor =
-        existing?.feedColorHex ?? palette[extCount % palette.length];
+    String selectedColor = existing?.feedColorHex ??
+        (feedType == 'fiber'
+            ? '#0284C7'
+            : palette[powerCount % palette.length]);
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModal) => AlertDialog(
-          title: Text(
-            existing == null
-                ? 'Añadir Toma Eléctrica Schuko Exterior'
-                : 'Editar Toma Exterior (${existing.code})',
-          ),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Las tomas exteriores representan enchufes Schuko o acometidas fuera del bastidor a las que puedes enchufar equipos por delante (Front) o por detrás (Back).',
-                  style: TextStyle(fontSize: 11.5, color: Color(0xFF475569)),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: codeCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Código (ej. TOMA-A, TOMA-B)',
+        builder: (ctx, setModal) {
+          final isFiber = feedType == 'fiber';
+          return AlertDialog(
+            title: Text(
+              existing == null
+                  ? (isFiber
+                      ? 'Añadir Toma Exterior de Fibra Óptica'
+                      : 'Añadir Toma Eléctrica Schuko Exterior')
+                  : 'Editar Toma Exterior (${existing.code})',
+            ),
+            content: SizedBox(
+              width: 460,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isFiber
+                        ? 'Las tomas exteriores de fibra representan acometidas ópticas o cajas murales fuera del bastidor donde puedes ajustar el número de conectores (FO1..FON) y conectar latiguillos al rack.'
+                        : 'Las tomas eléctricas exteriores representan enchufes Schuko o acometidas fuera del bastidor a las que puedes enchufar equipos o regletas del rack.',
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: Color(0xFF475569),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: feedType,
+                    decoration: const InputDecoration(
+                      labelText: 'Tipo de Toma Exterior',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'power',
+                        child: Text(
+                          '⚡ Toma Eléctrica Exterior (Enchufes Schuko 230V)',
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextField(
-                        controller: socketsCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Nº Enchufes Schuko (1-12)',
+                      DropdownMenuItem(
+                        value: 'fiber',
+                        child: Text(
+                          '🔆 Toma Exterior de Fibra Óptica (Conectores LC/SC)',
                         ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Descripción de la Línea / Circuito Eléctrico',
+                    ],
+                    onChanged: existing != null
+                        ? null
+                        : (val) {
+                            if (val == null) return;
+                            setModal(() {
+                              feedType = val;
+                              if (val == 'fiber') {
+                                codeCtrl.text = 'FIBRA-EXT-$nextFiberNum';
+                                nameCtrl.text =
+                                    'Caja Exterior de Fibra Óptica $nextFiberNum (Acometida CPD)';
+                                socketsCtrl.text = '8';
+                                selectedColor = '#0284C7';
+                              } else {
+                                codeCtrl.text = 'TOMA-$nextPowerLetter';
+                                nameCtrl.text =
+                                    'Línea $nextPowerLetter (Cuadro Eléctrico Sala)';
+                                socketsCtrl.text = '4';
+                                selectedColor = '#DC2626';
+                              }
+                            });
+                          },
                   ),
-                ),
-                const SizedBox(height: 14),
-                const Text(
-                  'Color Estándar de la Línea Eléctrica (sus cables heredarán este color):',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF1E293B),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 8,
-                  children: palette.map((hex) {
-                    final isSel =
-                        selectedColor.toUpperCase() == hex.toUpperCase();
-                    final col = CableGeometryBuilder.parseHexColor(hex);
-                    return GestureDetector(
-                      onTap: () => setModal(() => selectedColor = hex),
-                      child: Container(
-                        width: 32,
-                        height: 32,
-                        decoration: BoxDecoration(
-                          color: col,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: isSel ? Colors.black : Colors.white,
-                            width: isSel ? 2.8 : 1.5,
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: codeCtrl,
+                          decoration: InputDecoration(
+                            labelText: isFiber
+                                ? 'Código (ej. FIBRA-EXT-1)'
+                                : 'Código (ej. TOMA-A, TOMA-B)',
                           ),
                         ),
-                        child: isSel
-                            ? const Icon(
-                                Icons.bolt,
-                                size: 18,
-                                color: Colors.white,
-                              )
-                            : null,
                       ),
-                    );
-                  }).toList(),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: socketsCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            labelText: isFiber
+                                ? 'Nº Conectores Fibra (1-48)'
+                                : 'Nº Enchufes Schuko (1-16)',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (isFiber) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Text(
+                          'Ajuste rápido conectores: ',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF475569),
+                          ),
+                        ),
+                        for (final preset in [4, 6, 8, 12, 16, 24])
+                          Padding(
+                            padding: const EdgeInsets.only(right: 5),
+                            child: ActionChip(
+                              visualDensity: VisualDensity.compact,
+                              label: Text(
+                                '${preset}x FO',
+                                style: const TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              onPressed: () {
+                                setModal(() => socketsCtrl.text = '$preset');
+                              },
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: InputDecoration(
+                      labelText: isFiber
+                          ? 'Descripción de la Acometida / Caja de Fibra Exterior'
+                          : 'Descripción de la Línea / Circuito Eléctrico',
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    isFiber
+                        ? 'Color Identificativo de la Fibra (Aqua OM4 #0284C7, Amarillo OS2 #F59E0B, Verde APC #10B981...):'
+                        : 'Color Estándar de la Línea Eléctrica (sus cables heredarán este color):',
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF1E293B),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 8,
+                    children: palette.map((hex) {
+                      final isSel =
+                          selectedColor.toUpperCase() == hex.toUpperCase();
+                      final col = CableGeometryBuilder.parseHexColor(hex);
+                      return GestureDetector(
+                        onTap: () => setModal(() => selectedColor = hex),
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            color: col,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isSel ? Colors.black : Colors.white,
+                              width: isSel ? 2.8 : 1.5,
+                            ),
+                          ),
+                          child: isSel
+                              ? Icon(
+                                  isFiber
+                                      ? Icons.settings_input_hdmi_outlined
+                                      : Icons.bolt,
+                                  size: 17,
+                                  color: Colors.white,
+                                )
+                              : null,
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton.icon(
+                onPressed: () => Navigator.pop(ctx, true),
+                icon: const Icon(Icons.save_outlined, size: 16),
+                label: Text(
+                  existing == null ? 'Añadir Toma Exterior' : 'Guardar Cambios',
                 ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton.icon(
-              onPressed: () => Navigator.pop(ctx, true),
-              icon: const Icon(Icons.save_outlined, size: 16),
-              label: Text(existing == null ? 'Añadir Toma' : 'Guardar Cambios'),
-            ),
-          ],
-        ),
+              ),
+            ],
+          );
+        },
       ),
     );
 
     if (confirmed == true) {
       try {
-        final count =
-            (int.tryParse(socketsCtrl.text.trim()) ?? 4).clamp(1, 12);
+        final isFiber = feedType == 'fiber';
+        final maxPorts = isFiber ? 48 : 16;
+        final count = (int.tryParse(socketsCtrl.text.trim()) ??
+                (isFiber ? 8 : 4))
+            .clamp(1, maxPorts);
         if (existing == null) {
           await widget.api.createExternalOutlet(rack.id, {
             'code': codeCtrl.text.trim(),
             'name': nameCtrl.text.trim(),
             'color_hex': selectedColor,
             'socket_count': count,
+            'feed_type': feedType,
           });
         } else {
           await widget.api.updateExternalOutlet(existing.id, {
@@ -1217,6 +1402,7 @@ class _RackEditorViewState extends State<RackEditorView> {
             'name': nameCtrl.text.trim(),
             'color_hex': selectedColor,
             'socket_count': count,
+            'feed_type': feedType,
           });
         }
         await _loadRack();
@@ -1224,8 +1410,8 @@ class _RackEditorViewState extends State<RackEditorView> {
           SnackBar(
             content: Text(
               existing == null
-                  ? 'Nueva toma exterior "${codeCtrl.text.trim()}" añadida.'
-                  : 'Toma exterior "${codeCtrl.text.trim()}" actualizada (cables sincronizados al color $selectedColor).',
+                  ? 'Nueva toma exterior "${codeCtrl.text.trim()}" ($count ${isFiber ? 'conectores fibra' : 'enchufes Schuko'}) añadida.'
+                  : 'Toma exterior "${codeCtrl.text.trim()}" actualizada ($count ${isFiber ? 'conectores fibra' : 'enchufes Schuko'}).',
             ),
           ),
         );
@@ -1936,42 +2122,46 @@ class _RackEditorViewState extends State<RackEditorView> {
                             color: Color(0xFF0F172A),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Container(
-                          width: 7,
-                          height: 7,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF16A34A),
-                            shape: BoxShape.circle,
+                        if (onlineCnt > 0) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF16A34A),
+                              shape: BoxShape.circle,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 3),
-                        Text(
-                          '$onlineCnt',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFF15803D),
+                          const SizedBox(width: 3),
+                          Text(
+                            '$onlineCnt',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF15803D),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 7),
-                        Container(
-                          width: 7,
-                          height: 7,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFFDC2626),
-                            shape: BoxShape.circle,
+                        ],
+                        if (offlineCnt > 0) ...[
+                          const SizedBox(width: 7),
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFFDC2626),
+                              shape: BoxShape.circle,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 3),
-                        Text(
-                          '$offlineCnt',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFFB91C1C),
+                          const SizedBox(width: 3),
+                          Text(
+                            '$offlineCnt',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFFB91C1C),
+                            ),
                           ),
-                        ),
+                        ],
                         if (warnCnt > 0) ...[
                           const SizedBox(width: 7),
                           Container(
@@ -2982,14 +3172,22 @@ class _RackEditorViewState extends State<RackEditorView> {
   }
 
   // ===========================================================================
-  // WIDGET DE ZONA EXTERIOR DE TOMAS ELÉCTRICAS SCHUKO (FUERA DEL RACK)
+  // WIDGET DE ZONA EXTERIOR DE TOMAS ELÉCTRICAS SCHUKO Y FIBRA ÓPTICA
   // ===========================================================================
   Widget _buildExternalPowerOutletsZone({
     required List<RackDeviceModel> extOutlets,
     required Map<int, Color> connectedPortColors,
   }) {
-    final totalHeight =
-        extOutlets.length * (_extCardHeight + _extCardGap) + 90.0;
+    double runningTopInZone = _extCardTopStart - (_rackTopMargin - 20);
+    final cardPositions = <double>[];
+    final cardHeights = <double>[];
+    for (final ext in extOutlets) {
+      cardPositions.add(runningTopInZone);
+      final h = _externalCardHeight(ext);
+      cardHeights.add(h);
+      runningTopInZone += h + _extCardGap;
+    }
+    final totalHeight = runningTopInZone + 40.0;
 
     return Positioned(
       left: _extZoneLeft,
@@ -3004,7 +3202,7 @@ class _RackEditorViewState extends State<RackEditorView> {
             top: 0,
             right: 0,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
                 color: const Color(0xFF0F172A),
                 borderRadius: BorderRadius.circular(8),
@@ -3021,54 +3219,56 @@ class _RackEditorViewState extends State<RackEditorView> {
                   const Icon(
                     Icons.electrical_services,
                     color: Color(0xFFFACC15),
-                    size: 18,
+                    size: 16,
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                   const Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'TOMAS ELÉCTRICAS EXTERIORES (SCHUKO)',
+                          'TOMAS EXTERIORES (ELÉCTRICAS & FIBRA)',
                           style: TextStyle(
                             color: Colors.white,
-                            fontSize: 10.5,
+                            fontSize: 9.8,
                             fontWeight: FontWeight.w800,
-                            letterSpacing: 0.4,
+                            letterSpacing: 0.3,
                           ),
                         ),
                         Text(
-                          'Conecta equipos de Front o Back con color por línea',
+                          'Schuko 230V y Acometidas de Fibra con nº conectores ajustable',
                           style: TextStyle(
                             color: Color(0xFF94A3B8),
-                            fontSize: 9.5,
+                            fontSize: 8.8,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  if (_canEdit)
+                  if (_canEdit) ...[
                     InkWell(
-                      onTap: () => _showAddOrEditExternalOutletDialog(),
+                      onTap: () => _showAddOrEditExternalOutletDialog(
+                        initialFeedType: 'power',
+                      ),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
+                          horizontal: 6,
                           vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF2563EB),
+                          color: const Color(0xFFDC2626),
                           borderRadius: BorderRadius.circular(5),
                         ),
                         child: const Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.add, size: 13, color: Colors.white),
+                            Icon(Icons.bolt, size: 11, color: Colors.white),
                             SizedBox(width: 2),
                             Text(
-                              'Ampliar',
+                              '+Schuko',
                               style: TextStyle(
                                 color: Colors.white,
-                                fontSize: 10,
+                                fontSize: 9.2,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
@@ -3076,6 +3276,38 @@ class _RackEditorViewState extends State<RackEditorView> {
                         ),
                       ),
                     ),
+                    const SizedBox(width: 4),
+                    InkWell(
+                      onTap: () => _showAddOrEditExternalOutletDialog(
+                        initialFeedType: 'fiber',
+                      ),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0284C7),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.add, size: 11, color: Colors.white),
+                            SizedBox(width: 2),
+                            Text(
+                              '+Fibra',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 9.2,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -3083,7 +3315,8 @@ class _RackEditorViewState extends State<RackEditorView> {
           for (int idx = 0; idx < extOutlets.length; idx++)
             _buildSingleExternalOutletCard(
               ext: extOutlets[idx],
-              index: idx,
+              topInZone: cardPositions[idx],
+              cardHeight: cardHeights[idx],
               canDelete: _canEdit && extOutlets.length > 1,
               connectedPortColors: connectedPortColors,
             ),
@@ -3094,21 +3327,20 @@ class _RackEditorViewState extends State<RackEditorView> {
 
   Widget _buildSingleExternalOutletCard({
     required RackDeviceModel ext,
-    required int index,
+    required double topInZone,
+    required double cardHeight,
     required bool canDelete,
     required Map<int, Color> connectedPortColors,
   }) {
-    final topInZone =
-        (_extCardTopStart - (_rackTopMargin - 20)) +
-            index * (_extCardHeight + _extCardGap);
     final feedColor = CableGeometryBuilder.parseHexColor(ext.feedColorHex);
     final count = ext.ports.length;
+    final isFiber = ext.isFiberFeed;
 
     return Positioned(
       left: 0,
       top: topInZone,
       width: _extZoneWidth,
-      height: _extCardHeight,
+      height: cardHeight,
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
@@ -3140,14 +3372,20 @@ class _RackEditorViewState extends State<RackEditorView> {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.bolt, size: 16, color: Colors.white),
-                    const SizedBox(width: 4),
+                    Icon(
+                      isFiber
+                          ? Icons.settings_input_hdmi_outlined
+                          : Icons.bolt,
+                      size: 15,
+                      color: Colors.white,
+                    ),
+                    const SizedBox(width: 5),
                     Expanded(
                       child: Text(
                         '${ext.code} • ${ext.name}',
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 11,
+                          fontSize: 10.8,
                           fontWeight: FontWeight.w800,
                         ),
                         overflow: TextOverflow.ellipsis,
@@ -3162,7 +3400,9 @@ class _RackEditorViewState extends State<RackEditorView> {
                           size: 14,
                           color: Colors.white,
                         ),
-                        tooltip: 'Editar nombre, color o número de enchufes',
+                        tooltip: isFiber
+                            ? 'Editar caja exterior de fibra y nº de conectores'
+                            : 'Editar nombre, color o número de enchufes',
                         visualDensity: VisualDensity.compact,
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(
@@ -3192,36 +3432,100 @@ class _RackEditorViewState extends State<RackEditorView> {
             ),
             Positioned(
               left: 10,
-              top: 41,
-              right: 10,
+              top: 40,
+              right: 8,
               child: Row(
                 children: [
                   Container(
-                    width: 8,
-                    height: 8,
+                    width: 7,
+                    height: 7,
                     decoration: BoxDecoration(
                       color: feedColor,
                       shape: BoxShape.circle,
                     ),
                   ),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Enchufes Schuko 230V ($count tomas • Cable ${ext.feedColorHex})',
-                    style: const TextStyle(
-                      fontSize: 9.5,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF475569),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      isFiber
+                          ? 'Fibra Óptica Exterior ($count conectores FO)'
+                          : 'Enchufes Schuko 230V ($count tomas)',
+                      style: const TextStyle(
+                        fontSize: 9.2,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF475569),
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                  if (_canEdit)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 1,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          InkWell(
+                            onTap: count > 1
+                                ? () => _quickAdjustExternalOutletCount(
+                                      ext,
+                                      count - (isFiber && count > 8 ? 2 : 1),
+                                    )
+                                : null,
+                            child: const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 3),
+                              child: Icon(
+                                Icons.remove,
+                                size: 11,
+                                color: Color(0xFF0F172A),
+                              ),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 3),
+                            child: Text(
+                              '$count',
+                              style: const TextStyle(
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF0F172A),
+                              ),
+                            ),
+                          ),
+                          InkWell(
+                            onTap: count < (isFiber ? 48 : 16)
+                                ? () => _quickAdjustExternalOutletCount(
+                                      ext,
+                                      count + (isFiber && count >= 8 ? 2 : 1),
+                                    )
+                                : null,
+                            child: const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 3),
+                              child: Icon(
+                                Icons.add,
+                                size: 11,
+                                color: Color(0xFF0F172A),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),
             for (int pIdx = 0; pIdx < count; pIdx++)
-              _buildSchukoSocketWidget(
+              _buildExternalPortWidget(
                 ext: ext,
                 port: ext.ports[pIdx],
                 index: pIdx,
-                totalCount: count,
                 feedColor: feedColor,
                 connectedColor: connectedPortColors[ext.ports[pIdx].id],
               ),
@@ -3231,22 +3535,102 @@ class _RackEditorViewState extends State<RackEditorView> {
     );
   }
 
-  Widget _buildSchukoSocketWidget({
+  Widget _buildExternalPortWidget({
     required RackDeviceModel ext,
     required PortModel port,
     required int index,
-    required int totalCount,
     required Color feedColor,
     required Color? connectedColor,
   }) {
     final isPending = _pendingSourcePort?.id == port.id;
     final isConnected = connectedColor != null;
-    final rel = totalCount == 1
-        ? 0.5
-        : (0.14 + (0.72 * index / (totalCount - 1)));
-    const socketSize = 36.0;
-    final leftPx = rel * _extZoneWidth - socketSize / 2.0;
-    const topPx = 82.0 - socketSize / 2.0;
+    final localCenter = _externalPortLocalCenter(ext, index);
+    final isFiber = ext.isFiberFeed;
+    final socketSize = isFiber ? 28.0 : 34.0;
+    final leftPx = localCenter.dx - socketSize / 2.0;
+    final topPx = localCenter.dy - socketSize / 2.0;
+
+    if (isFiber) {
+      // Conector óptico exterior LC/SC (Duplex Ferrule)
+      return Positioned(
+        left: leftPx,
+        top: topPx,
+        width: socketSize,
+        height: socketSize + 13,
+        child: Tooltip(
+          message:
+              '${ext.code} (${ext.name}) — Conector Fibra ${port.portNumber} (LC/SC)\n${isConnected ? 'Ocupado (Clic para seleccionar latiguillo)' : 'Libre (Clic para conectar fibra al Rack)'}',
+          child: InkWell(
+            onTap: () => _handlePortTap(ext, port),
+            borderRadius: BorderRadius.circular(6),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: socketSize,
+                  height: socketSize - 4,
+                  decoration: BoxDecoration(
+                    color: isPending
+                        ? const Color(0xFF10B981)
+                        : (isConnected
+                            ? feedColor
+                            : feedColor.withValues(alpha: 0.12)),
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(
+                      color: isPending ? Colors.amber : feedColor,
+                      width: isPending ? 2.4 : 1.8,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: isConnected
+                              ? Colors.white
+                              : const Color(0xFF0F172A),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: isConnected ? feedColor : Colors.white,
+                            width: 1.0,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 3),
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: isConnected
+                              ? Colors.white
+                              : const Color(0xFF0F172A),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: isConnected ? feedColor : Colors.white,
+                            width: 1.0,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  port.portNumber,
+                  style: TextStyle(
+                    fontSize: 7.8,
+                    fontWeight: FontWeight.w800,
+                    color: isConnected ? feedColor : const Color(0xFF334155),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
     return Positioned(
       left: leftPx,

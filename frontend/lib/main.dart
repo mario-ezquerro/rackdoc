@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'core/api_client.dart';
+import 'core/image_file_picker.dart';
 import 'features/admin/admin_view.dart';
 import 'features/datacenter/datacenter_floor_view.dart';
 import 'features/locations/locations_view.dart';
@@ -17,7 +18,7 @@ class RackDocApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'RackDoc — DCIM & Visual Rack Manager',
+      title: 'RackDoc8 — DCIM & Visual Rack Manager',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -454,6 +455,283 @@ class _RackDocShellState extends State<RackDocShell> {
     );
   }
 
+  String _formatMonitoredInline({
+    required int monitored,
+    required int online,
+    required int offline,
+    String prefix = '',
+  }) {
+    final parts = <String>[];
+    if (prefix.isNotEmpty) parts.add(prefix);
+    parts.add('Monit: $monitored');
+    final statusParts = <String>[];
+    if (online > 0) statusParts.add('🟢$online');
+    if (offline > 0) statusParts.add('🔴$offline');
+    if (statusParts.isNotEmpty) {
+      parts.add(statusParts.join(' '));
+    }
+    return parts.join(' • ');
+  }
+
+  Future<void> _showImportExcelDialog() async {
+    final messenger = ScaffoldMessenger.of(context);
+    bool importing = false;
+    Map<String, dynamic>? importResult;
+    String? importError;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.upload_file_rounded, color: Color(0xFF15803D)),
+              SizedBox(width: 8),
+              Text('Importar Datos desde Excel (.xlsx)'),
+            ],
+          ),
+          content: SizedBox(
+            width: 540,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF0FDF4),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFF86EFAC)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(
+                            Icons.description_outlined,
+                            size: 18,
+                            color: Color(0xFF15803D),
+                          ),
+                          SizedBox(width: 6),
+                          Text(
+                            'Paso 1 (Recomendado): Descarga la Plantilla Excel de Ejemplo',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF14532D),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Incluye las pestañas "1_Racks_y_Sedes", "2_Equipos_y_Hosts" y "3_Instrucciones_y_Librerias" con ejemplos pre-rellenados (HP ProLiant, Dell PowerEdge, Supermicro, Cisco, Fortinet) listos para editar.',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: Color(0xFF166534),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          final url = Uri.parse(_api.getExcelTemplateUrl());
+                          launchUrl(url, mode: LaunchMode.externalApplication);
+                        },
+                        style: OutlinedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: const Color(0xFF15803D),
+                          side: const BorderSide(color: Color(0xFF16A34A)),
+                        ),
+                        icon: const Icon(Icons.download_rounded, size: 16),
+                        label: const Text(
+                          'Descargar Plantilla Ejemplo (.xlsx)',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(
+                            Icons.cloud_upload_outlined,
+                            size: 18,
+                            color: Color(0xFF1E3A8A),
+                          ),
+                          SizedBox(width: 6),
+                          Text(
+                            'Paso 2: Sube tu archivo Excel (.xlsx) para crear o actualizar',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'RackDoc8 importará automáticamente las Sedes, Plantas, Racks y montará cada Equipo/Host en su unidad U correspondiente.',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: Color(0xFF475569),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      FilledButton.icon(
+                        onPressed: importing
+                            ? null
+                            : () async {
+                                final picked = await pickExcelFile();
+                                if (picked == null) return;
+                                setModal(() {
+                                  importing = true;
+                                  importError = null;
+                                  importResult = null;
+                                });
+                                try {
+                                  final res = await _api.importExcelFile(
+                                    filename: picked.name,
+                                    fileBytes: picked.bytes,
+                                  );
+                                  await _loadInitialData();
+                                  setModal(() {
+                                    importing = false;
+                                    importResult = res;
+                                  });
+                                  messenger.showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Importación de Excel completada correctamente.',
+                                      ),
+                                      backgroundColor: Color(0xFF15803D),
+                                    ),
+                                  );
+                                } catch (e) {
+                                  setModal(() {
+                                    importing = false;
+                                    importError = e
+                                        .toString()
+                                        .replaceFirst('Exception: ', '');
+                                  });
+                                }
+                              },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF1E3A8A),
+                        ),
+                        icon: Icon(
+                          importing
+                              ? Icons.hourglass_top_rounded
+                              : Icons.folder_open_rounded,
+                          size: 16,
+                        ),
+                        label: Text(
+                          importing
+                              ? 'Importando datos del Excel...'
+                              : 'Seleccionar y Cargar Excel (.xlsx)',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (importError != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF2F2),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFFECACA)),
+                    ),
+                    child: Text(
+                      'Error: $importError',
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFFDC2626),
+                      ),
+                    ),
+                  ),
+                ],
+                if (importResult != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEFF6FF),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF93C5FD)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '✓ Resumen de Importación completada:',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF1E3A8A),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '• Sedes nuevas: ${importResult!['locations_created'] ?? 0}  |  Plantas nuevas: ${importResult!['floors_created'] ?? 0}\n'
+                          '• Racks creados: ${importResult!['racks_created'] ?? 0}  |  Racks actualizados: ${importResult!['racks_updated'] ?? 0}\n'
+                          '• Equipos creados: ${importResult!['devices_created'] ?? 0}  |  Equipos actualizados: ${importResult!['devices_updated'] ?? 0}',
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            color: Color(0xFF1E293B),
+                          ),
+                        ),
+                        if ((importResult!['errors'] as List?)?.isNotEmpty ==
+                            true) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'Avisos (${(importResult!['errors'] as List).length}): ${(importResult!['errors'] as List).take(3).join(' | ')}',
+                            style: const TextStyle(
+                              fontSize: 10.5,
+                              color: Color(0xFFB45309),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cerrar'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildLoginGateScreen() {
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
@@ -497,7 +775,7 @@ class _RackDocShellState extends State<RackDocShell> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'RackDoc DCIM',
+                          'RackDoc8 DCIM',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w900,
@@ -640,7 +918,7 @@ class _RackDocShellState extends State<RackDocShell> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'RackDoc DCIM',
+                              'RackDoc8 DCIM',
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w800,
@@ -823,7 +1101,11 @@ class _RackDocShellState extends State<RackDocShell> {
                             ),
                           ),
                           subtitle: Text(
-                            'Monit: ${loc.monitoredCount} • 🟢${loc.onlineCount} 🔴${loc.offlineCount}',
+                            _formatMonitoredInline(
+                              monitored: loc.monitoredCount,
+                              online: loc.onlineCount,
+                              offline: loc.offlineCount,
+                            ),
                             style: const TextStyle(
                               fontSize: 9.5,
                               fontWeight: FontWeight.w600,
@@ -872,7 +1154,12 @@ class _RackDocShellState extends State<RackDocShell> {
                                     ),
                                   ),
                                   subtitle: Text(
-                                    'P${fl.levelNumber} • Monit:${rk.monitoredCount} 🟢${rk.onlineCount} 🔴${rk.offlineCount}',
+                                    _formatMonitoredInline(
+                                      monitored: rk.monitoredCount,
+                                      online: rk.onlineCount,
+                                      offline: rk.offlineCount,
+                                      prefix: 'P${fl.levelNumber}',
+                                    ),
                                     style: const TextStyle(
                                       fontSize: 9.5,
                                       color: Color(0xFF64748B),
@@ -888,17 +1175,34 @@ class _RackDocShellState extends State<RackDocShell> {
 
                 const Divider(height: 1),
                 Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      final url = Uri.parse(_api.getExcelExportUrl());
-                      launchUrl(url, mode: LaunchMode.externalApplication);
-                    },
-                    icon: const Icon(Icons.table_view_outlined, size: 16),
-                    label: const Text(
-                      'Exportar Todo a Excel',
-                      style: TextStyle(fontSize: 11),
-                    ),
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      FilledButton.tonalIcon(
+                        onPressed: _showImportExcelDialog,
+                        icon: const Icon(Icons.upload_file_rounded, size: 16),
+                        label: const Text(
+                          'Importar Excel / Ejemplo',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          final url = Uri.parse(_api.getExcelExportUrl());
+                          launchUrl(url, mode: LaunchMode.externalApplication);
+                        },
+                        icon: const Icon(Icons.table_view_outlined, size: 16),
+                        label: const Text(
+                          'Exportar Todo a Excel',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -1167,13 +1471,31 @@ class _RackDocShellState extends State<RackDocShell> {
                 label: const Text('Actualizar Estado'),
               ),
               const SizedBox(width: 10),
+              OutlinedButton.icon(
+                onPressed: () {
+                  final url = Uri.parse(_api.getExcelTemplateUrl());
+                  launchUrl(url, mode: LaunchMode.externalApplication);
+                },
+                icon: const Icon(Icons.description_outlined, size: 17),
+                label: const Text('Plantilla Ejemplo (.xlsx)'),
+              ),
+              const SizedBox(width: 10),
+              FilledButton.icon(
+                onPressed: _showImportExcelDialog,
+                icon: const Icon(Icons.upload_file_rounded, size: 18),
+                label: const Text('Importar Excel (.xlsx)'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E3A8A),
+                ),
+              ),
+              const SizedBox(width: 10),
               FilledButton.icon(
                 onPressed: () {
                   final url = Uri.parse(_api.getExcelExportUrl());
                   launchUrl(url, mode: LaunchMode.externalApplication);
                 },
                 icon: const Icon(Icons.download_rounded, size: 18),
-                label: const Text('Descargar Inventario Completo (.xlsx)'),
+                label: const Text('Exportar Inventario (.xlsx)'),
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF15803D),
                 ),
@@ -1205,13 +1527,15 @@ class _RackDocShellState extends State<RackDocShell> {
               ),
               _DashboardCard(
                 title: 'Estado Online (Verde)',
-                value: '🟢 $totalOnline Online',
+                value: totalOnline > 0 ? '🟢 $totalOnline Online' : 'Sin equipos online',
                 icon: Icons.check_circle_outline,
                 color: const Color(0xFF16A34A),
               ),
               _DashboardCard(
                 title: 'Alertas Offline (Rojo)',
-                value: '🔴 $totalOffline Offline${totalWarning > 0 ? ' • 🟠 $totalWarning' : ''}',
+                value: totalOffline > 0
+                    ? '🔴 $totalOffline Offline${totalWarning > 0 ? ' • 🟠 $totalWarning' : ''}'
+                    : 'Sin alertas caídas',
                 icon: Icons.error_outline,
                 color: const Color(0xFFDC2626),
               ),
@@ -1261,14 +1585,14 @@ class _RackDocShellState extends State<RackDocShell> {
                         ButtonSegment(
                           value: 'online',
                           label: Text(
-                            '🟢 Verde ($totalOnline)',
+                            '${totalOnline > 0 ? '🟢 ' : ''}Verde ($totalOnline)',
                             style: const TextStyle(fontSize: 11),
                           ),
                         ),
                         ButtonSegment(
                           value: 'offline',
                           label: Text(
-                            '🔴 Rojo ($totalOffline)',
+                            '${totalOffline > 0 ? '🔴 ' : ''}Rojo ($totalOffline)',
                             style: const TextStyle(fontSize: 11),
                           ),
                         ),

@@ -408,8 +408,12 @@ class RackDeviceModel {
   bool get isExternalFeed =>
       mountedFace == 'external' || (customFields['is_external_feed'] == true);
 
+  String get feedType => (customFields['feed_type'] ?? 'power').toString();
+
+  bool get isFiberFeed => feedType == 'fiber';
+
   String get feedColorHex =>
-      (customFields['feed_color'] ?? '#DC2626').toString();
+      (customFields['feed_color'] ?? (isFiberFeed ? '#0284C7' : '#DC2626')).toString();
 
   int get socketCount =>
       int.tryParse((customFields['socket_count'] ?? ports.length).toString()) ??

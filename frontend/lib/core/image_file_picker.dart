@@ -10,3 +10,5 @@ class PickedImageFile {
 }
 
 Future<PickedImageFile?> pickPlanImageFile() => pickPlanImageFileImpl();
+
+Future<PickedImageFile?> pickExcelFile() => pickExcelFileImpl();

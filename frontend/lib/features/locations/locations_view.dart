@@ -991,64 +991,70 @@ class _LocationsViewState extends State<LocationsView> {
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 10),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 6,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: loc.offlineCount > 0
-                                      ? const Color(0xFFFEF2F2)
-                                      : const Color(0xFFF0FDF4),
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
+                              if (loc.monitoredCount > 0) ...[
+                                const SizedBox(height: 10),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
                                     color: loc.offlineCount > 0
-                                        ? const Color(0xFFFECACA)
-                                        : const Color(0xFFBBF7D0),
+                                        ? const Color(0xFFFEF2F2)
+                                        : const Color(0xFFF0FDF4),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: loc.offlineCount > 0
+                                          ? const Color(0xFFFECACA)
+                                          : const Color(0xFFBBF7D0),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.monitor_heart_rounded,
+                                        size: 14,
+                                        color: loc.offlineCount > 0
+                                            ? const Color(0xFFDC2626)
+                                            : const Color(0xFF16A34A),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'Monitorizados: ${loc.monitoredCount}',
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFF0F172A),
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      if (loc.onlineCount > 0)
+                                        _StatusDotPill(
+                                          color: const Color(0xFF16A34A),
+                                          count: loc.onlineCount,
+                                          label: 'Verde',
+                                        ),
+                                      if (loc.onlineCount > 0 &&
+                                          loc.offlineCount > 0)
+                                        const SizedBox(width: 6),
+                                      if (loc.offlineCount > 0)
+                                        _StatusDotPill(
+                                          color: const Color(0xFFDC2626),
+                                          count: loc.offlineCount,
+                                          label: 'Rojo',
+                                        ),
+                                      if (loc.warningCount > 0) ...[
+                                        const SizedBox(width: 6),
+                                        _StatusDotPill(
+                                          color: const Color(0xFFD97706),
+                                          count: loc.warningCount,
+                                          label: 'Aviso',
+                                        ),
+                                      ],
+                                    ],
                                   ),
                                 ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.monitor_heart_rounded,
-                                      size: 14,
-                                      color: loc.offlineCount > 0
-                                          ? const Color(0xFFDC2626)
-                                          : const Color(0xFF16A34A),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      'Monitorizados: ${loc.monitoredCount}',
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w700,
-                                        color: Color(0xFF0F172A),
-                                      ),
-                                    ),
-                                    const Spacer(),
-                                    _StatusDotPill(
-                                      color: const Color(0xFF16A34A),
-                                      count: loc.onlineCount,
-                                      label: 'Verde',
-                                    ),
-                                    const SizedBox(width: 6),
-                                    _StatusDotPill(
-                                      color: const Color(0xFFDC2626),
-                                      count: loc.offlineCount,
-                                      label: 'Rojo',
-                                    ),
-                                    if (loc.warningCount > 0) ...[
-                                      const SizedBox(width: 6),
-                                      _StatusDotPill(
-                                        color: const Color(0xFFD97706),
-                                        count: loc.warningCount,
-                                        label: 'Aviso',
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
+                              ],
                             ],
                           ),
                         ),
@@ -1116,8 +1122,7 @@ class _LocationsViewState extends State<LocationsView> {
                   child: Image.network(
                     customMapUrl,
                     fit: BoxFit.contain,
-                    errorBuilder: (ctx, err, _) =>
-                        Center(child: Text('Error cargando mapa: $err')),
+                    errorBuilder: (ctx, err, _) => const SizedBox.shrink(),
                   ),
                 ),
               ),
@@ -1239,7 +1244,15 @@ class _LocationsViewState extends State<LocationsView> {
                                       ],
                                     ),
                                     Text(
-                                      '${loc.floorsCount} plantas • ${loc.racksCount} racks • Monit: ${loc.monitoredCount} (🟢${loc.onlineCount} 🔴${loc.offlineCount})',
+                                      [
+                                        '${loc.floorsCount} plantas • ${loc.racksCount} racks',
+                                        if (loc.monitoredCount > 0)
+                                          'Monit: ${loc.monitoredCount}',
+                                        if (loc.onlineCount > 0)
+                                          '🟢${loc.onlineCount}',
+                                        if (loc.offlineCount > 0)
+                                          '🔴${loc.offlineCount}',
+                                      ].join(' '),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
@@ -1503,7 +1516,13 @@ class _LocationsViewState extends State<LocationsView> {
                                 const SizedBox(width: 4),
                                 Flexible(
                                   child: Text(
-                                    '${loc.code} • 🟢${loc.onlineCount} 🔴${loc.offlineCount}',
+                                    [
+                                      loc.code,
+                                      if (loc.onlineCount > 0)
+                                        '🟢${loc.onlineCount}',
+                                      if (loc.offlineCount > 0)
+                                        '🔴${loc.offlineCount}',
+                                    ].join(' '),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(

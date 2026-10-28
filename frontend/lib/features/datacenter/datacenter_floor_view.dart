@@ -32,6 +32,7 @@ class DatacenterFloorView extends StatefulWidget {
 class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   int? _selectedFloorId;
   bool _uploading = false;
+  bool _floorPlanLoadError = false;
 
   // Estado local en vivo para arrastrar y dimensionar los Racks en la Vista de Planta
   final Map<int, Offset> _rackPositions = {};
@@ -612,45 +613,52 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       ],
                     ),
                     const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: loc.offlineCount > 0
-                            ? const Color(0xFFFEF2F2)
-                            : const Color(0xFFF0FDF4),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
+                    if (loc.monitoredCount > 0) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
                           color: loc.offlineCount > 0
-                              ? const Color(0xFFFECACA)
-                              : const Color(0xFFBBF7D0),
+                              ? const Color(0xFFFEF2F2)
+                              : const Color(0xFFF0FDF4),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: loc.offlineCount > 0
+                                ? const Color(0xFFFECACA)
+                                : const Color(0xFFBBF7D0),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.monitor_heart_rounded,
+                              size: 14,
+                              color: loc.offlineCount > 0
+                                  ? const Color(0xFFDC2626)
+                                  : const Color(0xFF16A34A),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              [
+                                'Datacenter Monitorizados: ${loc.monitoredCount}',
+                                if (loc.onlineCount > 0) '🟢 ${loc.onlineCount}',
+                                if (loc.offlineCount > 0) '🔴 ${loc.offlineCount}',
+                                if (loc.warningCount > 0) '🟠 ${loc.warningCount}',
+                              ].join(' • '),
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF0F172A),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.monitor_heart_rounded,
-                            size: 14,
-                            color: loc.offlineCount > 0
-                                ? const Color(0xFFDC2626)
-                                : const Color(0xFF16A34A),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Datacenter Monitorizados: ${loc.monitoredCount} • 🟢 ${loc.onlineCount} • 🔴 ${loc.offlineCount}${loc.warningCount > 0 ? ' • 🟠 ${loc.warningCount}' : ''}',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF0F172A),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 10),
+                      const SizedBox(width: 10),
+                    ],
                     if (floor != null) ...[
                       OutlinedButton.icon(
                         onPressed: _uploading
@@ -779,7 +787,15 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                       borderRadius: BorderRadius.circular(10),
                                     ),
                                     child: Text(
-                                      '$rCount racks • Monit: ${fl.monitoredCount} (🟢${fl.onlineCount} 🔴${fl.offlineCount})',
+                                      [
+                                        '$rCount racks',
+                                        if (fl.monitoredCount > 0)
+                                          'Monit: ${fl.monitoredCount}',
+                                        if (fl.onlineCount > 0)
+                                          '🟢${fl.onlineCount}',
+                                        if (fl.offlineCount > 0)
+                                          '🔴${fl.offlineCount}',
+                                      ].join(' '),
                                       style: TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.bold,
@@ -925,9 +941,99 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                     child: Image.network(
                                       floorImageUrl,
                                       fit: BoxFit.contain,
-                                      errorBuilder: (ctx, err, _) => Center(
-                                        child: Text('Error cargando plano: $err'),
+                                      errorBuilder: (ctx, err, _) {
+                                        WidgetsBinding.instance
+                                            .addPostFrameCallback((_) {
+                                          if (mounted && !_floorPlanLoadError) {
+                                            setState(
+                                              () => _floorPlanLoadError = true,
+                                            );
+                                          }
+                                        });
+                                        return const SizedBox.shrink();
+                                      },
+                                    ),
+                                  ),
+                                ),
+
+                              if (_floorPlanLoadError &&
+                                  floorImageUrl.isNotEmpty)
+                                Positioned(
+                                  bottom: 14,
+                                  left: 14,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 10,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                        color: const Color(0xFFFCD34D),
+                                        width: 1.5,
                                       ),
+                                      boxShadow: const [
+                                        BoxShadow(
+                                          color: Colors.black12,
+                                          blurRadius: 10,
+                                          offset: Offset(0, 3),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(
+                                          Icons.broken_image_outlined,
+                                          color: Color(0xFFD97706),
+                                          size: 20,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        const Text(
+                                          'El plano de fondo anterior no se encuentra disponible. Mostrando cuadrícula técnica.',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color: Color(0xFF334155),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        FilledButton.tonalIcon(
+                                          onPressed: () async {
+                                            setState(
+                                              () => _floorPlanLoadError = false,
+                                            );
+                                            await _uploadFloorBlueprint(floor);
+                                          },
+                                          icon: const Icon(
+                                            Icons.upload_file_outlined,
+                                            size: 15,
+                                          ),
+                                          label: const Text(
+                                            'Subir Nuevo Plano',
+                                            style: TextStyle(fontSize: 11.5),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        TextButton(
+                                          onPressed: () async {
+                                            setState(
+                                              () => _floorPlanLoadError = false,
+                                            );
+                                            await widget.api
+                                                .deleteCustomPlanImage(
+                                              targetType: 'floor',
+                                              targetId: floor.id,
+                                            );
+                                            widget.onRefresh();
+                                          },
+                                          child: const Text(
+                                            'Usar solo cuadrícula',
+                                            style: TextStyle(fontSize: 11.5),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ),
@@ -1097,34 +1203,40 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 2),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 5,
-                        vertical: 1.5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: rk.offlineCount > 0
-                            ? const Color(0x44DC2626)
-                            : const Color(0x3316A34A),
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(
+                    if (rk.monitoredCount > 0) ...[
+                      const SizedBox(height: 2),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 1.5,
+                        ),
+                        decoration: BoxDecoration(
                           color: rk.offlineCount > 0
-                              ? const Color(0xFFF87171)
-                              : const Color(0xFF4ADE80),
-                          width: 0.8,
+                              ? const Color(0x44DC2626)
+                              : const Color(0x3316A34A),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: rk.offlineCount > 0
+                                ? const Color(0xFFF87171)
+                                : const Color(0xFF4ADE80),
+                            width: 0.8,
+                          ),
+                        ),
+                        child: Text(
+                          [
+                            'Monit:${rk.monitoredCount}',
+                            if (rk.onlineCount > 0) '🟢${rk.onlineCount}',
+                            if (rk.offlineCount > 0) '🔴${rk.offlineCount}',
+                          ].join(' '),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 8.5,
+                            fontWeight: FontWeight.w800,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      child: Text(
-                        'Monit:${rk.monitoredCount} 🟢${rk.onlineCount} 🔴${rk.offlineCount}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 8.5,
-                          fontWeight: FontWeight.w800,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
+                    ],
                     const Spacer(),
                   ],
                 ),

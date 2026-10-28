@@ -61,6 +61,7 @@ class DeviceLibraryImportRequest(BaseModel):
 class ExternalOutletCreate(BaseModel):
     code: str = "FEED-C"
     name: str = "Línea Eléctrica C (Schuko)"
+    feed_type: str = "power"  # "power" | "fiber"
     color_hex: str = "#EA580C"
     socket_count: int = 4
     start_u: int = 28
@@ -69,6 +70,7 @@ class ExternalOutletCreate(BaseModel):
 class ExternalOutletUpdate(BaseModel):
     code: Optional[str] = None
     name: Optional[str] = None
+    feed_type: Optional[str] = None
     color_hex: Optional[str] = None
     socket_count: Optional[int] = None
     start_u: Optional[int] = None

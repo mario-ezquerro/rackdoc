@@ -3,8 +3,14 @@ from pathlib import Path
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "rackdoc.db"
-DEFAULT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+_candidate_docker_data = Path("/app/data")
+if _candidate_docker_data.exists() or os.getenv("DATABASE_URL", "").startswith("sqlite:////app/data"):
+    DATA_DIR = _candidate_docker_data
+else:
+    DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+DEFAULT_DB_PATH = DATA_DIR / "rackdoc.db"
 
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DEFAULT_DB_PATH}")
 

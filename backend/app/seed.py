@@ -1038,7 +1038,11 @@ def get_or_create_external_feed_template(db: Session) -> DeviceTemplate:
 
 
 def sync_external_outlet_ports(db: Session, device: RackDevice, socket_count: int):
-    socket_count = max(1, min(16, int(socket_count)))
+    cf = dict(device.custom_fields or {})
+    feed_type = str(cf.get("feed_type") or "power").lower()
+    is_fiber = feed_type == "fiber"
+    max_sockets = 48 if is_fiber else 16
+    socket_count = max(1, min(max_sockets, int(socket_count)))
     existing_ports = sorted(device.ports, key=lambda p: p.col_index)
 
     # Si sobran puertos no conectados, borrarlos desde el final
@@ -1055,20 +1059,30 @@ def sync_external_outlet_ports(db: Session, device: RackDevice, socket_count: in
         if not has_conn:
             db.delete(cand)
 
-    # Si faltan puertos Schuko, crearlos
+    prefix = "FO" if is_fiber else "SCH"
+    p_type = "fiber_lc" if is_fiber else "power_schuko"
+
+    # Actualizar tipo/prefijo de los existentes si cambió feed_type
+    for idx, p in enumerate(existing_ports):
+        num = idx + 1
+        p.port_number = f"{prefix}{num}"
+        p.label = f"{device.code}:{prefix}{num}"
+        p.port_type = p_type
+
+    # Si faltan puertos, crearlos
     current_len = len(existing_ports)
     for idx in range(current_len, socket_count):
         num = idx + 1
-        p_num = f"SCH{num}"
+        p_num = f"{prefix}{num}"
         port = Port(
             rack_device_id=device.id,
             port_number=p_num,
             label=f"{device.code}:{p_num}",
             face="front",
-            port_type="power_schuko",
+            port_type=p_type,
             row_index=0,
             col_index=idx,
-            rel_x=round(0.15 + 0.70 * (idx / max(1, socket_count - 1)), 4),
+            rel_x=round(0.10 + 0.80 * (idx / max(1, socket_count - 1)), 4),
             rel_y=0.5,
         )
         db.add(port)
@@ -1078,46 +1092,84 @@ def sync_external_outlet_ports(db: Session, device: RackDevice, socket_count: in
 
 def ensure_rack_external_outlets(db: Session, rack: Rack):
     ext_devices = [d for d in rack.devices if d.mounted_face == "external"]
-    if ext_devices:
-        return
-
     tpl = get_or_create_external_feed_template(db)
-    feed_a = RackDevice(
-        rack_id=rack.id,
-        template_id=tpl.id,
-        code="TOMA-A",
-        name="Línea Eléctrica A (Schuko Rojo)",
-        hostname="feed-a",
-        start_u=38,
-        mounted_face="external",
-        status="online",
-        custom_fields={
-            "is_external_feed": True,
-            "feed_color": "#DC2626",
-            "socket_count": 4,
-        },
-        notes="Acometida eléctrica exterior Línea A (Estándar Rojo)",
+
+    has_power = any(
+        (d.custom_fields or {}).get("feed_type", "power") == "power"
+        for d in ext_devices
     )
-    feed_b = RackDevice(
-        rack_id=rack.id,
-        template_id=tpl.id,
-        code="TOMA-B",
-        name="Línea Eléctrica B (Schuko Azul)",
-        hostname="feed-b",
-        start_u=22,
-        mounted_face="external",
-        status="online",
-        custom_fields={
-            "is_external_feed": True,
-            "feed_color": "#2563EB",
-            "socket_count": 4,
-        },
-        notes="Acometida eléctrica exterior Línea B (Estándar Azul)",
+    has_fiber = any(
+        (d.custom_fields or {}).get("feed_type") == "fiber"
+        for d in ext_devices
     )
-    db.add_all([feed_a, feed_b])
-    db.flush()
-    sync_external_outlet_ports(db, feed_a, 4)
-    sync_external_outlet_ports(db, feed_b, 4)
+
+    if not has_power:
+        feed_a = RackDevice(
+            rack_id=rack.id,
+            template_id=tpl.id,
+            code="TOMA-A",
+            name="Línea Eléctrica A (Schuko Rojo)",
+            hostname="feed-a",
+            start_u=38,
+            mounted_face="external",
+            status="online",
+            custom_fields={
+                "is_external_feed": True,
+                "feed_type": "power",
+                "feed_color": "#DC2626",
+                "socket_count": 4,
+            },
+            notes="Acometida eléctrica exterior Línea A (Estándar Rojo)",
+        )
+        feed_b = RackDevice(
+            rack_id=rack.id,
+            template_id=tpl.id,
+            code="TOMA-B",
+            name="Línea Eléctrica B (Schuko Azul)",
+            hostname="feed-b",
+            start_u=22,
+            mounted_face="external",
+            status="online",
+            custom_fields={
+                "is_external_feed": True,
+                "feed_type": "power",
+                "feed_color": "#2563EB",
+                "socket_count": 4,
+            },
+            notes="Acometida eléctrica exterior Línea B (Estándar Azul)",
+        )
+        db.add_all([feed_a, feed_b])
+        db.flush()
+        sync_external_outlet_ports(db, feed_a, 4)
+        sync_external_outlet_ports(db, feed_b, 4)
+    else:
+        feed_a = next((d for d in ext_devices if d.code == "TOMA-A"), None)
+        feed_b = next((d for d in ext_devices if d.code == "TOMA-B"), None)
+
+    if not has_fiber:
+        fiber_ext = RackDevice(
+            rack_id=rack.id,
+            template_id=tpl.id,
+            code="FIBRA-EXT-1",
+            name="Toma Exterior de Fibra Óptica (LC/SC)",
+            hostname="fiber-ext-1",
+            start_u=41,
+            mounted_face="external",
+            status="online",
+            custom_fields={
+                "is_external_feed": True,
+                "feed_type": "fiber",
+                "feed_color": "#0284C7",
+                "socket_count": 8,
+            },
+            notes="Roseta / Caja mural exterior de Fibra Óptica con número de conectores ajustable",
+        )
+        db.add(fiber_ext)
+        db.flush()
+        sync_external_outlet_ports(db, fiber_ext, 8)
+
+    if has_power and has_fiber:
+        return
 
     # Si este rack es RK001_M y tiene UPS01 / PDU-B con entrada libre, conectarlos como ejemplo visual
     if rack.code == "RK001_M":

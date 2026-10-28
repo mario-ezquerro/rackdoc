@@ -1,11 +1,11 @@
 {
-    "name": "rackdoc_frontend",
-    "short_name": "rackdoc_frontend",
+    "name": "RackDoc8 — DCIM & Visual Rack Manager",
+    "short_name": "RackDoc8",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#0F172A",
+    "theme_color": "#1E3A8A",
+    "description": "RackDoc8 — DCIM, Visual 42U Rack Manager & Heartbeat Monitoring",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

@@ -3,11 +3,17 @@ import 'dart:js_interop';
 import 'package:web/web.dart' as web;
 import 'image_file_picker.dart';
 
-Future<PickedImageFile?> pickPlanImageFileImpl() async {
+Future<PickedImageFile?> pickPlanImageFileImpl() =>
+    _pickWebFile('.jpg,.jpeg,.png,.gif,.webp,image/jpeg,image/png,image/gif,image/webp');
+
+Future<PickedImageFile?> pickExcelFileImpl() =>
+    _pickWebFile('.xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+
+Future<PickedImageFile?> _pickWebFile(String accept) async {
   final completer = Completer<PickedImageFile?>();
   final input = web.HTMLInputElement()
     ..type = 'file'
-    ..accept = '.jpg,.jpeg,.png,.gif,.webp,image/jpeg,image/png,image/gif,image/webp'
+    ..accept = accept
     ..style.display = 'none';
 
   web.document.body?.append(input);
