@@ -393,3 +393,54 @@ class AisleCreate(BaseModel):
     code: str
     name: str
     aisle_type: str = "cold"
+
+
+class FloorDeviceCreate(BaseModel):
+    room_id: Optional[int] = None
+    room_code: str = "GOA"
+    device_type: str  # camera | access_control | access_point | desktop | laptop | phone | printer | 3d_printer | isp_uplink | microphone | ndi_box | screen | speaker | telecom_outlet
+    code: str
+    name: str
+    pos_x: float = 0.50
+    pos_y: float = 0.50
+    ip_address: str = ""
+    mac_address: str = ""
+    vlan: Optional[int] = None
+    status: str = "online"
+    linked_rack_id: Optional[int] = None
+    linked_rack_device_code: str = ""
+    linked_outlet_id: Optional[int] = None
+    responsible_person: str = "Alex Geng"
+    contact_first_name: str = ""
+    contact_last_name: str = ""
+    contact_email: str = ""
+    contact_phone: str = ""
+    contact_job_title: str = ""
+    contact_department: str = ""
+    notes: str = ""
+
+
+class FloorDeviceUpdate(BaseModel):
+    room_id: Optional[int] = None
+    room_code: Optional[str] = None
+    device_type: Optional[str] = None
+    code: Optional[str] = None
+    name: Optional[str] = None
+    pos_x: Optional[float] = None
+    pos_y: Optional[float] = None
+    ip_address: Optional[str] = None
+    mac_address: Optional[str] = None
+    vlan: Optional[int] = None
+    status: Optional[str] = None
+    linked_rack_id: Optional[int] = None
+    linked_rack_device_code: Optional[str] = None
+    linked_outlet_id: Optional[int] = None
+    responsible_person: Optional[str] = None
+    contact_first_name: Optional[str] = None
+    contact_last_name: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    contact_job_title: Optional[str] = None
+    contact_department: Optional[str] = None
+    notes: Optional[str] = None
+

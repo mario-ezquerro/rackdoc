@@ -133,6 +133,92 @@ class RoomNode {
   }
 }
 
+class FloorDeviceNode {
+  final int id;
+  final int floorId;
+  final int? roomId;
+  final String roomCode;
+  final String deviceType;
+  final String code;
+  final String name;
+  final double posX;
+  final double posY;
+  final String ipAddress;
+  final String macAddress;
+  final int? vlan;
+  final String status;
+  final int? linkedRackId;
+  final String linkedRackDeviceCode;
+  final int? linkedOutletId;
+  final String responsiblePerson;
+  final String contactFirstName;
+  final String contactLastName;
+  final String contactEmail;
+  final String contactPhone;
+  final String contactJobTitle;
+  final String contactDepartment;
+  final String notes;
+
+  String get category => deviceType;
+  String get linkedRackPort => linkedRackDeviceCode;
+
+  FloorDeviceNode({
+    required this.id,
+    required this.floorId,
+    this.roomId,
+    required this.roomCode,
+    required this.deviceType,
+    required this.code,
+    required this.name,
+    required this.posX,
+    required this.posY,
+    required this.ipAddress,
+    required this.macAddress,
+    this.vlan,
+    required this.status,
+    this.linkedRackId,
+    required this.linkedRackDeviceCode,
+    this.linkedOutletId,
+    required this.responsiblePerson,
+    required this.contactFirstName,
+    required this.contactLastName,
+    required this.contactEmail,
+    required this.contactPhone,
+    required this.contactJobTitle,
+    required this.contactDepartment,
+    required this.notes,
+  });
+
+  factory FloorDeviceNode.fromJson(Map<String, dynamic> json) {
+    return FloorDeviceNode(
+      id: json['id'] as int,
+      floorId: (json['floor_id'] ?? 0) as int,
+      roomId: json['room_id'] as int?,
+      roomCode: (json['room_code'] ?? 'GOA') as String,
+      deviceType: (json['device_type'] ?? 'camera') as String,
+      code: (json['code'] ?? '') as String,
+      name: (json['name'] ?? '') as String,
+      posX: ((json['pos_x'] ?? 0.5) as num).toDouble(),
+      posY: ((json['pos_y'] ?? 0.5) as num).toDouble(),
+      ipAddress: (json['ip_address'] ?? '') as String,
+      macAddress: (json['mac_address'] ?? '') as String,
+      vlan: json['vlan'] as int?,
+      status: (json['status'] ?? 'online') as String,
+      linkedRackId: json['linked_rack_id'] as int?,
+      linkedRackDeviceCode: (json['linked_rack_device_code'] ?? '') as String,
+      linkedOutletId: json['linked_outlet_id'] as int?,
+      responsiblePerson: (json['responsible_person'] ?? 'Alex Geng') as String,
+      contactFirstName: (json['contact_first_name'] ?? '') as String,
+      contactLastName: (json['contact_last_name'] ?? '') as String,
+      contactEmail: (json['contact_email'] ?? '') as String,
+      contactPhone: (json['contact_phone'] ?? '') as String,
+      contactJobTitle: (json['contact_job_title'] ?? '') as String,
+      contactDepartment: (json['contact_department'] ?? '') as String,
+      notes: (json['notes'] ?? '') as String,
+    );
+  }
+}
+
 class FloorNode {
   final int id;
   final String name;
@@ -144,6 +230,7 @@ class FloorNode {
   final int offlineCount;
   final int warningCount;
   final List<RoomNode> rooms;
+  final List<FloorDeviceNode> floorDevices;
 
   FloorNode({
     required this.id,
@@ -156,6 +243,7 @@ class FloorNode {
     this.offlineCount = 0,
     this.warningCount = 0,
     required this.rooms,
+    this.floorDevices = const [],
   });
 
   factory FloorNode.fromJson(Map<String, dynamic> json) {
@@ -171,6 +259,9 @@ class FloorNode {
       warningCount: (json['warning_count'] ?? 0) as int,
       rooms: ((json['rooms'] ?? []) as List)
           .map((e) => RoomNode.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      floorDevices: ((json['floor_devices'] ?? []) as List)
+          .map((e) => FloorDeviceNode.fromJson(e as Map<String, dynamic>))
           .toList(),
     );
   }

@@ -88,6 +88,7 @@ class Floor(Base):
 
     location = relationship("Location", back_populates="floors")
     rooms = relationship("Room", back_populates="floor", cascade="all, delete-orphan")
+    floor_devices = relationship("FloorDevice", back_populates="floor", cascade="all, delete-orphan")
 
 
 class Room(Base):
@@ -245,3 +246,41 @@ class Connection(Base):
 
     source_port = relationship("Port", foreign_keys=[source_port_id])
     target_port = relationship("Port", foreign_keys=[target_port_id])
+
+
+class FloorDevice(Base):
+    __tablename__ = "floor_devices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    floor_id = Column(Integer, ForeignKey("floors.id", ondelete="CASCADE"), nullable=False, index=True)
+    room_id = Column(Integer, ForeignKey("rooms.id", ondelete="SET NULL"), nullable=True)
+    room_code = Column(String(64), default="SALA-01")
+    device_type = Column(String(40), nullable=False, index=True)
+    # 3d_printer | access_control | access_point | camera | desktop | isp_uplink |
+    # laptop | microphone | ndi_box | phone | printer | screen | speaker | telecom_outlet
+    code = Column(String(50), nullable=False)
+    name = Column(String(120), nullable=False)
+    pos_x = Column(Float, default=0.50)
+    pos_y = Column(Float, default=0.50)
+    ip_address = Column(String(64), default="")
+    mac_address = Column(String(64), default="")
+    vlan = Column(Integer, nullable=True)
+    status = Column(String(32), default="online")  # online | offline | warning | passive
+
+    # Enlaces en el plano de planta (Rack -> Roseta/AP/CAM y Roseta -> Equipo final)
+    linked_rack_id = Column(Integer, ForeignKey("racks.id", ondelete="SET NULL"), nullable=True)
+    linked_rack_device_code = Column(String(80), default="")
+    linked_outlet_id = Column(Integer, ForeignKey("floor_devices.id", ondelete="SET NULL"), nullable=True)
+
+    # Persona responsable y de contacto (Settings Panel de Planta)
+    responsible_person = Column(String(120), default="Alex Geng")
+    contact_first_name = Column(String(80), default="")
+    contact_last_name = Column(String(80), default="")
+    contact_email = Column(String(120), default="")
+    contact_phone = Column(String(60), default="")
+    contact_job_title = Column(String(80), default="")
+    contact_department = Column(String(80), default="")
+    notes = Column(Text, default="")
+
+    floor = relationship("Floor", back_populates="floor_devices")
+

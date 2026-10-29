@@ -25,6 +25,7 @@ from .models import (
     RackDevice,
     Port,
     Connection,
+    FloorDevice,
 )
 from .schemas import (
     DeviceTemplateSchema,
@@ -57,6 +58,8 @@ from .schemas import (
     FloorUpdate,
     RoomCreate,
     AisleCreate,
+    FloorDeviceCreate,
+    FloorDeviceUpdate,
 )
 from .seed import (
     seed_initial_data,
@@ -130,6 +133,283 @@ def _sanitize_missing_upload_urls(db: Session):
         db.commit()
 
 
+def _ensure_demo_floor_devices(db: Session):
+    """Si aún no hay dispositivos de planta (Cámaras, Control de Acceso, Rosetas, PCs, APs), crea un conjunto de ejemplo conectado al Rack principal."""
+    if db.query(FloorDevice).count() > 0:
+        return
+    first_floor = db.query(Floor).order_by(Floor.id).first()
+    if not first_floor:
+        return
+    first_room = db.query(Room).filter(Room.floor_id == first_floor.id).first()
+    first_rack = (
+        db.query(Rack).filter(Rack.room_id == first_room.id).first()
+        if first_room
+        else db.query(Rack).first()
+    )
+    rk_id = first_rack.id if first_rack else None
+    rm_id = first_room.id if first_room else None
+
+    # 1. Rosetas de Telecomunicaciones (conectadas con línea discontinua naranja al Rack)
+    outlet_goa = FloorDevice(
+        floor_id=first_floor.id,
+        room_id=rm_id,
+        room_code="GOA",
+        device_type="telecom_outlet",
+        code="Bi01, Bi02...",
+        name="Caja Rosetas Pared Zona GOA (4x RJ45 Cat6A)",
+        pos_x=0.33,
+        pos_y=0.46,
+        status="passive",
+        linked_rack_id=rk_id,
+        linked_rack_device_code="PP-A:01-04",
+        responsible_person="Alex Geng",
+        contact_department="Infraestructura IT",
+    )
+    outlet_oslo = FloorDevice(
+        floor_id=first_floor.id,
+        room_id=rm_id,
+        room_code="OSLO",
+        device_type="telecom_outlet",
+        code="Bi05, Bi06...",
+        name="Caja Rosetas Sala OSLO (4x RJ45 Cat6A)",
+        pos_x=0.58,
+        pos_y=0.30,
+        status="passive",
+        linked_rack_id=rk_id,
+        linked_rack_device_code="PP-A:05-08",
+        responsible_person="Alex Geng",
+        contact_department="Infraestructura IT",
+    )
+    outlet_vienna = FloorDevice(
+        floor_id=first_floor.id,
+        room_id=rm_id,
+        room_code="VIENNA",
+        device_type="telecom_outlet",
+        code="Bi09, Bi10...",
+        name="Caja Rosetas Sala VIENNA (4x RJ45 Cat6A)",
+        pos_x=0.62,
+        pos_y=0.72,
+        status="passive",
+        linked_rack_id=rk_id,
+        linked_rack_device_code="PP-B:01-04",
+        responsible_person="Alex Geng",
+        contact_department="Infraestructura IT",
+    )
+    db.add_all([outlet_goa, outlet_oslo, outlet_vienna])
+    db.flush()
+
+    # 2. Cámaras CCTV, Controles de Acceso, APs Wi-Fi, Ordenadores, Teléfonos, Impresoras y Pantallas
+    demo_items = [
+        FloorDevice(
+            floor_id=first_floor.id,
+            room_id=rm_id,
+            room_code="GOA",
+            device_type="camera",
+            code="CAM01",
+            name="Cámara Domo IP Entrada Noroeste",
+            pos_x=0.20,
+            pos_y=0.32,
+            ip_address="10.28.40.11",
+            vlan=40,
+            status="online",
+            linked_rack_id=rk_id,
+            linked_rack_device_code="SW01:Gi1/0/21 (PoE)",
+            responsible_person="Alex Geng",
+            contact_department="Seguridad Física",
+        ),
+        FloorDevice(
+            floor_id=first_floor.id,
+            room_id=rm_id,
+            room_code="OSLO",
+            device_type="camera",
+            code="CAM02",
+            name="Cámara Bullet 4K Pasillo Norte",
+            pos_x=0.45,
+            pos_y=0.16,
+            ip_address="10.28.40.12",
+            vlan=40,
+            status="online",
+            linked_rack_id=rk_id,
+            linked_rack_device_code="SW01:Gi1/0/22 (PoE)",
+            responsible_person="Alex Geng",
+            contact_department="Seguridad Física",
+        ),
+        FloorDevice(
+            floor_id=first_floor.id,
+            room_id=rm_id,
+            room_code="VIENNA",
+            device_type="camera",
+            code="CAM03",
+            name="Cámara Esclusa Sala Racks",
+            pos_x=0.72,
+            pos_y=0.58,
+            ip_address="10.28.40.13",
+            vlan=40,
+            status="online",
+            linked_rack_id=rk_id,
+            linked_rack_device_code="SW01:Gi1/0/23 (PoE)",
+            responsible_person="Alex Geng",
+            contact_department="Seguridad Física",
+        ),
+        FloorDevice(
+            floor_id=first_floor.id,
+            room_id=rm_id,
+            room_code="CPD-DOOR",
+            device_type="access_control",
+            code="AC01",
+            name="Control de Acceso Biométrico + RFID Puerta CPD",
+            pos_x=0.50,
+            pos_y=0.52,
+            ip_address="10.28.45.10",
+            vlan=45,
+            status="online",
+            linked_rack_id=rk_id,
+            linked_rack_device_code="SW01:Gi1/0/24",
+            responsible_person="Alex Geng",
+            contact_department="Seguridad / Accesos",
+        ),
+        FloorDevice(
+            floor_id=first_floor.id,
+            room_id=rm_id,
+            room_code="GOA",
+            device_type="access_point",
+            code="AP01",
+            name="Punto de Acceso Wi-Fi 6E Techo GOA",
+            pos_x=0.38,
+            pos_y=0.42,
+            ip_address="10.28.30.21",
+            vlan=30,
+            status="online",
+            linked_rack_id=rk_id,
+            linked_rack_device_code="SW01:Gi1/0/18 (PoE+)",
+            responsible_person="Alex Geng",
+            contact_department="Redes & Wi-Fi",
+        ),
+        FloorDevice(
+            floor_id=first_floor.id,
+            room_id=rm_id,
+            room_code="OSLO",
+            device_type="access_point",
+            code="AP02",
+            name="Punto de Acceso Wi-Fi 6E Sala OSLO",
+            pos_x=0.64,
+            pos_y=0.36,
+            ip_address="10.28.30.22",
+            vlan=30,
+            status="online",
+            linked_rack_id=rk_id,
+            linked_rack_device_code="SW01:Gi1/0/19 (PoE+)",
+            responsible_person="Alex Geng",
+            contact_department="Redes & Wi-Fi",
+        ),
+        # Equipos de puesto conectados con línea azul sólida a las Rosetas (Bi01, Bi05, Bi09)
+        FloorDevice(
+            floor_id=first_floor.id,
+            room_id=rm_id,
+            room_code="GOA",
+            device_type="desktop",
+            code="DP01",
+            name="Workstation Operador NOC 01",
+            pos_x=0.22,
+            pos_y=0.44,
+            ip_address="10.28.20.101",
+            vlan=20,
+            status="online",
+            linked_outlet_id=outlet_goa.id,
+            responsible_person="Alex Geng",
+            contact_first_name="Carlos",
+            contact_last_name="Mendoza",
+            contact_email="cmendoza@rackdoc.local",
+            contact_department="Operaciones NOC",
+        ),
+        FloorDevice(
+            floor_id=first_floor.id,
+            room_id=rm_id,
+            room_code="GOA",
+            device_type="desktop",
+            code="DP02",
+            name="Workstation Operador NOC 02",
+            pos_x=0.26,
+            pos_y=0.36,
+            ip_address="10.28.20.102",
+            vlan=20,
+            status="online",
+            linked_outlet_id=outlet_goa.id,
+            responsible_person="Alex Geng",
+            contact_first_name="Laura",
+            contact_last_name="Sánchez",
+            contact_email="lsanchez@rackdoc.local",
+            contact_department="Operaciones NOC",
+        ),
+        FloorDevice(
+            floor_id=first_floor.id,
+            room_id=rm_id,
+            room_code="GOA",
+            device_type="phone",
+            code="PH01",
+            name="Teléfono IP VoIP Guardia NOC",
+            pos_x=0.29,
+            pos_y=0.55,
+            ip_address="10.28.50.11",
+            vlan=50,
+            status="online",
+            linked_outlet_id=outlet_goa.id,
+            responsible_person="Alex Geng",
+            contact_department="Voz IP",
+        ),
+        FloorDevice(
+            floor_id=first_floor.id,
+            room_id=rm_id,
+            room_code="OSLO",
+            device_type="laptop",
+            code="LP01",
+            name="Portátil Ingeniería Sistemas",
+            pos_x=0.55,
+            pos_y=0.20,
+            ip_address="10.28.20.115",
+            vlan=20,
+            status="online",
+            linked_outlet_id=outlet_oslo.id,
+            responsible_person="Alex Geng",
+            contact_department="Ingeniería",
+        ),
+        FloorDevice(
+            floor_id=first_floor.id,
+            room_id=rm_id,
+            room_code="VIENNA",
+            device_type="printer",
+            code="PR01",
+            name="Impresora Multifunción Red Planta",
+            pos_x=0.56,
+            pos_y=0.80,
+            ip_address="10.28.25.50",
+            vlan=25,
+            status="online",
+            linked_outlet_id=outlet_vienna.id,
+            responsible_person="Alex Geng",
+            contact_department="Servicios Generales",
+        ),
+        FloorDevice(
+            floor_id=first_floor.id,
+            room_id=rm_id,
+            room_code="VIENNA",
+            device_type="screen",
+            code="SC01",
+            name="Videowall Monitorización NOC 75\"",
+            pos_x=0.70,
+            pos_y=0.76,
+            ip_address="10.28.25.60",
+            vlan=25,
+            status="online",
+            linked_outlet_id=outlet_vienna.id,
+            responsible_person="Alex Geng",
+            contact_department="NOC Display",
+        ),
+    ]
+    db.add_all(demo_items)
+    db.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
@@ -138,6 +418,7 @@ async def lifespan(app: FastAPI):
     try:
         seed_initial_data(db)
         sync_system_defaults(db)
+        _ensure_demo_floor_devices(db)
         _sanitize_missing_upload_urls(db)
     finally:
         db.close()
@@ -287,6 +568,8 @@ def get_locations_tree(db: Session = Depends(get_db)):
             joinedload(Location.floors)
             .joinedload(Floor.rooms)
             .joinedload(Room.aisles),
+            joinedload(Location.floors)
+            .joinedload(Floor.floor_devices),
         )
         .all()
     )
@@ -409,6 +692,35 @@ def get_locations_tree(db: Session = Depends(get_db)):
             loc_online += fl_online
             loc_offline += fl_offline
             loc_warning += fl_warning
+            floor_devices_data = [
+                {
+                    "id": fd.id,
+                    "floor_id": fd.floor_id,
+                    "room_id": fd.room_id,
+                    "room_code": fd.room_code or "GOA",
+                    "device_type": fd.device_type,
+                    "code": fd.code,
+                    "name": fd.name,
+                    "pos_x": fd.pos_x if fd.pos_x is not None else 0.5,
+                    "pos_y": fd.pos_y if fd.pos_y is not None else 0.5,
+                    "ip_address": fd.ip_address or "",
+                    "mac_address": fd.mac_address or "",
+                    "vlan": fd.vlan,
+                    "status": fd.status or "online",
+                    "linked_rack_id": fd.linked_rack_id,
+                    "linked_rack_device_code": fd.linked_rack_device_code or "",
+                    "linked_outlet_id": fd.linked_outlet_id,
+                    "responsible_person": fd.responsible_person or "Alex Geng",
+                    "contact_first_name": fd.contact_first_name or "",
+                    "contact_last_name": fd.contact_last_name or "",
+                    "contact_email": fd.contact_email or "",
+                    "contact_phone": fd.contact_phone or "",
+                    "contact_job_title": fd.contact_job_title or "",
+                    "contact_department": fd.contact_department or "",
+                    "notes": fd.notes or "",
+                }
+                for fd in sorted(fl.floor_devices, key=lambda x: x.code)
+            ]
             floors_data.append(
                 {
                     "id": fl.id,
@@ -421,6 +733,7 @@ def get_locations_tree(db: Session = Depends(get_db)):
                     "offline_count": fl_offline,
                     "warning_count": fl_warning,
                     "rooms": rooms_data,
+                    "floor_devices": floor_devices_data,
                 }
             )
 
@@ -620,6 +933,64 @@ def create_aisle(payload: AisleCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(aisle)
     return {"id": aisle.id, "code": aisle.code, "name": aisle.name}
+
+
+@app.post("/api/floors/{floor_id}/floor-devices")
+def create_floor_device(
+    floor_id: int,
+    payload: FloorDeviceCreate,
+    db: Session = Depends(get_db),
+):
+    fl = db.query(Floor).filter(Floor.id == floor_id).first()
+    if not fl:
+        raise HTTPException(status_code=404, detail="Planta no encontrada")
+    data = payload.model_dump()
+    if data.get("room_id") is None and fl.rooms:
+        data["room_id"] = fl.rooms[0].id
+    fd = FloorDevice(floor_id=floor_id, **data)
+    db.add(fd)
+    db.commit()
+    db.refresh(fd)
+    return {
+        "id": fd.id,
+        "floor_id": fd.floor_id,
+        "device_type": fd.device_type,
+        "code": fd.code,
+        "name": fd.name,
+        "pos_x": fd.pos_x,
+        "pos_y": fd.pos_y,
+    }
+
+
+@app.put("/api/floor-devices/{device_id}")
+def update_floor_device(
+    device_id: int,
+    payload: FloorDeviceUpdate,
+    db: Session = Depends(get_db),
+):
+    fd = db.query(FloorDevice).filter(FloorDevice.id == device_id).first()
+    if not fd:
+        raise HTTPException(status_code=404, detail="Dispositivo de planta no encontrado")
+    updates = payload.model_dump(exclude_unset=True)
+    for k, v in updates.items():
+        setattr(fd, k, v)
+    db.commit()
+    db.refresh(fd)
+    return {"status": "ok", "id": fd.id}
+
+
+@app.delete("/api/floor-devices/{device_id}")
+def delete_floor_device(device_id: int, db: Session = Depends(get_db)):
+    fd = db.query(FloorDevice).filter(FloorDevice.id == device_id).first()
+    if not fd:
+        raise HTTPException(status_code=404, detail="Dispositivo de planta no encontrado")
+    # Desvincular otros dispositivos que apuntasen a esta roseta
+    db.query(FloorDevice).filter(FloorDevice.linked_outlet_id == device_id).update(
+        {"linked_outlet_id": None}
+    )
+    db.delete(fd)
+    db.commit()
+    return {"status": "deleted", "id": device_id}
 
 
 @app.post("/api/racks")

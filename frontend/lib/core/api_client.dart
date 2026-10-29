@@ -186,6 +186,38 @@ class RackDocApiClient {
     return data['id'] as int;
   }
 
+  Future<Map<String, dynamic>> createFloorDevice(
+    int floorId,
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/floors/$floorId/floor-devices'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<void> updateFloorDevice(
+    int deviceId,
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/floor-devices/$deviceId'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    _decodeResponse(res);
+  }
+
+  Future<void> deleteFloorDevice(int deviceId) async {
+    final res = await http.delete(
+      Uri.parse('$baseUrl/floor-devices/$deviceId'),
+      headers: _headers,
+    );
+    _decodeResponse(res);
+  }
+
   Future<List<DeviceTemplateModel>> getTemplates() async {
     final res = await http.get(Uri.parse('$baseUrl/templates'), headers: _headers);
     final data = _decodeResponse(res) as List;
