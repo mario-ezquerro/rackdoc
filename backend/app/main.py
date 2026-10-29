@@ -633,15 +633,89 @@ def create_device_template(payload: DeviceTemplateCreate, db: Session = Depends(
     return tpl
 
 
+@app.get("/api/templates/photo-proxy")
+def proxy_hardware_photo(url: str):
+    """Proxy de imágenes externas para evitar bloqueos CORS en Flutter Web."""
+    target = (url or "").strip()
+    if not target.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="URL inválida")
+    try:
+        req = urllib.request.Request(
+            target,
+            headers={
+                "User-Agent": "RackDoc8-DCIM/1.4 (https://github.com/mario-ezquerro/rackdoc)",
+                "Accept": "image/*,*/*;q=0.8",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            content = resp.read()
+            ctype = resp.headers.get("Content-Type", "image/jpeg")
+            return Response(
+                content=content,
+                media_type=ctype,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Cache-Control": "public, max-age=86400",
+                },
+            )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo cargar imagen: {exc}")
+
+
 @app.get("/api/templates/search-photo")
 def search_hardware_photos(q: str = "server rack"):
-    """Busca imágenes de referencia de equipos hardware en Internet (Wikimedia Commons API)."""
+    """Busca imágenes de referencia de equipos hardware en Internet (Wikimedia Commons API) con limpieza inteligente de modelo."""
+    import re
+
     query_str = (q or "").strip()
     if not query_str:
         return {"query": q, "results": []}
 
+    # Limpiar paréntesis, alturas U, especificaciones de puertos ("+ 4xSFP+", "24p", "Cat6A", "Gen11", etc.)
+    cleaned = re.sub(r"\([^)]*\)", " ", query_str)
+    cleaned = re.sub(
+        r"\b(\d+U|\d+p|\d+x\S+|\d+T|\d+G|Cat\.?\d+\w*|Gen\d+|Full-Depth|Short-Depth|Plus\+?)\b",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"[+/\\\-_]+", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    tokens = [t for t in cleaned.split(" ") if len(t) >= 2]
+    brand = tokens[0] if tokens else ""
+    family = " ".join(tokens[:2]) if len(tokens) >= 2 else cleaned
+    low_q = query_str.lower()
+
+    # Detectar categoría semántica para fallback garantizado
+    if any(k in low_q for k in ["switch", "catalyst", "aruba", "nexus"]):
+        cat_hint = "Ethernet switch rack"
+    elif any(k in low_q for k in ["router", "mikrotik", "ccr", "isr", "rutx"]):
+        cat_hint = "MikroTik router rack"
+    elif any(k in low_q for k in ["forti", "firewall", "palo alto", "ngfw"]):
+        cat_hint = "Firewall appliance rack"
+    elif any(k in low_q for k in ["patch", "patchbox", "cat6"]):
+        cat_hint = "19-inch rackmount Ethernet switches and patch panels"
+    elif any(k in low_q for k in ["ups", "sai", "smart-ups"]):
+        cat_hint = "APC UPS rack"
+    elif any(k in low_q for k in ["pdu", "schuko", "regleta", "netshelter"]):
+        cat_hint = "APC rackmount 19-inch PDU"
+    elif any(k in low_q for k in ["netapp", "flashsystem", "powerstore", "alletra", "synology", "qnap", "san", "nas"]):
+        cat_hint = "NetApp storage server rack"
+    elif any(k in low_q for k in ["proliant", "hpe", "apollo"]):
+        cat_hint = "HP ProLiant server"
+    elif any(k in low_q for k in ["poweredge", "dell", "vxrail"]):
+        cat_hint = "Dell PowerEdge server"
+    else:
+        cat_hint = "19-inch server rack hardware"
+
+    search_variants = []
+    for cand in [cleaned, family, f"{brand} rack" if brand else "", cat_hint, "19-inch rackmount Ethernet switches"]:
+        c = cand.strip()
+        if c and c not in search_variants:
+            search_variants.append(c)
+
     results = []
-    search_variants = [query_str, f"{query_str} server", f"{query_str} rack"]
     seen_urls = set()
 
     for variant in search_variants:
@@ -664,7 +738,7 @@ def search_hardware_photos(q: str = "server rack"):
         try:
             req = urllib.request.Request(
                 api_url,
-                headers={"User-Agent": "RackDoc8-DCIM/1.3 (https://github.com/mario-ezquerro/rackdoc)"},
+                headers={"User-Agent": "RackDoc8-DCIM/1.4 (https://github.com/mario-ezquerro/rackdoc)"},
             )
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode("utf-8", errors="ignore"))
@@ -684,7 +758,7 @@ def search_hardware_photos(q: str = "server rack"):
                             "url": full_url,
                             "width": iinfo.get("width", 0),
                             "height": iinfo.get("height", 0),
-                            "source": "Wikimedia Commons",
+                            "source": f"Wikimedia ({variant})",
                         }
                     )
         except Exception:

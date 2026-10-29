@@ -2673,6 +2673,14 @@ class _RackEditorViewState extends State<RackEditorView> {
     }
   }
 
+  String _resolvePhotoNetworkUrl(String rawUrl) {
+    final trimmed = rawUrl.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      return '${widget.api.baseUrl}/templates/photo-proxy?url=${Uri.encodeComponent(trimmed)}';
+    }
+    return trimmed;
+  }
+
   // ===========================================================================
   // BUSCADOR DE FOTOS DE REFERENCIA EN INTERNET PARA PLANTILLAS Y EQUIPOS
   // ===========================================================================
@@ -2852,7 +2860,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                           borderRadius:
                                               BorderRadius.circular(4),
                                           child: Image.network(
-                                            thumb,
+                                            _resolvePhotoNetworkUrl(thumb),
                                             fit: BoxFit.cover,
                                             errorBuilder: (_, _, _) =>
                                                 const Center(
@@ -2917,7 +2925,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Image.network(
-                            urlCtrl.text.trim(),
+                            _resolvePhotoNetworkUrl(urlCtrl.text.trim()),
                             fit: BoxFit.contain,
                             errorBuilder: (_, _, _) => const Center(
                               child: Text(
@@ -7084,13 +7092,17 @@ class _RackEditorViewState extends State<RackEditorView> {
                 left: _railWidth + 28,
                 top: 3,
                 child: Container(
-                  padding: _showEquipmentPhotos && dev.photoUrl.isNotEmpty
+                  padding: _showEquipmentPhotos
                       ? const EdgeInsets.symmetric(horizontal: 5, vertical: 1)
                       : EdgeInsets.zero,
-                  decoration: _showEquipmentPhotos && dev.photoUrl.isNotEmpty
+                  decoration: _showEquipmentPhotos
                       ? BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.86),
+                          color: Colors.white.withValues(alpha: 0.90),
                           borderRadius: BorderRadius.circular(3),
+                          border: Border.all(
+                            color: const Color(0xFF94A3B8),
+                            width: 0.6,
+                          ),
                         )
                       : null,
                   child: Text(
@@ -7534,25 +7546,31 @@ class _RackEditorViewState extends State<RackEditorView> {
     );
   }
 
-  /// Dibuja la Foto de Referencia de Internet (si existe y Foto Equipos está ON) o un bisel realista industrial.
+  /// Dibuja la Foto de Referencia de Internet (si existe y Foto Equipos está ON) o una Carátula Fotográfica Hardware Realista (Front & Back).
   Widget _buildRealisticPhotoBezelOverlay(RackDeviceModel dev, String face) {
     final hasPhoto = _showEquipmentPhotos && dev.photoUrl.isNotEmpty;
     final cat = dev.template.category;
     final isRoofFan = dev.template.isRoofFan;
     final isTray = cat == 'rack_tray' ||
         dev.template.modelName.toLowerCase().contains('bandeja');
-    final isStorageOrServer =
-        cat == 'storage_san' || cat == 'storage_nas' || cat == 'server';
 
     if (hasPhoto && !(isTray && dev.trayItems.isNotEmpty)) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(2),
-        child: Opacity(
-          opacity: 0.34,
-          child: Image.network(
-            dev.photoUrl,
-            fit: BoxFit.cover,
-            errorBuilder: (_, _, _) => const SizedBox.shrink(),
+      return IgnorePointer(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(2),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              _buildCatalogHardwareFaceplate(dev, face),
+              Opacity(
+                opacity: 0.82,
+                child: Image.network(
+                  _resolvePhotoNetworkUrl(dev.photoUrl),
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                ),
+              ),
+            ],
           ),
         ),
       );
@@ -7729,43 +7747,280 @@ class _RackEditorViewState extends State<RackEditorView> {
       );
     }
 
-    if (_showEquipmentPhotos && isStorageOrServer && face == 'front') {
-      // Bisel frontal de bahías NVMe/SAS para cabinas SAN/NAS (Dell, NetApp, IBM, Pure) y Servidores
-      final bayCols = dev.uHeight >= 2 ? 12 : 8;
+    if (_showEquipmentPhotos) {
       return IgnorePointer(
-        child: Padding(
-          padding: const EdgeInsets.only(
-            left: 140,
-            right: 70,
-            top: 16,
-            bottom: 4,
+        child: _buildCatalogHardwareFaceplate(dev, face),
+      );
+    }
+
+    return const SizedBox.shrink();
+  }
+
+  /// Renderiza una Carátula Fotográfica Hardware Realista (Front & Back) para cualquier equipo del catálogo.
+  Widget _buildCatalogHardwareFaceplate(RackDeviceModel dev, String face) {
+    final cat = dev.template.category;
+    final mfg = dev.template.manufacturer.trim();
+    final mfgLow = mfg.toLowerCase();
+    final modelLow = dev.template.modelName.toLowerCase();
+    final isBack = face.toLowerCase() == 'back';
+
+    // Color de acento de marca oficial
+    Color brandAccent = const Color(0xFF0284C7);
+    if (mfgLow.contains('hpe') || mfgLow.contains('hewlett')) {
+      brandAccent = const Color(0xFF01A982); // HPE Green
+    } else if (mfgLow.contains('dell')) {
+      brandAccent = const Color(0xFF0076CE); // Dell Blue
+    } else if (mfgLow.contains('cisco')) {
+      brandAccent = const Color(0xFF049FD9); // Cisco Cyan
+    } else if (mfgLow.contains('forti')) {
+      brandAccent = const Color(0xFFEE3124); // Fortinet Red
+    } else if (mfgLow.contains('mikrotik')) {
+      brandAccent = const Color(0xFF2563EB);
+    } else if (mfgLow.contains('apc') || mfgLow.contains('schneider')) {
+      brandAccent = const Color(0xFF10B981);
+    } else if (mfgLow.contains('netapp')) {
+      brandAccent = const Color(0xFF0067C5);
+    } else if (mfgLow.contains('pure')) {
+      brandAccent = const Color(0xFFFE5000);
+    } else if (mfgLow.contains('ibm')) {
+      brandAccent = const Color(0xFF0F62FE);
+    } else if (mfgLow.contains('patchbox')) {
+      brandAccent = const Color(0xFFEC4899);
+    }
+
+    // 1. CARA TRASERA (BACK): Chasis de acero + Módulos de Ventiladores Hot-Swap + Fuentes Redundantes PSU1/PSU2
+    if (isBack) {
+      final isPassive = cat == 'patch_panel' ||
+          cat == 'cable_manager' ||
+          cat == 'miscellaneous';
+      return Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: isPassive
+                ? [
+                    const Color(0xFF334155).withValues(alpha: 0.72),
+                    const Color(0xFF1E293B).withValues(alpha: 0.78),
+                  ]
+                : [
+                    const Color(0xFF475569).withValues(alpha: 0.72),
+                    const Color(0xFF1E293B).withValues(alpha: 0.80),
+                    const Color(0xFF0F172A).withValues(alpha: 0.84),
+                  ],
           ),
-          child: Row(
+          borderRadius: BorderRadius.circular(2),
+          border: Border.all(
+            color: const Color(0xFF64748B).withValues(alpha: 0.65),
+            width: 0.8,
+          ),
+        ),
+        child: Row(
+          children: [
+            const SizedBox(width: 120),
+            if (!isPassive) ...[
+              // Rejillas de ventiladores de extracción traseros
+              for (int f = 0; f < 3; f++)
+                Container(
+                  width: 24,
+                  height: 22,
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 3,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0F172A).withValues(alpha: 0.85),
+                    borderRadius: BorderRadius.circular(3),
+                    border: Border.all(
+                      color: const Color(0xFF94A3B8).withValues(alpha: 0.55),
+                      width: 0.8,
+                    ),
+                  ),
+                  child: const Center(
+                    child: Icon(
+                      Icons.cyclone,
+                      size: 13,
+                      color: Color(0xFF94A3B8),
+                    ),
+                  ),
+                ),
+              const SizedBox(width: 8),
+              // Módulos PSU redundantes (Hot-Swap)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F172A).withValues(alpha: 0.82),
+                  borderRadius: BorderRadius.circular(3),
+                  border: Border.all(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.75),
+                    width: 0.9,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 5,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981),
+                        borderRadius: BorderRadius.circular(1),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'REAR CHASSIS • ${mfg.toUpperCase()} DUAL PSU HOT-SWAP',
+                      style: const TextStyle(
+                        color: Color(0xFFE2E8F0),
+                        fontSize: 7.2,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else
+              const Text(
+                'REAR TERMINATION BAR • IDC KRONE / GROUNDING',
+                style: TextStyle(
+                  color: Color(0xFFCBD5E1),
+                  fontSize: 7.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
+    // 2. CARA DELANTERA (FRONT) POR CATEGORÍA DE HARDWARE
+    // 2A. SERVIDORES Y CABINAS SAN / NAS (HPE ProLiant, Dell PowerEdge, Supermicro, NetApp, IBM, Pure, Synology, QNAP)
+    if (cat == 'server' || cat == 'storage_san' || cat == 'storage_nas') {
+      final bayCols = dev.uHeight >= 2 ? 12 : 8;
+      final bayRows = dev.uHeight >= 4 ? 2 : 1;
+      return Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              const Color(0xFF1E293B).withValues(alpha: 0.86),
+              const Color(0xFF0F172A).withValues(alpha: 0.92),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(2),
+          border: Border(
+            left: BorderSide(color: brandAccent, width: 4),
+            top: BorderSide(
+              color: const Color(0xFF64748B).withValues(alpha: 0.6),
+              width: 0.8,
+            ),
+            bottom: BorderSide(
+              color: const Color(0xFF475569).withValues(alpha: 0.8),
+              width: 1.0,
+            ),
+          ),
+        ),
+        child: Padding(
+          padding: EdgeInsets.only(
+            left: 118,
+            right: 68,
+            top: dev.uHeight >= 2 ? 18 : 13,
+            bottom: 3,
+          ),
+          child: Column(
             children: [
-              for (int b = 0; b < bayCols; b++)
+              for (int r = 0; r < bayRows; r++)
                 Expanded(
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 1.5),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E293B).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(2),
-                      border: Border.all(
-                        color: const Color(0xFF64748B).withValues(alpha: 0.35),
-                        width: 0.8,
-                      ),
-                    ),
-                    child: Align(
-                      alignment: Alignment.topRight,
-                      child: Container(
-                        width: 3.5,
-                        height: 3.5,
-                        margin: const EdgeInsets.all(2),
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF10B981),
-                          shape: BoxShape.circle,
+                  child: Row(
+                    children: [
+                      // Badge de marca a la izquierda de las bahías
+                      if (r == 0)
+                        Container(
+                          margin: const EdgeInsets.only(right: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: brandAccent.withValues(alpha: 0.22),
+                            borderRadius: BorderRadius.circular(3),
+                            border: Border.all(color: brandAccent, width: 1.0),
+                          ),
+                          child: Text(
+                            mfg.toUpperCase(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 7.5,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
+                      for (int b = 0; b < bayCols; b++)
+                        Expanded(
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(
+                              horizontal: 1.2,
+                              vertical: 1.0,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF334155)
+                                  .withValues(alpha: 0.92),
+                              borderRadius: BorderRadius.circular(2),
+                              border: Border.all(
+                                color: const Color(0xFF94A3B8)
+                                    .withValues(alpha: 0.55),
+                                width: 0.8,
+                              ),
+                            ),
+                            child: Stack(
+                              children: [
+                                // Rejilla del caddy NVMe/SAS
+                                Positioned(
+                                  left: 2,
+                                  right: 2,
+                                  bottom: 2,
+                                  height: 3,
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: brandAccent.withValues(alpha: 0.7),
+                                      borderRadius: BorderRadius.circular(1),
+                                    ),
+                                  ),
+                                ),
+                                // LEDs de estado del disco (Verde Online + Azul Actividad)
+                                Positioned(
+                                  top: 2,
+                                  right: 2,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        width: 3.5,
+                                        height: 3.5,
+                                        decoration: const BoxDecoration(
+                                          color: Color(0xFF22C55E),
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 1.5),
+                                      Container(
+                                        width: 3.0,
+                                        height: 3.0,
+                                        decoration: BoxDecoration(
+                                          color: brandAccent,
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
             ],
@@ -7774,7 +8029,163 @@ class _RackEditorViewState extends State<RackEditorView> {
       );
     }
 
-    return const SizedBox.shrink();
+    // 2B. SAI / UPS Y PDU (APC Smart-UPS, NetShelter PDU, Rittal Schuko)
+    if (cat == 'ups' || cat == 'pdu') {
+      return Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              const Color(0xFF0F172A).withValues(alpha: 0.88),
+              const Color(0xFF1E293B).withValues(alpha: 0.85),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(2),
+          border: Border(
+            left: BorderSide(color: brandAccent, width: 4),
+          ),
+        ),
+        child: Row(
+          children: [
+            const SizedBox(width: 120),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0284C7).withValues(alpha: 0.28),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                  color: const Color(0xFF38BDF8),
+                  width: 1.1,
+                ),
+              ),
+              child: Text(
+                cat == 'ups'
+                    ? '⚡ ${mfg.toUpperCase()} LCD • 230V ONLINE • BATT 100% • LOAD 34%'
+                    : '⚡ ${mfg.toUpperCase()} METERED PDU • 230V • 6.2A',
+                style: const TextStyle(
+                  color: Color(0xFF7DD3FC),
+                  fontSize: 7.8,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // 2C. PASACABLES DE CEPILLO (Brush Cable Manager)
+    if (cat == 'cable_manager' || modelLow.contains('brush')) {
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFF0F172A),
+              Color(0xFF1E293B),
+              Color(0xFF090D16),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(2),
+          border: Border.all(color: const Color(0xFF475569), width: 1.2),
+        ),
+        child: Center(
+          child: Text(
+            'PASACABLES DE CEPILLO 19" • ${mfg.toUpperCase()} HIGH-DENSITY BRUSH STRIP',
+            style: const TextStyle(
+              color: Color(0xFF94A3B8),
+              fontSize: 7.8,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.8,
+            ),
+          ),
+        ),
+      );
+    }
+
+    // 2D. PATCHBOX / PATCH PANEL
+    if (cat == 'patchbox' || cat == 'patch_panel') {
+      return Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: cat == 'patchbox'
+                ? [
+                    const Color(0xFF1E293B).withValues(alpha: 0.88),
+                    const Color(0xFF0F172A).withValues(alpha: 0.92),
+                  ]
+                : [
+                    const Color(0xFF334155).withValues(alpha: 0.82),
+                    const Color(0xFF1E293B).withValues(alpha: 0.86),
+                  ],
+          ),
+          borderRadius: BorderRadius.circular(2),
+          border: Border(
+            left: BorderSide(color: brandAccent, width: 4),
+          ),
+        ),
+      );
+    }
+
+    // 2E. SWITCHES, ROUTERS, FIREWALLS, GATEWAYS Y RESTO DE EQUIPOS DE RED
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            const Color(0xFF1E293B).withValues(alpha: 0.78),
+            const Color(0xFF0F172A).withValues(alpha: 0.84),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(2),
+        border: Border(
+          left: BorderSide(color: brandAccent, width: 4.5),
+          bottom: BorderSide(
+            color: brandAccent.withValues(alpha: 0.55),
+            width: 1.0,
+          ),
+        ),
+      ),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0F172A).withValues(alpha: 0.85),
+              borderRadius: BorderRadius.circular(3),
+              border: Border.all(color: brandAccent, width: 0.9),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 4.5,
+                  height: 4.5,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF22C55E),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 3),
+                Text(
+                  mfg.toUpperCase(),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 7.2,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildDeviceMountingEar(int uHeight) {
