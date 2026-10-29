@@ -1354,10 +1354,514 @@ class _RackEditorViewState extends State<RackEditorView> {
     }
   }
 
+  // ===========================================================================
+  // SELECTOR EN CASCADA (GRUPO ➔ CATEGORÍA ➔ DISPOSITIVO CONCRETO) AL PULSAR "+" EN UNA U LIBRE
+  // ===========================================================================
+  static const Map<String, String> _quickCategoryLabels = {
+    'switch': 'Switch (Conmutador Red)',
+    'router': 'Router',
+    'firewall': 'Firewall / NGFW',
+    'gateway': 'Gateway / Fibra / Voz',
+    'server': 'Servidor / Host Rack',
+    'storage_san': 'Cabina Storage SAN (FC / NVMe / iSCSI)',
+    'storage_nas': 'Cabina Storage NAS',
+    'pdu': 'PDU / Regleta Eléctrica Schuko/C13',
+    'ups': 'SAI / UPS',
+    'patch_panel': 'Patch Panel Cobre/Fibra',
+    'patchbox': 'PATCHBOX',
+    'cable_manager': 'Pasacables / Guía Hilos',
+    'rack_tray': 'Bandeja de Rack 19"',
+    'rack_tray_device': 'Mini-Equipo sobre Bandeja (Router/Switch/Mini-PC)',
+    'miscellaneous': 'Accesorios / Ventiladores / Panel Ciego',
+  };
+
+  Future<void> _showQuickInstallAtUDialog(int targetU, String face) async {
+    if (!_canEdit) return;
+    final rack = _rack;
+    if (rack == null) return;
+
+    final availableTemplates = widget.templates
+        .where(
+          (t) =>
+              t.category != 'external_outlet' &&
+              t.category != 'external_power_feed' &&
+              t.libraryGroup != 'External Power',
+        )
+        .toList();
+    if (availableTemplates.isEmpty) return;
+
+    // 1. Construir lista ordenada de Grupos / Librerías
+    const preferredOrder = [
+      'Network',
+      'Power',
+      'Host - HP',
+      'Host - Dell',
+      'Host - Supermicro',
+      'Storage - SAN',
+      'Storage - NAS',
+      'Patching & Passive',
+      'Bandeja - Equipos Mini',
+    ];
+    final groupSet = <String>{};
+    for (final g in preferredOrder) {
+      if (availableTemplates.any(
+        (t) => t.libraryGroup.toLowerCase() == g.toLowerCase(),
+      )) {
+        groupSet.add(g);
+      }
+    }
+    for (final t in availableTemplates) {
+      final g = t.libraryGroup.trim();
+      if (g.isNotEmpty) groupSet.add(g);
+    }
+    final groups = groupSet.toList();
+
+    String selectedGroup =
+        ( _selectedLibraryGroup != 'all' &&
+                groups.contains(_selectedLibraryGroup))
+            ? _selectedLibraryGroup
+            : (groups.isNotEmpty ? groups.first : 'Network');
+    String selectedCategory = 'all';
+
+    List<DeviceTemplateModel> templatesForSelection(
+      String grp,
+      String cat,
+    ) {
+      return availableTemplates.where((t) {
+        final matchGrp =
+            grp == 'all' || t.libraryGroup.toLowerCase() == grp.toLowerCase();
+        if (!matchGrp) return false;
+        final matchCat = cat == 'all' || t.category == cat;
+        return matchCat;
+      }).toList();
+    }
+
+    List<String> categoriesForGroup(String grp) {
+      final cats = <String>{};
+      for (final t in availableTemplates) {
+        if (grp == 'all' || t.libraryGroup.toLowerCase() == grp.toLowerCase()) {
+          cats.add(t.category);
+        }
+      }
+      return cats.toList();
+    }
+
+    var filteredList = templatesForSelection(selectedGroup, selectedCategory);
+    DeviceTemplateModel? selectedTemplate =
+        filteredList.isNotEmpty ? filteredList.first : availableTemplates.first;
+
+    final chosenTemplate = await showDialog<DeviceTemplateModel>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) {
+          final groupCategories = categoriesForGroup(selectedGroup);
+          if (selectedCategory != 'all' &&
+              !groupCategories.contains(selectedCategory)) {
+            selectedCategory = 'all';
+          }
+          filteredList = templatesForSelection(selectedGroup, selectedCategory);
+          if (selectedTemplate == null ||
+              !filteredList.any((t) => t.id == selectedTemplate!.id)) {
+            selectedTemplate =
+                filteredList.isNotEmpty ? filteredList.first : null;
+          }
+
+          final tpl = selectedTemplate;
+          final bool fits = tpl != null &&
+              (tpl.isTrayMiniDevice
+                  ? _canFitAtU(rack, targetU, 1)
+                  : _canFitAtU(rack, targetU, tpl.uHeight));
+          final counts = tpl != null
+              ? _extractPortCountsFromSpec(
+                  tpl.layoutSpec,
+                  category: tpl.category,
+                )
+              : null;
+
+          return AlertDialog(
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDBEAFE),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.add_circle_outline,
+                    color: Color(0xFF1D4ED8),
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Instalar Dispositivo en U$targetU (${face.toUpperCase()})',
+                        style: const TextStyle(
+                          fontSize: 15.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const Text(
+                        'Selecciona primero el Grupo, luego la Categoría y finalmente el Dispositivo concreto',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF64748B),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: 540,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // PASO 1: DESPLEGABLE DE GRUPO / LIBRERÍA
+                    const Text(
+                      '1. GRUPO / FAMILIA DE EQUIPOS:',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF1E3A8A),
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    DropdownButtonFormField<String>(
+                      key: ValueKey('grp_$selectedGroup'),
+                      initialValue: selectedGroup,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.folder_outlined, size: 18),
+                        isDense: true,
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                      ),
+                      items: [
+                        for (final g in groups)
+                          DropdownMenuItem<String>(
+                            value: g,
+                            child: Text(
+                              '$g (${availableTemplates.where((t) => t.libraryGroup.toLowerCase() == g.toLowerCase()).length} modelos)',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        DropdownMenuItem<String>(
+                          value: 'all',
+                          child: Text(
+                            'Todos los Grupos (${availableTemplates.length} modelos)',
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ),
+                      ],
+                      onChanged: (val) {
+                        if (val == null) return;
+                        setModal(() {
+                          selectedGroup = val;
+                          selectedCategory = 'all';
+                          final nextList = templatesForSelection(
+                            selectedGroup,
+                            selectedCategory,
+                          );
+                          selectedTemplate =
+                              nextList.isNotEmpty ? nextList.first : null;
+                        });
+                      },
+                    ),
+
+                    // PASO 2: DESPLEGABLE DE SUBCATEGORÍA (SI EL GRUPO TIENE VARIAS CATEGORÍAS)
+                    if (groupCategories.length > 1) ...[
+                      const SizedBox(height: 14),
+                      const Text(
+                        '2. SUBGRUPO / TIPO DE DISPOSITIVO:',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF1E3A8A),
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      DropdownButtonFormField<String>(
+                        key: ValueKey('cat_${selectedGroup}_$selectedCategory'),
+                        initialValue: selectedCategory,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          prefixIcon: Icon(Icons.category_outlined, size: 18),
+                          isDense: true,
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                        ),
+                        items: [
+                          DropdownMenuItem<String>(
+                            value: 'all',
+                            child: Text(
+                              'Todos los tipos de "$selectedGroup" (${templatesForSelection(selectedGroup, 'all').length})',
+                              style: const TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          for (final c in groupCategories)
+                            DropdownMenuItem<String>(
+                              value: c,
+                              child: Text(
+                                '${_quickCategoryLabels[c] ?? c.toUpperCase()} (${templatesForSelection(selectedGroup, c).length})',
+                                style: const TextStyle(fontSize: 12.5),
+                              ),
+                            ),
+                        ],
+                        onChanged: (val) {
+                          if (val == null) return;
+                          setModal(() {
+                            selectedCategory = val;
+                            final nextList = templatesForSelection(
+                              selectedGroup,
+                              selectedCategory,
+                            );
+                            selectedTemplate =
+                                nextList.isNotEmpty ? nextList.first : null;
+                          });
+                        },
+                      ),
+                    ],
+
+                    // PASO 3: DESPLEGABLE DE DISPOSITIVO CONCRETO
+                    const SizedBox(height: 14),
+                    Text(
+                      groupCategories.length > 1
+                          ? '3. DISPOSITIVO CONCRETO A INSTALAR (${filteredList.length} disponibles):'
+                          : '2. DISPOSITIVO CONCRETO A INSTALAR (${filteredList.length} disponibles):',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF0F172A),
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    if (filteredList.isNotEmpty && selectedTemplate != null)
+                      DropdownButtonFormField<int>(
+                        key: ValueKey(
+                          'tpl_${selectedGroup}_${selectedCategory}_${selectedTemplate!.id}',
+                        ),
+                        initialValue: selectedTemplate!.id,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          prefixIcon: Icon(Icons.dns_outlined, size: 18),
+                          isDense: true,
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                        ),
+                        items: filteredList.map((item) {
+                          final itemFits = item.isTrayMiniDevice
+                              ? _canFitAtU(rack, targetU, 1)
+                              : _canFitAtU(rack, targetU, item.uHeight);
+                          return DropdownMenuItem<int>(
+                            value: item.id,
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    '${item.manufacturer} — ${item.modelName}',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: itemFits
+                                        ? const Color(0xFFDCFCE7)
+                                        : const Color(0xFFFEE2E2),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    item.isTrayMiniDevice
+                                        ? 'Bandeja 1U'
+                                        : '${item.uHeight}U',
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w800,
+                                      color: itemFits
+                                          ? const Color(0xFF166534)
+                                          : const Color(0xFF991B1B),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (tplId) {
+                          if (tplId == null) return;
+                          final found = filteredList.firstWhere(
+                            (t) => t.id == tplId,
+                            orElse: () => filteredList.first,
+                          );
+                          setModal(() => selectedTemplate = found);
+                        },
+                      ),
+
+                    // FICHA RESUMEN DEL DISPOSITIVO SELECCIONADO
+                    if (tpl != null && counts != null) ...[
+                      const SizedBox(height: 14),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: fits
+                              ? const Color(0xFFF8FAFC)
+                              : const Color(0xFFFEF2F2),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: fits
+                                ? const Color(0xFFCBD5E1)
+                                : const Color(0xFFFCA5A5),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  fits
+                                      ? Icons.check_circle_outline
+                                      : Icons.warning_amber_rounded,
+                                  size: 16,
+                                  color: fits
+                                      ? const Color(0xFF16A34A)
+                                      : const Color(0xFFDC2626),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    '${tpl.manufacturer} ${tpl.modelName}',
+                                    style: const TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFF0F172A),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              tpl.isTrayMiniDevice
+                                  ? '• Se instalará sobre una Bandeja 19" en U$targetU'
+                                  : '• Posición en Rack: U$targetU${tpl.uHeight > 1 ? ' a U${targetU + tpl.uHeight - 1}' : ''} (${tpl.uHeight}U • ${tpl.isFullDepth ? 'Profundidad Completa Front+Back' : 'Cara ${face.toUpperCase()}'})',
+                              style: const TextStyle(
+                                fontSize: 11.2,
+                                color: Color(0xFF334155),
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              '• Bocas por defecto — Front: ${counts['front_rj45']} RJ45, ${counts['front_sfp']} SFP, ${counts['front_psu']} PSU, ${counts['front_schuko']} Schuko | Back: ${counts['back_rj45']} RJ45, ${counts['back_sfp']} SFP, ${counts['back_psu']} PSU, ${counts['back_schuko']} Schuko (personalizables en el siguiente paso)',
+                              style: const TextStyle(
+                                fontSize: 10.8,
+                                color: Color(0xFF475569),
+                              ),
+                            ),
+                            if (!fits) ...[
+                              const SizedBox(height: 6),
+                              Text(
+                                '⚠ Atención: Este modelo ocupa ${tpl.uHeight}U y no hay ${tpl.uHeight}U libres consecutivas a partir de U$targetU (puedes ajustar su altura U en el siguiente paso o elegir otra U).',
+                                style: const TextStyle(
+                                  fontSize: 10.8,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFFDC2626),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actionsAlignment: MainAxisAlignment.spaceBetween,
+            actions: [
+              TextButton.icon(
+                onPressed: () async {
+                  Navigator.pop(ctx, null);
+                  await _showCreateCustomTemplateDialog();
+                },
+                icon: const Icon(Icons.add_box_outlined, size: 16),
+                label: const Text(
+                  '+ Crear Nuevo Modelo',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, null),
+                    child: const Text('Cancelar'),
+                  ),
+                  const SizedBox(width: 6),
+                  FilledButton.icon(
+                    onPressed: selectedTemplate == null
+                        ? null
+                        : () => Navigator.pop(ctx, selectedTemplate),
+                    icon: const Icon(Icons.arrow_forward, size: 16),
+                    label: Text('Seleccionar para U$targetU'),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (chosenTemplate != null && mounted) {
+      await _handleDropOrMountTemplate(
+        chosenTemplate,
+        targetU,
+        targetFace: face,
+      );
+    }
+  }
+
   Future<void> _handleDropOrMountTemplate(
     DeviceTemplateModel tpl,
-    int targetStartU,
-  ) async {
+    int targetStartU, {
+    String? targetFace,
+  }) async {
     if (!_canEdit) return;
     final rack = _rack;
     if (rack == null) return;
@@ -1778,7 +2282,8 @@ class _RackEditorViewState extends State<RackEditorView> {
         'hostname': hostnameCtrl.text.trim(),
         'fqdn': fqdnCtrl.text.trim(),
         'start_u': targetStartU,
-        'mounted_face': _activeFace == 'back' ? 'back' : 'front',
+        'mounted_face':
+            targetFace ?? (_activeFace == 'back' ? 'back' : 'front'),
         'ip_address': ipCtrl.text.trim(),
         'subnet_mask': maskCtrl.text.trim(),
         'gateway': gwCtrl.text.trim(),
@@ -6195,14 +6700,25 @@ class _RackEditorViewState extends State<RackEditorView> {
               },
               builder: (ctx, candidate, _) {
                 final isHovering = candidate.isNotEmpty;
-                return InkWell(
-                  onTap: (_canEdit && _selectedTemplateForClick != null)
-                      ? () => _handleDropOrMountTemplate(
-                            _selectedTemplateForClick!,
-                            u,
-                          )
-                      : null,
-                  child: Container(
+                return Tooltip(
+                  message: _selectedTemplateForClick != null
+                      ? 'Clic para instalar "${_selectedTemplateForClick!.modelName}" en U$u (${face.toUpperCase()})'
+                      : 'Clic en "+" para elegir Grupo y Dispositivo a instalar en U$u (${face.toUpperCase()})',
+                  child: InkWell(
+                    onTap: _canEdit
+                        ? () {
+                            if (_selectedTemplateForClick != null) {
+                              _handleDropOrMountTemplate(
+                                _selectedTemplateForClick!,
+                                u,
+                                targetFace: face,
+                              );
+                            } else {
+                              _showQuickInstallAtUDialog(u, face);
+                            }
+                          }
+                        : null,
+                    child: Container(
                     decoration: BoxDecoration(
                       color: isHovering
                           ? const Color(0xFFDBEAFE)
@@ -6236,6 +6752,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                               : const Color(0xFF64748B),
                         ),
                       ),
+                    ),
                     ),
                   ),
                 );
