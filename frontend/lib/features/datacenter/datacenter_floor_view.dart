@@ -73,105 +73,366 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   int? _devLinkedRackId;
   int? _devLinkedOutletId;
   String _devStatus = 'online';
+  String _devCategory = 'camera';
+
+  // Tipos personalizados creados por el usuario ("+ Nuevo Tipo a Medida")
+  List<_FloorDeviceCatalogItem> _customCatalogItems = [];
+  final Set<String> _expandedLibraryGroups = {
+    'Sensores & Clima / Energía',
+    'Seguridad & Control de Acceso',
+    'Red, Wi-Fi & Rosetas',
+    'Puestos de Trabajo & AV',
+    'Industrial / A Medida',
+  };
+
+  static const List<String> _libraryGroupOrder = [
+    'Sensores & Clima / Energía',
+    'Seguridad & Control de Acceso',
+    'Red, Wi-Fi & Rosetas',
+    'Puestos de Trabajo & AV',
+    'Industrial / A Medida',
+  ];
+
+  static const Map<String, IconData> _customIconMap = {
+    'thermostat': Icons.thermostat_rounded,
+    'water_drop': Icons.water_drop_outlined,
+    'bolt': Icons.bolt_rounded,
+    'fire': Icons.local_fire_department_outlined,
+    'waves': Icons.waves_rounded,
+    'air': Icons.air_rounded,
+    'ac_unit': Icons.ac_unit_rounded,
+    'battery': Icons.battery_charging_full_rounded,
+    'sensors': Icons.sensors_rounded,
+    'videocam': Icons.videocam_outlined,
+    'dialpad': Icons.dialpad_rounded,
+    'wifi': Icons.wifi_tethering_rounded,
+    'router': Icons.router_outlined,
+    'memory': Icons.memory_rounded,
+    'shield': Icons.shield_outlined,
+    'precision_manufacturing': Icons.precision_manufacturing_outlined,
+  };
+
+  static IconData _iconFromKey(String key) =>
+      _customIconMap[key] ?? Icons.sensors_rounded;
+
+  static Color _colorFromHex(String hex) {
+    final cleaned = hex.replaceAll('#', '').trim();
+    if (cleaned.length == 6) {
+      final val = int.tryParse('FF$cleaned', radix: 16);
+      if (val != null) return Color(val);
+    }
+    return const Color(0xFF0F172A);
+  }
 
   static const List<_FloorDeviceCatalogItem> _floorDeviceCatalog = [
+    // 1. FAMILIA: Sensores & Clima / Energía
     _FloorDeviceCatalogItem(
-      category: '3d_printer',
-      label: '3D Printer',
-      prefix: '3DP',
-      icon: Icons.view_in_ar_rounded,
+      category: 'sensor_temp',
+      groupName: 'Sensores & Clima / Energía',
+      label: 'Sensor Temperatura (°C)',
+      prefix: 'TMP',
+      icon: Icons.thermostat_rounded,
+      pinColor: Color(0xFF0D9488),
+      defaultPortHint: 'ENV-MON01:Temp-1 (21.2 °C)',
+      isSensor: true,
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'sensor_humidity',
+      groupName: 'Sensores & Clima / Energía',
+      label: 'Sensor Humedad (%RH)',
+      prefix: 'HUM',
+      icon: Icons.water_drop_outlined,
+      pinColor: Color(0xFF0284C7),
+      defaultPortHint: 'ENV-MON01:Hum-1 (45 %RH)',
+      isSensor: true,
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'sensor_temp_hum',
+      groupName: 'Sensores & Clima / Energía',
+      label: 'Sensor Temp + Humedad',
+      prefix: 'TH',
+      icon: Icons.device_thermostat_rounded,
+      pinColor: Color(0xFF0D9488),
+      defaultPortHint: 'ENV-MON01:TH-1 (21.0 °C / 46 %RH)',
+      isSensor: true,
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'sensor_power_load',
+      groupName: 'Sensores & Clima / Energía',
+      label: 'Sensor Carga Eléctrica (kW/A)',
+      prefix: 'PWR',
+      icon: Icons.bolt_rounded,
+      pinColor: Color(0xFFD97706),
+      defaultPortHint: 'PDU-A:Meter-1 (4.8 kW / 20.9 A)',
+      isSensor: true,
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'sensor_smoke',
+      groupName: 'Sensores & Clima / Energía',
+      label: 'Detector Humo / Incendio',
+      prefix: 'SMK',
+      icon: Icons.local_fire_department_outlined,
+      pinColor: Color(0xFFDC2626),
+      defaultPortHint: 'ENV-MON01:Smoke-1 (Normal)',
+      isSensor: true,
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'sensor_water_leak',
+      groupName: 'Sensores & Clima / Energía',
+      label: 'Sensor Fuga de Agua',
+      prefix: 'WTR',
+      icon: Icons.waves_rounded,
+      pinColor: Color(0xFF0284C7),
+      defaultPortHint: 'ENV-MON01:Leak-1 (Seco)',
+      isSensor: true,
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'sensor_airflow',
+      groupName: 'Sensores & Clima / Energía',
+      label: 'Sensor Flujo Aire / Presión',
+      prefix: 'AIR',
+      icon: Icons.air_rounded,
+      pinColor: Color(0xFF0D9488),
+      defaultPortHint: 'ENV-MON01:Airflow-1 (2.4 m/s)',
+      isSensor: true,
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'sensor_door',
+      groupName: 'Sensores & Clima / Energía',
+      label: 'Sensor Contacto Puerta',
+      prefix: 'DOR',
+      icon: Icons.sensor_door_outlined,
+      pinColor: Color(0xFF0D9488),
+      defaultPortHint: 'ENV-MON01:Door-1 (Cerrada)',
+      isSensor: true,
+    ),
+
+    // 2. FAMILIA: Seguridad & Control de Acceso
+    _FloorDeviceCatalogItem(
+      category: 'camera',
+      groupName: 'Seguridad & Control de Acceso',
+      label: 'Camera CCTV',
+      prefix: 'CAM',
+      icon: Icons.videocam_outlined,
+      pinColor: Color(0xFF0F172A),
+      defaultPortHint: 'SW01:Gi1/0/21 (PoE)',
     ),
     _FloorDeviceCatalogItem(
       category: 'access_control',
+      groupName: 'Seguridad & Control de Acceso',
       label: 'Access Control Panel',
       prefix: 'AC',
       icon: Icons.dialpad_rounded,
+      pinColor: Color(0xFF0F172A),
+      defaultPortHint: 'SW01:Gi1/0/24',
     ),
-    _FloorDeviceCatalogItem(
-      category: 'access_point',
-      label: 'Access Point',
-      prefix: 'AP',
-      icon: Icons.wifi_tethering_rounded,
-    ),
-    _FloorDeviceCatalogItem(
-      category: 'camera',
-      label: 'Camera',
-      prefix: 'CAM',
-      icon: Icons.videocam_outlined,
-    ),
-    _FloorDeviceCatalogItem(
-      category: 'desktop',
-      label: 'Desktop',
-      prefix: 'DP',
-      icon: Icons.desktop_windows_outlined,
-    ),
-    _FloorDeviceCatalogItem(
-      category: 'isp_uplink',
-      label: 'ISP Uplink',
-      prefix: 'ISP',
-      icon: Icons.public_rounded,
-    ),
-    _FloorDeviceCatalogItem(
-      category: 'laptop',
-      label: 'Laptop',
-      prefix: 'LP',
-      icon: Icons.laptop_mac_outlined,
-    ),
-    _FloorDeviceCatalogItem(
-      category: 'microphone',
-      label: 'Microphone',
-      prefix: 'MIC',
-      icon: Icons.mic_none_rounded,
-    ),
-    _FloorDeviceCatalogItem(
-      category: 'ndi_box',
-      label: 'NDI Box',
-      prefix: 'NDI',
-      icon: Icons.cast_connected_rounded,
-    ),
-    _FloorDeviceCatalogItem(
-      category: 'phone',
-      label: 'Phone',
-      prefix: 'PH',
-      icon: Icons.phone_in_talk_outlined,
-    ),
-    _FloorDeviceCatalogItem(
-      category: 'printer',
-      label: 'Printer',
-      prefix: 'PR',
-      icon: Icons.print_outlined,
-    ),
-    _FloorDeviceCatalogItem(
-      category: 'rack',
-      label: 'Rack',
-      prefix: 'RK',
-      icon: Icons.dns_outlined,
-    ),
-    _FloorDeviceCatalogItem(
-      category: 'screen',
-      label: 'Screen',
-      prefix: 'SC',
-      icon: Icons.tv_rounded,
-    ),
-    _FloorDeviceCatalogItem(
-      category: 'speaker',
-      label: 'Speaker',
-      prefix: 'SPK',
-      icon: Icons.speaker_outlined,
-    ),
+
+    // 3. FAMILIA: Red, Wi-Fi & Rosetas
     _FloorDeviceCatalogItem(
       category: 'telecom_outlet',
+      groupName: 'Red, Wi-Fi & Rosetas',
       label: 'Telecommunications Outlet',
       prefix: 'Bi',
       icon: Icons.settings_input_hdmi_outlined,
+      pinColor: Color(0xFF64748B),
+      defaultPortHint: 'PP-A:01-04',
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'access_point',
+      groupName: 'Red, Wi-Fi & Rosetas',
+      label: 'Access Point Wi-Fi',
+      prefix: 'AP',
+      icon: Icons.wifi_tethering_rounded,
+      pinColor: Color(0xFF0F172A),
+      defaultPortHint: 'SW01:Gi1/0/18 (PoE+)',
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'isp_uplink',
+      groupName: 'Red, Wi-Fi & Rosetas',
+      label: 'ISP Uplink / Acometida',
+      prefix: 'ISP',
+      icon: Icons.public_rounded,
+      pinColor: Color(0xFF1E3A8A),
+      defaultPortHint: 'FW01:WAN1',
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'rack',
+      groupName: 'Red, Wi-Fi & Rosetas',
+      label: 'Rack Cabinet',
+      prefix: 'RK',
+      icon: Icons.dns_outlined,
+      pinColor: Color(0xFF1E3A8A),
+      defaultPortHint: '',
+    ),
+
+    // 4. FAMILIA: Puestos de Trabajo & AV
+    _FloorDeviceCatalogItem(
+      category: 'desktop',
+      groupName: 'Puestos de Trabajo & AV',
+      label: 'Desktop',
+      prefix: 'DP',
+      icon: Icons.desktop_windows_outlined,
+      pinColor: Color(0xFF0F172A),
+      defaultPortHint: 'SW01:Gi1/0/1',
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'laptop',
+      groupName: 'Puestos de Trabajo & AV',
+      label: 'Laptop',
+      prefix: 'LP',
+      icon: Icons.laptop_mac_outlined,
+      pinColor: Color(0xFF0F172A),
+      defaultPortHint: 'SW01:Gi1/0/2',
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'phone',
+      groupName: 'Puestos de Trabajo & AV',
+      label: 'Phone VoIP',
+      prefix: 'PH',
+      icon: Icons.phone_in_talk_outlined,
+      pinColor: Color(0xFF0F172A),
+      defaultPortHint: 'SW01:Gi1/0/5 (VoIP)',
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'printer',
+      groupName: 'Puestos de Trabajo & AV',
+      label: 'Printer',
+      prefix: 'PR',
+      icon: Icons.print_outlined,
+      pinColor: Color(0xFF0F172A),
+      defaultPortHint: 'SW01:Gi1/0/8',
+    ),
+    _FloorDeviceCatalogItem(
+      category: '3d_printer',
+      groupName: 'Puestos de Trabajo & AV',
+      label: '3D Printer',
+      prefix: '3DP',
+      icon: Icons.view_in_ar_rounded,
+      pinColor: Color(0xFF0F172A),
+      defaultPortHint: 'SW01:Gi1/0/9',
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'screen',
+      groupName: 'Puestos de Trabajo & AV',
+      label: 'Screen / Videowall',
+      prefix: 'SC',
+      icon: Icons.tv_rounded,
+      pinColor: Color(0xFF0F172A),
+      defaultPortHint: 'SW01:Gi1/0/12',
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'speaker',
+      groupName: 'Puestos de Trabajo & AV',
+      label: 'Speaker',
+      prefix: 'SPK',
+      icon: Icons.speaker_outlined,
+      pinColor: Color(0xFF0F172A),
+      defaultPortHint: 'SW01:Gi1/0/14',
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'microphone',
+      groupName: 'Puestos de Trabajo & AV',
+      label: 'Microphone',
+      prefix: 'MIC',
+      icon: Icons.mic_none_rounded,
+      pinColor: Color(0xFF0F172A),
+      defaultPortHint: 'SW01:Gi1/0/15',
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'ndi_box',
+      groupName: 'Puestos de Trabajo & AV',
+      label: 'NDI Box',
+      prefix: 'NDI',
+      icon: Icons.cast_connected_rounded,
+      pinColor: Color(0xFF0F172A),
+      defaultPortHint: 'SW01:Gi1/0/16',
+    ),
+
+    // 5. FAMILIA: Industrial / A Medida
+    _FloorDeviceCatalogItem(
+      category: 'custom_crac',
+      groupName: 'Industrial / A Medida',
+      label: 'Climatizador CRAC / InRow',
+      prefix: 'CRAC',
+      icon: Icons.ac_unit_rounded,
+      pinColor: Color(0xFF7C3AED),
+      defaultPortHint: 'BMS:Modbus-CRAC1 (18.5 °C)',
+      isSensor: true,
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'custom_ups_plant',
+      groupName: 'Industrial / A Medida',
+      label: 'SAI / UPS Industrial Planta',
+      prefix: 'UPS',
+      icon: Icons.battery_charging_full_rounded,
+      pinColor: Color(0xFFD97706),
+      defaultPortHint: 'PDU-MAIN:Feed-A+B (98% Bat)',
+      isSensor: true,
+    ),
+    _FloorDeviceCatalogItem(
+      category: 'custom_elec_board',
+      groupName: 'Industrial / A Medida',
+      label: 'Cuadro Eléctrico General',
+      prefix: 'CEG',
+      icon: Icons.bolt_rounded,
+      pinColor: Color(0xFFD97706),
+      defaultPortHint: 'CEG-01:Disyuntor-Rack',
     ),
   ];
 
-  static _FloorDeviceCatalogItem _catalogItemFor(String category) {
-    for (final item in _floorDeviceCatalog) {
+  List<_FloorDeviceCatalogItem> get _allCatalogItems => [
+    ..._floorDeviceCatalog,
+    ..._customCatalogItems,
+  ];
+
+  bool _isSensorCategory(String category) {
+    if (category.startsWith('sensor_')) return true;
+    final item = _catalogItemFor(category);
+    return item.isSensor;
+  }
+
+  String _defaultPortHintForCategory(String category) {
+    final item = _catalogItemFor(category);
+    if (item.defaultPortHint.isNotEmpty) return item.defaultPortHint;
+    return 'SW01:Gi1/0/1';
+  }
+
+  _FloorDeviceCatalogItem _catalogItemFor(String category) {
+    for (final item in _allCatalogItems) {
       if (item.category == category) return item;
     }
-    return _floorDeviceCatalog[4]; // Desktop fallback
+    return _FloorDeviceCatalogItem(
+      category: category,
+      groupName: 'Industrial / A Medida',
+      label: category.toUpperCase(),
+      prefix: 'DEV',
+      icon: Icons.sensors_rounded,
+      pinColor: const Color(0xFF7C3AED),
+    );
+  }
+
+  Future<void> _loadCustomFloorDeviceTypes() async {
+    try {
+      final rows = await widget.api.fetchCustomFloorDeviceTypes();
+      if (!mounted) return;
+      setState(() {
+        _customCatalogItems = rows.map((r) {
+          final catKey = (r['category_key'] ?? 'custom_dev').toString();
+          return _FloorDeviceCatalogItem(
+            category: catKey,
+            groupName: (r['group_name'] ?? 'Industrial / A Medida').toString(),
+            label: (r['label'] ?? catKey).toString(),
+            prefix: (r['prefix'] ?? 'DEV').toString(),
+            icon: _iconFromKey((r['icon_key'] ?? 'sensors').toString()),
+            pinColor: _colorFromHex((r['pin_color_hex'] ?? '#7C3AED').toString()),
+            defaultPortHint:
+                (r['default_port_hint'] ?? 'SW01:Gi1/0/1').toString(),
+            isSensor: r['is_sensor'] == true,
+            customTypeId: (r['id'] as num?)?.toInt(),
+          );
+        }).toList();
+      });
+    } catch (_) {}
   }
 
   LocationNode? get _location {
@@ -203,6 +464,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   void initState() {
     super.initState();
     _syncFloorState();
+    _loadCustomFloorDeviceTypes();
   }
 
   @override
@@ -300,6 +562,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   void _loadFloorDeviceToControllers(FloorDeviceNode dev, {bool force = false}) {
     if (!force && _editingDeviceId == dev.id) return;
     _editingDeviceId = dev.id;
+    _devCategory = dev.category.isEmpty ? 'camera' : dev.category;
     _devCodeCtrl.text = dev.code;
     _devNameCtrl.text = dev.name;
     _devRoomCodeCtrl.text = dev.roomCode;
@@ -337,6 +600,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       await widget.api.updateFloorDevice(devId, {
+        'device_type': _devCategory,
         'code': _devCodeCtrl.text.trim(),
         'name': _devNameCtrl.text.trim(),
         'room_code': _devRoomCodeCtrl.text.trim(),
@@ -398,89 +662,281 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       return;
     }
 
-    final catItem = _catalogItemFor(category);
-    final autoCode = _nextAutoCodeForCategory(floor, category);
+    // Al soltar un sensor o dispositivo en el plano, abrimos el diálogo en esas
+    // coordenadas para que el usuario elija a qué Rack (o Roseta) va conectado
+    await _showAddFloorDeviceModal(
+      floor,
+      initialCategory: category,
+      targetPosX: normX,
+      targetPosY: normY,
+    );
+  }
 
-    // Buscamos un rack o roseta por defecto en esta planta para pre-conectar
-    int? defaultRackId;
-    for (final rm in floor.rooms) {
-      if (rm.racks.isNotEmpty) {
-        defaultRackId = rm.racks.first.id;
-        break;
-      }
-    }
+  Future<void> _showCreateCustomDeviceTypeModal(FloorNode floor) async {
+    String selectedGroup = 'Industrial / A Medida';
+    final labelCtrl = TextEditingController();
+    final prefixCtrl = TextEditingController(text: 'DEV');
+    final portHintCtrl = TextEditingController(text: 'ENV-MON01:Canal-1');
+    bool isSensor = true;
+    String selectedIconKey = 'sensors';
+    String selectedColorHex = '#7C3AED';
 
-    int? defaultOutletId;
-    const outletLinkedCategories = {
-      'desktop',
-      'laptop',
-      'phone',
-      'printer',
-      '3d_printer',
-      'screen',
-      'speaker',
-      'microphone',
-      'ndi_box',
-    };
-    if (outletLinkedCategories.contains(category)) {
-      // Buscar la roseta más cercana en el plano
-      double bestDist = 999.0;
-      for (final fd in floor.floorDevices) {
-        if (fd.category == 'telecom_outlet') {
-          final dx = fd.posX - normX;
-          final dy = fd.posY - normY;
-          final dist = dx * dx + dy * dy;
-          if (dist < bestDist) {
-            bestDist = dist;
-            defaultOutletId = fd.id;
-          }
-        }
-      }
-    }
+    const colorOptions = <Map<String, String>>[
+      {'hex': '#0D9488', 'name': 'Verde Azulado (Sensor Clima)'},
+      {'hex': '#D97706', 'name': 'Ámbar (Energía / Carga)'},
+      {'hex': '#DC2626', 'name': 'Rojo (Alarma / PCI)'},
+      {'hex': '#7C3AED', 'name': 'Morado (Industrial / A Medida)'},
+      {'hex': '#0284C7', 'name': 'Azul Cian (Agua / Humedad)'},
+      {'hex': '#0F172A', 'name': 'Negro (Equipo Activo)'},
+      {'hex': '#64748B', 'name': 'Gris Pizarra (Toma / Pasivo)'},
+    ];
 
-    try {
-      final res = await widget.api.createFloorDevice(floor.id, {
-        'device_type': category,
-        'code': autoCode,
-        'name': '${catItem.label} $autoCode',
-        'room_code': floor.rooms.isNotEmpty ? floor.rooms.first.name : 'GOA',
-        'pos_x': double.parse(normX.clamp(0.04, 0.94).toStringAsFixed(4)),
-        'pos_y': double.parse(normY.clamp(0.06, 0.92).toStringAsFixed(4)),
-        'status': 'online',
-        'linked_rack_id':
-            defaultOutletId == null ? defaultRackId : null,
-        'linked_rack_device_code':
-            defaultOutletId == null && defaultRackId != null ? 'SW01:Gi1/0/1' : '',
-        'linked_outlet_id': defaultOutletId,
-        'responsible_person': 'Alex Geng',
-      });
-      final newId = (res['id'] as num?)?.toInt();
-      if (newId != null) {
-        setState(() {
-          _selectedRackIds.clear();
-          _selectedFloorDeviceId = newId;
-          _editingDeviceId = null;
-          _showRightSettings = true;
-        });
-      }
-      widget.onRefresh();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error al colocar dispositivo: $e'),
-            backgroundColor: Colors.red.shade700,
+    final createdKey = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => AlertDialog(
+          title: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: _colorFromHex(selectedColorHex),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  _iconFromKey(selectedIconKey),
+                  color: Colors.white,
+                  size: 19,
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Crear Nuevo Tipo de Dispositivo / Sensor a Medida',
+                      style: TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Text(
+                      'Se añadirá a DEVICES LIBRARY para arrastrarlo o colocarlo en cualquier planta',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        );
-      }
+          content: SizedBox(
+            width: 500,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedGroup,
+                    decoration: const InputDecoration(
+                      labelText: 'Familia / Grupo en DEVICES LIBRARY',
+                      isDense: true,
+                    ),
+                    items: _libraryGroupOrder
+                        .map(
+                          (g) => DropdownMenuItem(value: g, child: Text(g)),
+                        )
+                        .toList(),
+                    onChanged: (v) {
+                      if (v != null) setModal(() => selectedGroup = v);
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: labelCtrl,
+                          decoration: const InputDecoration(
+                            labelText:
+                                'Nombre del Tipo * (ej. Sensor CO2, Grupo Electrógeno, Torno)',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: prefixCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Prefijo ID (ej. CO2, GEN)',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: portHintCtrl,
+                    decoration: const InputDecoration(
+                      labelText:
+                          'Puerto / Sonda por defecto en Rack (ej. ENV-MON01:CO2-1)',
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text(
+                      'Es un Sensor / Equipo con lectura o umbral (muestra lectura en el plano)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    value: isSensor,
+                    onChanged: (v) => setModal(() => isSensor = v),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Icono del Marcador:',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF334155),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: _customIconMap.entries.map((entry) {
+                      final isSel = selectedIconKey == entry.key;
+                      return InkWell(
+                        onTap: () =>
+                            setModal(() => selectedIconKey = entry.key),
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            color: isSel
+                                ? _colorFromHex(selectedColorHex)
+                                : const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: isSel
+                                  ? const Color(0xFF0F172A)
+                                  : const Color(0xFFCBD5E1),
+                              width: isSel ? 1.8 : 1.0,
+                            ),
+                          ),
+                          child: Icon(
+                            entry.value,
+                            size: 17,
+                            color: isSel
+                                ? Colors.white
+                                : const Color(0xFF334155),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Color del Pin en el Plano:',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF334155),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: colorOptions.map((c) {
+                      final hex = c['hex']!;
+                      final isSel = selectedColorHex == hex;
+                      return ChoiceChip(
+                        selected: isSel,
+                        avatar: CircleAvatar(
+                          backgroundColor: _colorFromHex(hex),
+                          radius: 7,
+                        ),
+                        label: Text(
+                          c['name']!,
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                        onSelected: (_) =>
+                            setModal(() => selectedColorHex = hex),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                final lbl = labelCtrl.text.trim();
+                if (lbl.isEmpty) return;
+                try {
+                  final res = await widget.api.createCustomFloorDeviceType({
+                    'group_name': selectedGroup,
+                    'label': lbl,
+                    'prefix': prefixCtrl.text.trim().isEmpty
+                        ? 'DEV'
+                        : prefixCtrl.text.trim().toUpperCase(),
+                    'icon_key': selectedIconKey,
+                    'pin_color_hex': selectedColorHex,
+                    'default_port_hint': portHintCtrl.text.trim(),
+                    'is_sensor': isSensor,
+                  });
+                  await _loadCustomFloorDeviceTypes();
+                  setState(() {
+                    _expandedLibraryGroups.add(selectedGroup);
+                  });
+                  if (ctx.mounted) {
+                    Navigator.pop(
+                      ctx,
+                      (res['category_key'] ?? '').toString(),
+                    );
+                  }
+                } catch (_) {}
+              },
+              icon: const Icon(Icons.add_circle_outline, size: 16),
+              label: const Text('Guardar en Librería y Colocar'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (createdKey != null && createdKey.isNotEmpty) {
+      await _showAddFloorDeviceModal(floor, initialCategory: createdKey);
     }
   }
 
   Future<void> _showAddFloorDeviceModal(
     FloorNode floor, {
-    String initialCategory = 'camera',
+    String initialCategory = 'sensor_temp',
+    double? targetPosX,
+    double? targetPosY,
   }) async {
-    String selectedCat = initialCategory == 'rack' ? 'camera' : initialCategory;
+    String selectedCat = initialCategory == 'rack'
+        ? 'sensor_temp'
+        : initialCategory;
     final codeCtrl = TextEditingController(
       text: _nextAutoCodeForCategory(floor, selectedCat),
     );
@@ -491,7 +947,14 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       text: floor.rooms.isNotEmpty ? floor.rooms.first.name : 'GOA',
     );
     final ipCtrl = TextEditingController();
-    final portCtrl = TextEditingController(text: 'PP-A:01');
+    final portCtrl = TextEditingController(
+      text: _defaultPortHintForCategory(selectedCat),
+    );
+    final notesCtrl = TextEditingController(
+      text: _isSensorCategory(selectedCat)
+          ? 'Lectura actual: OK | Monitorizado en Rack'
+          : '',
+    );
     final respCtrl = TextEditingController(text: 'Alex Geng');
 
     final floorRacks = <RackSummary>[];
@@ -502,197 +965,344 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         .where((d) => d.category == 'telecom_outlet')
         .toList();
 
-    int? linkedRackId = floorRacks.isNotEmpty ? floorRacks.first.id : null;
+    // Si se arrastró al plano, preseleccionamos el Rack más cercano al punto donde se soltó
+    int? linkedRackId;
+    if (floorRacks.isNotEmpty) {
+      if (targetPosX != null && targetPosY != null) {
+        double bestRackDist = 999.0;
+        for (final rk in floorRacks) {
+          final rPos = _rackPositions[rk.id] ?? Offset(rk.posX, rk.posY);
+          final dx = rPos.dx - targetPosX;
+          final dy = rPos.dy - targetPosY;
+          final dist = dx * dx + dy * dy;
+          if (dist < bestRackDist) {
+            bestRackDist = dist;
+            linkedRackId = rk.id;
+          }
+        }
+      } else {
+        linkedRackId = floorRacks.first.id;
+      }
+    }
+
     int? linkedOutletId;
 
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModal) => AlertDialog(
-          title: Row(
-            children: [
-              Icon(
-                _catalogItemFor(selectedCat).icon,
-                color: const Color(0xFF1E3A8A),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Añadir Dispositivo / Toma en ${floor.name}',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+        builder: (ctx, setModal) {
+          final isSensor = _isSensorCategory(selectedCat);
+          return AlertDialog(
+            title: Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: _catalogItemFor(selectedCat).pinColor,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    _catalogItemFor(selectedCat).icon,
+                    color: Colors.white,
+                    size: 19,
+                  ),
                 ),
-              ),
-            ],
-          ),
-          content: SizedBox(
-            width: 480,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  DropdownButtonFormField<String>(
-                    initialValue: selectedCat,
-                    decoration: const InputDecoration(
-                      labelText: 'Categoría del Dispositivo (Devices Library)',
-                    ),
-                    items: _floorDeviceCatalog
-                        .where((c) => c.category != 'rack')
-                        .map(
-                          (c) => DropdownMenuItem<String>(
-                            value: c.category,
-                            child: Row(
-                              children: [
-                                Icon(c.icon, size: 17, color: const Color(0xFF1E293B)),
-                                const SizedBox(width: 8),
-                                Text(c.label),
-                              ],
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        isSensor
+                            ? 'Colocar Sensor en ${floor.name} y Conectar a Rack'
+                            : 'Colocar Dispositivo / Toma en ${floor.name}',
+                        style: const TextStyle(
+                          fontSize: 15.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      Text(
+                        targetPosX != null
+                            ? 'Posición en plano seleccionada (${(targetPosX * 100).round()}%, ${(targetPosY! * 100).round()}%) • Elige el Rack de conexión'
+                            : 'Selecciona el tipo de equipo y el Rack al que va conectado',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: 520,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // 1. CAJA DESTACADA: SELECCIÓN DE RACK AL QUE VA CONECTADO
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFFBEB),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: const Color(0xFFF59E0B),
+                          width: 1.4,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(
+                                Icons.dns_rounded,
+                                size: 16,
+                                color: Color(0xFFB45309),
+                              ),
+                              SizedBox(width: 6),
+                              Text(
+                                '1. ¿A qué Rack está conectado este sensor / dispositivo? *',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w900,
+                                  color: Color(0xFF92400E),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<int?>(
+                            initialValue: linkedRackId,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                              labelText:
+                                  'Rack de Conexión en Planta (Traza línea al Rack)',
+                              filled: true,
+                              fillColor: Colors.white,
+                              isDense: true,
+                            ),
+                            items: [
+                              const DropdownMenuItem<int?>(
+                                value: null,
+                                child: Text('Sin conexión directa a Rack'),
+                              ),
+                              ...floorRacks.map(
+                                (rk) => DropdownMenuItem<int?>(
+                                  value: rk.id,
+                                  child: Text(
+                                    'Rack ${rk.code} — ${rk.name} (${rk.totalUnits}U • ${rk.deviceCount} eq.)',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                            onChanged: (v) => setModal(() => linkedRackId = v),
+                          ),
+                          const SizedBox(height: 8),
+                          TextField(
+                            controller: portCtrl,
+                            decoration: InputDecoration(
+                              labelText: isSensor
+                                  ? 'Equipo / Sonda / PDU en el Rack y Lectura (ej. ENV-MON01:Temp-1 21.2°C o PDU-A:Meter)'
+                                  : 'Puerto / Equipo en el Rack (ej. PP-A:01 o SW01:Gi1/0/10)',
+                              filled: true,
+                              fillColor: Colors.white,
+                              isDense: true,
                             ),
                           ),
-                        )
-                        .toList(),
-                    onChanged: (v) {
-                      if (v == null) return;
-                      setModal(() {
-                        selectedCat = v;
-                        final auto = _nextAutoCodeForCategory(floor, selectedCat);
-                        codeCtrl.text = auto;
-                        nameCtrl.text = '${_catalogItemFor(selectedCat).label} $auto';
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: codeCtrl,
-                          decoration: const InputDecoration(
-                            labelText: 'ID / Código * (ej. CAM01, DP01, Bi01...)',
-                          ),
-                        ),
+                        ],
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextField(
-                          controller: nameCtrl,
-                          decoration: const InputDecoration(
-                            labelText: 'Nombre Descriptivo',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: roomCtrl,
-                          decoration: const InputDecoration(
-                            labelText: 'Sala / Zona (ej. GOA, OSLO, VIENNA)',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextField(
-                          controller: ipCtrl,
-                          decoration: const InputDecoration(
-                            labelText: 'Dirección IP (opcional)',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  DropdownButtonFormField<int?>(
-                    initialValue: linkedRackId,
-                    decoration: const InputDecoration(
-                      labelText: 'Conectado a Rack (Línea Naranja Discontinua)',
                     ),
-                    items: [
-                      const DropdownMenuItem<int?>(
-                        value: null,
-                        child: Text('Sin conexión directa a Rack'),
-                      ),
-                      ...floorRacks.map(
-                        (rk) => DropdownMenuItem<int?>(
-                          value: rk.id,
-                          child: Text('${rk.code} (${rk.name})'),
-                        ),
-                      ),
-                    ],
-                    onChanged: (v) => setModal(() => linkedRackId = v),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: portCtrl,
-                          decoration: const InputDecoration(
-                            labelText: 'Puerto en Rack (ej. PP-A:01 / SW01:Gi1/0/5)',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextField(
-                          controller: respCtrl,
-                          decoration: const InputDecoration(
-                            labelText: 'Persona Responsable',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (selectedCat != 'telecom_outlet' &&
-                      floorOutlets.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    DropdownButtonFormField<int?>(
-                      initialValue: linkedOutletId,
+                    const SizedBox(height: 12),
+
+                    // 2. CATEGORÍA DEL SENSOR O DISPOSITIVO
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedCat,
                       decoration: const InputDecoration(
                         labelText:
-                            'Conectado a Roseta / Telecommunications Outlet (Línea Azul)',
+                            '2. Categoría / Tipo de Sensor o Dispositivo',
+                        isDense: true,
                       ),
-                      items: [
-                        const DropdownMenuItem<int?>(
-                          value: null,
-                          child: Text('Sin roseta intermedia'),
+                      items: _allCatalogItems
+                          .where((c) => c.category != 'rack')
+                          .map(
+                            (c) => DropdownMenuItem<String>(
+                              value: c.category,
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    c.icon,
+                                    size: 17,
+                                    color: c.pinColor,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    '${c.label} (${c.groupName})',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: c.isSensor
+                                          ? FontWeight.w700
+                                          : FontWeight.normal,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) {
+                        if (v == null) return;
+                        setModal(() {
+                          selectedCat = v;
+                          final auto = _nextAutoCodeForCategory(
+                            floor,
+                            selectedCat,
+                          );
+                          codeCtrl.text = auto;
+                          nameCtrl.text =
+                              '${_catalogItemFor(selectedCat).label} $auto';
+                          portCtrl.text =
+                              _defaultPortHintForCategory(selectedCat);
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: codeCtrl,
+                            decoration: const InputDecoration(
+                              labelText:
+                                  'ID / Código * (ej. TMP01, HUM01, PWR01, CAM01)',
+                              isDense: true,
+                            ),
+                          ),
                         ),
-                        ...floorOutlets.map(
-                          (o) => DropdownMenuItem<int?>(
-                            value: o.id,
-                            child: Text('${o.code} (${o.roomCode})'),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: nameCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Nombre Descriptivo',
+                              isDense: true,
+                            ),
                           ),
                         ),
                       ],
-                      onChanged: (v) => setModal(() => linkedOutletId = v),
                     ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: roomCtrl,
+                            decoration: const InputDecoration(
+                              labelText:
+                                  'Sala / Pasillo (ej. PASILLO-FRIO, GOA)',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: ipCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Dirección IP (opcional)',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: notesCtrl,
+                            decoration: InputDecoration(
+                              labelText: isSensor
+                                  ? 'Lectura / Umbral (ej. 21.4 °C | 46 %RH | 5.2 kW)'
+                                  : 'Notas técnicas',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: respCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Persona Responsable',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (selectedCat != 'telecom_outlet' &&
+                        !isSensor &&
+                        floorOutlets.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<int?>(
+                        initialValue: linkedOutletId,
+                        decoration: const InputDecoration(
+                          labelText:
+                              'Conectado a Roseta / Telecommunications Outlet (Línea Azul)',
+                          isDense: true,
+                        ),
+                        items: [
+                          const DropdownMenuItem<int?>(
+                            value: null,
+                            child: Text('Sin roseta intermedia (Directo a Rack)'),
+                          ),
+                          ...floorOutlets.map(
+                            (o) => DropdownMenuItem<int?>(
+                              value: o.id,
+                              child: Text('${o.code} (${o.roomCode})'),
+                            ),
+                          ),
+                        ],
+                        onChanged: (v) => setModal(() => linkedOutletId = v),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton.icon(
-              onPressed: () => Navigator.pop(ctx, true),
-              icon: const Icon(Icons.add_location_alt_outlined, size: 16),
-              label: const Text('Añadir al Plano'),
-            ),
-          ],
-        ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton.icon(
+                onPressed: () => Navigator.pop(ctx, true),
+                icon: const Icon(Icons.add_location_alt_outlined, size: 16),
+                label: const Text('Colocar y Conectar al Rack'),
+              ),
+            ],
+          );
+        },
       ),
     );
 
     if (ok == true) {
       final count = floor.floorDevices.length;
-      final normX = (0.20 + (count % 5) * 0.14).clamp(0.10, 0.86);
-      final normY = (0.30 + (count ~/ 5) * 0.15).clamp(0.14, 0.86);
+      final normX = targetPosX != null
+          ? double.parse(targetPosX.clamp(0.04, 0.94).toStringAsFixed(4))
+          : (0.20 + (count % 5) * 0.14).clamp(0.10, 0.86);
+      final normY = targetPosY != null
+          ? double.parse(targetPosY.clamp(0.06, 0.92).toStringAsFixed(4))
+          : (0.30 + (count ~/ 5) * 0.15).clamp(0.14, 0.86);
       final res = await widget.api.createFloorDevice(floor.id, {
         'device_type': selectedCat,
         'code': codeCtrl.text.trim(),
@@ -706,6 +1316,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         'linked_rack_device_code': portCtrl.text.trim(),
         'linked_outlet_id': linkedOutletId,
         'responsible_person': respCtrl.text.trim(),
+        'notes': notesCtrl.text.trim(),
       });
       final newId = (res['id'] as num?)?.toInt();
       if (newId != null) {
@@ -2850,19 +3461,44 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   }
 
   // ===========================================================================
-  // COLUMNA IZQUIERDA: DEVICES LIBRARY (Arrastrar o pulsar '+' para añadir)
+  // COLUMNA IZQUIERDA: DEVICES LIBRARY POR FAMILIAS DESPLEGABLES + A MEDIDA
   // ===========================================================================
   Widget _buildLeftDevicesLibraryPanel(FloorNode floor) {
     final query = _deviceLibrarySearch.trim().toLowerCase();
-    final filteredCatalog = _floorDeviceCatalog.where((item) {
+    final filteredCatalog = _allCatalogItems.where((item) {
       if (query.isEmpty) return true;
       return item.label.toLowerCase().contains(query) ||
           item.category.toLowerCase().contains(query) ||
+          item.groupName.toLowerCase().contains(query) ||
           item.prefix.toLowerCase().contains(query);
     }).toList();
 
+    final grouped = <String, List<_FloorDeviceCatalogItem>>{};
+    for (final g in _libraryGroupOrder) {
+      grouped[g] = [];
+    }
+    for (final item in filteredCatalog) {
+      grouped.putIfAbsent(item.groupName, () => []).add(item);
+    }
+
+    IconData groupIconFor(String g) {
+      if (g.startsWith('Sensores')) return Icons.thermostat_rounded;
+      if (g.startsWith('Seguridad')) return Icons.videocam_outlined;
+      if (g.startsWith('Red')) return Icons.hub_outlined;
+      if (g.startsWith('Puestos')) return Icons.desktop_windows_outlined;
+      return Icons.precision_manufacturing_outlined;
+    }
+
+    Color groupAccentFor(String g) {
+      if (g.startsWith('Sensores')) return const Color(0xFF0D9488);
+      if (g.startsWith('Seguridad')) return const Color(0xFF0F172A);
+      if (g.startsWith('Red')) return const Color(0xFF2563EB);
+      if (g.startsWith('Puestos')) return const Color(0xFF1E3A8A);
+      return const Color(0xFF7C3AED);
+    }
+
     return Container(
-      width: 245,
+      width: 265,
       decoration: const BoxDecoration(
         color: Colors.white,
         border: Border(right: BorderSide(color: Color(0xFFE2E8F0))),
@@ -2871,7 +3507,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 10, 6),
+            padding: const EdgeInsets.fromLTRB(14, 10, 8, 4),
             child: Row(
               children: [
                 const Expanded(
@@ -2901,22 +3537,22 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 14),
             child: Text(
-              'Drag device to a room to add it',
+              'Arrastra un equipo o sensor a la planta para elegir su Rack de conexión',
               style: TextStyle(
-                fontSize: 11,
+                fontSize: 10.5,
                 color: Color(0xFF64748B),
               ),
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
             child: SizedBox(
               height: 32,
               child: TextField(
                 onChanged: (v) => setState(() => _deviceLibrarySearch = v),
                 style: const TextStyle(fontSize: 12),
                 decoration: InputDecoration(
-                  hintText: 'Search...',
+                  hintText: 'Buscar sensor, cámara, PC...',
                   hintStyle: const TextStyle(
                     fontSize: 11.5,
                     color: Color(0xFF94A3B8),
@@ -2941,146 +3577,115 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
               ),
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                foregroundColor: const Color(0xFF7C3AED),
+                backgroundColor: const Color(0xFFF5F3FF),
+                side: const BorderSide(color: Color(0xFFC4B5FD)),
+              ),
+              onPressed: () => _showCreateCustomDeviceTypeModal(floor),
+              icon: const Icon(Icons.add_box_outlined, size: 15),
+              label: const Text(
+                '+ Nuevo Tipo a Medida',
+                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800),
+              ),
+            ),
+          ),
           const Divider(height: 1, color: Color(0xFFE2E8F0)),
           Expanded(
-            child: ListView.separated(
+            child: ListView(
               padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-              itemCount: filteredCatalog.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 2),
-              itemBuilder: (ctx, i) {
-                final item = filteredCatalog[i];
-                final countInFloor = item.category == 'rack'
-                    ? floor.rooms.fold<int>(0, (s, r) => s + r.racks.length)
-                    : floor.floorDevices
-                        .where((d) => d.category == item.category)
-                        .length;
-                final tileContent = Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 7,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFFF1F5F9)),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 26,
-                        height: 26,
-                        decoration: BoxDecoration(
-                          color: item.category == 'telecom_outlet'
-                              ? const Color(0xFFF1F5F9)
-                              : const Color(0xFFEFF6FF),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Icon(
-                          item.icon,
-                          size: 15,
-                          color: item.category == 'telecom_outlet'
-                              ? const Color(0xFF475569)
-                              : const Color(0xFF1E3A8A),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          item.label,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF1E293B),
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (countInFloor > 0)
-                        Container(
-                          margin: const EdgeInsets.only(right: 4),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 5,
-                            vertical: 1,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF1F5F9),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            '$countInFloor',
-                            style: const TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF64748B),
-                            ),
-                          ),
-                        ),
-                      InkWell(
-                        onTap: () {
-                          if (item.category == 'rack') {
-                            _showDrawNewRackDialog(floor);
+              children: [
+                for (final entry in grouped.entries)
+                  if (entry.value.isNotEmpty) ...[
+                    // Cabecera desplegable de Familia
+                    InkWell(
+                      onTap: () {
+                        setState(() {
+                          if (_expandedLibraryGroups.contains(entry.key)) {
+                            _expandedLibraryGroups.remove(entry.key);
                           } else {
-                            _showAddFloorDeviceModal(
-                              floor,
-                              initialCategory: item.category,
-                            );
+                            _expandedLibraryGroups.add(entry.key);
                           }
-                        },
-                        borderRadius: BorderRadius.circular(4),
-                        child: const Tooltip(
-                          message: 'Añadir al plano',
-                          child: Padding(
-                            padding: EdgeInsets.all(2),
-                            child: Icon(
-                              Icons.add_circle_outline_rounded,
-                              size: 16,
-                              color: Color(0xFF2563EB),
-                            ),
-                          ),
+                        });
+                      },
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        margin: const EdgeInsets.only(top: 4, bottom: 3),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 6,
                         ),
-                      ),
-                    ],
-                  ),
-                );
-
-                return Draggable<String>(
-                  data: item.category,
-                  feedback: Material(
-                    elevation: 8,
-                    borderRadius: BorderRadius.circular(20),
-                    color: const Color(0xFF0F172A),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 7,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(item.icon, size: 16, color: Colors.white),
-                          const SizedBox(width: 8),
-                          Text(
-                            item.label,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              groupIconFor(entry.key),
+                              size: 14,
+                              color: groupAccentFor(entry.key),
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                entry.key,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w900,
+                                  color: groupAccentFor(entry.key),
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 1,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: const Color(0xFFCBD5E1),
+                                ),
+                              ),
+                              child: Text(
+                                '${entry.value.length}',
+                                style: const TextStyle(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF475569),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(
+                              (_expandedLibraryGroups.contains(entry.key) ||
+                                      query.isNotEmpty)
+                                  ? Icons.expand_less_rounded
+                                  : Icons.expand_more_rounded,
+                              size: 16,
+                              color: const Color(0xFF64748B),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                  childWhenDragging: Opacity(
-                    opacity: 0.45,
-                    child: tileContent,
-                  ),
-                  child: MouseRegion(
-                    cursor: SystemMouseCursors.grab,
-                    child: tileContent,
-                  ),
-                );
-              },
+                    if (_expandedLibraryGroups.contains(entry.key) ||
+                        query.isNotEmpty)
+                      for (final item in entry.value)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 3, left: 4),
+                          child: _buildLibraryCatalogTile(floor, item),
+                        ),
+                  ],
+              ],
             ),
           ),
         ],
@@ -3088,8 +3693,161 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     );
   }
 
+  Widget _buildLibraryCatalogTile(
+    FloorNode floor,
+    _FloorDeviceCatalogItem item,
+  ) {
+    final countInFloor = item.category == 'rack'
+        ? floor.rooms.fold<int>(0, (s, r) => s + r.racks.length)
+        : floor.floorDevices.where((d) => d.category == item.category).length;
+
+    final tileContent = Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 8,
+        vertical: 6,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: const Color(0xFFF1F5F9)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: item.pinColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Icon(
+              item.icon,
+              size: 14,
+              color: item.pinColor,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              item.label,
+              style: const TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF1E293B),
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (countInFloor > 0)
+            Container(
+              margin: const EdgeInsets.only(right: 4),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 5,
+                vertical: 1,
+              ),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '$countInFloor',
+                style: const TextStyle(
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF64748B),
+                ),
+              ),
+            ),
+          if (item.customTypeId != null)
+            InkWell(
+              onTap: () async {
+                await widget.api.deleteCustomFloorDeviceType(
+                  item.customTypeId!,
+                );
+                await _loadCustomFloorDeviceTypes();
+              },
+              borderRadius: BorderRadius.circular(4),
+              child: const Tooltip(
+                message: 'Eliminar este tipo personalizado de la librería',
+                child: Padding(
+                  padding: EdgeInsets.all(2),
+                  child: Icon(
+                    Icons.delete_outline,
+                    size: 14,
+                    color: Color(0xFF94A3B8),
+                  ),
+                ),
+              ),
+            ),
+          InkWell(
+            onTap: () {
+              if (item.category == 'rack') {
+                _showDrawNewRackDialog(floor);
+              } else {
+                _showAddFloorDeviceModal(
+                  floor,
+                  initialCategory: item.category,
+                );
+              }
+            },
+            borderRadius: BorderRadius.circular(4),
+            child: const Tooltip(
+              message: 'Colocar en planta y elegir Rack de conexión',
+              child: Padding(
+                padding: EdgeInsets.all(2),
+                child: Icon(
+                  Icons.add_circle_outline_rounded,
+                  size: 16,
+                  color: Color(0xFF2563EB),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    return Draggable<String>(
+      data: item.category,
+      feedback: Material(
+        elevation: 8,
+        borderRadius: BorderRadius.circular(20),
+        color: item.pinColor,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 7,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(item.icon, size: 16, color: Colors.white),
+              const SizedBox(width: 8),
+              Text(
+                item.label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      childWhenDragging: Opacity(
+        opacity: 0.45,
+        child: tileContent,
+      ),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.grab,
+        child: tileContent,
+      ),
+    );
+  }
+
   // ===========================================================================
-  // PIN DE GOTA (TEARDROP PIN) EN EL PLANO 2D PARA CADA DISPOSITIVO / ROSETA
+  // PIN DE GOTA (TEARDROP PIN) EN EL PLANO 2D PARA CADA DISPOSITIVO / SENSOR
   // ===========================================================================
   Widget _buildFloorDevicePin({
     required FloorDeviceNode dev,
@@ -3101,13 +3859,25 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     final catItem = _catalogItemFor(dev.category);
     final isOutlet = dev.category == 'telecom_outlet';
 
+    // Buscar código del Rack conectado para mostrarlo en el tooltip y badge
+    String linkedRackCode = '';
+    if (dev.linkedRackId != null && _floor != null) {
+      for (final rm in _floor!.rooms) {
+        for (final rk in rm.racks) {
+          if (rk.id == dev.linkedRackId) {
+            linkedRackCode = rk.code;
+            break;
+          }
+        }
+      }
+    }
+
     // Coordenadas de la punta del pin
     final centerX = (normPos.dx * canvasW).clamp(20.0, canvasW - 20.0);
     final centerY = (normPos.dy * canvasH).clamp(24.0, canvasH - 16.0);
 
-    final Color pinBgColor = isSelected
-        ? const Color(0xFF2563EB)
-        : (isOutlet ? const Color(0xFF64748B) : const Color(0xFF0F172A));
+    final Color pinBgColor =
+        isSelected ? const Color(0xFF2563EB) : catItem.pinColor;
 
     Color statusDotColor = const Color(0xFF22C55E);
     if (dev.status == 'offline') {
@@ -3122,9 +3892,13 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       child: Tooltip(
         message: [
           '${dev.code} • ${dev.name}',
+          'Familia: ${catItem.groupName}',
+          if (linkedRackCode.isNotEmpty) 'Conectado a Rack: $linkedRackCode',
+          if (dev.linkedRackPort.isNotEmpty)
+            'Puerto/Sonda en Rack: ${dev.linkedRackPort}',
           if (dev.roomCode.isNotEmpty) 'Sala/Zona: ${dev.roomCode}',
           if (dev.ipAddress.isNotEmpty) 'IP: ${dev.ipAddress}',
-          if (dev.linkedRackPort.isNotEmpty) 'Puerto Rack: ${dev.linkedRackPort}',
+          if (dev.notes.isNotEmpty) dev.notes,
           if (dev.contactFirstName.isNotEmpty || dev.contactLastName.isNotEmpty)
             'Contacto: ${dev.contactFirstName} ${dev.contactLastName}',
           '• Clic: Abrir Settings  • Arrastrar: Mover en planta',
@@ -3191,7 +3965,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   ],
                 ),
                 const SizedBox(width: 3),
-                // Etiqueta junto al pin (ej. CAM01, DP01, Bi01, Bi02...)
+                // Etiqueta junto al pin (ej. TMP01, CAM01, DP01, Bi01, Bi02...)
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 6,
@@ -3205,7 +3979,9 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     border: Border.all(
                       color: isSelected
                           ? const Color(0xFFFACC15)
-                          : const Color(0xFFCBD5E1),
+                          : (catItem.isSensor
+                              ? catItem.pinColor.withValues(alpha: 0.55)
+                              : const Color(0xFFCBD5E1)),
                       width: isSelected ? 1.5 : 1.0,
                     ),
                     boxShadow: const [
@@ -3242,6 +4018,20 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                   : const Color(0xFF0F172A)),
                         ),
                       ),
+                      if (linkedRackCode.isNotEmpty &&
+                          (catItem.isSensor || isSelected)) ...[
+                        const SizedBox(width: 4),
+                        Text(
+                          '→$linkedRackCode',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            color: isSelected
+                                ? const Color(0xFFFDE047)
+                                : const Color(0xFFB45309),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -3286,7 +4076,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         .toList();
 
     return Container(
-      width: 300,
+      width: 310,
       decoration: const BoxDecoration(
         color: Colors.white,
         border: Border(left: BorderSide(color: Color(0xFFE2E8F0))),
@@ -3307,7 +4097,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     width: 28,
                     height: 28,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0F172A),
+                      color: _catalogItemFor(selectedDev.category).pinColor,
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Icon(
@@ -3456,6 +4246,14 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         ? _devLinkedOutletId
         : null;
 
+    final validCategories = <String>{
+      for (final c in _allCatalogItems)
+        if (c.category != 'rack') c.category,
+    };
+    final safeCategory = validCategories.contains(_devCategory)
+        ? _devCategory
+        : 'camera';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -3473,7 +4271,41 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     color: Color(0xFF2563EB),
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  initialValue: safeCategory,
+                  isExpanded: true,
+                  isDense: true,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF0F172A),
+                  ),
+                  decoration: _compactInputDecoration('Device / Sensor Type'),
+                  items: _allCatalogItems
+                      .where((c) => c.category != 'rack')
+                      .map(
+                        (c) => DropdownMenuItem<String>(
+                          value: c.category,
+                          child: Row(
+                            children: [
+                              Icon(c.icon, size: 15, color: c.pinColor),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  c.label,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) setState(() => _devCategory = v);
+                  },
+                ),
+                const SizedBox(height: 8),
                 _buildCompactField(label: 'ID *', controller: _devCodeCtrl),
                 const SizedBox(height: 8),
                 _buildCompactField(label: 'Name', controller: _devNameCtrl),
@@ -3541,77 +4373,101 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                const Divider(height: 1, color: Color(0xFFE2E8F0)),
-                const SizedBox(height: 10),
-                const Text(
-                  'Structured Cabling & Rack Link',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF0F172A),
+                // Bloque destacado de Conexión al Rack
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFFBEB),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFFCD34D)),
                   ),
-                ),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<int?>(
-                  initialValue: safeLinkedRackId,
-                  isExpanded: true,
-                  isDense: true,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF0F172A),
-                  ),
-                  decoration: _compactInputDecoration(
-                    'Linked Rack (Dashed Orange Line)',
-                  ),
-                  items: [
-                    const DropdownMenuItem<int?>(
-                      value: null,
-                      child: Text('None'),
-                    ),
-                    ...floorRacks.map(
-                      (rk) => DropdownMenuItem<int?>(
-                        value: rk.id,
-                        child: Text('${rk.code} (${rk.name})'),
-                      ),
-                    ),
-                  ],
-                  onChanged: (v) => setState(() => _devLinkedRackId = v),
-                ),
-                const SizedBox(height: 8),
-                _buildCompactField(
-                  label: 'Rack Patch Panel / Switch Port (ej. PP-A:01)',
-                  controller: _devRackPortCtrl,
-                ),
-                if (dev.category != 'telecom_outlet') ...[
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<int?>(
-                    initialValue: safeLinkedOutletId,
-                    isExpanded: true,
-                    isDense: true,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF0F172A),
-                    ),
-                    decoration: _compactInputDecoration(
-                      'Telecommunications Outlet (Blue Line)',
-                    ),
-                    items: [
-                      const DropdownMenuItem<int?>(
-                        value: null,
-                        child: Text('None (Direct to Rack)'),
-                      ),
-                      ...floorOutlets
-                          .where((o) => o.id != dev.id)
-                          .map(
-                            (o) => DropdownMenuItem<int?>(
-                              value: o.id,
-                              child: Text('${o.code} (${o.roomCode})'),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(
+                            Icons.dns_rounded,
+                            size: 14,
+                            color: Color(0xFFB45309),
+                          ),
+                          SizedBox(width: 6),
+                          Text(
+                            'Rack Conectado & Cableado',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFF92400E),
                             ),
                           ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<int?>(
+                        initialValue: safeLinkedRackId,
+                        isExpanded: true,
+                        isDense: true,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF0F172A),
+                        ),
+                        decoration: _compactInputDecoration(
+                          'Conectado al Rack (Línea Naranja)',
+                        ),
+                        items: [
+                          const DropdownMenuItem<int?>(
+                            value: null,
+                            child: Text('Sin conexión directa a Rack'),
+                          ),
+                          ...floorRacks.map(
+                            (rk) => DropdownMenuItem<int?>(
+                              value: rk.id,
+                              child: Text('${rk.code} (${rk.name})'),
+                            ),
+                          ),
+                        ],
+                        onChanged: (v) => setState(() => _devLinkedRackId = v),
+                      ),
+                      const SizedBox(height: 8),
+                      _buildCompactField(
+                        label:
+                            'Puerto / Sonda en Rack (ej. ENV-MON:Temp1 / PP-A:01)',
+                        controller: _devRackPortCtrl,
+                      ),
+                      if (dev.category != 'telecom_outlet') ...[
+                        const SizedBox(height: 8),
+                        DropdownButtonFormField<int?>(
+                          initialValue: safeLinkedOutletId,
+                          isExpanded: true,
+                          isDense: true,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF0F172A),
+                          ),
+                          decoration: _compactInputDecoration(
+                            'Telecommunications Outlet (Línea Azul)',
+                          ),
+                          items: [
+                            const DropdownMenuItem<int?>(
+                              value: null,
+                              child: Text('None (Direct to Rack)'),
+                            ),
+                            ...floorOutlets
+                                .where((o) => o.id != dev.id)
+                                .map(
+                                  (o) => DropdownMenuItem<int?>(
+                                    value: o.id,
+                                    child: Text('${o.code} (${o.roomCode})'),
+                                  ),
+                                ),
+                          ],
+                          onChanged: (v) =>
+                              setState(() => _devLinkedOutletId = v),
+                        ),
+                      ],
                     ],
-                    onChanged: (v) => setState(() => _devLinkedOutletId = v),
                   ),
-                ],
+                ),
                 const SizedBox(height: 8),
                 _buildCompactField(
                   label: 'Responsible person',
@@ -3668,7 +4524,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                 ),
                 const SizedBox(height: 8),
                 _buildCompactField(
-                  label: 'Notes',
+                  label: 'Lectura Sensor / Notas',
                   controller: _devNotesCtrl,
                   maxLines: 2,
                 ),
@@ -3759,7 +4615,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
           ),
           const SizedBox(height: 14),
           Text(
-            'TOMAS Y DISPOSITIVOS DE PLANTA CONECTADOS (${connectedDevices.length})',
+            'SENSORES, TOMAS Y DISPOSITIVOS CONECTADOS A ESTE RACK (${connectedDevices.length})',
             style: const TextStyle(
               fontSize: 10.5,
               fontWeight: FontWeight.w900,
@@ -3769,7 +4625,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
           const SizedBox(height: 8),
           if (connectedDevices.isEmpty)
             const Text(
-              'Ninguna roseta o cámara vinculada aún a este Rack.',
+              'Ningún sensor, roseta o cámara vinculado aún a este Rack.',
               style: TextStyle(fontSize: 11.5, color: Color(0xFF94A3B8)),
             )
           else
@@ -3788,7 +4644,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   leading: Icon(
                     cat.icon,
                     size: 16,
-                    color: const Color(0xFF1E3A8A),
+                    color: cat.pinColor,
                   ),
                   title: Text(
                     '${d.code} (${d.roomCode})',
@@ -3799,7 +4655,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   ),
                   subtitle: Text(
                     d.linkedRackPort.isNotEmpty
-                        ? 'Puerto: ${d.linkedRackPort}'
+                        ? 'Puerto/Sonda: ${d.linkedRackPort}'
                         : cat.label,
                     style: const TextStyle(fontSize: 10.5),
                   ),
@@ -3822,7 +4678,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
           child: Text(
-            'Haz clic en cualquier cámara, roseta, PC o Rack del plano para editar sus Settings (${floor.floorDevices.length} dispositivos en planta).',
+            'Haz clic en cualquier sensor, cámara, roseta, PC o Rack del plano para editar sus Settings (${floor.floorDevices.length} elementos en planta).',
             style: const TextStyle(
               fontSize: 11,
               color: Color(0xFF64748B),
@@ -3858,9 +4714,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       leading: Icon(
                         cat.icon,
                         size: 16,
-                        color: d.category == 'telecom_outlet'
-                            ? const Color(0xFF475569)
-                            : const Color(0xFF0F172A),
+                        color: cat.pinColor,
                       ),
                       title: Text(
                         '${d.code}  •  ${d.name}',
@@ -3898,7 +4752,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
       filled: true,
-      fillColor: const Color(0xFFF8FAFC),
+      fillColor: Colors.white,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(6),
         borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
@@ -3926,15 +4780,25 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
 
 class _FloorDeviceCatalogItem {
   final String category;
+  final String groupName;
   final String label;
   final String prefix;
   final IconData icon;
+  final Color pinColor;
+  final String defaultPortHint;
+  final bool isSensor;
+  final int? customTypeId;
 
   const _FloorDeviceCatalogItem({
     required this.category,
+    this.groupName = 'Industrial / A Medida',
     required this.label,
     required this.prefix,
     required this.icon,
+    this.pinColor = const Color(0xFF0F172A),
+    this.defaultPortHint = 'SW01:Gi1/0/1',
+    this.isSensor = false,
+    this.customTypeId,
   });
 }
 

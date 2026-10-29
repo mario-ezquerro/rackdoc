@@ -444,3 +444,15 @@ class FloorDeviceUpdate(BaseModel):
     contact_department: Optional[str] = None
     notes: Optional[str] = None
 
+
+class FloorDeviceCustomTypeCreate(BaseModel):
+    category_key: Optional[str] = None
+    group_name: str = "Industrial / A Medida"
+    label: str
+    prefix: str = "DEV"
+    icon_key: str = "memory"
+    pin_color_hex: str = "#7C3AED"
+    default_port_hint: str = "SW01:Gi1/0/1"
+    is_sensor: bool = False
+
+

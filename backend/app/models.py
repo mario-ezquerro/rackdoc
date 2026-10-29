@@ -284,3 +284,18 @@ class FloorDevice(Base):
 
     floor = relationship("Floor", back_populates="floor_devices")
 
+
+class FloorDeviceCustomType(Base):
+    __tablename__ = "floor_device_custom_types"
+
+    id = Column(Integer, primary_key=True, index=True)
+    category_key = Column(String(64), unique=True, nullable=False, index=True)
+    group_name = Column(String(80), default="Industrial / A Medida")
+    label = Column(String(120), nullable=False)
+    prefix = Column(String(24), default="DEV")
+    icon_key = Column(String(50), default="memory")
+    pin_color_hex = Column(String(20), default="#7C3AED")
+    default_port_hint = Column(String(100), default="SW01:Gi1/0/1")
+    is_sensor = Column(Boolean, default=False)
+
+
