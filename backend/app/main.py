@@ -455,7 +455,16 @@ def get_locations_tree(db: Session = Depends(get_db)):
 
 @app.post("/api/locations")
 def create_location(payload: LocationCreate, db: Session = Depends(get_db)):
-    loc = Location(**payload.model_dict() if hasattr(payload, "model_dict") else payload.model_dump())
+    data = payload.model_dict() if hasattr(payload, "model_dict") else payload.model_dump()
+    raw_code = (data.get("code") or "CPD").strip() or "CPD"
+    final_code = raw_code
+    suffix = 2
+    while db.query(Location).filter(Location.code == final_code).first() is not None:
+        final_code = f"{raw_code}-{suffix:02d}"
+        suffix += 1
+    data["code"] = final_code
+
+    loc = Location(**data)
     db.add(loc)
     db.commit()
     db.refresh(loc)
@@ -486,7 +495,21 @@ def update_location(location_id: int, payload: LocationUpdate, db: Session = Dep
     loc = db.query(Location).filter(Location.id == location_id).first()
     if not loc:
         raise HTTPException(status_code=404, detail="Sede no encontrada")
-    for k, v in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    if "code" in updates and updates["code"]:
+        new_code = updates["code"].strip()
+        dup = (
+            db.query(Location)
+            .filter(Location.code == new_code, Location.id != location_id)
+            .first()
+        )
+        if dup:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Ya existe otro Datacenter con el código '{new_code}'.",
+            )
+        updates["code"] = new_code
+    for k, v in updates.items():
         setattr(loc, k, v)
     db.commit()
     db.refresh(loc)

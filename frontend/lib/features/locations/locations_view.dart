@@ -310,10 +310,22 @@ class _LocationsViewState extends State<LocationsView> {
   }
 
   Future<void> _showLocationFormDialog({LocationNode? existing}) async {
+    final messenger = ScaffoldMessenger.of(context);
     final isEdit = existing != null;
-    final codeCtrl = TextEditingController(text: existing?.code ?? 'CPD-MAD');
+    final existingCodes = widget.locations
+        .map((l) => l.code.toUpperCase())
+        .toSet();
+    int nextNum = widget.locations.length + 1;
+    String defaultCode = 'CPD-${nextNum.toString().padLeft(2, '0')}';
+    while (existingCodes.contains(defaultCode.toUpperCase())) {
+      nextNum++;
+      defaultCode = 'CPD-${nextNum.toString().padLeft(2, '0')}';
+    }
+    final defaultName = 'Datacenter $defaultCode';
+
+    final codeCtrl = TextEditingController(text: existing?.code ?? defaultCode);
     final nameCtrl = TextEditingController(
-      text: existing?.name ?? 'Madrid Core Datacenter',
+      text: existing?.name ?? defaultName,
     );
     final latCtrl = TextEditingController(
       text: existing != null ? existing.latitude.toString() : '40.4168',
@@ -326,7 +338,7 @@ class _LocationsViewState extends State<LocationsView> {
           ? existing!.address
           : 'Calle Alcalá, Madrid',
     );
-    final searchOsmCtrl = TextEditingController(text: addrCtrl.text);
+    final searchOsmCtrl = TextEditingController(text: existing?.address ?? '');
     List<Map<String, dynamic>> modalResults = [];
     bool modalLoading = false;
 
@@ -485,6 +497,18 @@ class _LocationsViewState extends State<LocationsView> {
                                       addrCtrl.text = disp;
                                       latCtrl.text = lat.toStringAsFixed(6);
                                       lngCtrl.text = lon.toStringAsFixed(6);
+                                      if (!isEdit &&
+                                          nameCtrl.text.trim() == defaultName) {
+                                        final parts = disp
+                                            .split(',')
+                                            .map((s) => s.trim())
+                                            .where((s) => s.isNotEmpty)
+                                            .toList();
+                                        if (parts.isNotEmpty) {
+                                          nameCtrl.text =
+                                              'CPD ${parts.first}';
+                                        }
+                                      }
                                       modalResults = [];
                                     });
                                   },
@@ -562,26 +586,55 @@ class _LocationsViewState extends State<LocationsView> {
     if (confirmed == true) {
       final lat = double.tryParse(latCtrl.text.trim()) ?? 40.4168;
       final lon = double.tryParse(lngCtrl.text.trim()) ?? -3.7038;
-      if (isEdit) {
-        await widget.api.updateLocation(existing.id, {
-          'code': codeCtrl.text.trim(),
-          'name': nameCtrl.text.trim(),
-          'latitude': lat,
-          'longitude': lon,
-          'address': addrCtrl.text.trim(),
-        });
-      } else {
-        await widget.api.createLocation(
-          code: codeCtrl.text.trim(),
-          name: nameCtrl.text.trim(),
-          latitude: lat,
-          longitude: lon,
-          address: addrCtrl.text.trim(),
+      try {
+        if (isEdit) {
+          await widget.api.updateLocation(existing.id, {
+            'code': codeCtrl.text.trim(),
+            'name': nameCtrl.text.trim(),
+            'latitude': lat,
+            'longitude': lon,
+            'address': addrCtrl.text.trim(),
+          });
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(
+                'Datacenter "${nameCtrl.text.trim()}" actualizado correctamente.',
+              ),
+            ),
+          );
+        } else {
+          final created = await widget.api.createLocation(
+            code: codeCtrl.text.trim(),
+            name: nameCtrl.text.trim(),
+            latitude: lat,
+            longitude: lon,
+            address: addrCtrl.text.trim(),
+          );
+          final newId = created['id'] as int?;
+          if (newId != null && mounted) {
+            setState(() {
+              _selectedLocationId = newId;
+            });
+          }
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(
+                'Datacenter "${created['name'] ?? nameCtrl.text.trim()}" (${created['code'] ?? codeCtrl.text.trim()}) creado correctamente.',
+              ),
+            ),
+          );
+        }
+        widget.onRefresh();
+        if (_mapViewMode == 'api_map') {
+          _mapController.move(LatLng(lat, lon), 14.0);
+        }
+      } catch (e) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('Error al guardar Datacenter: $e'),
+            backgroundColor: Colors.red.shade700,
+          ),
         );
-      }
-      widget.onRefresh();
-      if (_mapViewMode == 'api_map') {
-        _mapController.move(LatLng(lat, lon), 14.0);
       }
     }
   }

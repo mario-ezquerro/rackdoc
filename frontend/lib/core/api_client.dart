@@ -48,7 +48,7 @@ class RackDocApiClient {
         .toList();
   }
 
-  Future<void> createLocation({
+  Future<Map<String, dynamic>> createLocation({
     required String code,
     required String name,
     required double latitude,
@@ -66,7 +66,7 @@ class RackDocApiClient {
         'address': address,
       }),
     );
-    _decodeResponse(res);
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
   }
 
   Future<void> createFloor({
