@@ -14,6 +14,7 @@ from .models import (
     RackDevice,
     Port,
     Connection,
+    FloorDevice,
 )
 
 
@@ -535,15 +536,15 @@ def seed_initial_data(db: Session):
             fqdn="fi01.hq.rackdoc.local",
             start_u=41,
             mounted_face="front",
-            ip_address="127.0.0.1",
+            ip_address="10.28.0.2",
             subnet_mask="255.255.255.0",
             gateway="10.28.0.1",
             vlan_mgmt=10,
             management_links=[{"protocol": "https", "port": 443, "username": "admin", "label": "Web Panel"}],
             monitoring_enabled=True,
             monitor_method="icmp",
-            status="online",
-            last_ping_ms=0.8,
+            status="offline",
+            last_ping_ms=None,
             serial_number="FIB-2026-001",
             custom_fields={"Proveedor Fibra": "DarkFiber EU", "Conector": "LC/APC OM4"},
         ),
@@ -556,7 +557,7 @@ def seed_initial_data(db: Session):
             fqdn="rt01.hq.rackdoc.local",
             start_u=39,
             mounted_face="front",
-            ip_address="127.0.0.1",
+            ip_address="10.28.0.1",
             subnet_mask="255.255.255.0",
             gateway="10.28.0.1",
             vlan_mgmt=1,
@@ -567,8 +568,8 @@ def seed_initial_data(db: Session):
             ],
             monitoring_enabled=True,
             monitor_method="icmp",
-            status="online",
-            last_ping_ms=1.1,
+            status="offline",
+            last_ping_ms=None,
             serial_number="MT-CCR-99812",
             custom_fields={"BGP ASN": "65001", "OS Version": "RouterOS 7.16", "Contrato": "24x7 Gold"},
         ),
@@ -593,7 +594,7 @@ def seed_initial_data(db: Session):
             fqdn="sw01.hq.rackdoc.local",
             start_u=37,
             mounted_face="front",
-            ip_address="127.0.0.1",
+            ip_address="10.28.0.11",
             subnet_mask="255.255.255.0",
             gateway="10.28.0.1",
             vlan_mgmt=10,
@@ -603,8 +604,8 @@ def seed_initial_data(db: Session):
             ],
             monitoring_enabled=True,
             monitor_method="icmp",
-            status="online",
-            last_ping_ms=1.4,
+            status="offline",
+            last_ping_ms=None,
             serial_number="FOC2614Y12A",
             custom_fields={"IOS Version": "17.9.4a", "PoE Budget": "740W", "Stack ID": "1"},
         ),
@@ -2899,23 +2900,111 @@ def sync_system_defaults(db: Session):
                 },
             ]
 
-    # Asegurar que los equipos activos monitorizados muestren estados realistas (Verde Online y Rojo Offline) y métodos de Heartbeat variados
+    # Asegurar que los equipos monitorizados con IPs demo inexistentes (10.28.x.x) figuren como CAÍDOS (offline)
+    # y dispongan de su configuración modular multi-protocolo (ICMP, SSH, HTTP/HTTPS, TCP, UDP, SNMP)
     for dev in db.query(RackDevice).all():
         if dev.mounted_face == "external":
             continue
         if dev.monitoring_enabled:
-            if dev.code == "SW03":
-                dev.status = "offline"
-                dev.last_ping_ms = None
-            elif dev.status not in ("online", "offline"):
-                dev.status = "online"
-                dev.last_ping_ms = 1.6
             if dev.code in ("SRV01", "SRV02") and dev.monitor_method == "icmp":
                 dev.monitor_method = "ssh"
                 dev.monitor_port = 22
             elif dev.code in ("FW01",) and dev.monitor_method == "icmp":
                 dev.monitor_method = "https"
                 dev.monitor_port = 443
+
+            cf = dict(dev.custom_fields or {})
+            cat = (dev.template.category if dev.template else "").lower()
+            if (dev.ip_address or "").strip() == "127.0.0.1":
+                if dev.code == "RT01":
+                    dev.ip_address = "10.28.0.1"
+                elif dev.code == "FI-01":
+                    dev.ip_address = "10.28.0.2"
+                elif dev.code == "SW01":
+                    dev.ip_address = "10.28.0.11"
+                else:
+                    dev.ip_address = f"10.28.0.{10 + dev.id}"
+            ip_val = (dev.ip_address or "").strip()
+            fqdn_val = (dev.fqdn or dev.hostname or "").strip()
+
+            if "heartbeat_config" not in cf:
+                if cat in ("switch", "router"):
+                    enabled_list = ["icmp", "ssh", "snmp"]
+                elif cat in ("firewall", "gateway"):
+                    enabled_list = ["icmp", "https", "ssh"]
+                elif cat in ("server", "storage_nas", "storage_san"):
+                    enabled_list = ["icmp", "ssh", "https"]
+                elif cat in ("pdu", "ups"):
+                    enabled_list = ["icmp", "snmp", "http"]
+                else:
+                    enabled_list = [dev.monitor_method or "icmp"]
+
+                cf["heartbeat_config"] = {
+                    "remote_access_enabled": True,
+                    "enabled_checks": enabled_list,
+                    "checks": {
+                        "icmp": {"target_type": "ip"},
+                        "ssh": {
+                            "target_type": "ip",
+                            "port": 22,
+                            "username": "admin",
+                        },
+                        "http": {
+                            "target_type": "ip",
+                            "scheme": "https" if "https" in enabled_list else "http",
+                            "port": 443 if "https" in enabled_list else 80,
+                            "url": f"https://{ip_val or fqdn_val}:443/"
+                            if "https" in enabled_list
+                            else f"http://{ip_val or fqdn_val}:80/",
+                            "path": "/",
+                            "expected_status": 200,
+                        },
+                        "tcp": {
+                            "target_type": "ip",
+                            "port": dev.monitor_port or 8080,
+                        },
+                        "udp": {
+                            "target_type": "ip",
+                            "port": 161,
+                        },
+                        "snmp": {
+                            "target_type": "ip",
+                            "port": 161,
+                            "version": "2c",
+                            "community": "public",
+                            "oid": "1.3.6.1.2.1.1.1.0",
+                        },
+                    },
+                }
+
+            # Si el equipo tiene una IP ficticia de laboratorio (10.28.x.x) o aún no ha sido verificado realmente,
+            # marcarlo como CAÍDO (offline) porque no existe en la red real
+            if not cf.get("real_heartbeat_v3_initialized"):
+                if ip_val.startswith("10.28.") or not ip_val:
+                    dev.status = "offline"
+                    dev.last_ping_ms = None
+                    hb_cfg = cf.get("heartbeat_config") or {}
+                    en_checks = hb_cfg.get("enabled_checks") or [dev.monitor_method or "icmp"]
+                    cf["last_heartbeat_checks"] = [
+                        {
+                            "protocol": m,
+                            "method": m,
+                            "target": ip_val or fqdn_val or "Sin IP/FQDN",
+                            "target_type": "ip",
+                            "status": "offline",
+                            "latency_ms": None,
+                            "detail": f"[{m.upper()}] Sin respuesta desde {ip_val or fqdn_val or 'host'} (Equipo inalcanzable / Caído)",
+                        }
+                        for m in en_checks
+                    ]
+                cf["real_heartbeat_v3_initialized"] = True
+            dev.custom_fields = cf
+
+    for fd in db.query(FloorDevice).all():
+        if fd.device_type == "telecom_outlet":
+            continue
+        if (fd.ip_address or "").startswith("10.28.") and fd.status == "online":
+            fd.status = "offline"
 
     # Asegurar que cada Rack tenga sus Tomas Exteriores Schuko (mínimo 1, por defecto 2: Línea A Roja y Línea B Azul)
     racks = db.query(Rack).all()

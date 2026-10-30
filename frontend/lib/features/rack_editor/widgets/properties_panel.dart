@@ -73,13 +73,30 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
   String _devMonitorMethod = 'icmp';
   int _devMonitorPort = 22;
   late TextEditingController _devMonitorPortCtrl;
-  late TextEditingController _hbUrlCtrl;
-  late TextEditingController _hbExpectedStatusCtrl;
+
+  // Configuración modular por protocolo de Heartbeat y Gestión Remota
+  Set<String> _hbEnabledChecks = {'icmp'};
+  bool _hbRemoteAccessEnabled = true;
+  String _hbIcmpTarget = 'ip';
+  String _hbSshTarget = 'ip';
+  late TextEditingController _hbSshPortCtrl;
   late TextEditingController _hbSshUserCtrl;
   late TextEditingController _hbSshArgsCtrl;
+  String _hbHttpTarget = 'ip';
+  String _hbHttpScheme = 'https';
+  late TextEditingController _hbHttpPortCtrl;
+  late TextEditingController _hbUrlCtrl;
+  late TextEditingController _hbExpectedStatusCtrl;
+  String _hbTcpTarget = 'ip';
+  late TextEditingController _hbTcpPortCtrl;
+  String _hbUdpTarget = 'ip';
+  late TextEditingController _hbUdpPortCtrl;
+  String _hbSnmpTarget = 'ip';
+  String _hbSnmpVersion = 'v2c';
+  late TextEditingController _hbSnmpPortCtrl;
   late TextEditingController _hbSnmpCommunityCtrl;
   late TextEditingController _hbSnmpOidCtrl;
-  List<String> _hbSecondaryMethods = [];
+  List<Map<String, dynamic>> _lastHeartbeatChecks = [];
   bool _hbSimulateOffline = false;
   List<Map<String, dynamic>> _devLinks = [];
   Map<String, dynamic> _devCustomFields = {};
@@ -107,12 +124,13 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
     if (oldWidget.rack.id != widget.rack.id) {
       _initRackControllers();
     }
-    if (oldWidget.selectedDevice?.id != widget.selectedDevice?.id ||
-        oldWidget.selectedDevice?.uHeight != widget.selectedDevice?.uHeight ||
+    if (oldWidget.selectedDevice?.id != widget.selectedDevice?.id) {
+      _initDeviceControllers(preservePingResult: false);
+    } else if (oldWidget.selectedDevice?.uHeight != widget.selectedDevice?.uHeight ||
         oldWidget.selectedDevice?.photoUrl != widget.selectedDevice?.photoUrl ||
         oldWidget.selectedDevice?.status != widget.selectedDevice?.status ||
         oldWidget.selectedDevice?.lastPingMs != widget.selectedDevice?.lastPingMs) {
-      _initDeviceControllers();
+      _initDeviceControllers(preservePingResult: true);
     }
     if (oldWidget.selectedConnection?.id != widget.selectedConnection?.id) {
       _initConnectionControllers();
@@ -134,9 +152,11 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
     _rackAisleId = r.aisleId;
   }
 
-  void _initDeviceControllers() {
+  void _initDeviceControllers({bool preservePingResult = false}) {
     final d = widget.selectedDevice;
-    _pingResultMessage = null;
+    if (!preservePingResult) {
+      _pingResultMessage = null;
+    }
     _devCodeCtrl = TextEditingController(text: d?.code ?? '');
     _devNameCtrl = TextEditingController(text: d?.name ?? '');
     _devHostnameCtrl = TextEditingController(text: d?.hostname ?? '');
@@ -152,7 +172,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
     _devUHeight = d?.uHeight ?? 1;
     _devMountedFace = d?.mountedFace ?? 'front';
     _devMonitorEnabled = d?.monitoringEnabled ?? false;
-    const validMethods = {'icmp', 'ssh', 'https', 'http', 'tcp', 'snmp'};
+    const validMethods = {'icmp', 'ssh', 'https', 'http', 'tcp', 'udp', 'snmp'};
     final rawMethod = (d?.monitorMethod ?? 'icmp').toLowerCase();
     _devMonitorMethod = validMethods.contains(rawMethod) ? rawMethod : 'icmp';
     _devMonitorPort = d?.monitorPort ?? 22;
@@ -162,32 +182,160 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         : [];
     _devCustomFields =
         d != null ? Map<String, dynamic>.from(d.customFields) : {};
+
+    final rawChecks = _devCustomFields['last_heartbeat_checks'];
+    if (rawChecks is List) {
+      _lastHeartbeatChecks = rawChecks
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } else if (!preservePingResult) {
+      _lastHeartbeatChecks = [];
+    }
+
     final rawHb = _devCustomFields['heartbeat_config'];
     final hb = rawHb is Map
         ? Map<String, dynamic>.from(rawHb)
         : <String, dynamic>{};
-    _hbUrlCtrl = TextEditingController(
-      text: (hb['url'] ?? hb['path'] ?? '/').toString(),
-    );
-    _hbExpectedStatusCtrl = TextEditingController(
-      text: (hb['expected_status'] ?? '200').toString(),
+
+    _hbRemoteAccessEnabled = hb['remote_access_enabled'] != false;
+    _hbSimulateOffline = hb['simulate_offline'] == true;
+
+    final rawEnabled = hb['enabled_checks'];
+    final enabledSet = <String>{};
+    if (rawEnabled is List && rawEnabled.isNotEmpty) {
+      for (final item in rawEnabled) {
+        final s = item.toString().toLowerCase().trim();
+        if (s == 'https') {
+          enabledSet.add('http');
+        } else if (validMethods.contains(s)) {
+          enabledSet.add(s);
+        }
+      }
+    } else {
+      enabledSet.add(_devMonitorMethod == 'https' ? 'http' : _devMonitorMethod);
+      final sec = hb['secondary_methods'];
+      if (sec is List) {
+        for (final item in sec) {
+          final s = item.toString().toLowerCase().trim();
+          if (s == 'https') {
+            enabledSet.add('http');
+          } else if (validMethods.contains(s)) {
+            enabledSet.add(s);
+          }
+        }
+      }
+    }
+    if (enabledSet.isEmpty) {
+      enabledSet.add('icmp');
+    }
+    _hbEnabledChecks = enabledSet;
+
+    final checksMap = hb['checks'] is Map
+        ? Map<String, dynamic>.from(hb['checks'] as Map)
+        : <String, dynamic>{};
+    Map<String, dynamic> checkOf(String k) {
+      final v = checksMap[k];
+      return v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
+    }
+
+    final icmpCfg = checkOf('icmp');
+    _hbIcmpTarget =
+        (icmpCfg['use_target'] ?? icmpCfg['target_type'] ?? 'ip').toString();
+    if (_hbIcmpTarget != 'fqdn') _hbIcmpTarget = 'ip';
+
+    final sshCfg = checkOf('ssh');
+    _hbSshTarget =
+        (sshCfg['use_target'] ?? sshCfg['target_type'] ?? 'ip').toString();
+    if (_hbSshTarget != 'fqdn') _hbSshTarget = 'ip';
+    _hbSshPortCtrl = TextEditingController(
+      text: (sshCfg['port'] ?? (_devMonitorMethod == 'ssh' ? _devMonitorPort : 22))
+          .toString(),
     );
     _hbSshUserCtrl = TextEditingController(
-      text: (hb['ssh_user'] ?? 'admin').toString(),
+      text: (sshCfg['username'] ?? sshCfg['ssh_user'] ?? hb['ssh_user'] ?? 'admin')
+          .toString(),
     );
     _hbSshArgsCtrl = TextEditingController(
       text: (hb['ssh_extra_args'] ?? '-o StrictHostKeyChecking=no').toString(),
     );
+
+    final httpCfg = checkOf('http').isNotEmpty ? checkOf('http') : checkOf('https');
+    _hbHttpTarget =
+        (httpCfg['use_target'] ?? httpCfg['target_type'] ?? 'ip').toString();
+    if (_hbHttpTarget != 'fqdn') _hbHttpTarget = 'ip';
+    final rawScheme = (httpCfg['scheme'] ??
+            (rawEnabled is List && rawEnabled.contains('http') && !rawEnabled.contains('https')
+                ? 'http'
+                : 'https'))
+        .toString()
+        .toLowerCase();
+    _hbHttpScheme = rawScheme == 'http' ? 'http' : 'https';
+    _hbHttpPortCtrl = TextEditingController(
+      text: (httpCfg['port'] ?? (_hbHttpScheme == 'https' ? 443 : 80)).toString(),
+    );
+    final defaultHost = (d?.ipAddress.isNotEmpty ?? false)
+        ? d!.ipAddress
+        : ((d?.fqdn.isNotEmpty ?? false) ? d!.fqdn : '10.28.10.1');
+    _hbUrlCtrl = TextEditingController(
+      text: (httpCfg['url'] ??
+              hb['url'] ??
+              hb['path'] ??
+              '$_hbHttpScheme://$defaultHost/')
+          .toString(),
+    );
+    _hbExpectedStatusCtrl = TextEditingController(
+      text: (httpCfg['expected_status'] ?? hb['expected_status'] ?? '200')
+          .toString(),
+    );
+
+    final tcpCfg = checkOf('tcp');
+    _hbTcpTarget =
+        (tcpCfg['use_target'] ?? tcpCfg['target_type'] ?? 'ip').toString();
+    if (_hbTcpTarget != 'fqdn') _hbTcpTarget = 'ip';
+    _hbTcpPortCtrl = TextEditingController(
+      text: (tcpCfg['port'] ?? (_devMonitorMethod == 'tcp' ? _devMonitorPort : 8080))
+          .toString(),
+    );
+
+    final udpCfg = checkOf('udp');
+    _hbUdpTarget =
+        (udpCfg['use_target'] ?? udpCfg['target_type'] ?? 'ip').toString();
+    if (_hbUdpTarget != 'fqdn') _hbUdpTarget = 'ip';
+    _hbUdpPortCtrl = TextEditingController(
+      text: (udpCfg['port'] ?? 53).toString(),
+    );
+
+    final snmpCfg = checkOf('snmp');
+    _hbSnmpTarget =
+        (snmpCfg['use_target'] ?? snmpCfg['target_type'] ?? 'ip').toString();
+    if (_hbSnmpTarget != 'fqdn') _hbSnmpTarget = 'ip';
+    final rawSnmpVer = (snmpCfg['version'] ??
+            snmpCfg['snmp_version'] ??
+            hb['snmp_version'] ??
+            'v2c')
+        .toString()
+        .toLowerCase();
+    _hbSnmpVersion = const {'v1', 'v2c', 'v3'}.contains(rawSnmpVer)
+        ? rawSnmpVer
+        : (rawSnmpVer == '2c' ? 'v2c' : 'v2c');
+    _hbSnmpPortCtrl = TextEditingController(
+      text: (snmpCfg['port'] ?? 161).toString(),
+    );
     _hbSnmpCommunityCtrl = TextEditingController(
-      text: (hb['snmp_community'] ?? 'public').toString(),
+      text: (snmpCfg['community'] ??
+              snmpCfg['snmp_community'] ??
+              hb['snmp_community'] ??
+              'public')
+          .toString(),
     );
     _hbSnmpOidCtrl = TextEditingController(
-      text: (hb['snmp_oid'] ?? '1.3.6.1.2.1.1.1.0').toString(),
+      text: (snmpCfg['oid'] ??
+              snmpCfg['snmp_oid'] ??
+              hb['snmp_oid'] ??
+              '1.3.6.1.2.1.1.1.0')
+          .toString(),
     );
-    _hbSecondaryMethods = ((hb['secondary_methods'] ?? []) as List)
-        .map((e) => e.toString())
-        .toList();
-    _hbSimulateOffline = hb['simulate_offline'] == true;
   }
 
   void _initConnectionControllers() {
@@ -235,17 +383,93 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
   }
 
   Map<String, dynamic> _buildHeartbeatConfigMap() {
+    final enabledList = _hbEnabledChecks.isEmpty
+        ? <String>['icmp']
+        : _hbEnabledChecks.toList();
+    final sshPort = int.tryParse(_hbSshPortCtrl.text.trim()) ?? 22;
+    final httpPort = int.tryParse(_hbHttpPortCtrl.text.trim()) ??
+        (_hbHttpScheme == 'https' ? 443 : 80);
+    final tcpPort = int.tryParse(_hbTcpPortCtrl.text.trim()) ?? 8080;
+    final udpPort = int.tryParse(_hbUdpPortCtrl.text.trim()) ?? 53;
+    final snmpPort = int.tryParse(_hbSnmpPortCtrl.text.trim()) ?? 161;
+    final expStatus = int.tryParse(_hbExpectedStatusCtrl.text.trim()) ?? 200;
+
     return {
+      'remote_access_enabled': _hbRemoteAccessEnabled,
+      'enabled_checks': enabledList,
+      'simulate_offline': _hbSimulateOffline,
       'url': _hbUrlCtrl.text.trim(),
       'path': _hbUrlCtrl.text.trim(),
-      'expected_status': int.tryParse(_hbExpectedStatusCtrl.text.trim()) ?? 200,
+      'expected_status': expStatus,
       'ssh_user': _hbSshUserCtrl.text.trim(),
       'ssh_extra_args': _hbSshArgsCtrl.text.trim(),
+      'snmp_version': _hbSnmpVersion,
       'snmp_community': _hbSnmpCommunityCtrl.text.trim(),
       'snmp_oid': _hbSnmpOidCtrl.text.trim(),
-      'secondary_methods': _hbSecondaryMethods,
-      'simulate_offline': _hbSimulateOffline,
+      'checks': {
+        'icmp': {
+          'use_target': _hbIcmpTarget,
+          'target_type': _hbIcmpTarget,
+        },
+        'ssh': {
+          'use_target': _hbSshTarget,
+          'target_type': _hbSshTarget,
+          'port': sshPort,
+          'username': _hbSshUserCtrl.text.trim(),
+          'ssh_user': _hbSshUserCtrl.text.trim(),
+        },
+        'http': {
+          'use_target': _hbHttpTarget,
+          'target_type': _hbHttpTarget,
+          'scheme': _hbHttpScheme,
+          'port': httpPort,
+          'url': _hbUrlCtrl.text.trim(),
+          'expected_status': expStatus,
+        },
+        'tcp': {
+          'use_target': _hbTcpTarget,
+          'target_type': _hbTcpTarget,
+          'port': tcpPort,
+        },
+        'udp': {
+          'use_target': _hbUdpTarget,
+          'target_type': _hbUdpTarget,
+          'port': udpPort,
+        },
+        'snmp': {
+          'use_target': _hbSnmpTarget,
+          'target_type': _hbSnmpTarget,
+          'port': snmpPort,
+          'version': _hbSnmpVersion,
+          'snmp_version': _hbSnmpVersion,
+          'community': _hbSnmpCommunityCtrl.text.trim(),
+          'snmp_community': _hbSnmpCommunityCtrl.text.trim(),
+          'oid': _hbSnmpOidCtrl.text.trim(),
+          'snmp_oid': _hbSnmpOidCtrl.text.trim(),
+        },
+      },
     };
+  }
+
+  void _syncPrimaryMethodAndPortFromChecks() {
+    final firstProto =
+        _hbEnabledChecks.isEmpty ? 'icmp' : _hbEnabledChecks.first;
+    _devMonitorMethod = firstProto == 'http' ? _hbHttpScheme : firstProto;
+    if (firstProto == 'ssh') {
+      _devMonitorPort = int.tryParse(_hbSshPortCtrl.text.trim()) ?? 22;
+    } else if (firstProto == 'http') {
+      _devMonitorPort = int.tryParse(_hbHttpPortCtrl.text.trim()) ??
+          (_hbHttpScheme == 'https' ? 443 : 80);
+    } else if (firstProto == 'tcp') {
+      _devMonitorPort = int.tryParse(_hbTcpPortCtrl.text.trim()) ?? 8080;
+    } else if (firstProto == 'udp') {
+      _devMonitorPort = int.tryParse(_hbUdpPortCtrl.text.trim()) ?? 53;
+    } else if (firstProto == 'snmp') {
+      _devMonitorPort = int.tryParse(_hbSnmpPortCtrl.text.trim()) ?? 161;
+    } else {
+      _devMonitorPort = 0;
+    }
+    _devMonitorPortCtrl.text = '$_devMonitorPort';
   }
 
   Future<void> _saveDeviceSettings() async {
@@ -253,8 +477,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
     if (d == null) return;
     setState(() => _isSaving = true);
     try {
-      _devMonitorPort =
-          int.tryParse(_devMonitorPortCtrl.text.trim()) ?? _devMonitorPort;
+      _syncPrimaryMethodAndPortFromChecks();
       _devCustomFields['heartbeat_config'] = _buildHeartbeatConfigMap();
       _devCustomFields['u_height_override'] = _devUHeight;
       await widget.api.updateDevice(d.id, {
@@ -297,6 +520,44 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
   bool get _canEdit => widget.currentUser?.canEdit ?? true;
   bool get _canConnectRemote => widget.currentUser?.canConnectRemote ?? true;
 
+  String _resolveHostByPreference(String pref) {
+    final ip = _devIpCtrl.text.trim();
+    final fqdn = _devFqdnCtrl.text.trim();
+    if (pref == 'fqdn') {
+      return fqdn.isNotEmpty ? fqdn : ip;
+    }
+    return ip.isNotEmpty ? ip : fqdn;
+  }
+
+  String _buildEffectiveHttpUrl() {
+    final host = _resolveHostByPreference(_hbHttpTarget);
+    final port = int.tryParse(_hbHttpPortCtrl.text.trim()) ??
+        (_hbHttpScheme == 'https' ? 443 : 80);
+    var raw = _hbUrlCtrl.text.trim();
+    if (raw.isEmpty || raw == '/') {
+      final portPart = ((_hbHttpScheme == 'http' && port == 80) ||
+              (_hbHttpScheme == 'https' && port == 443))
+          ? ''
+          : ':$port';
+      return '$_hbHttpScheme://$host$portPart/';
+    }
+    raw = raw
+        .replaceAll('{ip}', _devIpCtrl.text.trim())
+        .replaceAll('{fqdn}', _devFqdnCtrl.text.trim())
+        .replaceAll('{host}', host);
+    if (raw.startsWith('/')) {
+      final portPart = ((_hbHttpScheme == 'http' && port == 80) ||
+              (_hbHttpScheme == 'https' && port == 443))
+          ? ''
+          : ':$port';
+      return '$_hbHttpScheme://$host$portPart$raw';
+    }
+    if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
+      return '$_hbHttpScheme://$raw';
+    }
+    return raw;
+  }
+
   Future<void> _triggerDevicePing() async {
     if (!_canConnectRemote) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -312,11 +573,10 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
     if (d == null) return;
     setState(() {
       _isPinging = true;
-      _pingResultMessage = null;
+      _pingResultMessage = 'Ejecutando sondas reales de red (${_hbEnabledChecks.map((e) => e.toUpperCase()).join(', ')})...';
     });
     try {
-      _devMonitorPort =
-          int.tryParse(_devMonitorPortCtrl.text.trim()) ?? _devMonitorPort;
+      _syncPrimaryMethodAndPortFromChecks();
       _devCustomFields['heartbeat_config'] = _buildHeartbeatConfigMap();
       if (_canEdit) {
         await widget.api.updateDevice(d.id, {
@@ -329,15 +589,418 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         });
       }
       final res = await widget.api.pingDevice(d.id);
-      setState(() {
-        _pingResultMessage = res['detail']?.toString() ?? 'Check completado';
-      });
+      if (mounted) {
+        setState(() {
+          _pingResultMessage = res['detail']?.toString() ?? 'Check completado';
+          final rawChecks = res['checks'];
+          if (rawChecks is List) {
+            _lastHeartbeatChecks = rawChecks
+                .whereType<Map>()
+                .map((e) => Map<String, dynamic>.from(e))
+                .toList();
+          }
+        });
+      }
       widget.onRefreshRack();
     } catch (e) {
-      setState(() => _pingResultMessage = 'Error: $e');
+      if (mounted) {
+        setState(() => _pingResultMessage = 'Error ejecutando Heartbeat: $e');
+      }
     } finally {
       if (mounted) setState(() => _isPinging = false);
     }
+  }
+
+  Future<void> _openConfiguredWebUrl() async {
+    if (!_canConnectRemote || !_hbRemoteAccessEnabled) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('La conexión remota está deshabilitada para este equipo o rol.'),
+          backgroundColor: Color(0xFFDC2626),
+        ),
+      );
+      return;
+    }
+    final url = _buildEffectiveHttpUrl();
+    await Clipboard.setData(ClipboardData(text: url));
+    try {
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    } catch (_) {}
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Abriendo panel Web en nueva pestaña: $url'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  Future<void> _launchNativeSshOrCopy() async {
+    if (!_canConnectRemote || !_hbRemoteAccessEnabled) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('La gestión SSH remota está deshabilitada para este equipo o rol.'),
+          backgroundColor: Color(0xFFDC2626),
+        ),
+      );
+      return;
+    }
+    final host = _resolveHostByPreference(_hbSshTarget);
+    final port = int.tryParse(_hbSshPortCtrl.text.trim()) ?? 22;
+    final user = _hbSshUserCtrl.text.trim().isEmpty
+        ? 'admin'
+        : _hbSshUserCtrl.text.trim();
+    final sshCmd = port == 22 ? 'ssh $user@$host' : 'ssh -p $port $user@$host';
+    final sshUri = 'ssh://$user@$host:$port';
+    await Clipboard.setData(ClipboardData(text: sshCmd));
+    try {
+      await launchUrl(Uri.parse(sshUri), mode: LaunchMode.externalApplication);
+    } catch (_) {}
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Lanzando $sshUri (Comando copiado al portapapeles: $sshCmd)'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  Future<void> _openIntegratedRemoteConsoleModal({
+    String initialProtocol = 'ssh',
+  }) async {
+    final d = widget.selectedDevice;
+    if (d == null) return;
+    if (!_canConnectRemote || !_hbRemoteAccessEnabled) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('La Consola Remota está deshabilitada en este equipo o para tu rol.'),
+          backgroundColor: Color(0xFFDC2626),
+        ),
+      );
+      return;
+    }
+
+    // Guardar primero los parámetros actuales de Heartbeat/Red si el usuario tiene permiso
+    if (_canEdit) {
+      _syncPrimaryMethodAndPortFromChecks();
+      _devCustomFields['heartbeat_config'] = _buildHeartbeatConfigMap();
+      try {
+        await widget.api.updateDevice(d.id, {
+          'ip_address': _devIpCtrl.text.trim(),
+          'fqdn': _devFqdnCtrl.text.trim(),
+          'monitoring_enabled': _devMonitorEnabled,
+          'monitor_method': _devMonitorMethod,
+          'monitor_port': _devMonitorPort,
+          'custom_fields': _devCustomFields,
+        });
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+
+    String activeProto = initialProtocol;
+    bool isRunning = false;
+    final cmdCtrl = TextEditingController(
+      text: initialProtocol == 'ssh' ? 'show version' : '',
+    );
+    final List<String> consoleLog = [
+      '=== CONSOLA REMOTA & DIAGNÓSTICO RACKDOC :: ${d.code} (${d.name}) ===',
+      'IP: ${_devIpCtrl.text.trim().isEmpty ? "No definida" : _devIpCtrl.text.trim()} | FQDN: ${_devFqdnCtrl.text.trim().isEmpty ? "No definido" : _devFqdnCtrl.text.trim()}',
+      'Selecciona una acción o protocolo arriba para conectar o diagnosticar en tiempo real.',
+      '--------------------------------------------------------------------',
+    ];
+
+    Future<void> executeAction(
+      String proto,
+      StateSetter setModal,
+    ) async {
+      setModal(() {
+        activeProto = proto;
+        isRunning = true;
+        consoleLog.add('\n> Ejecutando [${proto.toUpperCase()}]...');
+      });
+      try {
+        Map<String, dynamic> reqPayload = {'action': proto};
+        if (proto == 'icmp') {
+          reqPayload['use_target'] = _hbIcmpTarget;
+        } else if (proto == 'ssh') {
+          reqPayload['use_target'] = _hbSshTarget;
+          reqPayload['port'] = int.tryParse(_hbSshPortCtrl.text.trim()) ?? 22;
+          reqPayload['username'] = _hbSshUserCtrl.text.trim();
+          reqPayload['command'] = cmdCtrl.text.trim();
+        } else if (proto == 'http' || proto == 'https') {
+          reqPayload['action'] = _hbHttpScheme;
+          reqPayload['use_target'] = _hbHttpTarget;
+          reqPayload['scheme'] = _hbHttpScheme;
+          reqPayload['port'] = int.tryParse(_hbHttpPortCtrl.text.trim()) ??
+              (_hbHttpScheme == 'https' ? 443 : 80);
+          reqPayload['url'] = _hbUrlCtrl.text.trim();
+          reqPayload['expected_status'] =
+              int.tryParse(_hbExpectedStatusCtrl.text.trim()) ?? 200;
+        } else if (proto == 'tcp') {
+          reqPayload['use_target'] = _hbTcpTarget;
+          reqPayload['port'] = int.tryParse(_hbTcpPortCtrl.text.trim()) ?? 8080;
+        } else if (proto == 'udp') {
+          reqPayload['use_target'] = _hbUdpTarget;
+          reqPayload['port'] = int.tryParse(_hbUdpPortCtrl.text.trim()) ?? 53;
+        } else if (proto == 'snmp') {
+          reqPayload['use_target'] = _hbSnmpTarget;
+          reqPayload['port'] = int.tryParse(_hbSnmpPortCtrl.text.trim()) ?? 161;
+          reqPayload['version'] = _hbSnmpVersion;
+          reqPayload['community'] = _hbSnmpCommunityCtrl.text.trim();
+          reqPayload['oid'] = _hbSnmpOidCtrl.text.trim();
+        }
+        final res = await widget.api.runDeviceRemoteConsole(d.id, reqPayload);
+        setModal(() {
+          consoleLog.add(res['output']?.toString() ?? 'Sin salida.');
+          if (res['checks'] is List) {
+            _lastHeartbeatChecks = (res['checks'] as List)
+                .whereType<Map>()
+                .map((e) => Map<String, dynamic>.from(e))
+                .toList();
+          }
+        });
+        widget.onRefreshRack();
+      } catch (e) {
+        setModal(() {
+          consoleLog.add('ERROR: $e');
+        });
+      } finally {
+        setModal(() => isRunning = false);
+      }
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        bool autoStarted = false;
+        return StatefulBuilder(
+          builder: (ctx, setModal) {
+            if (!autoStarted) {
+              autoStarted = true;
+              Future.microtask(() => executeAction(initialProtocol, setModal));
+            }
+            final sshHost = _resolveHostByPreference(_hbSshTarget);
+            final sshPort = int.tryParse(_hbSshPortCtrl.text.trim()) ?? 22;
+            final sshUser = _hbSshUserCtrl.text.trim().isEmpty
+                ? 'admin'
+                : _hbSshUserCtrl.text.trim();
+            final sshCli = sshPort == 22
+                ? 'ssh $sshUser@$sshHost'
+                : 'ssh -p $sshPort $sshUser@$sshHost';
+            final webUrl = _buildEffectiveHttpUrl();
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFF0F172A),
+              titlePadding: const EdgeInsets.fromLTRB(18, 14, 18, 8),
+              contentPadding: const EdgeInsets.fromLTRB(18, 6, 18, 14),
+              title: Row(
+                children: [
+                  const Icon(Icons.terminal, color: Color(0xFF38BDF8), size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Consola de Conexión y Gestión Remota — ${d.code} (${d.name})',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    icon: const Icon(Icons.close, color: Colors.white70, size: 18),
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: 680,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Botonera de protocolos en vivo
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        _ConsoleActionChip(
+                          label: 'Heartbeat Completo',
+                          icon: Icons.monitor_heart_outlined,
+                          selected: activeProto == 'heartbeat',
+                          onTap: isRunning
+                              ? null
+                              : () => executeAction('heartbeat', setModal),
+                        ),
+                        _ConsoleActionChip(
+                          label: 'ICMP Ping (${_hbIcmpTarget.toUpperCase()})',
+                          icon: Icons.network_ping,
+                          selected: activeProto == 'icmp',
+                          onTap: isRunning
+                              ? null
+                              : () => executeAction('icmp', setModal),
+                        ),
+                        _ConsoleActionChip(
+                          label: 'SSH :${_hbSshPortCtrl.text}',
+                          icon: Icons.terminal,
+                          selected: activeProto == 'ssh',
+                          onTap: isRunning
+                              ? null
+                              : () => executeAction('ssh', setModal),
+                        ),
+                        _ConsoleActionChip(
+                          label: '${_hbHttpScheme.toUpperCase()} :${_hbHttpPortCtrl.text}',
+                          icon: Icons.language,
+                          selected: activeProto == 'http' || activeProto == 'https',
+                          onTap: isRunning
+                              ? null
+                              : () => executeAction(_hbHttpScheme, setModal),
+                        ),
+                        _ConsoleActionChip(
+                          label: 'TCP :${_hbTcpPortCtrl.text}',
+                          icon: Icons.settings_ethernet,
+                          selected: activeProto == 'tcp',
+                          onTap: isRunning
+                              ? null
+                              : () => executeAction('tcp', setModal),
+                        ),
+                        _ConsoleActionChip(
+                          label: 'UDP :${_hbUdpPortCtrl.text}',
+                          icon: Icons.wifi_tethering,
+                          selected: activeProto == 'udp',
+                          onTap: isRunning
+                              ? null
+                              : () => executeAction('udp', setModal),
+                        ),
+                        _ConsoleActionChip(
+                          label: 'SNMP ${_hbSnmpVersion.toUpperCase()}',
+                          icon: Icons.sensors,
+                          selected: activeProto == 'snmp',
+                          onTap: isRunning
+                              ? null
+                              : () => executeAction('snmp', setModal),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    // Barra de comando SSH o lanzadores directos
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: cmdCtrl,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.white,
+                              fontFamily: 'monospace',
+                            ),
+                            decoration: InputDecoration(
+                              isDense: true,
+                              filled: true,
+                              fillColor: const Color(0xFF1E293B),
+                              labelText:
+                                  'Comando remoto SSH (ej. show version, uptime, ip a)',
+                              labelStyle: const TextStyle(
+                                fontSize: 11,
+                                color: Color(0xFF94A3B8),
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                            ),
+                            onSubmitted: (_) => executeAction('ssh', setModal),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton.icon(
+                          onPressed: isRunning
+                              ? null
+                              : () => executeAction('ssh', setModal),
+                          icon: const Icon(Icons.play_arrow, size: 15),
+                          label: const Text('Ejecutar SSH', style: TextStyle(fontSize: 11.5)),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF0284C7),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    // Salida de Terminal
+                    Container(
+                      height: 270,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF020617),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFF334155)),
+                      ),
+                      child: SingleChildScrollView(
+                        child: SelectableText(
+                          consoleLog.join('\n'),
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 11.5,
+                            height: 1.45,
+                            color: Color(0xFF38BDF8),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    // Accesos nativos directos (Terminal SSH SO / Navegador Web)
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      alignment: WrapAlignment.spaceBetween,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: sshCli));
+                            launchUrl(
+                              Uri.parse('ssh://$sshUser@$sshHost:$sshPort'),
+                              mode: LaunchMode.externalApplication,
+                            );
+                          },
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF38BDF8),
+                            side: const BorderSide(color: Color(0xFF0284C7)),
+                          ),
+                          icon: const Icon(Icons.open_in_new, size: 14),
+                          label: Text(
+                            'Abrir Cliente SSH ($sshCli)',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            launchUrl(
+                              Uri.parse(webUrl),
+                              mode: LaunchMode.externalApplication,
+                            );
+                          },
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF34D399),
+                            side: const BorderSide(color: Color(0xFF059669)),
+                          ),
+                          icon: const Icon(Icons.language, size: 14),
+                          label: Text(
+                            'Abrir Web UI ($webUrl)',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _launchRemoteProtocol(Map<String, dynamic> link) async {
@@ -768,7 +1431,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         ),
         const Divider(height: 20),
 
-        // SECCIÓN A: MONITORIZACIÓN Y HEARTBEAT (ICMP, SSH, HTTPS/URL, TCP, SNMP)
+        // SECCIÓN A: MONITORIZACIÓN Y HEARTBEAT MULTI-PROTOCOLO (ICMP, SSH, HTTP/HTTPS, TCP, UDP, SNMP)
         Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
@@ -799,10 +1462,10 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                   Expanded(
                     child: Text(
                       _devMonitorEnabled
-                          ? 'Heartbeat: ${d.status.toUpperCase()}'
+                          ? 'Heartbeat: ${isOnline ? "ONLINE (OK)" : (isOffline ? "CAÍDO (OFFLINE)" : "DEGRADADO (${d.status.toUpperCase()})")}'
                           : 'Heartbeat: DESACTIVADO',
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 11.5,
                         fontWeight: FontWeight.w800,
                         color: _devMonitorEnabled
                             ? statusColor
@@ -832,200 +1495,365 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                 ],
               ),
               const SizedBox(height: 6),
-              Row(
-                children: [
-                  Expanded(
-                    flex: 3,
-                    child: DropdownButtonFormField<String>(
-                      initialValue: _devMonitorMethod,
-                      isDense: true,
-                      decoration: _compactDecoration(label: 'Método Heartbeat'),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'icmp',
-                          child: Text('ICMP Ping', style: TextStyle(fontSize: 11.5)),
-                        ),
-                        DropdownMenuItem(
-                          value: 'ssh',
-                          child: Text('SSH (Banner/Auth)', style: TextStyle(fontSize: 11.5)),
-                        ),
-                        DropdownMenuItem(
-                          value: 'https',
-                          child: Text('HTTPS / Web SSL', style: TextStyle(fontSize: 11.5)),
-                        ),
-                        DropdownMenuItem(
-                          value: 'http',
-                          child: Text('HTTP / Endpoint URL', style: TextStyle(fontSize: 11.5)),
-                        ),
-                        DropdownMenuItem(
-                          value: 'tcp',
-                          child: Text('TCP Port Probe', style: TextStyle(fontSize: 11.5)),
-                        ),
-                        DropdownMenuItem(
-                          value: 'snmp',
-                          child: Text('SNMP v2c/v3', style: TextStyle(fontSize: 11.5)),
-                        ),
-                      ],
-                      onChanged: _canEdit
-                          ? (v) {
-                              setState(() {
-                                _devMonitorMethod = v ?? 'icmp';
-                                if (_devMonitorMethod == 'ssh') {
-                                  _devMonitorPortCtrl.text = '22';
-                                } else if (_devMonitorMethod == 'https') {
-                                  _devMonitorPortCtrl.text = '443';
-                                } else if (_devMonitorMethod == 'http') {
-                                  _devMonitorPortCtrl.text = '80';
-                                } else if (_devMonitorMethod == 'snmp') {
-                                  _devMonitorPortCtrl.text = '161';
-                                }
-                              });
-                            }
-                          : null,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    flex: 1,
-                    child: TextField(
-                      controller: _devMonitorPortCtrl,
-                      style: const TextStyle(fontSize: 11.5),
-                      decoration: _compactDecoration(label: 'Puerto'),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
               const Text(
-                'Métodos adicionales combinados (Multi-Check):',
+                'Marca las opciones de Heartbeat a comprobar (cada protocolo tiene su propia configuración):',
                 style: TextStyle(
                   fontSize: 10.5,
                   fontWeight: FontWeight.w600,
                   color: Color(0xFF475569),
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               Wrap(
-                spacing: 4,
-                runSpacing: 4,
-                children: ['icmp', 'ssh', 'https', 'http', 'tcp', 'snmp'].map((m) {
-                  final isPrimary = _devMonitorMethod == m;
-                  final isSelected = isPrimary || _hbSecondaryMethods.contains(m);
+                spacing: 5,
+                runSpacing: 5,
+                children: [
+                  ('icmp', 'ICMP Ping'),
+                  ('ssh', 'SSH'),
+                  ('http', 'HTTP / HTTPS'),
+                  ('tcp', 'TCP'),
+                  ('udp', 'UDP'),
+                  ('snmp', 'SNMP'),
+                ].map((pair) {
+                  final key = pair.$1;
+                  final label = pair.$2;
+                  final isChecked = _hbEnabledChecks.contains(key);
+                  final checkRes = _lastHeartbeatChecks.cast<Map<String, dynamic>?>().firstWhere(
+                        (c) {
+                          final m = (c?['method'] ?? c?['protocol'] ?? '')
+                              .toString()
+                              .toLowerCase();
+                          if (key == 'http') return m == 'http' || m == 'https';
+                          return m == key;
+                        },
+                        orElse: () => null,
+                      );
+                  final chkOnline = checkRes != null && checkRes['status'] == 'online';
+                  final chkOffline = checkRes != null && checkRes['status'] == 'offline';
                   return FilterChip(
-                    label: Text(
-                      m.toUpperCase(),
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: isSelected
-                            ? const Color(0xFF1D4ED8)
-                            : const Color(0xFF475569),
-                      ),
-                    ),
-                    selected: isSelected,
+                    selected: isChecked,
+                    showCheckmark: true,
                     visualDensity: VisualDensity.compact,
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(horizontal: 2),
-                    onSelected: (!_canEdit || isPrimary)
+                    selectedColor: const Color(0xFFDBEAFE),
+                    checkmarkColor: const Color(0xFF1D4ED8),
+                    label: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w800,
+                            color: isChecked
+                                ? const Color(0xFF1E3A8A)
+                                : const Color(0xFF475569),
+                          ),
+                        ),
+                        if (isChecked && checkRes != null) ...[
+                          const SizedBox(width: 4),
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: chkOnline
+                                  ? const Color(0xFF16A34A)
+                                  : (chkOffline
+                                      ? const Color(0xFFDC2626)
+                                      : const Color(0xFFD97706)),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    onSelected: !_canEdit
                         ? null
                         : (sel) {
                             setState(() {
                               if (sel) {
-                                _hbSecondaryMethods.add(m);
-                              } else {
-                                _hbSecondaryMethods.remove(m);
+                                _hbEnabledChecks.add(key);
+                              } else if (_hbEnabledChecks.length > 1) {
+                                _hbEnabledChecks.remove(key);
                               }
                             });
                           },
                   );
                 }).toList(),
               ),
-              // Parámetros extra según el método seleccionado
-              if (_devMonitorMethod == 'https' ||
-                  _devMonitorMethod == 'http' ||
-                  _hbSecondaryMethods.contains('https') ||
-                  _hbSecondaryMethods.contains('http')) ...[
-                const SizedBox(height: 8),
-                _CompactInput(
-                  label: 'URL / Path Heartbeat (ej. /healthz o https://ip:8443/api)',
-                  controller: _hbUrlCtrl,
+
+              const SizedBox(height: 8),
+
+              // 1. Configuración ICMP (Solo Ping: IP o FQDN)
+              if (_hbEnabledChecks.contains('icmp'))
+                _buildProtocolConfigCard(
+                  protocolKey: 'icmp',
+                  title: 'ICMP (Solo Ping)',
+                  icon: Icons.network_ping,
+                  targetValue: _hbIcmpTarget,
+                  onTargetChanged: (v) => setState(() => _hbIcmpTarget = v),
+                  child: Text(
+                    'Envía eco ICMP directo a ${_hbIcmpTarget == "fqdn" ? (_devFqdnCtrl.text.isEmpty ? "FQDN (sin definir)" : _devFqdnCtrl.text) : (_devIpCtrl.text.isEmpty ? "IP (sin definir)" : _devIpCtrl.text)} (sin puerto).',
+                    style: const TextStyle(fontSize: 10, color: Color(0xFF64748B)),
+                  ),
                 ),
-                _CompactInput(
-                  label: 'Código HTTP Esperado (ej. 200)',
-                  controller: _hbExpectedStatusCtrl,
-                ),
-              ],
-              if (_devMonitorMethod == 'ssh' ||
-                  _hbSecondaryMethods.contains('ssh')) ...[
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _CompactInput(
-                        label: 'Usuario SSH',
-                        controller: _hbSshUserCtrl,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: _CompactInput(
-                        label: 'Opciones Extra SSH',
-                        controller: _hbSshArgsCtrl,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-              if (_devMonitorMethod == 'snmp' ||
-                  _hbSecondaryMethods.contains('snmp')) ...[
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _CompactInput(
-                        label: 'Comunidad SNMP',
-                        controller: _hbSnmpCommunityCtrl,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: _CompactInput(
-                        label: 'OID Heartbeat',
-                        controller: _hbSnmpOidCtrl,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-              if (_canEdit) ...[
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    SizedBox(
-                      height: 22,
-                      width: 22,
-                      child: Checkbox(
-                        value: _hbSimulateOffline,
-                        activeColor: const Color(0xFFDC2626),
-                        onChanged: (v) =>
-                            setState(() => _hbSimulateOffline = v ?? false),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    const Expanded(
-                      child: Text(
-                        'Simular caída / Alerta Roja (Offline)',
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFFB91C1C),
+
+              // 2. Configuración SSH (Puerto por defecto 22 o personalizado + Usuario)
+              if (_hbEnabledChecks.contains('ssh'))
+                _buildProtocolConfigCard(
+                  protocolKey: 'ssh',
+                  title: 'SSH (Puerto 22 o a medida)',
+                  icon: Icons.terminal,
+                  targetValue: _hbSshTarget,
+                  onTargetChanged: (v) => setState(() => _hbSshTarget = v),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 1,
+                        child: _CompactInput(
+                          label: 'Puerto SSH',
+                          controller: _hbSshPortCtrl,
                         ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 6),
+                      Expanded(
+                        flex: 2,
+                        child: _CompactInput(
+                          label: 'Usuario SSH',
+                          controller: _hbSshUserCtrl,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ],
-              if (_pingResultMessage != null) ...[
+
+              // 3. Configuración HTTP / HTTPS (URL con IP o FQDN, Puerto y Código esperado)
+              if (_hbEnabledChecks.contains('http'))
+                _buildProtocolConfigCard(
+                  protocolKey: 'http',
+                  title: 'HTTP / HTTPS (URL Web / API)',
+                  icon: Icons.language,
+                  targetValue: _hbHttpTarget,
+                  onTargetChanged: (v) => setState(() {
+                    _hbHttpTarget = v;
+                    final h = _resolveHostByPreference(v);
+                    if (h.isNotEmpty) {
+                      final p = int.tryParse(_hbHttpPortCtrl.text.trim()) ??
+                          (_hbHttpScheme == 'https' ? 443 : 80);
+                      final pPart = ((_hbHttpScheme == 'http' && p == 80) ||
+                              (_hbHttpScheme == 'https' && p == 443))
+                          ? ''
+                          : ':$p';
+                      _hbUrlCtrl.text = '$_hbHttpScheme://$h$pPart/';
+                    }
+                  }),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              initialValue: _hbHttpScheme,
+                              isDense: true,
+                              decoration: _compactDecoration(label: 'Protocolo'),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'https',
+                                  child: Text('HTTPS', style: TextStyle(fontSize: 11)),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'http',
+                                  child: Text('HTTP', style: TextStyle(fontSize: 11)),
+                                ),
+                              ],
+                              onChanged: _canEdit
+                                  ? (v) {
+                                      setState(() {
+                                        _hbHttpScheme = v ?? 'https';
+                                        _hbHttpPortCtrl.text =
+                                            _hbHttpScheme == 'https' ? '443' : '80';
+                                        final h = _resolveHostByPreference(_hbHttpTarget);
+                                        if (h.isNotEmpty) {
+                                          _hbUrlCtrl.text = '$_hbHttpScheme://$h/';
+                                        }
+                                      });
+                                    }
+                                  : null,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: _CompactInput(
+                              label: 'Puerto',
+                              controller: _hbHttpPortCtrl,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: _CompactInput(
+                              label: 'HTTP OK',
+                              controller: _hbExpectedStatusCtrl,
+                            ),
+                          ),
+                        ],
+                      ),
+                      _CompactInput(
+                        label: 'URL completa o Path (usa IP/FQDN o {ip} / {fqdn})',
+                        controller: _hbUrlCtrl,
+                      ),
+                    ],
+                  ),
+                ),
+
+              // 4. Configuración TCP (Puerto en concreto)
+              if (_hbEnabledChecks.contains('tcp'))
+                _buildProtocolConfigCard(
+                  protocolKey: 'tcp',
+                  title: 'TCP (Puerto específico)',
+                  icon: Icons.settings_ethernet,
+                  targetValue: _hbTcpTarget,
+                  onTargetChanged: (v) => setState(() => _hbTcpTarget = v),
+                  child: _CompactInput(
+                    label: 'Puerto TCP a comprobar (ej. 8006, 3389, 9100, 5432)',
+                    controller: _hbTcpPortCtrl,
+                  ),
+                ),
+
+              // 5. Configuración UDP (Puerto en concreto)
+              if (_hbEnabledChecks.contains('udp'))
+                _buildProtocolConfigCard(
+                  protocolKey: 'udp',
+                  title: 'UDP (Puerto específico)',
+                  icon: Icons.wifi_tethering,
+                  targetValue: _hbUdpTarget,
+                  onTargetChanged: (v) => setState(() => _hbUdpTarget = v),
+                  child: _CompactInput(
+                    label: 'Puerto UDP a comprobar (ej. 53 DNS, 123 NTP, 514 Syslog)',
+                    controller: _hbUdpPortCtrl,
+                  ),
+                ),
+
+              // 6. Configuración SNMP (Versión, Comunidad, Puerto UDP y OID)
+              if (_hbEnabledChecks.contains('snmp'))
+                _buildProtocolConfigCard(
+                  protocolKey: 'snmp',
+                  title: 'SNMP (OID + Versión + Comunidad)',
+                  icon: Icons.sensors,
+                  targetValue: _hbSnmpTarget,
+                  onTargetChanged: (v) => setState(() => _hbSnmpTarget = v),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              initialValue: _hbSnmpVersion,
+                              isDense: true,
+                              decoration: _compactDecoration(label: 'Versión'),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'v1',
+                                  child: Text('SNMP v1', style: TextStyle(fontSize: 11)),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'v2c',
+                                  child: Text('SNMP v2c', style: TextStyle(fontSize: 11)),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'v3',
+                                  child: Text('SNMP v3', style: TextStyle(fontSize: 11)),
+                                ),
+                              ],
+                              onChanged: _canEdit
+                                  ? (v) => setState(() => _hbSnmpVersion = v ?? 'v2c')
+                                  : null,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: _CompactInput(
+                              label: 'Comunidad',
+                              controller: _hbSnmpCommunityCtrl,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: _CompactInput(
+                              label: 'Puerto UDP',
+                              controller: _hbSnmpPortCtrl,
+                            ),
+                          ),
+                        ],
+                      ),
+                      _CompactInput(
+                        label: 'OID SNMP (ej. 1.3.6.1.2.1.1.1.0 sysDescr)',
+                        controller: _hbSnmpOidCtrl,
+                      ),
+                    ],
+                  ),
+                ),
+
+              // Desglose de resultados por protocolo del último Heartbeat
+              if (_lastHeartbeatChecks.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Estado real por cada protocolo marcado:',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF475569),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      ..._lastHeartbeatChecks.map((chk) {
+                        final st = (chk['status'] ?? 'offline').toString();
+                        final ok = st == 'online';
+                        final det = (chk['detail'] ?? '').toString();
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                ok ? Icons.check_circle : Icons.cancel,
+                                size: 13,
+                                color: ok
+                                    ? const Color(0xFF16A34A)
+                                    : const Color(0xFFDC2626),
+                              ),
+                              const SizedBox(width: 5),
+                              Expanded(
+                                child: Text(
+                                  det,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    color: ok
+                                        ? const Color(0xFF15803D)
+                                        : const Color(0xFFB91C1C),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+              ] else if (_pingResultMessage != null) ...[
                 const SizedBox(height: 6),
                 Container(
                   padding: const EdgeInsets.all(6),
@@ -1043,6 +1871,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                   ),
                 ),
               ],
+
               const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
@@ -1050,11 +1879,17 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                   onPressed: (_isPinging || !_canConnectRemote)
                       ? null
                       : _triggerDevicePing,
-                  icon: const Icon(Icons.monitor_heart_outlined, size: 15),
+                  icon: _isPinging
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.monitor_heart_outlined, size: 15),
                   label: Text(
                     _isPinging
-                        ? 'Ejecutando Heartbeat...'
-                        : 'Probar Heartbeat Ahora',
+                        ? 'Comprobando protocolos en red...'
+                        : 'Probar Heartbeat Ahora (${_hbEnabledChecks.length})',
                   ),
                 ),
               ),
@@ -1064,86 +1899,223 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
 
         const SizedBox(height: 14),
 
-        // SECCIÓN B: LANZADORES RÁPIDOS DE CONEXIÓN (SSH / TELNET / WEB / iDRAC)
-        Row(
-          children: [
-            const Expanded(
-              child: Text(
-                'Conexión Directa (SSH / Telnet / Web)',
+        // SECCIÓN B: CONECTAR Y GESTIONAR EQUIPO (USANDO LOS DATOS DE SSH / WEB / SNMP CONFIGURADOS)
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF0F9FF),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFFBAE6FD)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(
+                    Icons.important_devices,
+                    size: 16,
+                    color: Color(0xFF0369A1),
+                  ),
+                  const SizedBox(width: 6),
+                  const Expanded(
+                    child: Text(
+                      'Conectar / Gestión Remota del Equipo',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF0C4A6E),
+                      ),
+                    ),
+                  ),
+                  if (_canEdit)
+                    Tooltip(
+                      message:
+                          'Habilitar o bloquear la conexión remota a este equipo',
+                      child: Switch(
+                        value: _hbRemoteAccessEnabled,
+                        onChanged: (v) =>
+                            setState(() => _hbRemoteAccessEnabled = v),
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                ],
+              ),
+              Text(
+                _hbRemoteAccessEnabled
+                    ? 'Usa directamente los parámetros configurados (SSH, Web HTTP/HTTPS y SNMP) para conectarte o administrar el equipo:'
+                    : '⛔ Conexión remota bloqueada por configuración en este equipo.',
                 style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF0F172A),
+                  fontSize: 10.5,
+                  color: _hbRemoteAccessEnabled
+                      ? const Color(0xFF0369A1)
+                      : const Color(0xFFB91C1C),
                 ),
               ),
-            ),
-            if (_canEdit)
-              TextButton.icon(
-                onPressed: _showAddProtocolDialog,
-                icon: const Icon(Icons.add, size: 14),
-                label: const Text('Añadir', style: TextStyle(fontSize: 11)),
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
+              if (!_canConnectRemote) ...[
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF2F2),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFFECACA)),
+                  ),
+                  child: const Text(
+                    '🔒 Rol "Solo Ver": la conexión interactiva SSH / Web está deshabilitada.',
+                    style: TextStyle(fontSize: 10.5, color: Color(0xFFB91C1C)),
+                  ),
                 ),
+              ],
+              if (_hbRemoteAccessEnabled && _canConnectRemote) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    // 1. Conectar por SSH (Consola Integrada)
+                    FilledButton.icon(
+                      onPressed: () => _openIntegratedRemoteConsoleModal(
+                        initialProtocol: 'ssh',
+                      ),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF0F172A),
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                      ),
+                      icon: const Icon(Icons.terminal, size: 14),
+                      label: Text(
+                        'Consola SSH (:${_hbSshPortCtrl.text})',
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                    ),
+                    // 2. Lanzar Cliente SSH Nativo
+                    OutlinedButton.icon(
+                      onPressed: _launchNativeSshOrCopy,
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 6,
+                        ),
+                      ),
+                      icon: const Icon(Icons.open_in_new, size: 13),
+                      label: Text(
+                        'SSH App (${_hbSshUserCtrl.text}@${_hbSshTarget.toUpperCase()})',
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                    ),
+                    // 3. Conectar vía Web HTTP/HTTPS
+                    FilledButton.tonalIcon(
+                      onPressed: _openConfiguredWebUrl,
+                      style: FilledButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                      ),
+                      icon: const Icon(Icons.language, size: 14),
+                      label: Text(
+                        'Abrir Web (${_hbHttpScheme.toUpperCase()}:${_hbHttpPortCtrl.text})',
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                    ),
+                    // 4. Consultar SNMP / Diagnóstico en vivo
+                    OutlinedButton.icon(
+                      onPressed: () => _openIntegratedRemoteConsoleModal(
+                        initialProtocol:
+                            _hbEnabledChecks.contains('snmp') ? 'snmp' : 'heartbeat',
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 6,
+                        ),
+                      ),
+                      icon: const Icon(Icons.sensors, size: 14),
+                      label: const Text(
+                        'Diagnóstico / SNMP',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Accesos adicionales (Telnet / iDRAC / iLO / VNC):',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF334155),
+                      ),
+                    ),
+                  ),
+                  if (_canEdit)
+                    TextButton.icon(
+                      onPressed: _showAddProtocolDialog,
+                      icon: const Icon(Icons.add, size: 13),
+                      label: const Text(
+                        'Añadir Acceso',
+                        style: TextStyle(fontSize: 10.5),
+                      ),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                ],
               ),
-          ],
+              if (_devLinks.isNotEmpty)
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: _devLinks.asMap().entries.map((entry) {
+                    final idx = entry.key;
+                    final lnk = entry.value;
+                    final proto =
+                        (lnk['protocol'] ?? 'ssh').toString().toUpperCase();
+                    final port = lnk['port'] ?? 22;
+                    final label = (lnk['label'] ?? proto).toString();
+                    return InputChip(
+                      avatar: Icon(
+                        proto == 'SSH' || proto == 'TELNET'
+                            ? Icons.terminal
+                            : Icons.language,
+                        size: 13,
+                        color: (_canConnectRemote && _hbRemoteAccessEnabled)
+                            ? const Color(0xFF1D4ED8)
+                            : const Color(0xFF94A3B8),
+                      ),
+                      label: Text(
+                        '$label ($proto:$port)',
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      backgroundColor: Colors.white,
+                      onPressed: (_canConnectRemote && _hbRemoteAccessEnabled)
+                          ? () => _launchRemoteProtocol(lnk)
+                          : null,
+                      onDeleted: _canEdit
+                          ? () {
+                              setState(() => _devLinks.removeAt(idx));
+                            }
+                          : null,
+                    );
+                  }).toList(),
+                ),
+            ],
+          ),
         ),
-        if (!_canConnectRemote)
-          Container(
-            margin: const EdgeInsets.only(bottom: 6),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFEF2F2),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: const Color(0xFFFECACA)),
-            ),
-            child: const Text(
-              '🔒 Rol "Solo Ver": la conexión interactiva SSH / Telnet / Web está deshabilitada.',
-              style: TextStyle(fontSize: 10.5, color: Color(0xFFB91C1C)),
-            ),
-          ),
-        const SizedBox(height: 6),
-        if (_devLinks.isEmpty)
-          const Text(
-            'Sin accesos configurados. Pulsa + Añadir para configurar SSH, Telnet o Web.',
-            style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
-          )
-        else
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: _devLinks.asMap().entries.map((entry) {
-              final idx = entry.key;
-              final lnk = entry.value;
-              final proto = (lnk['protocol'] ?? 'ssh').toString().toUpperCase();
-              final port = lnk['port'] ?? 22;
-              final label = (lnk['label'] ?? proto).toString();
-              return InputChip(
-                avatar: Icon(
-                  proto == 'SSH' || proto == 'TELNET'
-                      ? Icons.terminal
-                      : Icons.language,
-                  size: 14,
-                  color: _canConnectRemote
-                      ? const Color(0xFF1D4ED8)
-                      : const Color(0xFF94A3B8),
-                ),
-                label: Text(
-                  '$label ($proto:$port)',
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-                ),
-                backgroundColor: _canConnectRemote
-                    ? const Color(0xFFEFF6FF)
-                    : const Color(0xFFF1F5F9),
-                onPressed: () => _launchRemoteProtocol(lnk),
-                onDeleted: _canEdit
-                    ? () {
-                        setState(() => _devLinks.removeAt(idx));
-                      }
-                    : null,
-              );
-            }).toList(),
-          ),
 
         const Divider(height: 22),
 
@@ -1371,6 +2343,10 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         if (_devCustomFields.entries
             .where((e) => !const {
                   'heartbeat_config',
+                  'last_heartbeat_checks',
+                  'last_heartbeat_detail',
+                  'real_heartbeat_v2_initialized',
+                  'real_heartbeat_v3_initialized',
                   'is_external_feed',
                   'feed_type',
                   'feed_color',
@@ -1391,6 +2367,9 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
           ..._devCustomFields.entries
               .where((e) => !const {
                     'heartbeat_config',
+                    'last_heartbeat_checks',
+                    'last_heartbeat_detail',
+                    'real_heartbeat_v2_initialized',
                     'is_external_feed',
                     'feed_type',
                     'feed_color',
@@ -1475,6 +2454,127 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
           ),
         ],
       ],
+    );
+  }
+
+  Widget _buildProtocolConfigCard({
+    required String protocolKey,
+    required String title,
+    required IconData icon,
+    required String targetValue,
+    required ValueChanged<String> onTargetChanged,
+    required Widget child,
+  }) {
+    final checkRes = _lastHeartbeatChecks.cast<Map<String, dynamic>?>().firstWhere(
+          (c) {
+            final m = (c?['method'] ?? c?['protocol'] ?? '')
+                .toString()
+                .toLowerCase();
+            if (protocolKey == 'http') return m == 'http' || m == 'https';
+            return m == protocolKey;
+          },
+          orElse: () => null,
+        );
+    final isOk = checkRes != null && checkRes['status'] == 'online';
+    final isFail = checkRes != null && checkRes['status'] == 'offline';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: isOk
+              ? const Color(0xFF86EFAC)
+              : (isFail ? const Color(0xFFFCA5A5) : const Color(0xFFCBD5E1)),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 14, color: const Color(0xFF1D4ED8)),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF0F172A),
+                  ),
+                ),
+              ),
+              if (checkRes != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                  margin: const EdgeInsets.only(right: 6),
+                  decoration: BoxDecoration(
+                    color: isOk
+                        ? const Color(0xFFDCFCE7)
+                        : const Color(0xFFFEE2E2),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    isOk
+                        ? 'OK${checkRes["latency_ms"] != null ? " ${checkRes["latency_ms"]}ms" : ""}'
+                        : 'CAÍDO',
+                    style: TextStyle(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w800,
+                      color: isOk
+                          ? const Color(0xFF15803D)
+                          : const Color(0xFFB91C1C),
+                    ),
+                  ),
+                ),
+              // Selector IP vs FQDN para cada protocolo
+              Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(5),
+                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final opt in [('ip', 'IP'), ('fqdn', 'FQDN')])
+                      InkWell(
+                        onTap: _canEdit ? () => onTargetChanged(opt.$1) : null,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2.5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: targetValue == opt.$1
+                                ? const Color(0xFF1D4ED8)
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            opt.$2,
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w800,
+                              color: targetValue == opt.$1
+                                  ? Colors.white
+                                  : const Color(0xFF475569),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          child,
+        ],
+      ),
     );
   }
 
@@ -1802,6 +2902,53 @@ class _CompactInput extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ConsoleActionChip extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  const _ConsoleActionChip({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFF0284C7) : const Color(0xFF1E293B),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: selected ? const Color(0xFF38BDF8) : const Color(0xFF334155),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 13, color: Colors.white),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

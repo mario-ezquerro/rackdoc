@@ -371,6 +371,19 @@ class RackDocApiClient {
     return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
+  Future<Map<String, dynamic>> runDeviceRemoteConsole(
+    int deviceId,
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/devices/$deviceId/remote-console'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    final data = _decodeResponse(res) as Map;
+    return Map<String, dynamic>.from(data);
+  }
+
   Future<ConnectionModel> createConnection(Map<String, dynamic> payload) async {
     final res = await http.post(
       Uri.parse('$baseUrl/connections'),

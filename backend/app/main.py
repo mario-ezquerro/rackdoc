@@ -71,7 +71,11 @@ from .seed import (
     sync_external_outlet_ports,
     ensure_rack_external_outlets,
 )
-from .services.monitor import check_single_device, check_all_monitored_devices
+from .services.monitor import (
+    check_single_device,
+    check_all_monitored_devices,
+    run_device_remote_console,
+)
 from .services.excel_export import (
     generate_datacenter_excel,
     generate_excel_import_template,
@@ -2320,6 +2324,18 @@ def ping_device_endpoint(device_id: int, db: Session = Depends(get_db)):
 @app.post("/api/racks/{rack_id}/ping-all")
 def ping_all_rack_devices_endpoint(rack_id: int, db: Session = Depends(get_db)):
     return check_all_monitored_devices(db, rack_id=rack_id)
+
+
+@app.post("/api/devices/{device_id}/remote-console")
+def device_remote_console_endpoint(
+    device_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    device = db.query(RackDevice).filter(RackDevice.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Dispositivo no encontrado")
+    return run_device_remote_console(db, device, payload or {})
 
 
 @app.post("/api/racks/{rack_id}/external-outlets", response_model=RackDeviceSchema)
