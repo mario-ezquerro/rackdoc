@@ -744,7 +744,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     } catch (_) {}
   }
 
-  Future<void> _saveSelectedFloorDeviceSettings() async {
+  Future<void> _saveSelectedFloorDeviceSettings({String? customToast}) async {
     final devId = _selectedFloorDeviceId;
     if (devId == null) return;
     final messenger = ScaffoldMessenger.of(context);
@@ -769,10 +769,15 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         'contact_department': _devContactDeptCtrl.text.trim(),
         'notes': _devNotesCtrl.text.trim(),
       });
+      _editingDeviceId = null;
       widget.onRefresh();
+      messenger.hideCurrentSnackBar();
       messenger.showSnackBar(
         SnackBar(
-          content: Text('Ajustes de "${_devCodeCtrl.text.trim()}" guardados.'),
+          content: Text(
+            customToast ??
+                '✓ Ajustes de "${_devCodeCtrl.text.trim()}" aplicados y guardados.',
+          ),
           duration: const Duration(seconds: 2),
         ),
       );
@@ -780,6 +785,44 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       messenger.showSnackBar(
         SnackBar(
           content: Text('Error al guardar dispositivo: $e'),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+    }
+  }
+
+  Future<void> _quickLinkDeviceToRack(
+    FloorDeviceNode dev,
+    int? targetRackId,
+    String targetRackCode,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await widget.api.updateFloorDevice(dev.id, {
+        'linked_rack_id': targetRackId ?? 0,
+      });
+      if (_selectedFloorDeviceId == dev.id) {
+        setState(() {
+          _devLinkedRackId = targetRackId;
+          _editingDeviceId = null;
+        });
+      }
+      widget.onRefresh();
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            targetRackId == null
+                ? '✓ "${dev.code}" desvinculado del Rack.'
+                : '✓ "${dev.code}" conectado al Rack $targetRackCode.',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Error al cambiar Rack del sensor/dispositivo: $e'),
           backgroundColor: Colors.red.shade700,
         ),
       );
@@ -2888,6 +2931,10 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                                                 _floorDevicePositions,
                                                             selectedDeviceId:
                                                                 _selectedFloorDeviceId,
+                                                            selectedLinkedRackId:
+                                                                _devLinkedRackId,
+                                                            selectedLinkedOutletId:
+                                                                _devLinkedOutletId,
                                                             selectedRackIds:
                                                                 _selectedRackIds,
                                                           ),
@@ -4268,15 +4315,19 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   }) {
     final normPos = _floorDevicePositions[dev.id] ?? Offset(dev.posX, dev.posY);
     final isSelected = _selectedFloorDeviceId == dev.id;
-    final catItem = _catalogItemFor(dev.category);
-    final isOutlet = dev.category == 'telecom_outlet';
+    final effectiveCategory = isSelected ? _devCategory : dev.category;
+    final effectiveStatus = isSelected ? _devStatus : dev.status;
+    final effectiveLinkedRackId =
+        isSelected ? _devLinkedRackId : dev.linkedRackId;
+    final catItem = _catalogItemFor(effectiveCategory);
+    final isOutlet = effectiveCategory == 'telecom_outlet';
 
     // Buscar código del Rack conectado para mostrarlo en el tooltip y badge
     String linkedRackCode = '';
-    if (dev.linkedRackId != null && _floor != null) {
+    if (effectiveLinkedRackId != null && _floor != null) {
       for (final rm in _floor!.rooms) {
         for (final rk in rm.racks) {
-          if (rk.id == dev.linkedRackId) {
+          if (rk.id == effectiveLinkedRackId) {
             linkedRackCode = rk.code;
             break;
           }
@@ -4292,9 +4343,9 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         isSelected ? const Color(0xFF2563EB) : catItem.pinColor;
 
     Color statusDotColor = const Color(0xFF22C55E);
-    if (dev.status == 'offline') {
+    if (effectiveStatus == 'offline') {
       statusDotColor = const Color(0xFFEF4444);
-    } else if (dev.status == 'warning') {
+    } else if (effectiveStatus == 'warning') {
       statusDotColor = const Color(0xFFF59E0B);
     }
 
@@ -4672,6 +4723,12 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         ? _devCategory
         : 'camera';
 
+    final safeStatus = const {'online', 'warning', 'offline'}.contains(
+          _devStatus,
+        )
+        ? _devStatus
+        : 'online';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -4691,6 +4748,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                 ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
+                  key: ValueKey('cat_${dev.id}_$safeCategory'),
                   initialValue: safeCategory,
                   isExpanded: true,
                   isDense: true,
@@ -4720,7 +4778,13 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       )
                       .toList(),
                   onChanged: (v) {
-                    if (v != null) setState(() => _devCategory = v);
+                    if (v != null && v != _devCategory) {
+                      setState(() => _devCategory = v);
+                      _saveSelectedFloorDeviceSettings(
+                        customToast:
+                            '✓ Tipo cambiado a "${_catalogItemFor(v).label}".',
+                      );
+                    }
                   },
                 ),
                 const SizedBox(height: 8),
@@ -4757,12 +4821,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: DropdownButtonFormField<String>(
-                        initialValue:
-                            const {'online', 'warning', 'offline'}.contains(
-                                  _devStatus,
-                                )
-                                ? _devStatus
-                                : 'online',
+                        key: ValueKey('st_${dev.id}_$safeStatus'),
+                        initialValue: safeStatus,
                         isDense: true,
                         style: const TextStyle(
                           fontSize: 12,
@@ -4784,7 +4844,13 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           ),
                         ],
                         onChanged: (v) {
-                          if (v != null) setState(() => _devStatus = v);
+                          if (v != null && v != _devStatus) {
+                            setState(() => _devStatus = v);
+                            _saveSelectedFloorDeviceSettings(
+                              customToast:
+                                  '✓ Estado de "${_devCodeCtrl.text.trim()}" actualizado a ${v.toUpperCase()}.',
+                            );
+                          }
                         },
                       ),
                     ),
@@ -4822,6 +4888,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       ),
                       const SizedBox(height: 8),
                       DropdownButtonFormField<int?>(
+                        key: ValueKey('rack_${dev.id}_$safeLinkedRackId'),
                         initialValue: safeLinkedRackId,
                         isExpanded: true,
                         isDense: true,
@@ -4844,7 +4911,23 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                             ),
                           ),
                         ],
-                        onChanged: (v) => setState(() => _devLinkedRackId = v),
+                        onChanged: (v) {
+                          setState(() => _devLinkedRackId = v);
+                          String rackLabel = 'Sin Rack';
+                          if (v != null) {
+                            for (final rk in floorRacks) {
+                              if (rk.id == v) {
+                                rackLabel = '${rk.code} (${rk.name})';
+                                break;
+                              }
+                            }
+                          }
+                          _saveSelectedFloorDeviceSettings(
+                            customToast: v == null
+                                ? '✓ "${_devCodeCtrl.text.trim()}" desvinculado de Rack.'
+                                : '✓ "${_devCodeCtrl.text.trim()}" conectado al Rack $rackLabel.',
+                          );
+                        },
                       ),
                       const SizedBox(height: 8),
                       _buildCompactField(
@@ -4855,6 +4938,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       if (dev.category != 'telecom_outlet') ...[
                         const SizedBox(height: 8),
                         DropdownButtonFormField<int?>(
+                          key: ValueKey('out_${dev.id}_$safeLinkedOutletId'),
                           initialValue: safeLinkedOutletId,
                           isExpanded: true,
                           isDense: true,
@@ -4879,10 +4963,36 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                   ),
                                 ),
                           ],
-                          onChanged: (v) =>
-                              setState(() => _devLinkedOutletId = v),
+                          onChanged: (v) {
+                            setState(() => _devLinkedOutletId = v);
+                            _saveSelectedFloorDeviceSettings(
+                              customToast:
+                                  '✓ Roseta de "${_devCodeCtrl.text.trim()}" actualizada.',
+                            );
+                          },
                         ),
                       ],
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => _saveSelectedFloorDeviceSettings(),
+                          icon: const Icon(Icons.check_circle_outline, size: 15),
+                          label: const Text(
+                            'Aplicar Conexión / Puerto de Rack',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF92400E),
+                            backgroundColor: Colors.white,
+                            side: const BorderSide(color: Color(0xFFF59E0B)),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -4957,9 +5067,9 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
             border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
           ),
           child: FilledButton.icon(
-            onPressed: _saveSelectedFloorDeviceSettings,
+            onPressed: () => _saveSelectedFloorDeviceSettings(),
             icon: const Icon(Icons.save_outlined, size: 16),
-            label: const Text('Save Settings'),
+            label: const Text('Guardar Cambios (Save Settings)'),
             style: FilledButton.styleFrom(
               backgroundColor: const Color(0xFF2563EB),
             ),
@@ -4975,6 +5085,9 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   ) {
     final connectedDevices = floor.floorDevices
         .where((d) => d.linkedRackId == rk.id)
+        .toList();
+    final otherDevices = floor.floorDevices
+        .where((d) => d.linkedRackId != rk.id)
         .toList();
 
     return SingleChildScrollView(
@@ -5077,10 +5190,83 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                         : cat.label,
                     style: const TextStyle(fontSize: 10.5),
                   ),
+                  trailing: IconButton(
+                    tooltip: 'Desvincular de ${rk.code}',
+                    icon: const Icon(
+                      Icons.link_off_rounded,
+                      size: 16,
+                      color: Color(0xFFDC2626),
+                    ),
+                    onPressed: () => _quickLinkDeviceToRack(d, null, rk.code),
+                  ),
                   onTap: () => _selectFloorDevice(d),
                 ),
               );
             }),
+          if (otherDevices.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            const Divider(height: 1, color: Color(0xFFE2E8F0)),
+            const SizedBox(height: 12),
+            Text(
+              'MOVER / CONECTAR OTROS SENSORES DE PLANTA A ${rk.code} (${otherDevices.length})',
+              style: const TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFFB45309),
+              ),
+            ),
+            const SizedBox(height: 6),
+            ...otherDevices.map((d) {
+              final cat = _catalogItemFor(d.category);
+              return Card(
+                margin: const EdgeInsets.only(bottom: 5),
+                elevation: 0,
+                color: const Color(0xFFFFFBEB),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  side: const BorderSide(color: Color(0xFFFDE68A)),
+                ),
+                child: ListTile(
+                  dense: true,
+                  visualDensity: VisualDensity.compact,
+                  leading: Icon(
+                    cat.icon,
+                    size: 15,
+                    color: cat.pinColor,
+                  ),
+                  title: Text(
+                    '${d.code} • ${d.name}',
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    cat.label,
+                    style: const TextStyle(fontSize: 10),
+                  ),
+                  trailing: FilledButton.tonal(
+                    style: FilledButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      backgroundColor: const Color(0xFFFEF3C7),
+                      foregroundColor: const Color(0xFF92400E),
+                    ),
+                    onPressed: () => _quickLinkDeviceToRack(d, rk.id, rk.code),
+                    child: Text(
+                      '→ ${rk.code}',
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  onTap: () => _selectFloorDevice(d),
+                ),
+              );
+            }),
+          ],
         ],
       ),
     );
@@ -5190,6 +5376,10 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     return TextField(
       controller: controller,
       maxLines: maxLines,
+      textInputAction:
+          maxLines == 1 ? TextInputAction.done : TextInputAction.newline,
+      onSubmitted:
+          maxLines == 1 ? (_) => _saveSelectedFloorDeviceSettings() : null,
       style: const TextStyle(fontSize: 12, color: Color(0xFF0F172A)),
       decoration: _compactInputDecoration(label),
     );
@@ -5250,6 +5440,8 @@ class _FloorConnectionsPainter extends CustomPainter {
   final List<FloorDeviceNode> floorDevices;
   final Map<int, Offset> devicePositions;
   final int? selectedDeviceId;
+  final int? selectedLinkedRackId;
+  final int? selectedLinkedOutletId;
   final Set<int> selectedRackIds;
 
   _FloorConnectionsPainter({
@@ -5259,6 +5451,8 @@ class _FloorConnectionsPainter extends CustomPainter {
     required this.floorDevices,
     required this.devicePositions,
     required this.selectedDeviceId,
+    required this.selectedLinkedRackId,
+    required this.selectedLinkedOutletId,
     required this.selectedRackIds,
   });
 
@@ -5288,18 +5482,19 @@ class _FloorConnectionsPainter extends CustomPainter {
 
     // 1. Líneas naranjas discontinuas (Troncal: Rack -> Roseta Bi01 o Cámara/AP directo)
     for (final d in floorDevices) {
-      final rId = d.linkedRackId;
+      final isSel = selectedDeviceId == d.id;
+      final rId = isSel ? selectedLinkedRackId : d.linkedRackId;
+      final outId = isSel ? selectedLinkedOutletId : d.linkedOutletId;
       if (rId == null) continue;
       // Si el equipo ya va conectado a una roseta, el tramo al rack lo pinta la roseta
-      if (d.linkedOutletId != null && devCenters.containsKey(d.linkedOutletId)) {
+      if (outId != null && devCenters.containsKey(outId)) {
         continue;
       }
       final p1 = rackCenters[rId];
       final p2 = devCenters[d.id];
       if (p1 == null || p2 == null) continue;
 
-      final isHighlighted =
-          selectedDeviceId == d.id || selectedRackIds.contains(rId);
+      final isHighlighted = isSel || selectedRackIds.contains(rId);
       final paint = Paint()
         ..color = isHighlighted
             ? const Color(0xFFD97706)
@@ -5312,14 +5507,14 @@ class _FloorConnectionsPainter extends CustomPainter {
 
     // 2. Líneas azules continuas (Latiguillo de área de trabajo: Roseta Bi01 -> Desktop/Phone/Printer)
     for (final d in floorDevices) {
-      final outId = d.linkedOutletId;
+      final isSel = selectedDeviceId == d.id;
+      final outId = isSel ? selectedLinkedOutletId : d.linkedOutletId;
       if (outId == null) continue;
       final p1 = devCenters[outId];
       final p2 = devCenters[d.id];
       if (p1 == null || p2 == null) continue;
 
-      final isHighlighted =
-          selectedDeviceId == d.id || selectedDeviceId == outId;
+      final isHighlighted = isSel || selectedDeviceId == outId;
       final paint = Paint()
         ..color = isHighlighted
             ? const Color(0xFF1D4ED8)

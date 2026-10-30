@@ -1073,10 +1073,23 @@ def create_floor_device(
     data = payload.model_dump()
     if data.get("room_id") is None and fl.rooms:
         data["room_id"] = fl.rooms[0].id
+    if data.get("linked_rack_id") == 0:
+        data["linked_rack_id"] = None
+    if data.get("linked_outlet_id") == 0:
+        data["linked_outlet_id"] = None
     fd = FloorDevice(floor_id=floor_id, **data)
     db.add(fd)
     db.commit()
     db.refresh(fd)
+    if fd.linked_rack_id:
+        rk = (
+            db.query(Rack)
+            .options(joinedload(Rack.devices).joinedload(RackDevice.ports), joinedload(Rack.devices).joinedload(RackDevice.template))
+            .filter(Rack.id == fd.linked_rack_id)
+            .first()
+        )
+        if rk:
+            _sync_rack_floor_devices_box(db, rk)
     return {
         "id": fd.id,
         "floor_id": fd.floor_id,
@@ -1085,6 +1098,8 @@ def create_floor_device(
         "name": fd.name,
         "pos_x": fd.pos_x,
         "pos_y": fd.pos_y,
+        "linked_rack_id": fd.linked_rack_id,
+        "linked_outlet_id": fd.linked_outlet_id,
     }
 
 
@@ -1097,6 +1112,7 @@ def update_floor_device(
     fd = db.query(FloorDevice).filter(FloorDevice.id == device_id).first()
     if not fd:
         raise HTTPException(status_code=404, detail="Dispositivo de planta no encontrado")
+    old_rack_id = fd.linked_rack_id
     updates = payload.model_dump(exclude_unset=True)
     if "linked_rack_id" in updates and updates["linked_rack_id"] == 0:
         updates["linked_rack_id"] = None
@@ -1106,7 +1122,26 @@ def update_floor_device(
         setattr(fd, k, v)
     db.commit()
     db.refresh(fd)
-    return {"status": "ok", "id": fd.id}
+
+    affected_rack_ids = {r_id for r_id in (old_rack_id, fd.linked_rack_id) if r_id}
+    for r_id in affected_rack_ids:
+        rk = (
+            db.query(Rack)
+            .options(joinedload(Rack.devices).joinedload(RackDevice.ports), joinedload(Rack.devices).joinedload(RackDevice.template))
+            .filter(Rack.id == r_id)
+            .first()
+        )
+        if rk:
+            _sync_rack_floor_devices_box(db, rk)
+
+    return {
+        "status": "ok",
+        "id": fd.id,
+        "linked_rack_id": fd.linked_rack_id,
+        "linked_outlet_id": fd.linked_outlet_id,
+        "device_type": fd.device_type,
+        "status_val": fd.status,
+    }
 
 
 @app.delete("/api/floor-devices/{device_id}")
@@ -1114,12 +1149,22 @@ def delete_floor_device(device_id: int, db: Session = Depends(get_db)):
     fd = db.query(FloorDevice).filter(FloorDevice.id == device_id).first()
     if not fd:
         raise HTTPException(status_code=404, detail="Dispositivo de planta no encontrado")
+    old_rack_id = fd.linked_rack_id
     # Desvincular otros dispositivos que apuntasen a esta roseta
     db.query(FloorDevice).filter(FloorDevice.linked_outlet_id == device_id).update(
         {"linked_outlet_id": None}
     )
     db.delete(fd)
     db.commit()
+    if old_rack_id:
+        rk = (
+            db.query(Rack)
+            .options(joinedload(Rack.devices).joinedload(RackDevice.ports), joinedload(Rack.devices).joinedload(RackDevice.template))
+            .filter(Rack.id == old_rack_id)
+            .first()
+        )
+        if rk:
+            _sync_rack_floor_devices_box(db, rk)
     return {"status": "deleted", "id": device_id}
 
 
