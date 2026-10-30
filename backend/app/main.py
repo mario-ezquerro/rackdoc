@@ -77,6 +77,7 @@ from .services.monitor import (
     run_device_remote_console,
 )
 from .services.excel_export import (
+    build_dashboard_inventory_data,
     generate_datacenter_excel,
     generate_excel_import_template,
     import_datacenter_excel,
@@ -2666,6 +2667,19 @@ def delete_custom_plan_image(
     obj.map_image_url = ""
     db.commit()
     return {"status": "deleted"}
+
+
+@app.get("/api/reports/dashboard-inventory")
+def get_dashboard_inventory_report(
+    location_id: Optional[int] = None,
+    rack_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    return build_dashboard_inventory_data(
+        db=db,
+        location_id=location_id,
+        rack_id=rack_id,
+    )
 
 
 @app.get("/api/reports/excel")

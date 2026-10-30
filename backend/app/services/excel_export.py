@@ -16,8 +16,781 @@ from ..models import (
     RackDevice,
     Connection,
     Port,
+    FloorDevice,
 )
 from ..seed import create_ports_from_template, ensure_rack_external_outlets
+
+
+FLOOR_DEVICE_TYPE_LABELS: Dict[str, str] = {
+    "telecom_outlet": "Roseta RJ45 / Toma Pared",
+    "camera": "Cámara CCTV IP",
+    "access_control": "Control de Acceso Biométrico/RFID",
+    "access_point": "Punto de Acceso Wi-Fi",
+    "desktop": "Ordenador / Workstation PC",
+    "laptop": "Portátil Corporativo",
+    "phone": "Teléfono IP VoIP",
+    "printer": "Impresora Multifunción de Red",
+    "3d_printer": "Impresora 3D Industrial",
+    "screen": "Pantalla / Videowall",
+    "speaker": "Altavoz / Megafonía IP",
+    "microphone": "Micrófono Sala IP",
+    "ndi_box": "Codificador Vídeo NDI",
+    "isp_uplink": "Acometida Operador ISP",
+    "sensor_temp": "Sonda Temperatura (°C)",
+    "sensor_humidity": "Sensor Humedad (%RH)",
+    "sensor_power_load": "Analizador Carga Eléctrica (kW/A)",
+    "sensor_smoke": "Detector Humo / Incendio",
+    "sensor_water_leak": "Sensor Fuga de Agua",
+    "custom_crac": "Climatizador CRAC / InRow",
+    "custom_elec_board": "Cuadro Eléctrico General",
+}
+
+ACTIVE_HW_CATEGORIES = {
+    "switch",
+    "san_switch",
+    "router",
+    "firewall",
+    "server",
+    "storage_san",
+    "storage_nas",
+    "ups",
+    "pdu",
+    "roof_fan",
+    "rack_tray_device",
+}
+
+PATCH_PANEL_CATEGORIES = {
+    "patch_panel",
+    "gateway",
+    "patchbox",
+}
+
+
+def _category_display_info(cat: str, dev_name: str = "", dev_code: str = "") -> tuple[bool, str, str]:
+    """
+    Devuelve (is_active_hardware, kind_group, badge_label) para diferenciar claramente
+    entre 'Hierro' (Switches, Routers, Firewalls, Servidores, Cabinas, SAI, PDU) y
+    'Patch Panels / Elementos Pasivos' de cada línea del Rack.
+    """
+    c = (cat or "").strip().lower()
+    code_up = (dev_code or "").strip().upper()
+    name_low = (dev_name or "").strip().lower()
+
+    if c in ("switch", "san_switch"):
+        return True, "hierro", "HIERRO • SWITCH"
+    if c == "router":
+        return True, "hierro", "HIERRO • ROUTER"
+    if c == "firewall":
+        return True, "hierro", "HIERRO • FIREWALL"
+    if c == "server":
+        return True, "hierro", "HIERRO • SERVIDOR / HOST"
+    if c == "storage_san":
+        return True, "hierro", "HIERRO • CABINA SAN"
+    if c == "storage_nas":
+        return True, "hierro", "HIERRO • CABINA NAS"
+    if c == "ups":
+        return True, "hierro", "HIERRO • SAI / UPS"
+    if c == "pdu":
+        return True, "hierro", "HIERRO • PDU ELÉCTRICA"
+    if c == "roof_fan":
+        return True, "hierro", "HIERRO • VENTILADOR TECHO"
+    if c == "rack_tray_device":
+        return True, "hierro", "HIERRO • EQUIPO EN BANDEJA"
+    if c == "patch_panel":
+        return False, "patch_panel", "PATCH PANEL • COBRE RJ45"
+    if c == "patchbox":
+        return False, "patch_panel", "PATCHBOX • CASETES"
+    if c == "gateway":
+        if code_up.startswith(("FI", "ODF")) or "bandeja" in name_low or "patch panel" in name_low or "fibra" in name_low:
+            return False, "patch_panel", "PATCH PANEL • BANDEJA FIBRA (ODF)"
+        return True, "hierro", "HIERRO • GATEWAY FIBRA"
+    if c == "cable_manager":
+        return False, "pasivo", "PASIVO • PASACABLES 1U"
+    if c == "rack_tray":
+        return False, "pasivo", "PASIVO • BANDEJA FIJA"
+    return False, "pasivo", f"PASIVO • {c.upper() or 'ACCESORIO'}"
+
+
+def _extract_slot_number(port_number: str) -> Optional[int]:
+    if not port_number:
+        return None
+    m = re.search(r"(\d+)$", str(port_number).strip())
+    if m:
+        return int(m.group(1))
+    m2 = re.search(r"(\d+)", str(port_number).strip())
+    return int(m2.group(1)) if m2 else None
+
+
+def _parse_linked_rack_target(raw_code: str) -> Optional[tuple[str, int, int]]:
+    """
+    Parsea cadenas como 'PP-A:01-04', 'PP-A:01', 'A:1', 'PBX01:2', 'SW01:Gi1/0/21 (PoE)'
+    y devuelve (device_code_normalized, start_port, end_port).
+    """
+    if not raw_code or ":" not in raw_code:
+        return None
+    left, right = raw_code.split(":", 1)
+    dev_code = left.strip().upper()
+    if dev_code.startswith("PP-") and len(dev_code) > 3:
+        dev_code = dev_code[3:]
+    right_clean = right.split("(")[0].strip()
+    m_range = re.search(r"(\d+)\s*-\s*(\d+)", right_clean)
+    if m_range:
+        p1, p2 = int(m_range.group(1)), int(m_range.group(2))
+        return dev_code, min(p1, p2), max(p1, p2)
+    m_last = re.search(r"(\d+)\s*$", right_clean)
+    if m_last:
+        p = int(m_last.group(1))
+        return dev_code, p, p
+    m_any = re.search(r"(\d+)", right_clean)
+    if m_any:
+        p = int(m_any.group(1))
+        return dev_code, p, p
+    return None
+
+
+def build_dashboard_inventory_data(
+    db: Session,
+    location_id: Optional[int] = None,
+    rack_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Construye el inventario detallado para '4. Dashboard & Excel' y la exportación Excel:
+    1) 'rack_lines': Línea a línea de cada Rack (U42..U1), diferenciando claramente 'Hierro'
+       (Switches, Routers, Firewalls, Servidores, SAN/NAS, SAI, PDU) de 'Patch Panels / Pasivos'.
+    2) 'patch_panels': Todos los Patch Panels / Bandejas de Fibra / Patchboxes con sus 24 bocas
+       (1..24), indicando si cada boca está OCUPADA o LIBRE, a qué Switch/Hierro va conectada
+       y qué Aparato final tiene conectado (código, nombre, tipo de aparato, IP, sala y estado).
+    """
+    racks_q = db.query(Rack).join(Room).join(Floor).join(Location)
+    if location_id is not None:
+        racks_q = racks_q.filter(Location.id == location_id)
+    if rack_id is not None:
+        racks_q = racks_q.filter(Rack.id == rack_id)
+
+    racks = racks_q.order_by(Location.id, Floor.level_number, Rack.id).all()
+    rack_ids = {r.id for r in racks}
+
+    all_conns = db.query(Connection).all()
+    conns_by_port_id: Dict[int, list[Connection]] = {}
+    for c in all_conns:
+        conns_by_port_id.setdefault(c.source_port_id, []).append(c)
+        conns_by_port_id.setdefault(c.target_port_id, []).append(c)
+
+    all_floor_devs = db.query(FloorDevice).order_by(FloorDevice.id).all()
+    floor_dev_by_id: Dict[int, FloorDevice] = {fd.id: fd for fd in all_floor_devs}
+    children_by_outlet_id: Dict[int, list[FloorDevice]] = {}
+    for fd in all_floor_devs:
+        if fd.linked_outlet_id:
+            children_by_outlet_id.setdefault(fd.linked_outlet_id, []).append(fd)
+
+    rack_lines: list[Dict[str, Any]] = []
+    patch_panels: list[Dict[str, Any]] = []
+
+    for r in racks:
+        room = r.room
+        floor = room.floor if room else None
+        loc = floor.location if floor else None
+        aisle = r.aisle
+
+        mounted_devices = [
+            d for d in r.devices if (d.mounted_face or "front").lower() != "external"
+        ]
+        mounted_devices.sort(
+            key=lambda d: (
+                d.start_u,
+                1 if (d.mounted_face or "front").lower() == "front" else 0,
+            ),
+            reverse=True,
+        )
+
+        # Mapa de switches del rack para resolver puentes vía Patchbox (PBX01->SW01, PBX02->SW02, PBX03->SW03)
+        rack_switches = [
+            d
+            for d in mounted_devices
+            if d.template and (d.template.category or "").lower() in ("switch", "router", "firewall")
+        ]
+
+        def _find_paired_switch_for_patchbox(pbx_dev: RackDevice) -> Optional[RackDevice]:
+            pbx_num = _extract_slot_number(pbx_dev.code)
+            if pbx_num is not None:
+                for sw in rack_switches:
+                    if sw.code.upper() == f"SW0{pbx_num}" or sw.code.upper() == f"SW{pbx_num}":
+                        return sw
+            # Si no coincide por número, buscar el switch más cercano en U
+            closest = None
+            min_dist = 999
+            for sw in rack_switches:
+                dist = abs(sw.start_u - pbx_dev.start_u)
+                if dist < min_dist:
+                    min_dist = dist
+                    closest = sw
+            return closest
+
+        # Indexar FloorDevices vinculados a este Rack o a la misma Planta
+        rack_floor_devs = [
+            fd
+            for fd in all_floor_devs
+            if fd.linked_rack_id == r.id
+            or (fd.linked_rack_id is None and floor and fd.floor_id == floor.id)
+        ]
+
+        # Mapa (dev_code_upper, slot_num) -> list[tuple[FloorDevice, Optional[FloorDevice]]]
+        # donde cada tupla es (endpoint_fd, via_outlet_fd)
+        direct_fd_map: Dict[tuple[str, int], list[tuple[FloorDevice, Optional[FloorDevice]]]] = {}
+        for fd in rack_floor_devs:
+            parsed = _parse_linked_rack_target(fd.linked_rack_device_code or "")
+            if not parsed:
+                continue
+            target_code, p_start, p_end = parsed
+            if fd.device_type == "telecom_outlet":
+                outlet_children = children_by_outlet_id.get(fd.id, [])
+                for idx, p_num in enumerate(range(p_start, p_end + 1)):
+                    if idx < len(outlet_children):
+                        direct_fd_map.setdefault((target_code, p_num), []).append(
+                            (outlet_children[idx], fd)
+                        )
+                    else:
+                        direct_fd_map.setdefault((target_code, p_num), []).append((fd, None))
+            else:
+                for p_num in range(p_start, p_end + 1):
+                    outlet_parent = (
+                        floor_dev_by_id.get(fd.linked_outlet_id)
+                        if fd.linked_outlet_id
+                        else None
+                    )
+                    direct_fd_map.setdefault((target_code, p_num), []).append(
+                        (fd, outlet_parent)
+                    )
+
+        # Además, para que las rosetas clásicas de la planta (GOA Bi01..04 -> A:1..4, OSLO Bi05..08 -> A:5..8,
+        # VIENNA Bi09..12 -> B:1..4) siempre conserven su trazabilidad hacia Patch Panel A y B en el Rack 1:
+        for fd in all_floor_devs:
+            if fd.device_type == "telecom_outlet" and (
+                fd.linked_rack_id == r.id or r.code == "RK001_M"
+            ):
+                code_up = (fd.code or "").upper()
+                outlet_children = children_by_outlet_id.get(fd.id, [])
+                fallback_range: Optional[tuple[str, int, int]] = None
+                if "BI01" in code_up:
+                    fallback_range = ("A", 1, 4)
+                elif "BI05" in code_up:
+                    fallback_range = ("A", 5, 8)
+                elif "BI09" in code_up:
+                    fallback_range = ("B", 1, 4)
+                if fallback_range:
+                    t_code, s_p, e_p = fallback_range
+                    for idx, p_num in enumerate(range(s_p, e_p + 1)):
+                        if not direct_fd_map.get((t_code, p_num)):
+                            if idx < len(outlet_children):
+                                direct_fd_map.setdefault((t_code, p_num), []).append(
+                                    (outlet_children[idx], fd)
+                                )
+                            else:
+                                direct_fd_map.setdefault((t_code, p_num), []).append(
+                                    (fd, None)
+                                )
+
+        # 1) Construir líneas del Rack (Hierro y Pasivos)
+        for d in mounted_devices:
+            tpl = d.template
+            cat = (tpl.category if tpl else "server").lower()
+            cf = d.custom_fields or {}
+            u_height = int(cf.get("u_height_override") or (tpl.u_height if tpl else 1))
+            end_u = d.start_u + u_height - 1
+            u_range = f"U{d.start_u}" if end_u == d.start_u else f"U{d.start_u}-U{end_u}"
+
+            is_active_hw, kind_group, badge_label = _category_display_info(
+                cat, d.name, d.code
+            )
+            if d.ip_address and d.ip_address.strip() and kind_group == "pasivo":
+                is_active_hw = True
+
+            data_ports = [
+                p
+                for p in d.ports
+                if not (p.port_type or "").lower().startswith("power")
+                and (p.port_type or "").lower() != "passthrough"
+            ]
+            if not data_ports:
+                data_ports = list(d.ports)
+
+            # Si es patch_panel o patchbox con front+back duplicados (1..24 y KR-1..KR-24),
+            # contabilizar las bocas frontales como capacidad nominal (24 bocas)
+            front_data_ports = [
+                p for p in data_ports if (p.face or "front").lower() == "front"
+            ]
+            if cat in PATCH_PANEL_CATEGORIES and front_data_ports:
+                nominal_total = len(front_data_ports)
+                occupied_slots = set()
+                for p in data_ports:
+                    if conns_by_port_id.get(p.id):
+                        sn = _extract_slot_number(p.port_number)
+                        occupied_slots.add(sn if sn is not None else p.id)
+                for (dc, sn), fds in direct_fd_map.items():
+                    if dc == d.code.upper() and fds:
+                        occupied_slots.add(sn)
+                occupied_cnt = min(nominal_total, len(occupied_slots))
+            else:
+                nominal_total = len(data_ports)
+                occupied_cnt = sum(
+                    1 for p in data_ports if conns_by_port_id.get(p.id)
+                )
+
+            free_cnt = max(0, nominal_total - occupied_cnt)
+
+            rack_lines.append(
+                {
+                    "device_id": d.id,
+                    "rack_id": r.id,
+                    "rack_code": r.code,
+                    "rack_name": r.name,
+                    "location_id": loc.id if loc else None,
+                    "location_code": loc.code if loc else "",
+                    "location_name": loc.name if loc else "",
+                    "floor_name": floor.name if floor else "",
+                    "room_name": room.name if room else "",
+                    "aisle_name": aisle.name if aisle else "General",
+                    "start_u": d.start_u,
+                    "end_u": end_u,
+                    "u_height": u_height,
+                    "u_range": u_range,
+                    "mounted_face": (d.mounted_face or "front").upper(),
+                    "is_full_depth": bool(tpl and tpl.is_full_depth),
+                    "code": d.code,
+                    "name": d.name,
+                    "category": cat,
+                    "is_active_hardware": is_active_hw,
+                    "kind_group": kind_group,  # 'hierro' | 'patch_panel' | 'pasivo'
+                    "equipment_type_badge": badge_label,
+                    "manufacturer": tpl.manufacturer if tpl else "",
+                    "model_name": tpl.model_name if tpl else "",
+                    "hostname": d.hostname or "",
+                    "fqdn": d.fqdn or "",
+                    "ip_address": d.ip_address or "",
+                    "subnet_mask": d.subnet_mask or "",
+                    "gateway": d.gateway or "",
+                    "vlan_mgmt": d.vlan_mgmt,
+                    "mac_address": d.mac_address or "",
+                    "status": (d.status or "unknown").lower(),
+                    "monitoring_enabled": bool(d.monitoring_enabled),
+                    "monitor_method": (d.monitor_method or "icmp").lower(),
+                    "monitor_port": d.monitor_port or 22,
+                    "last_ping_ms": d.last_ping_ms,
+                    "last_checked_at": (
+                        d.last_checked_at.strftime("%Y-%m-%d %H:%M:%S")
+                        if d.last_checked_at
+                        else ""
+                    ),
+                    "management_links": d.management_links or [],
+                    "total_ports": nominal_total,
+                    "occupied_ports": occupied_cnt,
+                    "free_ports": free_cnt,
+                    "serial_number": d.serial_number or "",
+                    "custom_fields": cf,
+                    "notes": d.notes or "",
+                }
+            )
+
+        # 2) Construir el detalle Boca a Boca (1..24) de todos los Patch Panels / Bandejas de Fibra / Patchboxes
+        for d in mounted_devices:
+            tpl = d.template
+            cat = (tpl.category if tpl else "").lower()
+            if cat not in PATCH_PANEL_CATEGORIES:
+                continue
+
+            cf = d.custom_fields or {}
+            u_height = int(cf.get("u_height_override") or (tpl.u_height if tpl else 1))
+            end_u = d.start_u + u_height - 1
+            u_range = f"U{d.start_u}" if end_u == d.start_u else f"U{d.start_u}-U{end_u}"
+
+            # Agrupar puertos por número de boca (1..24)
+            slot_ports: Dict[int, Dict[str, Port]] = {}
+            for p in d.ports:
+                if (p.port_type or "").lower().startswith("power"):
+                    continue
+                sn = _extract_slot_number(p.port_number)
+                if sn is None:
+                    continue
+                face_key = "back" if (p.face or "front").lower() == "back" else "front"
+                slot_ports.setdefault(sn, {})[face_key] = p
+
+            max_slot = max(slot_ports.keys()) if slot_ports else 24
+            total_slots = max(24, max_slot) if cat in ("patch_panel", "patchbox") else max_slot
+
+            bocas_list: list[Dict[str, Any]] = []
+            occupied_bocas_count = 0
+
+            for slot_num in range(1, total_slots + 1):
+                faces_dict = slot_ports.get(slot_num, {})
+                front_p = faces_dict.get("front")
+                back_p = faces_dict.get("back")
+                primary_p = front_p or back_p
+
+                port_label = (
+                    front_p.port_number
+                    if front_p
+                    else (back_p.port_number if back_p else str(slot_num))
+                )
+                port_type = (
+                    primary_p.port_type
+                    if primary_p
+                    else ("fiber_lc" if cat == "gateway" else "rj45")
+                )
+
+                # Recopilar todas las conexiones en front y back de esta boca
+                slot_conns: list[tuple[Connection, Port, Port]] = []
+                for p_obj in (front_p, back_p):
+                    if not p_obj:
+                        continue
+                    for c in conns_by_port_id.get(p_obj.id, []):
+                        other_p = (
+                            c.target_port
+                            if c.source_port_id == p_obj.id
+                            else c.source_port
+                        )
+                        if other_p and other_p.device:
+                            slot_conns.append((c, p_obj, other_p))
+
+                # Resolver lado Switch / Hierro y lado Aparato / Dispositivo Conectado
+                hw_info: Optional[Dict[str, Any]] = None
+                endpoint_info: Optional[Dict[str, Any]] = None
+                cable_labels: list[str] = []
+                cable_vlan: Optional[int] = None
+                cable_type_str = ""
+
+                for c, my_p, other_p in slot_conns:
+                    other_dev = other_p.device
+                    other_tpl = other_dev.template
+                    other_cat = (other_tpl.category if other_tpl else "").lower()
+                    if c.label:
+                        cable_labels.append(c.label)
+                    if c.vlan and not cable_vlan:
+                        cable_vlan = c.vlan
+                    if c.cable_type and not cable_type_str:
+                        cable_type_str = c.cable_type
+
+                    # Caso A: Conectado a PLANTA-DC (Equipo de planta / Roseta / Cámara / Impresora / Sensor)
+                    if (other_dev.mounted_face or "").lower() == "external":
+                        feed_t = str((other_dev.custom_fields or {}).get("feed_type") or "")
+                        if feed_t == "floor_devices":
+                            # Extraer ID de FloorDevice de label="FD:<id>|..."
+                            m_fd = re.match(r"^FD:(\d+)\|", str(other_p.label or ""))
+                            fd_obj = (
+                                floor_dev_by_id.get(int(m_fd.group(1)))
+                                if m_fd
+                                else None
+                            )
+                            if fd_obj:
+                                if fd_obj.device_type == "telecom_outlet":
+                                    ch_list = children_by_outlet_id.get(fd_obj.id, [])
+                                    if ch_list:
+                                        first_ch = ch_list[0]
+                                        extra_names = (
+                                            f" (+{len(ch_list) - 1} más)"
+                                            if len(ch_list) > 1
+                                            else ""
+                                        )
+                                        endpoint_info = {
+                                            "code": f"{first_ch.code}{extra_names}",
+                                            "name": f"{first_ch.name} (vía Roseta {fd_obj.code})",
+                                            "device_type": first_ch.device_type,
+                                            "device_type_label": FLOOR_DEVICE_TYPE_LABELS.get(
+                                                first_ch.device_type,
+                                                first_ch.device_type,
+                                            ),
+                                            "ip_address": first_ch.ip_address or "Sin IP",
+                                            "room_code": first_ch.room_code or fd_obj.room_code or "",
+                                            "status": (first_ch.status or "online").lower(),
+                                            "vlan": first_ch.vlan or cable_vlan,
+                                            "via_outlet": fd_obj.code,
+                                        }
+                                    else:
+                                        endpoint_info = {
+                                            "code": fd_obj.code,
+                                            "name": fd_obj.name,
+                                            "device_type": fd_obj.device_type,
+                                            "device_type_label": FLOOR_DEVICE_TYPE_LABELS.get(
+                                                fd_obj.device_type,
+                                                "Roseta RJ45",
+                                            ),
+                                            "ip_address": fd_obj.ip_address or "Pasivo (Sin IP)",
+                                            "room_code": fd_obj.room_code or "",
+                                            "status": "passive",
+                                            "vlan": fd_obj.vlan or cable_vlan,
+                                            "via_outlet": fd_obj.code,
+                                        }
+                                else:
+                                    endpoint_info = {
+                                        "code": fd_obj.code,
+                                        "name": fd_obj.name,
+                                        "device_type": fd_obj.device_type,
+                                        "device_type_label": FLOOR_DEVICE_TYPE_LABELS.get(
+                                            fd_obj.device_type,
+                                            fd_obj.device_type,
+                                        ),
+                                        "ip_address": fd_obj.ip_address or "Sin IP",
+                                        "room_code": fd_obj.room_code or "",
+                                        "status": (fd_obj.status or "online").lower(),
+                                        "vlan": fd_obj.vlan or cable_vlan,
+                                        "via_outlet": "",
+                                    }
+                        elif feed_t == "fiber":
+                            endpoint_info = {
+                                "code": other_dev.code,
+                                "name": f"{other_dev.name} ({other_p.port_number})",
+                                "device_type": "isp_uplink",
+                                "device_type_label": "Acometida Fibra Exterior",
+                                "ip_address": "Óptica Pasiva",
+                                "room_code": "Acometida CPD",
+                                "status": "online",
+                                "vlan": cable_vlan,
+                                "via_outlet": "",
+                            }
+                        continue
+
+                    # Caso B: Conectado a un Switch / Router / Firewall / Servidor / Hierro activo
+                    if other_cat in ACTIVE_HW_CATEGORIES:
+                        hw_info = {
+                            "device_id": other_dev.id,
+                            "code": other_dev.code,
+                            "name": other_dev.name,
+                            "category": other_cat,
+                            "port": other_p.port_number,
+                            "face": (other_p.face or "front").upper(),
+                            "ip_address": other_dev.ip_address or "",
+                            "status": (other_dev.status or "unknown").lower(),
+                            "rack_code": other_dev.rack.code if other_dev.rack else r.code,
+                        }
+                        # Ver si en ese puerto del Switch hay vinculado un FloorDevice (ej. SW01:Gi1/0/21)
+                        other_sn = _extract_slot_number(other_p.port_number)
+                        if other_sn is not None and not endpoint_info:
+                            sw_fds = direct_fd_map.get((other_dev.code.upper(), other_sn), [])
+                            if sw_fds:
+                                f_dev, via_out = sw_fds[0]
+                                endpoint_info = {
+                                    "code": f_dev.code,
+                                    "name": f_dev.name,
+                                    "device_type": f_dev.device_type,
+                                    "device_type_label": FLOOR_DEVICE_TYPE_LABELS.get(
+                                        f_dev.device_type, f_dev.device_type
+                                    ),
+                                    "ip_address": f_dev.ip_address or "Sin IP",
+                                    "room_code": f_dev.room_code or "",
+                                    "status": (f_dev.status or "online").lower(),
+                                    "vlan": f_dev.vlan or cable_vlan,
+                                    "via_outlet": via_out.code if via_out else "",
+                                }
+                        continue
+
+                    # Caso C: Conectado a un PATCHBOX (ej. A:1 <-> PBX01:1 o D:4 <-> PBX02:4) o a otro Patch Panel
+                    if other_cat in PATCH_PANEL_CATEGORIES:
+                        other_sn = _extract_slot_number(other_p.port_number) or slot_num
+                        # Buscar si el otro Patchbox/Panel tiene otro cable en la misma boca hacia un Switch o Planta
+                        traced_sw = None
+                        for p2 in other_dev.ports:
+                            if _extract_slot_number(p2.port_number) == other_sn and p2.id != other_p.id:
+                                for c2 in conns_by_port_id.get(p2.id, []):
+                                    hop_p = (
+                                        c2.target_port
+                                        if c2.source_port_id == p2.id
+                                        else c2.source_port
+                                    )
+                                    if hop_p and hop_p.device and hop_p.device.id != d.id:
+                                        hop_cat = (
+                                            hop_p.device.template.category
+                                            if hop_p.device.template
+                                            else ""
+                                        ).lower()
+                                        if hop_cat in ACTIVE_HW_CATEGORIES:
+                                            traced_sw = (hop_p.device, hop_p.port_number)
+                        if not traced_sw and other_cat == "patchbox":
+                            paired_sw = _find_paired_switch_for_patchbox(other_dev)
+                            if paired_sw:
+                                traced_sw = (paired_sw, str(other_sn))
+
+                        if traced_sw and not hw_info:
+                            sw_dev, sw_port_num = traced_sw
+                            hw_info = {
+                                "device_id": sw_dev.id,
+                                "code": f"{sw_dev.code} (vía {other_dev.code})",
+                                "name": f"{sw_dev.name} [Casete {other_dev.code}:{other_p.port_number}]",
+                                "category": (
+                                    sw_dev.template.category if sw_dev.template else "switch"
+                                ),
+                                "port": sw_port_num,
+                                "face": "FRONT",
+                                "ip_address": sw_dev.ip_address or "",
+                                "status": (sw_dev.status or "unknown").lower(),
+                                "rack_code": sw_dev.rack.code if sw_dev.rack else r.code,
+                            }
+                        elif not hw_info:
+                            hw_info = {
+                                "device_id": other_dev.id,
+                                "code": other_dev.code,
+                                "name": other_dev.name,
+                                "category": other_cat,
+                                "port": other_p.port_number,
+                                "face": (other_p.face or "front").upper(),
+                                "ip_address": other_dev.ip_address or "",
+                                "status": (other_dev.status or "unknown").lower(),
+                                "rack_code": other_dev.rack.code if other_dev.rack else r.code,
+                            }
+
+                        # Si el propio Patch Panel es un Patchbox (ej. PBX01) y el otro extremo es un Patch Panel (ej. A:1),
+                        # también comprobamos si A:1 tiene un aparato de planta conectado:
+                        if not endpoint_info:
+                            other_fds = direct_fd_map.get((other_dev.code.upper(), other_sn), [])
+                            if other_fds:
+                                f_dev, via_out = other_fds[0]
+                                endpoint_info = {
+                                    "code": f_dev.code,
+                                    "name": f"{f_dev.name} (vía Patch Panel {other_dev.code}:{other_p.port_number})",
+                                    "device_type": f_dev.device_type,
+                                    "device_type_label": FLOOR_DEVICE_TYPE_LABELS.get(
+                                        f_dev.device_type, f_dev.device_type
+                                    ),
+                                    "ip_address": f_dev.ip_address or "Sin IP",
+                                    "room_code": f_dev.room_code or "",
+                                    "status": (f_dev.status or "online").lower(),
+                                    "vlan": f_dev.vlan or cable_vlan,
+                                    "via_outlet": via_out.code if via_out else f"PP-{other_dev.code}:{other_p.port_number}",
+                                }
+
+                # Caso D: Comprobar si hay un FloorDevice directamente asignado a (d.code, slot_num)
+                if not endpoint_info:
+                    my_fds = direct_fd_map.get((d.code.upper(), slot_num), [])
+                    if my_fds:
+                        f_dev, via_out = my_fds[0]
+                        endpoint_info = {
+                            "code": f_dev.code,
+                            "name": (
+                                f"{f_dev.name} (vía Roseta {via_out.code})"
+                                if via_out
+                                else f_dev.name
+                            ),
+                            "device_type": f_dev.device_type,
+                            "device_type_label": FLOOR_DEVICE_TYPE_LABELS.get(
+                                f_dev.device_type, f_dev.device_type
+                            ),
+                            "ip_address": f_dev.ip_address or "Pasivo (Sin IP)",
+                            "room_code": f_dev.room_code or (via_out.room_code if via_out else ""),
+                            "status": (f_dev.status or "online").lower(),
+                            "vlan": f_dev.vlan or cable_vlan,
+                            "via_outlet": via_out.code if via_out else "",
+                        }
+                        # Si esta boca de Patch Panel tiene un aparato de planta en back pero no latiguillo frontal explícito,
+                        # pero existe un Patchbox/Switch asociado, mantener hw_info si existe
+
+                # Caso E: Si no hay un FloorDevice separado pero sí hay un equipo activo conectado (ej. FI-01:F19 -> RAC27 ONT Nokia,
+                # FI-01:F23 -> RT01 Core Router, PBX01:15 -> FW01 FortiGate) o circuito etiquetado:
+                if not endpoint_info and (hw_info or cable_labels):
+                    lbl_joined = " | ".join(dict.fromkeys(cable_labels))
+                    if hw_info and hw_info.get("category") in (
+                        "router",
+                        "firewall",
+                        "server",
+                        "rack_tray_device",
+                        "storage_san",
+                        "storage_nas",
+                    ):
+                        endpoint_info = {
+                            "code": hw_info["code"],
+                            "name": hw_info["name"],
+                            "device_type": hw_info["category"],
+                            "device_type_label": f"Equipo Rack ({hw_info['category'].upper()})",
+                            "ip_address": hw_info.get("ip_address") or "Sin IP",
+                            "room_code": f"Rack {hw_info.get('rack_code', r.code)}",
+                            "status": hw_info.get("status", "online"),
+                            "vlan": cable_vlan,
+                            "via_outlet": f"Puerto {hw_info.get('port', '')}",
+                        }
+                    elif lbl_joined:
+                        endpoint_info = {
+                            "code": f"TOMA-{d.code}{slot_num:02d}",
+                            "name": lbl_joined,
+                            "device_type": "telecom_outlet",
+                            "device_type_label": "Circuito / Línea Cableada",
+                            "ip_address": (
+                                hw_info.get("ip_address")
+                                if (hw_info and hw_info.get("ip_address"))
+                                else "Asignación DHCP / VLAN"
+                            ),
+                            "room_code": room.name if room else "Planta",
+                            "status": "online",
+                            "vlan": cable_vlan,
+                            "via_outlet": f"{d.code}:{port_label}",
+                        }
+
+                is_occupied = bool(slot_conns or hw_info or endpoint_info)
+                if is_occupied:
+                    occupied_bocas_count += 1
+
+                bocas_list.append(
+                    {
+                        "slot_number": slot_num,
+                        "port_label": port_label,
+                        "port_type": port_type,
+                        "is_occupied": is_occupied,
+                        "status_text": "OCUPADA" if is_occupied else "LIBRE",
+                        "cable_type": cable_type_str,
+                        "cable_label": " | ".join(dict.fromkeys(cable_labels)),
+                        "vlan": (
+                            endpoint_info.get("vlan")
+                            if (endpoint_info and endpoint_info.get("vlan"))
+                            else cable_vlan
+                        ),
+                        "switch_hardware": hw_info,
+                        "connected_device": endpoint_info,
+                    }
+                )
+
+            patch_panels.append(
+                {
+                    "device_id": d.id,
+                    "rack_id": r.id,
+                    "rack_code": r.code,
+                    "rack_name": r.name,
+                    "location_id": loc.id if loc else None,
+                    "location_code": loc.code if loc else "",
+                    "location_name": loc.name if loc else "",
+                    "floor_name": floor.name if floor else "",
+                    "room_name": room.name if room else "",
+                    "start_u": d.start_u,
+                    "u_range": u_range,
+                    "code": d.code,
+                    "name": d.name,
+                    "category": cat,
+                    "equipment_type_badge": _category_display_info(cat, d.name, d.code)[2],
+                    "manufacturer": tpl.manufacturer if tpl else "",
+                    "model_name": tpl.model_name if tpl else "",
+                    "ip_address": d.ip_address or "",
+                    "total_bocas": total_slots,
+                    "occupied_bocas": occupied_bocas_count,
+                    "free_bocas": max(0, total_slots - occupied_bocas_count),
+                    "bocas": bocas_list,
+                }
+            )
+
+    active_hw_lines = [ln for ln in rack_lines if ln["kind_group"] == "hierro"]
+    passive_lines = [ln for ln in rack_lines if ln["kind_group"] != "hierro"]
+    total_pp_bocas = sum(pp["total_bocas"] for pp in patch_panels)
+    occupied_pp_bocas = sum(pp["occupied_bocas"] for pp in patch_panels)
+
+    return {
+        "summary": {
+            "racks_count": len(racks),
+            "total_rack_lines": len(rack_lines),
+            "active_hierro_count": len(active_hw_lines),
+            "passive_lines_count": len(passive_lines),
+            "patch_panels_count": len(patch_panels),
+            "total_patch_panel_bocas": total_pp_bocas,
+            "occupied_patch_panel_bocas": occupied_pp_bocas,
+            "free_patch_panel_bocas": max(0, total_pp_bocas - occupied_pp_bocas),
+        },
+        "rack_lines": rack_lines,
+        "patch_panels": patch_panels,
+    }
+
 
 
 def _style_worksheet(ws):
@@ -60,11 +833,13 @@ def generate_datacenter_excel(
     rack_id: Optional[int] = None,
 ) -> BytesIO:
     """
-    Genera un informe Excel (.xlsx) completo con 3 hojas:
-    1. Ubicaciones, Pasillos y Racks
-    2. Inventario de Equipos, Red (FQDN, IP, Máscara, Gateway, SSH/Web) y Estado Ping
-    3. Mapa de Cableado (Red, Fibra y Electricidad en Front y Back)
+    Genera un informe Excel (.xlsx) completo con 4 hojas diferenciadas:
+    1. Racks y Pasillos (Ubicaciones, Plantas, Salas, Pasillos y Racks con desglose Hierro vs Pasivos)
+    2. Hardware y Red (Línea a Línea del Rack U42..U1 diferenciando 'HIERRO' activo vs 'PATCH PANEL / PASIVO')
+    3. Patch Panels (Bocas 1-24) (Detalle boca por boca 1..24 de cada Patch Panel: OCUPADA o LIBRE, Switch/Hierro y Aparato conectado con su IP y tipo)
+    4. Mapa de Cableado (Red, Fibra, Planta y Electricidad en Front y Back)
     """
+    inv = build_dashboard_inventory_data(db=db, location_id=location_id, rack_id=rack_id)
     wb = Workbook()
 
     # 1. Hoja de Racks y Pasillos
@@ -80,7 +855,8 @@ def generate_datacenter_excel(
         "Código Rack",
         "Nombre Rack",
         "U Totales",
-        "Equipos Montados",
+        "Equipos Hierro (Activos)",
+        "Patch Panels / Pasivos",
         "Fabricante",
         "Modelo",
         "Nº Serie",
@@ -103,6 +879,9 @@ def generate_datacenter_excel(
         floor = room.floor if room else None
         loc = floor.location if floor else None
         aisle = r.aisle
+        r_lines = [ln for ln in inv["rack_lines"] if ln["rack_id"] == r.id]
+        hierro_cnt = sum(1 for ln in r_lines if ln["kind_group"] == "hierro")
+        pasivo_cnt = sum(1 for ln in r_lines if ln["kind_group"] != "hierro")
         ws_racks.append([
             loc.code if loc else "",
             loc.name if loc else "",
@@ -113,7 +892,8 @@ def generate_datacenter_excel(
             r.code,
             r.name,
             r.total_units,
-            len(r.devices),
+            hierro_cnt,
+            pasivo_cnt,
             r.manufacturer,
             r.model_name,
             r.serial_number,
@@ -123,7 +903,7 @@ def generate_datacenter_excel(
         ])
     _style_worksheet(ws_racks)
 
-    # 2. Hoja de Hardware, Red y Monitorización
+    # 2. Hoja de Hardware y Red (Línea a Línea del Rack: Hierro vs Pasivos)
     ws_devs = wb.create_sheet(title="Hardware y Red")
     ws_devs.append([
         "Rack",
@@ -131,11 +911,13 @@ def generate_datacenter_excel(
         "Unidad U",
         "Altura (U)",
         "Cara Montaje",
-        "Profundidad Completa",
+        "Tipo en Rack (Hierro / Pasivo)",
         "Código",
         "Nombre Dispositivo",
         "Categoría",
         "Fabricante / Modelo",
+        "Bocas Ocupadas / Totales",
+        "Bocas Libres",
         "Hostname",
         "FQDN",
         "Dirección IP",
@@ -152,52 +934,133 @@ def generate_datacenter_excel(
         "Notas",
     ])
 
-    devs_query = db.query(RackDevice)
-    if rack_ids:
-        devs_query = devs_query.filter(RackDevice.rack_id.in_(rack_ids))
-    elif location_id is not None or rack_id is not None:
-        devs_query = devs_query.filter(RackDevice.id == -1)
-
-    devices = devs_query.order_by(RackDevice.rack_id, RackDevice.start_u.desc()).all()
-    for d in devices:
-        tpl = d.template
-        u_end = d.start_u + (tpl.u_height - 1 if tpl else 0)
-        u_range = f"U{d.start_u}" if u_end == d.start_u else f"U{d.start_u}-U{u_end}"
+    for ln in inv["rack_lines"]:
         links_str = ", ".join(
             f"{lnk.get('protocol', '').upper()}:{lnk.get('port', '')}"
-            for lnk in (d.management_links or [])
+            for lnk in (ln.get("management_links") or [])
         )
-        custom_str = json.dumps(d.custom_fields, ensure_ascii=False) if d.custom_fields else ""
-
+        custom_str = (
+            json.dumps(ln["custom_fields"], ensure_ascii=False)
+            if ln.get("custom_fields")
+            else ""
+        )
         ws_devs.append([
-            d.rack.code if d.rack else "",
-            d.rack.aisle.name if (d.rack and d.rack.aisle) else "",
-            u_range,
-            tpl.u_height if tpl else 1,
-            d.mounted_face.upper(),
-            "Sí (Front+Back)" if (tpl and tpl.is_full_depth) else "No",
-            d.code,
-            d.name,
-            tpl.category if tpl else "",
-            f"{tpl.manufacturer} {tpl.model_name}" if tpl else "",
-            d.hostname,
-            d.fqdn,
-            d.ip_address,
-            d.subnet_mask,
-            d.gateway,
-            d.vlan_mgmt or "",
-            d.mac_address,
+            ln["rack_code"],
+            ln["aisle_name"],
+            ln["u_range"],
+            ln["u_height"],
+            ln["mounted_face"],
+            ln["equipment_type_badge"],
+            ln["code"],
+            ln["name"],
+            ln["category"],
+            f"{ln['manufacturer']} {ln['model_name']}".strip(),
+            f"{ln['occupied_ports']} / {ln['total_ports']}",
+            ln["free_ports"],
+            ln["hostname"],
+            ln["fqdn"],
+            ln["ip_address"] or ("—" if ln["kind_group"] != "hierro" else "Sin IP"),
+            ln["subnet_mask"],
+            ln["gateway"],
+            ln["vlan_mgmt"] or "",
+            ln["mac_address"],
             links_str,
-            d.status.upper(),
-            d.last_ping_ms if d.last_ping_ms is not None else "",
-            d.last_checked_at.strftime("%Y-%m-%d %H:%M:%S") if d.last_checked_at else "",
-            d.serial_number,
+            ln["status"].upper() if ln["kind_group"] == "hierro" else "PASIVO",
+            ln["last_ping_ms"] if ln["last_ping_ms"] is not None else "",
+            ln["last_checked_at"],
+            ln["serial_number"],
             custom_str,
-            d.notes,
+            ln["notes"],
         ])
     _style_worksheet(ws_devs)
 
-    # 3. Hoja de Mapa de Cableado (Patching)
+    # 3. Hoja de Patch Panels — Detalle Boca por Boca (1 a 24)
+    ws_pp = wb.create_sheet(title="Patch Panels (Bocas 1-24)")
+    ws_pp.append([
+        "Rack",
+        "Unidad U",
+        "Patch Panel (Código)",
+        "Nombre Patch Panel",
+        "Tipo Panel",
+        "Boca Nº",
+        "Conector",
+        "Estado Boca",
+        "Switch / Hierro Conectado",
+        "Boca del Switch / Hierro",
+        "IP del Switch / Hierro",
+        "Aparato / Dispositivo Conectado (Cuál es)",
+        "Tipo de Aparato",
+        "IP del Aparato",
+        "Sala / Ubicación / Roseta",
+        "VLAN",
+        "Estado Aparato",
+        "Etiqueta / Circuito",
+    ])
+
+    occupied_fill = PatternFill(start_color="EFF6FF", end_color="EFF6FF", fill_type="solid")
+    free_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+
+    for pp in inv["patch_panels"]:
+        for boca in pp["bocas"]:
+            sw = boca.get("switch_hardware") or {}
+            ep = boca.get("connected_device") or {}
+            is_occ = boca["is_occupied"]
+
+            sw_name_str = (
+                f"{sw.get('code', '')} — {sw.get('name', '')}".strip(" —")
+                if sw
+                else "Sin conexión a Switch"
+            )
+            sw_port_str = (
+                f"{sw.get('code', '').split(' ')[0]}:{sw.get('port', '')}"
+                if sw and sw.get("port")
+                else "—"
+            )
+            sw_ip_str = sw.get("ip_address") or "—"
+
+            if ep:
+                ep_identity = f"{ep.get('code', '')} — {ep.get('name', '')}".strip(" —")
+                ep_type = ep.get("device_type_label") or ep.get("device_type") or "Dispositivo"
+                ep_ip = ep.get("ip_address") or "Sin IP"
+                ep_room = ep.get("room_code") or "—"
+                if ep.get("via_outlet") and ep.get("via_outlet") not in ep_room:
+                    ep_room = f"{ep_room} ({ep.get('via_outlet')})".strip()
+                ep_status = str(ep.get("status") or "online").upper()
+            else:
+                ep_identity = "LIBRE — Sin aparato conectado"
+                ep_type = "—"
+                ep_ip = "—"
+                ep_room = "—"
+                ep_status = "LIBRE"
+
+            ws_pp.append([
+                pp["rack_code"],
+                pp["u_range"],
+                pp["code"],
+                pp["name"],
+                pp["equipment_type_badge"],
+                f"Boca {boca['slot_number']:02d} ({boca['port_label']})",
+                str(boca["port_type"] or "rj45").upper(),
+                "OCUPADA" if is_occ else "LIBRE (Sin conexión)",
+                sw_name_str if is_occ else "—",
+                sw_port_str if is_occ else "—",
+                sw_ip_str if is_occ else "—",
+                ep_identity,
+                ep_type,
+                ep_ip,
+                ep_room,
+                boca.get("vlan") or "",
+                ep_status,
+                boca.get("cable_label") or "",
+            ])
+    _style_worksheet(ws_pp)
+    for row in ws_pp.iter_rows(min_row=2):
+        state_val = str(row[7].value or "")
+        row_fill = occupied_fill if state_val.startswith("OCUPADA") else free_fill
+        for cell in row:
+            cell.fill = row_fill
+
+    # 4. Hoja de Mapa de Cableado (Patching)
     ws_cables = wb.create_sheet(title="Mapa de Cableado")
     ws_cables.append([
         "ID Cable",

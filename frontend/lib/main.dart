@@ -80,6 +80,14 @@ class _RackDocShellState extends State<RackDocShell> {
   String _dashSortBy = 'status'; // 'status' | 'code' | 'ip' | 'rack' | 'latency' | 'method'
   bool _dashSortAsc = true;
 
+  // Estado de '4. Dashboard & Excel': Hierro Línea a Línea vs Patch Panels Boca a Boca vs Heartbeat
+  Map<String, dynamic>? _dashboardInventory;
+  String _dashMainSection = 'all_sections'; // 'all_sections' | 'hierro_lines' | 'patch_panels' | 'heartbeat'
+  int? _dashSelectedRackId; // null = Todos los Racks
+  String _dashRackLineKindFilter = 'all'; // 'all' | 'hierro' | 'pasivo'
+  String _dashPatchBocaFilter = 'all'; // 'all' | 'occupied' | 'free'
+  int? _dashSelectedPatchPanelId; // null = Todos los Patch Panels
+
   bool _loading = true;
   String? _error;
 
@@ -99,10 +107,12 @@ class _RackDocShellState extends State<RackDocShell> {
         _api.getLocations(),
         _api.getTemplates(),
         _api.getUsers(),
+        _api.fetchDashboardInventory(),
       ]);
       final locs = results[0] as List<LocationNode>;
       final tpls = results[1] as List<DeviceTemplateModel>;
       final usrs = results[2] as List<UserModel>;
+      final dashInv = results[3] as Map<String, dynamic>;
 
       int defaultLocId = _activeLocationId;
       int defaultRackId = _activeRackId;
@@ -135,6 +145,7 @@ class _RackDocShellState extends State<RackDocShell> {
           _locations = locs;
           _templates = tpls;
           _users = usrs;
+          _dashboardInventory = dashInv;
           _currentUser = activeUsr;
           _activeLocationId = defaultLocId;
           _activeRackId = defaultRackId;
@@ -164,9 +175,15 @@ class _RackDocShellState extends State<RackDocShell> {
 
   Future<void> _refreshDataSilently() async {
     try {
-      final locs = await _api.getLocations();
+      final results = await Future.wait([
+        _api.getLocations(),
+        _api.fetchDashboardInventory(),
+      ]);
       if (mounted) {
-        setState(() => _locations = locs);
+        setState(() {
+          _locations = results[0] as List<LocationNode>;
+          _dashboardInventory = results[1] as Map<String, dynamic>;
+        });
       }
     } catch (_) {}
   }
@@ -1083,7 +1100,10 @@ class _RackDocShellState extends State<RackDocShell> {
                   icon: Icons.dashboard_outlined,
                   label: '4. Dashboard & Excel',
                   active: _activeNav == 'dashboard',
-                  onTap: () => setState(() => _activeNav = 'dashboard'),
+                  onTap: () {
+                    setState(() => _activeNav = 'dashboard');
+                    _refreshDataSilently();
+                  },
                 ),
                 _SidebarItem(
                   icon: Icons.settings_rounded,
@@ -1717,13 +1737,13 @@ class _RackDocShellState extends State<RackDocShell> {
     int totalFloors = 0;
     int totalRooms = 0;
     int totalRacks = 0;
-    int totalDevices = 0;
     int totalMonitored = 0;
     int totalOnline = 0;
     int totalOffline = 0;
     int totalWarning = 0;
 
     final allMonitoredSystems = <Map<String, dynamic>>[];
+    final allRacksMeta = <Map<String, dynamic>>[];
 
     for (final l in _locations) {
       totalFloors += l.floorsCount;
@@ -1736,7 +1756,13 @@ class _RackDocShellState extends State<RackDocShell> {
       for (final f in l.floors) {
         for (final r in f.rooms) {
           for (final rk in r.racks) {
-            totalDevices += rk.deviceCount;
+            allRacksMeta.add({
+              'id': rk.id,
+              'code': rk.code,
+              'name': rk.name,
+              'location_code': l.code,
+              'floor_name': f.name,
+            });
             for (final md in rk.monitoredDevices) {
               allMonitoredSystems.add({
                 ...md,
@@ -1755,9 +1781,74 @@ class _RackDocShellState extends State<RackDocShell> {
       }
     }
 
-    // Filtrado por texto, estado y método Heartbeat
+    // Extraer datos detallados de Hierro (Línea a Línea del Rack) y Patch Panels (Bocas 1..24)
+    final rawRackLines = (_dashboardInventory?['rack_lines'] as List?) ?? const [];
+    final rawPatchPanels = (_dashboardInventory?['patch_panels'] as List?) ?? const [];
+
+    final allRackLines = rawRackLines
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .where((ln) =>
+            _dashSelectedRackId == null || ln['rack_id'] == _dashSelectedRackId)
+        .toList();
+
+    final allPatchPanels = rawPatchPanels
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .where((pp) =>
+            _dashSelectedRackId == null || pp['rack_id'] == _dashSelectedRackId)
+        .toList();
+
+    final int hierroCount =
+        allRackLines.where((ln) => ln['kind_group'] == 'hierro').length;
+    final int pasivoCount =
+        allRackLines.where((ln) => ln['kind_group'] != 'hierro').length;
+    final int totalPpBocas = allPatchPanels.fold<int>(
+      0,
+      (acc, pp) => acc + ((pp['total_bocas'] as num?)?.toInt() ?? 0),
+    );
+    final int occupiedPpBocas = allPatchPanels.fold<int>(
+      0,
+      (acc, pp) => acc + ((pp['occupied_bocas'] as num?)?.toInt() ?? 0),
+    );
+    final int freePpBocas = (totalPpBocas - occupiedPpBocas).clamp(0, 999999);
+
+    // Filtrado de líneas del Rack (Hierro vs Pasivo + texto)
     final q = _dashSearchCtrl.text.trim().toLowerCase();
+    final filteredRackLines = allRackLines.where((ln) {
+      final kg = (ln['kind_group'] ?? '').toString();
+      if (_dashRackLineKindFilter == 'hierro' && kg != 'hierro') return false;
+      if (_dashRackLineKindFilter == 'pasivo' && kg == 'hierro') return false;
+      if (q.isNotEmpty) {
+        final hay = [
+          ln['code'],
+          ln['name'],
+          ln['equipment_type_badge'],
+          ln['manufacturer'],
+          ln['model_name'],
+          ln['hostname'],
+          ln['fqdn'],
+          ln['ip_address'],
+          ln['rack_code'],
+          ln['u_range'],
+        ].map((e) => (e ?? '').toString().toLowerCase()).join(' ');
+        if (!hay.contains(q)) return false;
+      }
+      return true;
+    }).toList();
+
+    // Filtrado de Patch Panels
+    final filteredPatchPanels = allPatchPanels.where((pp) {
+      if (_dashSelectedPatchPanelId != null &&
+          pp['device_id'] != _dashSelectedPatchPanelId) {
+        return false;
+      }
+      return true;
+    }).toList();
+
+    // Filtrado por texto, estado y método Heartbeat
     final filtered = allMonitoredSystems.where((sys) {
+      if (_dashSelectedRackId != null && sys['rack_id'] != _dashSelectedRackId) {
+        return false;
+      }
       final st = (sys['status'] ?? 'unknown').toString().toLowerCase();
       final method = (sys['monitor_method'] ?? 'icmp').toString().toLowerCase();
       if (_dashStatusFilter != 'all' && st != _dashStatusFilter) {
@@ -1782,7 +1873,7 @@ class _RackDocShellState extends State<RackDocShell> {
       return true;
     }).toList();
 
-    // Ordenación interactiva
+    // Ordenación interactiva Heartbeat
     int statusPriority(String st) {
       if (st == 'offline') return 0; // Rojo primero
       if (st == 'warning') return 1;
@@ -1832,6 +1923,13 @@ class _RackDocShellState extends State<RackDocShell> {
       return _dashSortAsc ? cmp : -cmp;
     });
 
+    final bool showHierroLines = _dashMainSection == 'all_sections' ||
+        _dashMainSection == 'hierro_lines';
+    final bool showPatchPanels = _dashMainSection == 'all_sections' ||
+        _dashMainSection == 'patch_panels';
+    final bool showHeartbeat =
+        _dashMainSection == 'all_sections' || _dashMainSection == 'heartbeat';
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(28),
       child: Column(
@@ -1844,7 +1942,7 @@ class _RackDocShellState extends State<RackDocShell> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Dashboard, Monitorización Heartbeat & Exportación Excel',
+                      'Dashboard: Hierro del Rack (U42→U1), Patch Panels (Bocas 1-24) & Excel',
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w800,
@@ -1853,7 +1951,7 @@ class _RackDocShellState extends State<RackDocShell> {
                     ),
                     SizedBox(height: 4),
                     Text(
-                      'Estado en tiempo real de todos los sistemas monitorizados (Verde/Rojo), métricas por Datacenter/Rack y exportación Excel.',
+                      'Diferenciación línea por línea entre "Hierro" (Switches, Routers, Servidores, SAN/NAS, SAI, PDU) y Patch Panels boca a boca (ocupada o libre, qué aparato está conectado y qué IP tiene).',
                       style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
                     ),
                   ],
@@ -1862,7 +1960,7 @@ class _RackDocShellState extends State<RackDocShell> {
               OutlinedButton.icon(
                 onPressed: _refreshDataSilently,
                 icon: const Icon(Icons.refresh, size: 17),
-                label: const Text('Actualizar Estado'),
+                label: const Text('Actualizar Datos'),
               ),
               const SizedBox(width: 10),
               OutlinedButton.icon(
@@ -1885,11 +1983,17 @@ class _RackDocShellState extends State<RackDocShell> {
               const SizedBox(width: 10),
               FilledButton.icon(
                 onPressed: () {
-                  final url = Uri.parse(_api.getExcelExportUrl());
+                  final url = Uri.parse(
+                    _api.getExcelExportUrl(rackId: _dashSelectedRackId),
+                  );
                   launchUrl(url, mode: LaunchMode.externalApplication);
                 },
                 icon: const Icon(Icons.download_rounded, size: 18),
-                label: const Text('Exportar Inventario (.xlsx)'),
+                label: Text(
+                  _dashSelectedRackId != null
+                      ? 'Exportar Rack a Excel (.xlsx)'
+                      : 'Exportar Todo a Excel (.xlsx)',
+                ),
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF15803D),
                 ),
@@ -1902,26 +2006,30 @@ class _RackDocShellState extends State<RackDocShell> {
             runSpacing: 14,
             children: [
               _DashboardCard(
-                title: 'Datacenters / Plantas',
-                value: '${_locations.length} Sedes / $totalFloors Plantas ($totalRooms Salas)',
+                title: 'Datacenters / Plantas / Racks',
+                value:
+                    '${_locations.length} Sedes / $totalFloors Plantas / $totalRacks Racks ($totalRooms Salas)',
                 icon: Icons.public,
                 color: const Color(0xFF2563EB),
               ),
               _DashboardCard(
-                title: 'Racks & Equipos',
-                value: '$totalRacks Racks / $totalDevices Eq.',
-                icon: Icons.dns_outlined,
-                color: const Color(0xFF7C3AED),
+                title: 'Hierro en Rack (Equipos Activos)',
+                value: '$hierroCount Equipos Hierro • $pasivoCount Pasivos',
+                icon: Icons.dns_rounded,
+                color: const Color(0xFF4F46E5),
               ),
               _DashboardCard(
-                title: 'Sistemas Monitorizados',
-                value: '$totalMonitored Activos',
-                icon: Icons.monitor_heart_outlined,
-                color: const Color(0xFF0284C7),
+                title: 'Patch Panels (Mapa de Bocas)',
+                value:
+                    '${allPatchPanels.length} Panels • $occupiedPpBocas Ocup. / $freePpBocas Libres',
+                icon: Icons.settings_input_component_rounded,
+                color: const Color(0xFF0D9488),
               ),
               _DashboardCard(
                 title: 'Estado Online (Verde)',
-                value: totalOnline > 0 ? '🟢 $totalOnline Online' : 'Sin equipos online',
+                value: totalOnline > 0
+                    ? '🟢 $totalOnline Online'
+                    : 'Sin equipos online',
                 icon: Icons.check_circle_outline,
                 color: const Color(0xFF16A34A),
               ),
@@ -1936,7 +2044,194 @@ class _RackDocShellState extends State<RackDocShell> {
             ],
           ),
 
-          const SizedBox(height: 26),
+          const SizedBox(height: 20),
+
+          // BARRA GLOBAL DE FILTRO POR RACK Y NAVEGACIÓN DE SECCIONES DEL DASHBOARD
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFCBD5E1)),
+            ),
+            child: Wrap(
+              spacing: 16,
+              runSpacing: 12,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.filter_alt_outlined,
+                      size: 18,
+                      color: Color(0xFF1E3A8A),
+                    ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Filtrar por Rack:',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF0F172A),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    SizedBox(
+                      width: 260,
+                      child: DropdownButtonFormField<int?>(
+                        initialValue: _dashSelectedRackId,
+                        isDense: true,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        items: [
+                          const DropdownMenuItem<int?>(
+                            value: null,
+                            child: Text(
+                              'Todos los Racks del CPD',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          ...allRacksMeta.map(
+                            (rk) => DropdownMenuItem<int?>(
+                              value: rk['id'] as int,
+                              child: Text(
+                                '${rk['location_code']} > ${rk['code']} (${rk['name']})',
+                                style: const TextStyle(fontSize: 12),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ],
+                        onChanged: (val) {
+                          setState(() {
+                            _dashSelectedRackId = val;
+                            _dashSelectedPatchPanelId = null;
+                          });
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                SegmentedButton<String>(
+                  segments: [
+                    const ButtonSegment(
+                      value: 'all_sections',
+                      icon: Icon(Icons.view_agenda_outlined, size: 16),
+                      label: Text('Todo', style: TextStyle(fontSize: 11.5)),
+                    ),
+                    ButtonSegment(
+                      value: 'hierro_lines',
+                      icon: const Icon(Icons.dns_rounded, size: 16),
+                      label: Text(
+                        '1. Hierro & Líneas Rack (${allRackLines.length})',
+                        style: const TextStyle(fontSize: 11.5),
+                      ),
+                    ),
+                    ButtonSegment(
+                      value: 'patch_panels',
+                      icon: const Icon(
+                        Icons.settings_input_component_rounded,
+                        size: 16,
+                      ),
+                      label: Text(
+                        '2. Patch Panels Bocas 1-24 (${allPatchPanels.length})',
+                        style: const TextStyle(fontSize: 11.5),
+                      ),
+                    ),
+                    ButtonSegment(
+                      value: 'heartbeat',
+                      icon: const Icon(Icons.monitor_heart_outlined, size: 16),
+                      label: Text(
+                        '3. Heartbeat ($totalMonitored)',
+                        style: const TextStyle(fontSize: 11.5),
+                      ),
+                    ),
+                  ],
+                  selected: {_dashMainSection},
+                  onSelectionChanged: (s) {
+                    setState(() => _dashMainSection = s.first);
+                  },
+                ),
+                SizedBox(
+                  width: 260,
+                  child: TextField(
+                    controller: _dashSearchCtrl,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      hintText: 'Buscar equipo, boca, aparato o IP...',
+                      prefixIcon: const Icon(Icons.search, size: 17),
+                      suffixIcon: _dashSearchCtrl.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, size: 15),
+                              onPressed: () {
+                                _dashSearchCtrl.clear();
+                                setState(() {});
+                              },
+                            )
+                          : null,
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      filled: true,
+                      fillColor: const Color(0xFFF8FAFC),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ====================================================================
+          // SECCIÓN 1: HIERRO vs PASIVOS — LÍNEA POR LÍNEA DEL RACK (U42 -> U1)
+          // ====================================================================
+          if (showHierroLines) ...[
+            const SizedBox(height: 24),
+            _buildRackLinesSection(
+              filteredRackLines: filteredRackLines,
+              hierroCount: hierroCount,
+              pasivoCount: pasivoCount,
+            ),
+          ],
+
+          // ====================================================================
+          // SECCIÓN 2: PATCH PANELS — DETALLE BOCA POR BOCA (1..24)
+          // ====================================================================
+          if (showPatchPanels) ...[
+            const SizedBox(height: 24),
+            _buildPatchPanelsBocasSection(
+              allPatchPanels: allPatchPanels,
+              filteredPatchPanels: filteredPatchPanels,
+              totalPpBocas: totalPpBocas,
+              occupiedPpBocas: occupiedPpBocas,
+              freePpBocas: freePpBocas,
+              searchQuery: q,
+            ),
+          ],
+
+          // ====================================================================
+          // SECCIÓN 3: LISTADO DE SISTEMAS MONITORIZADOS (HEARTBEAT)
+          // ====================================================================
+          if (showHeartbeat) ...[
+            const SizedBox(height: 24),
 
           // LISTADO ORGANIZABLE Y BUSCABLE DE SISTEMAS MONITORIZADOS
           Container(
@@ -1958,7 +2253,7 @@ class _RackDocShellState extends State<RackDocShell> {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      'Listado de Sistemas Monitorizados (${filtered.length} de $totalMonitored)',
+                      '3. Monitorización Heartbeat en Tiempo Real (${filtered.length} de $totalMonitored)',
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
@@ -2324,6 +2619,1040 @@ class _RackDocShellState extends State<RackDocShell> {
               ],
             ),
           ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRackLinesSection({
+    required List<Map<String, dynamic>> filteredRackLines,
+    required int hierroCount,
+    required int pasivoCount,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.dns_rounded,
+                color: Color(0xFF4F46E5),
+                size: 21,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '1. Desglose Línea a Línea del Rack (U42 → U1) — "Hierro" vs Patch Panels (${filteredRackLines.length} líneas)',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF0F172A),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    const Text(
+                      'Diferencia claramente qué hay montado en cada U del armario: equipos de "Hierro" activos (Switches, Routers, Firewalls, Servidores, SAN/NAS, SAI, PDUs) frente a Patch Panels y pasivos.',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                    ),
+                  ],
+                ),
+              ),
+              SegmentedButton<String>(
+                segments: [
+                  ButtonSegment(
+                    value: 'all',
+                    label: Text(
+                      'Todas (${hierroCount + pasivoCount})',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  ),
+                  ButtonSegment(
+                    value: 'hierro',
+                    label: Text(
+                      '⚙️ Solo Hierro ($hierroCount)',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  ),
+                  ButtonSegment(
+                    value: 'pasivo',
+                    label: Text(
+                      '🔌 Patch Panels / Pasivos ($pasivoCount)',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  ),
+                ],
+                selected: {_dashRackLineKindFilter},
+                onSelectionChanged: (s) {
+                  setState(() => _dashRackLineKindFilter = s.first);
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          const Divider(height: 1),
+          if (filteredRackLines.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(
+                child: Text(
+                  'No hay líneas de Rack para el filtro seleccionado.',
+                  style: TextStyle(color: Color(0xFF64748B)),
+                ),
+              ),
+            )
+          else
+            ...filteredRackLines.map((ln) {
+              final kg = (ln['kind_group'] ?? 'hierro').toString();
+              final isHierro = kg == 'hierro';
+              final isPatchPanel = kg == 'patch_panel';
+              final badgeText = (ln['equipment_type_badge'] ?? '').toString();
+              final badgeColor = isHierro
+                  ? const Color(0xFF4F46E5)
+                  : (isPatchPanel
+                      ? const Color(0xFF0D9488)
+                      : const Color(0xFF64748B));
+
+              final st = (ln['status'] ?? 'unknown').toString().toLowerCase();
+              final isOnline = st == 'online';
+              final isOffline = st == 'offline';
+              final ipStr = (ln['ip_address'] ?? '').toString();
+              final occPorts = (ln['occupied_ports'] as num?)?.toInt() ?? 0;
+              final totPorts = (ln['total_ports'] as num?)?.toInt() ?? 0;
+              final freePorts = (ln['free_ports'] as num?)?.toInt() ?? 0;
+              final rackId = ln['rack_id'] as int;
+              final devId = ln['device_id'] as int?;
+
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: isHierro
+                      ? const Color(0xFFF8FAFC)
+                      : const Color(0xFFF0FDFA).withValues(alpha: 0.45),
+                  border: const Border(
+                    bottom: BorderSide(color: Color(0xFFE2E8F0)),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    // Unidad U + Cara
+                    Container(
+                      width: 82,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F172A),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            '${ln['u_range']}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                              color: Colors.white,
+                            ),
+                          ),
+                          Text(
+                            '${ln['rack_code']} • ${ln['mounted_face']}',
+                            style: const TextStyle(
+                              fontSize: 9.5,
+                              color: Color(0xFF94A3B8),
+                              fontWeight: FontWeight.w700,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    // Badge HIERRO vs PATCH PANEL
+                    Container(
+                      width: 185,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: badgeColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: badgeColor.withValues(alpha: 0.45),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            isHierro
+                                ? Icons.memory_rounded
+                                : Icons.settings_input_component_rounded,
+                            size: 14,
+                            color: badgeColor,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              badgeText,
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w800,
+                                color: badgeColor,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    // Código, Nombre y Modelo
+                    Expanded(
+                      flex: 3,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${ln['code']} — ${ln['name']}',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                          Text(
+                            '${ln['manufacturer']} ${ln['model_name']}${ln['hostname']?.toString().isNotEmpty == true ? ' • Host: ${ln['hostname']}' : ''}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF64748B),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // IP y Estado
+                    Expanded(
+                      flex: 2,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.lan_outlined,
+                                size: 14,
+                                color: Color(0xFF334155),
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  ipStr.isNotEmpty
+                                      ? 'IP: $ipStr'
+                                      : (isHierro
+                                          ? 'IP: Sin IP asignada'
+                                          : 'Elemento Pasivo (Sin IP)'),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                    color: ipStr.isNotEmpty
+                                        ? const Color(0xFF1D4ED8)
+                                        : const Color(0xFF64748B),
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            isHierro
+                                ? (isOnline
+                                    ? '🟢 ONLINE${ln['last_ping_ms'] != null ? ' (${ln['last_ping_ms']} ms)' : ''}'
+                                    : (isOffline
+                                        ? '🔴 OFFLINE / CAÍDO'
+                                        : '⚪ Estado: ${st.toUpperCase()}'))
+                                : '🔌 Panel Pasivo en Rack',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: isHierro
+                                  ? (isOnline
+                                      ? const Color(0xFF16A34A)
+                                      : (isOffline
+                                          ? const Color(0xFFDC2626)
+                                          : const Color(0xFF64748B)))
+                                  : const Color(0xFF0D9488),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Ocupación de Bocas
+                    Expanded(
+                      flex: 2,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            totPorts > 0
+                                ? '$occPorts ocupadas / $freePorts libres (de $totPorts)'
+                                : 'Sin bocas de datos',
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF1E293B),
+                            ),
+                          ),
+                          if (totPorts > 0) ...[
+                            const SizedBox(height: 4),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: (occPorts / totPorts).clamp(0.0, 1.0),
+                                minHeight: 6,
+                                backgroundColor: const Color(0xFFE2E8F0),
+                                color: isPatchPanel
+                                    ? const Color(0xFF0D9488)
+                                    : const Color(0xFF4F46E5),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    if (isPatchPanel) ...[
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          setState(() {
+                            _dashMainSection = 'patch_panels';
+                            _dashSelectedPatchPanelId = devId;
+                          });
+                        },
+                        icon: const Icon(
+                          Icons.grid_view_rounded,
+                          size: 14,
+                        ),
+                        label: const Text(
+                          'Ver Bocas 1-24',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    FilledButton.tonalIcon(
+                      onPressed: () => _openRack(
+                        rackId,
+                        highlightDeviceId: devId,
+                      ),
+                      icon: const Icon(Icons.my_location_rounded, size: 14),
+                      label: const Text(
+                        'Ir al Rack',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPatchPanelsBocasSection({
+    required List<Map<String, dynamic>> allPatchPanels,
+    required List<Map<String, dynamic>> filteredPatchPanels,
+    required int totalPpBocas,
+    required int occupiedPpBocas,
+    required int freePpBocas,
+    required String searchQuery,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 12,
+            runSpacing: 10,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              const Icon(
+                Icons.settings_input_component_rounded,
+                color: Color(0xFF0D9488),
+                size: 22,
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '2. Información de Patch Panels — Detalle Boca por Boca ($occupiedPpBocas Ocupadas / $freePpBocas Libres de $totalPpBocas)',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  const Text(
+                    'Muestra cada boca (1..24) del Patch Panel: si está conectada o libre, a qué Switch ("Hierro") va unida y qué aparato final está conectado (cuál es, tipo y dirección IP).',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                  ),
+                ],
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 240,
+                child: DropdownButtonFormField<int?>(
+                  initialValue: _dashSelectedPatchPanelId,
+                  isDense: true,
+                  decoration: InputDecoration(
+                    labelText: 'Seleccionar Patch Panel',
+                    isDense: true,
+                    filled: true,
+                    fillColor: const Color(0xFFF8FAFC),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  items: [
+                    const DropdownMenuItem<int?>(
+                      value: null,
+                      child: Text(
+                        'Todos los Patch Panels',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    ...allPatchPanels.map(
+                      (pp) => DropdownMenuItem<int?>(
+                        value: pp['device_id'] as int,
+                        child: Text(
+                          '[${pp['rack_code']} ${pp['u_range']}] ${pp['code']} — ${pp['name']}',
+                          style: const TextStyle(fontSize: 11.5),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                  onChanged: (val) {
+                    setState(() => _dashSelectedPatchPanelId = val);
+                  },
+                ),
+              ),
+              SegmentedButton<String>(
+                segments: [
+                  ButtonSegment(
+                    value: 'all',
+                    label: Text(
+                      'Todas ($totalPpBocas)',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  ),
+                  ButtonSegment(
+                    value: 'occupied',
+                    label: Text(
+                      '🟢 Con Aparato / Conectadas ($occupiedPpBocas)',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  ),
+                  ButtonSegment(
+                    value: 'free',
+                    label: Text(
+                      '⚪ Bocas Libres ($freePpBocas)',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  ),
+                ],
+                selected: {_dashPatchBocaFilter},
+                onSelectionChanged: (s) {
+                  setState(() => _dashPatchBocaFilter = s.first);
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Divider(height: 1),
+          if (filteredPatchPanels.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(
+                child: Text(
+                  'No hay Patch Panels registrados en el Rack seleccionado.',
+                  style: TextStyle(color: Color(0xFF64748B)),
+                ),
+              ),
+            )
+          else
+            ...filteredPatchPanels.map((pp) {
+              final rawBocas = (pp['bocas'] as List?) ?? const [];
+              final allBocas = rawBocas
+                  .map((b) => Map<String, dynamic>.from(b as Map))
+                  .toList();
+
+              final visibleBocas = allBocas.where((b) {
+                final isOcc = b['is_occupied'] == true;
+                if (_dashPatchBocaFilter == 'occupied' && !isOcc) return false;
+                if (_dashPatchBocaFilter == 'free' && isOcc) return false;
+                if (searchQuery.isNotEmpty) {
+                  final sw = (b['switch_hardware'] as Map?) ?? const {};
+                  final ep = (b['connected_device'] as Map?) ?? const {};
+                  final hay = [
+                    pp['code'],
+                    pp['name'],
+                    b['port_label'],
+                    b['status_text'],
+                    b['cable_label'],
+                    sw['code'],
+                    sw['name'],
+                    sw['ip_address'],
+                    ep['code'],
+                    ep['name'],
+                    ep['device_type_label'],
+                    ep['ip_address'],
+                    ep['room_code'],
+                  ].map((e) => (e ?? '').toString().toLowerCase()).join(' ');
+                  if (!hay.contains(searchQuery)) return false;
+                }
+                return true;
+              }).toList();
+
+              final rackId = pp['rack_id'] as int;
+              final devId = pp['device_id'] as int?;
+              final occCnt = (pp['occupied_bocas'] as num?)?.toInt() ?? 0;
+              final freeCnt = (pp['free_bocas'] as num?)?.toInt() ?? 0;
+              final totCnt = (pp['total_bocas'] as num?)?.toInt() ?? 24;
+
+              return Container(
+                margin: const EdgeInsets.only(top: 16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Cabecera del Patch Panel + tira visual de 24 bocas
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF0F172A),
+                        borderRadius: BorderRadius.vertical(
+                          top: Radius.circular(9),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0D9488),
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: Text(
+                              '${pp['rack_code']} • ${pp['u_range']}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w900,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Patch Panel ${pp['code']} — ${pp['name']} (${pp['manufacturer']} ${pp['model_name']})',
+                              style: const TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1E293B),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: const Color(0xFF475569),
+                              ),
+                            ),
+                            child: Text(
+                              '🟢 $occCnt Ocupadas  •  ⚪ $freeCnt Libres  (Total: $totCnt bocas)',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFFE2E8F0),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          FilledButton.tonalIcon(
+                            onPressed: () => _openRack(
+                              rackId,
+                              highlightDeviceId: devId,
+                            ),
+                            icon: const Icon(
+                              Icons.open_in_new_rounded,
+                              size: 14,
+                            ),
+                            label: const Text(
+                              'Ver en Rack Editor',
+                              style: TextStyle(fontSize: 11),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Tira gráfica rápida de las 24 bocas (clic o resumen visual)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 8,
+                      ),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFF1F5F9),
+                        border: Border(
+                          bottom: BorderSide(color: Color(0xFFCBD5E1)),
+                        ),
+                      ),
+                      child: Wrap(
+                        spacing: 5,
+                        runSpacing: 5,
+                        children: allBocas.map((b) {
+                          final isOcc = b['is_occupied'] == true;
+                          final ep = (b['connected_device'] as Map?) ?? const {};
+                          final sw = (b['switch_hardware'] as Map?) ?? const {};
+                          final tooltipMsg = isOcc
+                              ? 'Boca ${b['port_label']}: OCUPADA\n'
+                                  'Aparato: ${ep['code'] ?? '-'} (${ep['name'] ?? '-'})\n'
+                                  'IP Aparato: ${ep['ip_address'] ?? 'Sin IP'}\n'
+                                  'Switch: ${sw['code'] ?? '-'} (Puerto ${sw['port'] ?? '-'})'
+                              : 'Boca ${b['port_label']}: LIBRE (Sin nada conectado)';
+                          return Tooltip(
+                            message: tooltipMsg,
+                            child: Container(
+                              width: 34,
+                              height: 24,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: isOcc
+                                    ? const Color(0xFF0D9488)
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                  color: isOcc
+                                      ? const Color(0xFF0F766E)
+                                      : const Color(0xFFCBD5E1),
+                                  width: isOcc ? 1.4 : 1.0,
+                                ),
+                              ),
+                              child: Text(
+                                '${b['port_label']}',
+                                style: TextStyle(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: isOcc
+                                      ? Colors.white
+                                      : const Color(0xFF64748B),
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+
+                    // Encabezado de columnas de las bocas
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 7,
+                      ),
+                      color: const Color(0xFFE2E8F0).withValues(alpha: 0.55),
+                      child: const Row(
+                        children: [
+                          SizedBox(
+                            width: 92,
+                            child: Text(
+                              'BOCA Nº',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF334155),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 135,
+                            child: Text(
+                              'ESTADO BOCA',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF334155),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            flex: 2,
+                            child: Text(
+                              'CONEXIÓN EN RACK (HACIA SWITCH / HIERRO)',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF334155),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            flex: 3,
+                            child: Text(
+                              'APARATO CONECTADO (CUÁL ES, TIPO Y UBICACIÓN)',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF334155),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 175,
+                            child: Text(
+                              'DIRECCIÓN IP APARATO',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF334155),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    if (visibleBocas.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Text(
+                          'No hay bocas en este Patch Panel que coincidan con el filtro actual.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                      )
+                    else
+                      ...visibleBocas.map((b) {
+                        final isOcc = b['is_occupied'] == true;
+                        final sw = b['switch_hardware'] != null
+                            ? Map<String, dynamic>.from(
+                                b['switch_hardware'] as Map,
+                              )
+                            : null;
+                        final ep = b['connected_device'] != null
+                            ? Map<String, dynamic>.from(
+                                b['connected_device'] as Map,
+                              )
+                            : null;
+                        final slotNum =
+                            (b['slot_number'] as num?)?.toInt() ?? 1;
+                        final portLbl = (b['port_label'] ?? '$slotNum').toString();
+                        final portType =
+                            (b['port_type'] ?? 'rj45').toString().toUpperCase();
+                        final epIp = (ep?['ip_address'] ?? '').toString();
+                        final hasValidIp = epIp.isNotEmpty &&
+                            !epIp.toLowerCase().contains('sin ip') &&
+                            !epIp.toLowerCase().contains('pasiv');
+
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isOcc
+                                ? Colors.white
+                                : const Color(0xFFF8FAFC),
+                            border: const Border(
+                              bottom: BorderSide(color: Color(0xFFE2E8F0)),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              // Boca Nº
+                              SizedBox(
+                                width: 92,
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 7,
+                                        vertical: 3,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: isOcc
+                                            ? const Color(0xFF0F172A)
+                                            : const Color(0xFFE2E8F0),
+                                        borderRadius: BorderRadius.circular(5),
+                                      ),
+                                      child: Text(
+                                        'Boca ${slotNum.toString().padLeft(2, '0')}',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w900,
+                                          color: isOcc
+                                              ? Colors.white
+                                              : const Color(0xFF475569),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                              // Estado (OCUPADA vs LIBRE)
+                              SizedBox(
+                                width: 135,
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 3,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: isOcc
+                                            ? const Color(0xFFDCFCE7)
+                                            : const Color(0xFFF1F5F9),
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(
+                                          color: isOcc
+                                              ? const Color(0xFF16A34A)
+                                              : const Color(0xFFCBD5E1),
+                                        ),
+                                      ),
+                                      child: Text(
+                                        isOcc
+                                            ? '🟢 OCUPADA ($portLbl)'
+                                            : '⚪ LIBRE ($portType)',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w800,
+                                          color: isOcc
+                                              ? const Color(0xFF15803D)
+                                              : const Color(0xFF64748B),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                              // Lado Switch / Hierro del Rack
+                              Expanded(
+                                flex: 2,
+                                child: sw != null
+                                    ? Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            '${sw['code']} : Boca ${sw['port']}',
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w800,
+                                              color: Color(0xFF4F46E5),
+                                            ),
+                                          ),
+                                          Text(
+                                            '${sw['name']}${sw['ip_address']?.toString().isNotEmpty == true ? ' • IP SW: ${sw['ip_address']}' : ''}',
+                                            style: const TextStyle(
+                                              fontSize: 10.5,
+                                              color: Color(0xFF64748B),
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ],
+                                      )
+                                    : Text(
+                                        isOcc
+                                            ? 'Conexión directa en planta / trasera'
+                                            : '— Sin conexión a Switch —',
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          color: Color(0xFF94A3B8),
+                                        ),
+                                      ),
+                              ),
+
+                              // Lado Aparato / Dispositivo Conectado (Cuál es y tipo)
+                              Expanded(
+                                flex: 3,
+                                child: ep != null
+                                    ? Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 6,
+                                                  vertical: 1.5,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(0xFFE0F2FE),
+                                                  borderRadius:
+                                                      BorderRadius.circular(4),
+                                                ),
+                                                child: Text(
+                                                  '${ep['device_type_label'] ?? ep['device_type'] ?? 'Aparato'}',
+                                                  style: const TextStyle(
+                                                    fontSize: 9.5,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: Color(0xFF0369A1),
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Expanded(
+                                                child: Text(
+                                                  '${ep['code']} — ${ep['name']}',
+                                                  style: const TextStyle(
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: Color(0xFF0F172A),
+                                                  ),
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            'Ubicación: ${ep['room_code']?.toString().isNotEmpty == true ? ep['room_code'] : 'Planta'}${b['vlan'] != null ? ' • VLAN ${b['vlan']}' : ''}',
+                                            style: const TextStyle(
+                                              fontSize: 10.5,
+                                              color: Color(0xFF64748B),
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : const Text(
+                                        'Sin nada conectado (Boca disponible)',
+                                        style: TextStyle(
+                                          fontSize: 11.5,
+                                          fontStyle: FontStyle.italic,
+                                          color: Color(0xFF94A3B8),
+                                        ),
+                                      ),
+                              ),
+
+                              // Dirección IP del Aparato conectado
+                              SizedBox(
+                                width: 175,
+                                child: ep != null
+                                    ? Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 9,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: hasValidIp
+                                              ? const Color(0xFFEFF6FF)
+                                              : const Color(0xFFF1F5F9),
+                                          borderRadius:
+                                              BorderRadius.circular(6),
+                                          border: Border.all(
+                                            color: hasValidIp
+                                                ? const Color(0xFF93C5FD)
+                                                : const Color(0xFFCBD5E1),
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              Icons.language_rounded,
+                                              size: 13,
+                                              color: hasValidIp
+                                                  ? const Color(0xFF1D4ED8)
+                                                  : const Color(0xFF64748B),
+                                            ),
+                                            const SizedBox(width: 5),
+                                            Expanded(
+                                              child: Text(
+                                                hasValidIp
+                                                    ? 'IP: $epIp'
+                                                    : (epIp.isNotEmpty
+                                                        ? epIp
+                                                        : 'Sin IP'),
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: hasValidIp
+                                                      ? const Color(0xFF1E3A8A)
+                                                      : const Color(0xFF64748B),
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      )
+                                    : const Text(
+                                        '—',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Color(0xFFCBD5E1),
+                                        ),
+                                      ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                  ],
+                ),
+              );
+            }),
         ],
       ),
     );

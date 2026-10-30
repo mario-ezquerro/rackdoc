@@ -415,6 +415,21 @@ class RackDocApiClient {
     _decodeResponse(res);
   }
 
+  Future<Map<String, dynamic>> fetchDashboardInventory({
+    int? locationId,
+    int? rackId,
+  }) async {
+    final params = <String, String>{};
+    if (locationId != null) params['location_id'] = locationId.toString();
+    if (rackId != null) params['rack_id'] = rackId.toString();
+    final uri = Uri.parse('$baseUrl/reports/dashboard-inventory').replace(
+      queryParameters: params.isEmpty ? null : params,
+    );
+    final res = await http.get(uri, headers: _headers);
+    final data = _decodeResponse(res) as Map;
+    return Map<String, dynamic>.from(data);
+  }
+
   String getExcelExportUrl({int? locationId, int? rackId}) {
     final params = <String, String>{};
     if (locationId != null) params['location_id'] = locationId.toString();
