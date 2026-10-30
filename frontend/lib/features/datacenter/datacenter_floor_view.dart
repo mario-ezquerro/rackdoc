@@ -83,6 +83,9 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   int? _devLinkedOutletId;
   String _devStatus = 'online';
   String _devCategory = 'camera';
+  String? _settingsSavedBanner;
+  bool _settingsSaveError = false;
+  int _bannerSeq = 0;
 
   // Tipos personalizados creados por el usuario ("+ Nuevo Tipo a Medida")
   List<_FloorDeviceCatalogItem> _customCatalogItems = [];
@@ -744,10 +747,25 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     } catch (_) {}
   }
 
+  void _showInlineSettingsBanner(String message, {bool isError = false}) {
+    if (!mounted) return;
+    final seq = ++_bannerSeq;
+    setState(() {
+      _settingsSavedBanner = message;
+      _settingsSaveError = isError;
+    });
+    Future.delayed(const Duration(milliseconds: 2200), () {
+      if (mounted && _bannerSeq == seq) {
+        setState(() {
+          _settingsSavedBanner = null;
+        });
+      }
+    });
+  }
+
   Future<void> _saveSelectedFloorDeviceSettings({String? customToast}) async {
     final devId = _selectedFloorDeviceId;
     if (devId == null) return;
-    final messenger = ScaffoldMessenger.of(context);
     try {
       await widget.api.updateFloorDevice(devId, {
         'device_type': _devCategory,
@@ -771,22 +789,14 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       });
       _editingDeviceId = null;
       widget.onRefresh();
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            customToast ??
-                '✓ Ajustes de "${_devCodeCtrl.text.trim()}" aplicados y guardados.',
-          ),
-          duration: const Duration(seconds: 2),
-        ),
+      _showInlineSettingsBanner(
+        customToast ??
+            '✓ Ajustes de "${_devCodeCtrl.text.trim()}" guardados.',
       );
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Error al guardar dispositivo: $e'),
-          backgroundColor: Colors.red.shade700,
-        ),
+      _showInlineSettingsBanner(
+        'Error al guardar: $e',
+        isError: true,
       );
     }
   }
@@ -796,7 +806,6 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     int? targetRackId,
     String targetRackCode,
   ) async {
-    final messenger = ScaffoldMessenger.of(context);
     try {
       await widget.api.updateFloorDevice(dev.id, {
         'linked_rack_id': targetRackId ?? 0,
@@ -808,23 +817,15 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         });
       }
       widget.onRefresh();
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            targetRackId == null
-                ? '✓ "${dev.code}" desvinculado del Rack.'
-                : '✓ "${dev.code}" conectado al Rack $targetRackCode.',
-          ),
-          duration: const Duration(seconds: 2),
-        ),
+      _showInlineSettingsBanner(
+        targetRackId == null
+            ? '✓ "${dev.code}" desvinculado del Rack.'
+            : '✓ "${dev.code}" conectado al Rack $targetRackCode.',
       );
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Error al cambiar Rack del sensor/dispositivo: $e'),
-          backgroundColor: Colors.red.shade700,
-        ),
+      _showInlineSettingsBanner(
+        'Error al cambiar Rack: $e',
+        isError: true,
       );
     }
   }
@@ -4774,6 +4775,16 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     ),
                   ),
                   IconButton(
+                    onPressed: () => _saveSelectedFloorDeviceSettings(),
+                    icon: const Icon(
+                      Icons.save_outlined,
+                      size: 18,
+                      color: Color(0xFF2563EB),
+                    ),
+                    tooltip: 'Guardar cambios',
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  IconButton(
                     onPressed: () => _confirmDeleteFloorDevice(selectedDev!),
                     icon: const Icon(
                       Icons.delete_outline,
@@ -4851,6 +4862,48 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
               ],
             ),
           ),
+          if (_settingsSavedBanner != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: _settingsSaveError
+                    ? const Color(0xFFFEF2F2)
+                    : const Color(0xFFECFDF5),
+                border: Border(
+                  bottom: BorderSide(
+                    color: _settingsSaveError
+                        ? const Color(0xFFFECACA)
+                        : const Color(0xFFA7F3D0),
+                  ),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _settingsSaveError
+                        ? Icons.error_outline_rounded
+                        : Icons.check_circle_rounded,
+                    size: 14,
+                    color: _settingsSaveError
+                        ? const Color(0xFFDC2626)
+                        : const Color(0xFF059669),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _settingsSavedBanner!,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: _settingsSaveError
+                            ? const Color(0xFFB91C1C)
+                            : const Color(0xFF065F46),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
 
           // Cuerpo del panel derecho según selección
           Expanded(

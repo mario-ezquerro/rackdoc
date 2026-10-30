@@ -25,6 +25,13 @@ class RackDocApp extends StatelessWidget {
         colorSchemeSeed: const Color(0xFF1E3A8A),
         scaffoldBackgroundColor: const Color(0xFFF8FAFC),
         fontFamily: 'SF Pro Text',
+        snackBarTheme: SnackBarThemeData(
+          behavior: SnackBarBehavior.floating,
+          width: 440,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
       ),
       home: const RackDocShell(),
     );
