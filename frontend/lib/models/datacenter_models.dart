@@ -543,8 +543,14 @@ class RackDeviceModel {
 
   bool get isFiberFeed => feedType == 'fiber';
 
+  bool get isFloorDevicesFeed => feedType == 'floor_devices';
+
   String get feedColorHex =>
-      (customFields['feed_color'] ?? (isFiberFeed ? '#0284C7' : '#DC2626')).toString();
+      (customFields['feed_color'] ??
+              (isFloorDevicesFeed
+                  ? '#0D9488'
+                  : (isFiberFeed ? '#0284C7' : '#DC2626')))
+          .toString();
 
   int get socketCount =>
       int.tryParse((customFields['socket_count'] ?? ports.length).toString()) ??

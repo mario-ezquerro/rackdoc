@@ -79,8 +79,8 @@ class _RackEditorViewState extends State<RackEditorView> {
       TransformationController();
 
   // Dimensiones constantes del dibujo técnico del Rack (estilo Patchbox CAD) + Vista Dual (Front + Back) + Zona Exterior
-  static const double _canvasWidth = 1140.0;
-  static const double _dualCanvasWidth = 1890.0;
+  static const double _canvasWidth = 1165.0;
+  static const double _dualCanvasWidth = 1915.0;
   static const double _rackOuterLeft = 104.0;
   static const double _rackOuterWidth = 628.0;
   static const double _rackInnerLeft = 152.0;
@@ -92,10 +92,10 @@ class _RackEditorViewState extends State<RackEditorView> {
   static const double _rackTopMargin = 76.0;
   static const double _uHeightPx = 42.0;
 
-  // Coordenadas del cuadro de Tomas Eléctricas y de Fibra Exteriores (fuera del rack a la derecha)
+  // Coordenadas del cuadro de Equipos de Planta, Tomas Eléctricas y de Fibra Exteriores (fuera del rack a la derecha)
   static const double _extZoneLeft = 785.0;
   static const double _dualExtZoneLeft = 1530.0;
-  static const double _extZoneWidth = 315.0;
+  static const double _extZoneWidth = 340.0;
   static const double _extCardTopStart = 114.0;
   static const double _extCardHeight = 128.0;
   static const double _extCardGap = 18.0;
@@ -252,7 +252,12 @@ class _RackEditorViewState extends State<RackEditorView> {
 
   List<RackDeviceModel> _getExternalOutlets(RackDetailModel rack) {
     final list = rack.devices.where((d) => d.isExternalFeed).toList();
-    list.sort((a, b) => a.id.compareTo(b.id));
+    list.sort((a, b) {
+      if (a.isFloorDevicesFeed != b.isFloorDevicesFeed) {
+        return a.isFloorDevicesFeed ? -1 : 1;
+      }
+      return a.id.compareTo(b.id);
+    });
     return list;
   }
 
@@ -291,6 +296,9 @@ class _RackEditorViewState extends State<RackEditorView> {
 
   int _externalColsPerRow(RackDeviceModel ext) {
     final count = ext.ports.isEmpty ? 1 : ext.ports.length;
+    if (ext.isFloorDevicesFeed) {
+      return 3;
+    }
     if (ext.isFiberFeed) {
       return count <= 8 ? count : 8;
     }
@@ -299,6 +307,11 @@ class _RackEditorViewState extends State<RackEditorView> {
 
   double _externalCardHeight(RackDeviceModel ext) {
     final count = ext.ports.length;
+    if (ext.isFloorDevicesFeed) {
+      if (count <= 0) return 118.0;
+      final rows = ((count - 1) ~/ 3) + 1;
+      return 74.0 + rows * 68.0;
+    }
     if (count <= 0) return _extCardHeight;
     final colsPerRow = _externalColsPerRow(ext);
     final rows = ((count - 1) ~/ colsPerRow) + 1;
@@ -307,6 +320,14 @@ class _RackEditorViewState extends State<RackEditorView> {
 
   Offset _externalPortLocalCenter(RackDeviceModel ext, int pIdx) {
     final count = ext.ports.length;
+    if (ext.isFloorDevicesFeed) {
+      if (count <= 0) return const Offset(_extZoneWidth * 0.5, 92.0);
+      final rowIdx = pIdx ~/ 3;
+      final colIdx = pIdx % 3;
+      final relX = 0.18 + colIdx * 0.32;
+      final centerY = 92.0 + rowIdx * 68.0;
+      return Offset(relX * _extZoneWidth, centerY);
+    }
     if (count <= 0) return const Offset(_extZoneWidth * 0.5, 84.0);
     final colsPerRow = _externalColsPerRow(ext);
     final rows = ((count - 1) ~/ colsPerRow) + 1;
@@ -2389,8 +2410,13 @@ class _RackEditorViewState extends State<RackEditorView> {
     String defaultColor = '#2563EB';
     String? forcedExternalFeedName;
     bool isExtFiber = false;
+    bool isFloorDeviceConn =
+        srcDev.isFloorDevicesFeed || dev.isFloorDevicesFeed;
 
-    if (srcDev.isExternalFeed) {
+    if (isFloorDeviceConn) {
+      defaultCableType = 'utp_cat6a';
+      defaultColor = '#0D9488';
+    } else if (srcDev.isExternalFeed) {
       isExtFiber = srcDev.isFiberFeed;
       defaultCableType = isExtFiber ? 'fiber_om4' : 'power_ac';
       defaultColor = srcDev.feedColorHex;
@@ -2412,15 +2438,29 @@ class _RackEditorViewState extends State<RackEditorView> {
       defaultColor = '#DC2626';
     }
 
+    String floorDefaultLabel =
+        '${srcDev.code}:${srcPort.portNumber} ➔ ${dev.code}:${port.portNumber}';
+    if (isFloorDeviceConn) {
+      final fPort = srcDev.isFloorDevicesFeed ? srcPort : port;
+      final rDev = srcDev.isFloorDevicesFeed ? dev : srcDev;
+      final rPort = srcDev.isFloorDevicesFeed ? port : srcPort;
+      final parts = fPort.label.split('|');
+      final fName = parts.length >= 3 ? parts[2] : fPort.portNumber;
+      floorDefaultLabel =
+          'Planta ${fPort.portNumber} ($fName) ➔ ${rDev.code}:${rPort.portNumber}';
+    }
+
     String cableType = defaultCableType;
     String colorHex = defaultColor;
     String channel = (srcDev.isExternalFeed || dev.isExternalFeed)
         ? 'right'
         : 'auto';
     final labelCtrl = TextEditingController(
-      text: forcedExternalFeedName != null
-          ? '${isExtFiber ? 'Fibra Exterior' : 'Alimentación'} $forcedExternalFeedName ➔ ${srcDev.isExternalFeed ? dev.code : srcDev.code}'
-          : '${srcDev.code}:${srcPort.portNumber} ➔ ${dev.code}:${port.portNumber}',
+      text: isFloorDeviceConn
+          ? floorDefaultLabel
+          : (forcedExternalFeedName != null
+              ? '${isExtFiber ? 'Fibra Exterior' : 'Alimentación'} $forcedExternalFeedName ➔ ${srcDev.isExternalFeed ? dev.code : srcDev.code}'
+              : '${srcDev.code}:${srcPort.portNumber} ➔ ${dev.code}:${port.portNumber}'),
     );
     final vlanCtrl = TextEditingController(
       text: defaultCableType.startsWith('power') ? '' : '10',
@@ -6886,8 +6926,352 @@ class _RackEditorViewState extends State<RackEditorView> {
   }
 
   // ===========================================================================
-  // WIDGET DE ZONA EXTERIOR DE TOMAS ELÉCTRICAS SCHUKO Y FIBRA ÓPTICA
+  // WIDGET DE ZONA EXTERIOR: EQUIPOS DE PLANTA (IMPRESORAS, APs, CÁMARAS, SENSORES) + TOMAS SCHUKO & FIBRA
   // ===========================================================================
+  ({IconData icon, Color color, String typeLabel}) _floorDeviceVisualMeta(
+    String devType,
+  ) {
+    final t = devType.toLowerCase();
+    if (t == 'printer') {
+      return (
+        icon: Icons.print_rounded,
+        color: const Color(0xFF4F46E5),
+        typeLabel: 'Impresora Red',
+      );
+    }
+    if (t == 'camera') {
+      return (
+        icon: Icons.videocam_rounded,
+        color: const Color(0xFFE11D48),
+        typeLabel: 'Cámara IP',
+      );
+    }
+    if (t == 'access_control') {
+      return (
+        icon: Icons.fingerprint_rounded,
+        color: const Color(0xFFEA580C),
+        typeLabel: 'Control Acceso',
+      );
+    }
+    if (t == 'access_point') {
+      return (
+        icon: Icons.wifi_rounded,
+        color: const Color(0xFF0284C7),
+        typeLabel: 'Punto Wi-Fi AP',
+      );
+    }
+    if (t == 'desktop') {
+      return (
+        icon: Icons.desktop_windows_rounded,
+        color: const Color(0xFF2563EB),
+        typeLabel: 'Ordenador / PC',
+      );
+    }
+    if (t == 'phone') {
+      return (
+        icon: Icons.phone_in_talk_rounded,
+        color: const Color(0xFF0D9488),
+        typeLabel: 'Teléfono VoIP',
+      );
+    }
+    if (t == 'tv_display') {
+      return (
+        icon: Icons.tv_rounded,
+        color: const Color(0xFF7C3AED),
+        typeLabel: 'Pantalla / TV',
+      );
+    }
+    if (t == 'telecom_outlet') {
+      return (
+        icon: Icons.settings_ethernet_rounded,
+        color: const Color(0xFFD97706),
+        typeLabel: 'Roseta RJ45',
+      );
+    }
+    if (t.contains('temp')) {
+      return (
+        icon: Icons.thermostat_rounded,
+        color: const Color(0xFFEA580C),
+        typeLabel: 'Sensor Temp.',
+      );
+    }
+    if (t.contains('hum')) {
+      return (
+        icon: Icons.water_drop_rounded,
+        color: const Color(0xFF0891B2),
+        typeLabel: 'Sensor Humedad',
+      );
+    }
+    if (t.contains('power') || t.contains('load')) {
+      return (
+        icon: Icons.bolt_rounded,
+        color: const Color(0xFFCA8A04),
+        typeLabel: 'Sensor Carga kW',
+      );
+    }
+    if (t.contains('smoke') || t.contains('fire')) {
+      return (
+        icon: Icons.local_fire_department_rounded,
+        color: const Color(0xFFDC2626),
+        typeLabel: 'Detector Humo',
+      );
+    }
+    if (t.contains('water') || t.contains('leak')) {
+      return (
+        icon: Icons.waves_rounded,
+        color: const Color(0xFF2563EB),
+        typeLabel: 'Sensor Fuga Agua',
+      );
+    }
+    return (
+      icon: Icons.sensors_rounded,
+      color: const Color(0xFF0D9488),
+      typeLabel: 'Equipo / Sensor',
+    );
+  }
+
+  Future<void> _showQuickAddFloorDeviceFromRackDialog() async {
+    if (!_canEdit) return;
+    final rack = _rack;
+    if (rack == null) return;
+    final floorId = rack.breadcrumb['floor_id'] as int?;
+    if (floorId == null) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    String selectedType = 'printer';
+    final codeCtrl = TextEditingController(text: 'PR02');
+    final nameCtrl = TextEditingController(text: 'Impresora Multifunción Sala');
+    final ipCtrl = TextEditingController(text: '10.28.25.55');
+    final roomCtrl = TextEditingController(
+      text: (rack.breadcrumb['room_name'] ?? 'CPD').toString(),
+    );
+
+    const presets = <({String key, String prefix, String label, String defName})>[
+      (
+        key: 'printer',
+        prefix: 'PR',
+        label: '🖨️ Impresora de Red (RJ45)',
+        defName: 'Impresora Multifunción LaserJet',
+      ),
+      (
+        key: 'access_point',
+        prefix: 'AP',
+        label: '📶 Punto de Acceso Wi-Fi (PoE)',
+        defName: 'Punto de Acceso Wi-Fi 6E Techo',
+      ),
+      (
+        key: 'camera',
+        prefix: 'CAM',
+        label: '📹 Cámara CCTV IP (PoE)',
+        defName: 'Cámara Domo IP 4K',
+      ),
+      (
+        key: 'access_control',
+        prefix: 'AC',
+        label: '🔐 Control de Acceso Puerta',
+        defName: 'Terminal Biométrico RFID Puerta',
+      ),
+      (
+        key: 'telecom_outlet',
+        prefix: 'Bi',
+        label: '🔌 Roseta de Red / Pared (RJ45)',
+        defName: 'Caja Rosetas Pared Cat6A',
+      ),
+      (
+        key: 'desktop',
+        prefix: 'DP',
+        label: '💻 Ordenador / Workstation',
+        defName: 'Workstation Operador',
+      ),
+      (
+        key: 'phone',
+        prefix: 'PH',
+        label: '☎️ Teléfono VoIP',
+        defName: 'Teléfono IP Sobremesa',
+      ),
+      (
+        key: 'sensor_temp',
+        prefix: 'TMP',
+        label: '🌡️ Sensor de Temperatura',
+        defName: 'Sonda Temperatura Pasillo Frío',
+      ),
+      (
+        key: 'sensor_humidity',
+        prefix: 'HUM',
+        label: '💧 Sensor de Humedad',
+        defName: 'Sensor Humedad Relativa CPD',
+      ),
+      (
+        key: 'sensor_power_load',
+        prefix: 'PWR',
+        label: '⚡ Sensor Carga Eléctrica (kW/A)',
+        defName: 'Analizador Carga Eléctrica Cuadro',
+      ),
+    ];
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.hub_rounded, color: Color(0xFF0D9488), size: 22),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Añadir Equipo / Sensor de Planta a ${rack.code}',
+                  style: const TextStyle(
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 460,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(9),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF0FDFA),
+                    borderRadius: BorderRadius.circular(7),
+                    border: Border.all(color: const Color(0xFF99F6E4)),
+                  ),
+                  child: Text(
+                    'Se añadirá al plano de Planta (2. Datacenters) vinculado a "${rack.code}" y aparecerá en este recuadro para que puedas tirar su cable al Switch o Patch Panel.',
+                    style: const TextStyle(
+                      fontSize: 11.2,
+                      color: Color(0xFF115E59),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedType,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Tipo de Equipo o Sensor de Planta',
+                    isDense: true,
+                  ),
+                  items: presets
+                      .map(
+                        (p) => DropdownMenuItem(
+                          value: p.key,
+                          child: Text(
+                            p.label,
+                            style: const TextStyle(fontSize: 12.5),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (val) {
+                    if (val == null) return;
+                    final pr = presets.firstWhere((e) => e.key == val);
+                    setModal(() {
+                      selectedType = val;
+                      codeCtrl.text =
+                          '${pr.prefix}0${DateTime.now().second % 9 + 1}';
+                      nameCtrl.text = pr.defName;
+                    });
+                  },
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: codeCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Código (ej. PR02, AP03, CAM04)',
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: roomCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Zona / Sala en Planta',
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Nombre Descriptivo',
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: ipCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Dirección IP (opcional)',
+                    isDense: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF0D9488),
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              icon: const Icon(Icons.add_link, size: 16),
+              label: const Text('Añadir al Recuadro de Planta'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await widget.api.createFloorDevice(floorId, {
+          'room_id': rack.roomId,
+          'room_code': roomCtrl.text.trim(),
+          'device_type': selectedType,
+          'code': codeCtrl.text.trim(),
+          'name': nameCtrl.text.trim(),
+          'pos_x': 0.42,
+          'pos_y': 0.48,
+          'ip_address': ipCtrl.text.trim(),
+          'vlan': 20,
+          'status': 'online',
+          'linked_rack_id': rack.id,
+          'linked_rack_device_code': '',
+        });
+        await _loadRack();
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              'Equipo de planta "${codeCtrl.text.trim()}" añadido al recuadro de ${rack.code}. Haz clic en su icono para unirlo a un Switch o Patch Panel.',
+            ),
+          ),
+        );
+      } catch (e) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
+        );
+      }
+    }
+  }
+
   Widget _buildExternalPowerOutletsZone({
     required List<RackDeviceModel> extOutlets,
     required Map<int, Color> connectedPortColors,
@@ -6902,6 +7286,8 @@ class _RackEditorViewState extends State<RackEditorView> {
       runningTopInZone += h + _extCardGap;
     }
     final totalHeight = runningTopInZone + 40.0;
+    final nonFloorOutletsCount =
+        extOutlets.where((e) => !e.isFloorDevicesFeed).length;
 
     return Positioned(
       left: _effectiveExtZoneLeft,
@@ -6931,8 +7317,8 @@ class _RackEditorViewState extends State<RackEditorView> {
               child: Row(
                 children: [
                   const Icon(
-                    Icons.electrical_services,
-                    color: Color(0xFFFACC15),
+                    Icons.hub_rounded,
+                    color: Color(0xFF2DD4BF),
                     size: 16,
                   ),
                   const SizedBox(width: 6),
@@ -6941,25 +7327,54 @@ class _RackEditorViewState extends State<RackEditorView> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'TOMAS EXTERIORES (ELÉCTRICAS & FIBRA)',
+                          'PLANTA / DATACENTER & TOMAS EXTERIORES',
                           style: TextStyle(
                             color: Colors.white,
-                            fontSize: 9.8,
+                            fontSize: 9.4,
                             fontWeight: FontWeight.w800,
-                            letterSpacing: 0.3,
+                            letterSpacing: 0.2,
                           ),
                         ),
                         Text(
-                          'Schuko 230V y Acometidas de Fibra con nº conectores ajustable',
+                          'Impresoras, APs, Cámaras, Sensores, Schuko y Fibra',
                           style: TextStyle(
                             color: Color(0xFF94A3B8),
-                            fontSize: 8.8,
+                            fontSize: 8.5,
                           ),
                         ),
                       ],
                     ),
                   ),
                   if (_canEdit) ...[
+                    InkWell(
+                      onTap: _showQuickAddFloorDeviceFromRackDialog,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0D9488),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.add_link, size: 11, color: Colors.white),
+                            SizedBox(width: 2),
+                            Text(
+                              '+Planta',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 8.8,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
                     InkWell(
                       onTap: () => _showAddOrEditExternalOutletDialog(
                         initialFeedType: 'power',
@@ -6982,7 +7397,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                               '+Schuko',
                               style: TextStyle(
                                 color: Colors.white,
-                                fontSize: 9.2,
+                                fontSize: 8.8,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
@@ -7013,7 +7428,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                               '+Fibra',
                               style: TextStyle(
                                 color: Colors.white,
-                                fontSize: 9.2,
+                                fontSize: 8.8,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
@@ -7031,7 +7446,9 @@ class _RackEditorViewState extends State<RackEditorView> {
               ext: extOutlets[idx],
               topInZone: cardPositions[idx],
               cardHeight: cardHeights[idx],
-              canDelete: _canEdit && extOutlets.length > 1,
+              canDelete: _canEdit &&
+                  !extOutlets[idx].isFloorDevicesFeed &&
+                  nonFloorOutletsCount > 1,
               connectedPortColors: connectedPortColors,
             ),
         ],
@@ -7049,6 +7466,7 @@ class _RackEditorViewState extends State<RackEditorView> {
     final feedColor = CableGeometryBuilder.parseHexColor(ext.feedColorHex);
     final count = ext.ports.length;
     final isFiber = ext.isFiberFeed;
+    final isFloorBox = ext.isFloorDevicesFeed;
 
     return Positioned(
       left: 0,
@@ -7057,7 +7475,7 @@ class _RackEditorViewState extends State<RackEditorView> {
       height: cardHeight,
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: isFloorBox ? const Color(0xFFF8FAFC) : Colors.white,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: feedColor, width: 2.2),
           boxShadow: [
@@ -7087,25 +7505,59 @@ class _RackEditorViewState extends State<RackEditorView> {
                 child: Row(
                   children: [
                     Icon(
-                      isFiber
-                          ? Icons.settings_input_hdmi_outlined
-                          : Icons.bolt,
+                      isFloorBox
+                          ? Icons.devices_other_rounded
+                          : (isFiber
+                              ? Icons.settings_input_hdmi_outlined
+                              : Icons.bolt),
                       size: 15,
                       color: Colors.white,
                     ),
                     const SizedBox(width: 5),
                     Expanded(
                       child: Text(
-                        '${ext.code} • ${ext.name}',
+                        isFloorBox
+                            ? 'EQUIPOS & SENSORES DE PLANTA ($count)'
+                            : '${ext.code} • ${ext.name}',
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 10.8,
+                          fontSize: 10.4,
                           fontWeight: FontWeight.w800,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    if (_canEdit)
+                    if (_canEdit && isFloorBox)
+                      InkWell(
+                        onTap: _showQuickAddFloorDeviceFromRackDialog,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: Colors.white70),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.add, size: 11, color: Colors.white),
+                              SizedBox(width: 2),
+                              Text(
+                                'Añadir',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 8.8,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    if (_canEdit && !isFloorBox)
                       IconButton(
                         onPressed: () =>
                             _showAddOrEditExternalOutletDialog(existing: ext),
@@ -7161,18 +7613,20 @@ class _RackEditorViewState extends State<RackEditorView> {
                   const SizedBox(width: 5),
                   Expanded(
                     child: Text(
-                      isFiber
-                          ? 'Fibra Óptica Exterior ($count conectores FO)'
-                          : 'Enchufes Schuko 230V ($count tomas)',
+                      isFloorBox
+                          ? 'Clic en icono para tirar cable al Switch o Patch Panel'
+                          : (isFiber
+                              ? 'Fibra Óptica Exterior ($count conectores FO)'
+                              : 'Enchufes Schuko 230V ($count tomas)'),
                       style: const TextStyle(
-                        fontSize: 9.2,
+                        fontSize: 9.0,
                         fontWeight: FontWeight.w700,
                         color: Color(0xFF475569),
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  if (_canEdit)
+                  if (_canEdit && !isFloorBox)
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 4,
@@ -7235,6 +7689,25 @@ class _RackEditorViewState extends State<RackEditorView> {
                 ],
               ),
             ),
+            if (isFloorBox && count == 0)
+              Positioned(
+                left: 12,
+                right: 12,
+                top: 62,
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                  ),
+                  child: const Text(
+                    'Sin impresoras, cámaras, APs o sensores vinculados a este Rack. Pulsa "+Planta" arriba o vincúlalos en 2. Datacenters.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 9.2, color: Color(0xFF64748B)),
+                  ),
+                ),
+              ),
             for (int pIdx = 0; pIdx < count; pIdx++)
               _buildExternalPortWidget(
                 ext: ext,
@@ -7259,6 +7732,174 @@ class _RackEditorViewState extends State<RackEditorView> {
     final isPending = _pendingSourcePort?.id == port.id;
     final isConnected = connectedColor != null;
     final localCenter = _externalPortLocalCenter(ext, index);
+
+    // 1. RECUADRO DE EQUIPOS DE PLANTA (Impresoras, Cámaras, APs Wi-Fi, Sensores, Rosetas, PCs)
+    if (ext.isFloorDevicesFeed) {
+      final parts = port.label.split('|');
+      final devType = parts.length >= 2 ? parts[1] : 'device';
+      final devName = parts.length >= 3 && parts[2].trim().isNotEmpty
+          ? parts[2].trim()
+          : port.portNumber;
+      final devIp = parts.length >= 4 ? parts[3].trim() : '';
+      final devRoom = parts.length >= 5 ? parts[4].trim() : '';
+      final meta = _floorDeviceVisualMeta(devType);
+
+      String? connectedTargetLabel;
+      if (_rack != null) {
+        for (final c in _rack!.connections) {
+          if (c.sourcePortId == port.id) {
+            connectedTargetLabel =
+                '${c.targetInfo.deviceCode}:${c.targetInfo.portNumber}';
+            break;
+          } else if (c.targetPortId == port.id) {
+            connectedTargetLabel =
+                '${c.sourceInfo.deviceCode}:${c.sourceInfo.portNumber}';
+            break;
+          }
+        }
+      }
+
+      const tileW = 102.0;
+      const tileH = 58.0;
+      final leftPx = localCenter.dx - tileW / 2.0;
+      final topPx = localCenter.dy - tileH / 2.0;
+      final borderCol = isPending
+          ? const Color(0xFFF59E0B)
+          : (isConnected ? (connectedColor) : meta.color);
+
+      return Positioned(
+        left: leftPx,
+        top: topPx,
+        width: tileW,
+        height: tileH,
+        child: Tooltip(
+          message:
+              '📡 EQUIPO / SENSOR DE PLANTA (${meta.typeLabel})\n'
+              '• Código: ${port.portNumber} — $devName\n'
+              '${devRoom.isNotEmpty ? '• Sala / Zona: $devRoom\n' : ''}'
+              '${devIp.isNotEmpty ? '• IP: $devIp\n' : ''}'
+              '• Estado en Rack: ${connectedTargetLabel != null ? 'Conectado a $connectedTargetLabel (Clic para seleccionar/borrar cable)' : 'Libre (Clic para tirar cable al Switch o Patch Panel)'}',
+          child: InkWell(
+            onTap: () => _handlePortTap(ext, port),
+            borderRadius: BorderRadius.circular(8),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 140),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3.5),
+              decoration: BoxDecoration(
+                color: isPending
+                    ? const Color(0xFFECFDF5)
+                    : (isConnected
+                        ? borderCol.withValues(alpha: 0.11)
+                        : Colors.white),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: borderCol,
+                  width: isPending ? 2.4 : (isConnected ? 1.9 : 1.3),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: borderCol.withValues(
+                      alpha: isPending || isConnected ? 0.22 : 0.08,
+                    ),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 17,
+                        height: 17,
+                        decoration: BoxDecoration(
+                          color: meta.color,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Icon(meta.icon, size: 11, color: Colors.white),
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          port.portNumber,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 9.2,
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFF0F172A),
+                          ),
+                        ),
+                      ),
+                      Container(
+                        width: 9,
+                        height: 9,
+                        decoration: BoxDecoration(
+                          color: isConnected
+                              ? const Color(0xFF16A34A)
+                              : const Color(0xFFCBD5E1),
+                          borderRadius: BorderRadius.circular(2),
+                          border: Border.all(
+                            color: const Color(0xFF0F172A),
+                            width: 0.8,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    devName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 7.6,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF475569),
+                    ),
+                  ),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 1.5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isPending
+                          ? const Color(0xFFD97706)
+                          : (connectedTargetLabel != null
+                              ? borderCol
+                              : const Color(0xFFF1F5F9)),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      isPending
+                          ? 'Elige boca Switch/PP...'
+                          : (connectedTargetLabel != null
+                              ? '➔ $connectedTargetLabel'
+                              : 'Clic ➔ Switch / PP'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 7.4,
+                        fontWeight: FontWeight.w800,
+                        color: (isPending || connectedTargetLabel != null)
+                            ? Colors.white
+                            : const Color(0xFF334155),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     final isFiber = ext.isFiberFeed;
     final socketSize = isFiber ? 28.0 : 34.0;
     final leftPx = localCenter.dx - socketSize / 2.0;
