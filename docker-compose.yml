@@ -3,7 +3,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    image: rackdoc-backend:latest
+    image: cloudresources/rackdoc-backend:latest
     container_name: rackdoc-backend
     hostname: rackdoc-backend
     restart: unless-stopped
@@ -25,7 +25,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    image: rackdoc-frontend:latest
+    image: cloudresources/rackdoc-frontend:latest
     container_name: rackdoc-frontend
     hostname: rackdoc-frontend
     restart: unless-stopped
