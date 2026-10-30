@@ -549,7 +549,26 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       }
     }
 
-    // 2. Deshacer movimiento: Ctrl + Z (Windows/Linux) o Cmd + Z (macOS)
+    // 2. Tecla ESC -> Cancelar selección o Modo Mano fijado
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.escape) {
+      if (_marqueeStart != null ||
+          _isHandToolPinned ||
+          _selectedRackIds.isNotEmpty ||
+          _selectedFloorDeviceId != null) {
+        setState(() {
+          _marqueeStart = null;
+          _marqueeCurrent = null;
+          _isHandToolPinned = false;
+          _selectedRackIds.clear();
+          _selectedFloorDeviceId = null;
+          _editingDeviceId = null;
+        });
+        return true;
+      }
+    }
+
+    // 3. Deshacer movimiento: Ctrl + Z (Windows/Linux) o Cmd + Z (macOS)
     if (event is KeyDownEvent &&
         event.logicalKey == LogicalKeyboardKey.keyZ) {
       final keys = HardwareKeyboard.instance.logicalKeysPressed;

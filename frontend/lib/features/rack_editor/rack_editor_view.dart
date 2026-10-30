@@ -176,7 +176,38 @@ class _RackEditorViewState extends State<RackEditorView> {
       }
     }
 
-    // 2. Deshacer movimiento: Ctrl + Z (Windows/Linux) o Cmd + Z (macOS)
+    // 2. Tecla ESC -> Cancelar tirada de cable en curso, plantilla activa o selección
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.escape) {
+      if (_pendingSourcePort != null) {
+        setState(() {
+          _pendingSourcePort = null;
+          _pendingSourceDevice = null;
+          _cursorCanvasPos = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Tirada de conexión cancelada (Esc).'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+        return true;
+      }
+      if (_selectedTemplateForClick != null ||
+          _isHandToolPinned ||
+          _selectedConnectionId != null ||
+          _selectedDeviceId != null) {
+        setState(() {
+          _selectedTemplateForClick = null;
+          _isHandToolPinned = false;
+          _selectedConnectionId = null;
+          _selectedDeviceId = null;
+        });
+        return true;
+      }
+    }
+
+    // 3. Deshacer movimiento: Ctrl + Z (Windows/Linux) o Cmd + Z (macOS)
     if (event is KeyDownEvent &&
         event.logicalKey == LogicalKeyboardKey.keyZ) {
       final keys = HardwareKeyboard.instance.logicalKeysPressed;
@@ -5562,7 +5593,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        'Tirando desde ${_pendingSourceDevice?.code}:${_pendingSourcePort?.portNumber} — Clic en boca Front/Back',
+                        'Tirando desde ${_pendingSourceDevice?.code}:${_pendingSourcePort?.portNumber} — Clic en boca destino (o pulsa Esc para cancelar)',
                         style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
@@ -5741,6 +5772,15 @@ class _RackEditorViewState extends State<RackEditorView> {
                             }
                           },
                           child: GestureDetector(
+                            onSecondaryTap: () {
+                              if (_pendingSourcePort != null) {
+                                setState(() {
+                                  _pendingSourcePort = null;
+                                  _pendingSourceDevice = null;
+                                  _cursorCanvasPos = null;
+                                });
+                              }
+                            },
                             onTapUp: (details) {
                               for (final r in computedRoutes) {
                                 final d =
