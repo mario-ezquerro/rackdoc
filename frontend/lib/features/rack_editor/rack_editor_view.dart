@@ -88,7 +88,7 @@ class _RackEditorViewState extends State<RackEditorView> {
   static const double _backRackOuterLeft = 836.0;
   static const double _backRackInnerLeft = 884.0;
   static const double _dualFaceGap = 104.0;
-  static const double _railWidth = 18.0;
+  static const double _railWidth = 21.0;
   static const double _rackTopMargin = 76.0;
   static const double _uHeightPx = 42.0;
 
@@ -262,12 +262,14 @@ class _RackEditorViewState extends State<RackEditorView> {
   }
 
   /// Ajusta la posición horizontal relativa `relX` para agrupar visualmente en bloques de 8 bocas
-  /// los paneles de 24 puertos de 1 fila (como Patch Panels A..E y FI-01 en la imagen de referencia).
+  /// los paneles de 24 puertos de 1 fila (como Patch Panels A..E y FI-01 en la imagen de referencia),
+  /// los 24 casetes verticales de PATCHBOX en 1 sola fila, y los bloques RJ45 + SFP+ en Routers/Switches.
   double _computeVisualRelX(RackDeviceModel dev, PortModel port) {
     final cat = dev.template.category;
     final numVal = int.tryParse(
       port.portNumber.replaceAll(RegExp(r'[^0-9]'), ''),
     );
+    // 1. Patch Panels (A..F) y Bandeja de Fibra (FI-01): 3 bloques de 8 bocas (1..8, 9..16, 17..24)
     if ((cat == 'patch_panel' || cat == 'gateway') &&
         numVal != null &&
         numVal >= 1 &&
@@ -275,23 +277,59 @@ class _RackEditorViewState extends State<RackEditorView> {
       final idx = numVal - 1; // 0..23
       final block = idx ~/ 8; // 0, 1, 2
       final inBlock = idx % 8; // 0..7
-      const baseStart = 0.085;
-      const blockSpan = 0.245;
+      const baseStart = 0.082;
+      const blockSpan = 0.252;
       const blockGap = 0.042;
       return baseStart +
           block * (blockSpan + blockGap) +
           (inBlock / 7.0) * blockSpan;
     }
+    // 2. PATCHBOX (PBX01, PBX02, PBX03) en cara frontal: 24 casetes verticales en 1 sola fila (1..24)
+    if (cat == 'patchbox' &&
+        port.face == 'front' &&
+        numVal != null &&
+        numVal >= 1 &&
+        numVal <= 24) {
+      final idx = numVal - 1; // 0..23
+      return 0.052 + (idx / 23.0) * 0.896;
+    }
+    // 3. Router (RT01): bloque compacto 2x4 RJ45 (1..8) y a su derecha bloque 2x2 SFP+ (9..12)
+    if (cat == 'router' && port.face == 'front' && numVal != null) {
+      if (port.portType == 'sfp_plus' || port.portNumber.startsWith('SFP')) {
+        final col = ((numVal - 1) ~/ 2).clamp(0, 1);
+        return 0.725 + col * 0.046;
+      }
+      if (numVal >= 1 && numVal <= 8) {
+        final col = ((numVal - 1) ~/ 2).clamp(0, 3);
+        return 0.545 + (col / 3.0) * 0.115;
+      }
+    }
+    // 4. Switch (SW01..03): bloque 2x12 RJ45 (1..24) y a su derecha bloque 2x2 SFP+ (1..4)
+    if (cat == 'switch' && port.face == 'front' && numVal != null) {
+      if (port.portType == 'sfp_plus' || port.portNumber.startsWith('SFP')) {
+        final col = ((numVal - 1) ~/ 2).clamp(0, 1);
+        return 0.775 + col * 0.036;
+      }
+      if (numVal >= 1 && numVal <= 24) {
+        final col = ((numVal - 1) ~/ 2).clamp(0, 11);
+        return 0.365 + (col / 11.0) * 0.365;
+      }
+    }
     return port.relX;
   }
 
   double _computeVisualRelY(RackDeviceModel dev, PortModel port, String face) {
+    final cat = dev.template.category;
+    if (cat == 'patchbox' && face == 'front') {
+      // En PATCHBOX los 24 casetes van en 1 sola fila y el conector RJ45 queda en la mitad inferior del casete
+      return 0.65;
+    }
     final facePorts = dev.portsForFace(face);
     final hasTwoRows = facePorts.any((p) => p.rowIndex > 0);
     if (hasTwoRows) {
       return port.rowIndex == 0 ? 0.34 : 0.72;
     }
-    return 0.56;
+    return 0.58;
   }
 
   int _externalColsPerRow(RackDeviceModel ext) {
@@ -6603,27 +6641,77 @@ class _RackEditorViewState extends State<RackEditorView> {
         ),
       ),
 
-      // A2. Marco exterior de doble pared del Armario Rack
+      // A1B. Techo técnico superior del Armario (Rittal Top Enclosure Cap encima de U42)
+      Positioned(
+        left: outerLeft,
+        top: _rackTopMargin - 38,
+        width: _rackOuterWidth,
+        height: 18,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(
+              top: const BorderSide(color: Color(0xFF334155), width: 1.3),
+              left: const BorderSide(color: Color(0xFF334155), width: 1.3),
+              right: const BorderSide(color: Color(0xFF334155), width: 1.3),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 24,
+                decoration: const BoxDecoration(
+                  border: Border(
+                    right: BorderSide(color: Color(0xFF475569), width: 1.1),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    border: Border.all(
+                      color: const Color(0xFF64748B),
+                      width: 0.9,
+                    ),
+                  ),
+                ),
+              ),
+              Container(
+                width: 24,
+                decoration: const BoxDecoration(
+                  border: Border(
+                    left: BorderSide(color: Color(0xFF475569), width: 1.1),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+
+      // A2. Marco exterior de doble pared del Armario Rack + Canaletas laterales
       Positioned(
         left: outerLeft,
         top: _rackTopMargin - 20,
         width: _rackOuterWidth,
         height: rack.totalUnits * _uHeightPx + 40,
         child: Container(
-          padding: const EdgeInsets.all(6),
+          padding: const EdgeInsets.all(7),
           decoration: BoxDecoration(
-            color: const Color(0xFFF8FAFC),
+            color: Colors.white,
             border: Border.all(
               color: const Color(0xFF334155),
-              width: 1.5,
+              width: 1.4,
             ),
           ),
           child: Container(
             decoration: BoxDecoration(
-              color: const Color(0xFFFDFEFE),
+              color: Colors.white,
               border: Border.all(
                 color: const Color(0xFF475569),
-                width: 1.2,
+                width: 1.15,
               ),
             ),
           ),
@@ -6636,14 +6724,14 @@ class _RackEditorViewState extends State<RackEditorView> {
         top: _rackTopMargin,
         width: _railWidth,
         height: rack.totalUnits * _uHeightPx,
-        child: _buildPerforated19InchRail(rack.totalUnits),
+        child: _buildPerforated19InchRail(rack.totalUnits, isLeft: true),
       ),
       Positioned(
         left: innerLeft + _rackInnerWidth,
         top: _rackTopMargin,
         width: _railWidth,
         height: rack.totalUnits * _uHeightPx,
-        child: _buildPerforated19InchRail(rack.totalUnits),
+        child: _buildPerforated19InchRail(rack.totalUnits, isLeft: false),
       ),
 
       // A4. Línea vertical continua de la regla U a la izquierda del armario
@@ -6888,13 +6976,13 @@ class _RackEditorViewState extends State<RackEditorView> {
     ];
   }
 
-  /// Dibuja el raíl vertical de 19 pulgadas con las 3 perforaciones cuadradas por cada U (idéntico a la imagen).
-  Widget _buildPerforated19InchRail(int totalUnits) {
+  /// Dibuja el raíl vertical de 19 pulgadas con las 3 perforaciones cuadradas EIA-310 por cada U (idéntico a la imagen).
+  Widget _buildPerforated19InchRail(int totalUnits, {bool isLeft = true}) {
     return Container(
       decoration: const BoxDecoration(
-        color: Color(0xFFE2E8F0),
+        color: Color(0xFFDDE3EC),
         border: Border.symmetric(
-          vertical: BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+          vertical: BorderSide(color: Color(0xFFB8C4D4), width: 0.9),
         ),
       ),
       child: Column(
@@ -6902,22 +6990,29 @@ class _RackEditorViewState extends State<RackEditorView> {
           for (int u = 0; u < totalUnits; u++)
             SizedBox(
               height: _uHeightPx,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  for (int h = 0; h < 3; h++)
-                    Container(
-                      width: 4.0,
-                      height: 4.0,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
-                        border: Border.all(
-                          color: const Color(0xFF94A3B8),
-                          width: 0.8,
+              child: Align(
+                alignment:
+                    isLeft ? Alignment.centerLeft : Alignment.centerRight,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2.5),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      for (int h = 0; h < 3; h++)
+                        Container(
+                          width: 3.2,
+                          height: 3.2,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            border: Border.all(
+                              color: const Color(0xFF64748B),
+                              width: 0.8,
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                ],
+                    ],
+                  ),
+                ),
               ),
             ),
         ],
@@ -8187,67 +8282,61 @@ class _RackEditorViewState extends State<RackEditorView> {
               ),
 
             // Orejetas laterales de anclaje sobre el raíl de 19" izquierdo y derecho
+            // En la orejeta izquierda se inscribe verticalmente el código del equipo (FI-01, RT01, PBX01, SW01...)
+            // salvo en Patch Panels de una sola letra (A, B, C, D, E, F) donde la letra va horizontal dentro del frontal
             Positioned(
               left: 0,
               top: 0,
               bottom: 0,
               width: _railWidth,
-              child: _buildDeviceMountingEar(dev.uHeight),
+              child: _buildDeviceMountingEar(
+                dev.uHeight,
+                isLeft: true,
+                verticalCode: dev.code.trim().length <= 1 ? null : dev.code,
+                statusColor: dev.monitoringEnabled ? statusColor : null,
+              ),
             ),
             Positioned(
               right: 0,
               top: 0,
               bottom: 0,
               width: _railWidth,
-              child: _buildDeviceMountingEar(dev.uHeight),
+              child: _buildDeviceMountingEar(dev.uHeight, isLeft: false),
             ),
 
-            // Código del equipo rotado 90° en vertical a la izquierda (con punto de estado Heartbeat Verde/Rojo/Ámbar)
-            Positioned(
-              left: _railWidth + 2,
-              top: 2,
-              bottom: 2,
-              width: 22,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  RotatedBox(
-                    quarterTurns: 3,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (dev.monitoringEnabled) ...[
-                          Container(
-                            width: 5.5,
-                            height: 5.5,
-                            decoration: BoxDecoration(
-                              color: statusColor,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 3),
-                        ],
-                        Text(
-                          dev.code,
-                          style: const TextStyle(
-                            fontSize: 8.5,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFF0F172A),
-                            letterSpacing: 0.3,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Información sutil cuando tiene pocas bocas en esta cara (ej. parte trasera con PSU o servidor o cabina SAN/NAS)
-            if (facePorts.length <= 12 && !(isTray && dev.trayItems.isNotEmpty))
+            // Para Patch Panels con código de 1 sola letra (A, B, C, D, E, F), se dibuja en horizontal junto a la orejeta izquierda
+            if (dev.code.trim().length == 1)
               Positioned(
-                left: _railWidth + 28,
+                left: _railWidth + 5,
+                top: 0,
+                bottom: 0,
+                width: 18,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        dev.code.trim(),
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+            // Etiqueta descriptiva sólo cuando "Foto Equipos: ON" está activo, en cara trasera, o en chasis con <= 4 bocas (servidores/SAI)
+            if ((_showEquipmentPhotos ||
+                    face == 'back' ||
+                    facePorts.length <= 4) &&
+                facePorts.length <= 12 &&
+                !(isTray && dev.trayItems.isNotEmpty))
+              Positioned(
+                left: _railWidth + 26,
                 top: 3,
                 child: Container(
                   padding: _showEquipmentPhotos
@@ -8266,7 +8355,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                   child: Text(
                     '${dev.name}${dev.uHeight > 1 ? ' (${dev.uHeight}U)' : ''}${isRearAutoView ? ' • [${face.toUpperCase()} U${dev.startU}]' : ''}${dev.ipAddress.isNotEmpty ? ' • ${dev.ipAddress}' : ''}${dev.monitoringEnabled ? ' • HB:${dev.monitorMethod.toUpperCase()}' : ''}',
                     style: const TextStyle(
-                      fontSize: 8.5,
+                      fontSize: 8.2,
                       fontWeight: FontWeight.w700,
                       color: Color(0xFF334155),
                     ),
@@ -9346,32 +9435,120 @@ class _RackEditorViewState extends State<RackEditorView> {
     );
   }
 
-  Widget _buildDeviceMountingEar(int uHeight) {
+  Widget _buildDeviceMountingEar(
+    int uHeight, {
+    bool isLeft = true,
+    String? verticalCode,
+    Color? statusColor,
+  }) {
+    final hasVerticalCode =
+        isLeft && verticalCode != null && verticalCode.trim().isNotEmpty;
     return Container(
       decoration: const BoxDecoration(
-        color: Color(0xFFE2E8F0),
+        color: Color(0xFFDDE3EC),
         border: Border.symmetric(
-          vertical: BorderSide(color: Color(0xFFCBD5E1), width: 0.8),
+          vertical: BorderSide(color: Color(0xFFB4BFCE), width: 0.9),
         ),
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          for (int i = 0; i < uHeight * 3; i++)
-            Container(
-              width: 4.0,
-              height: 4.0,
-              decoration: BoxDecoration(
-                color: const Color(0xFF94A3B8),
-                borderRadius: BorderRadius.circular(1),
-              ),
+      child: hasVerticalCode
+          ? Column(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const SizedBox(height: 1.5),
+                Container(
+                  width: 3.6,
+                  height: 3.6,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    border: Border.all(
+                      color: const Color(0xFF64748B),
+                      width: 0.75,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Center(
+                    child: RotatedBox(
+                      quarterTurns: 3,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (statusColor != null) ...[
+                            Container(
+                              width: 4.2,
+                              height: 4.2,
+                              decoration: BoxDecoration(
+                                color: statusColor,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 1.5),
+                          ],
+                          Text(
+                            verticalCode.trim(),
+                            style: const TextStyle(
+                              fontSize: 7.4,
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFF0F172A),
+                              letterSpacing: 0.1,
+                              height: 1.0,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Container(
+                  width: 3.6,
+                  height: 3.6,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    border: Border.all(
+                      color: const Color(0xFF64748B),
+                      width: 0.75,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 1.5),
+              ],
+            )
+          : Column(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                for (int i = 0; i < uHeight * 3; i++)
+                  Align(
+                    alignment: isLeft
+                        ? Alignment.centerLeft
+                        : Alignment.centerRight,
+                    child: Container(
+                      margin: EdgeInsets.only(
+                        left: isLeft ? 3.5 : 0,
+                        right: isLeft ? 0 : 3.5,
+                      ),
+                      width: 4.2,
+                      height: 4.2,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        border: Border.all(
+                          color: const Color(0xFF64748B),
+                          width: 0.85,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
-        ],
-      ),
     );
   }
 
-  /// Dibuja cada puerto con su conector RJ45 / Fibra / PSU / Enchufe Schuko Hembra / Conector Macho IN.
+  /// Dibuja cada puerto con geometría CAD técnica:
+  /// - Conector RJ45 ("ETS" 8P8C escalonado con pestaña y pines de contacto superiores)
+  /// - Casetes verticales PATCHBOX (24 módulos en 1 fila con clip superior, número 1..24 y boca RJ45 inferior)
+  /// - Jaulas de Fibra SFP/SFP+ (rectángulo blanco con doble ranura horizontal de transceptor `[=]`)
+  /// - Acopladores de Fibra LC/SC en bandejas FI-01 (cuadrado blanco hueco libre y doble marco azul con núcleo `[▣]` conectado)
+  /// - Tomas eléctricas Schuko / IEC / Conector Macho IN
   Widget _buildPortWidget({
     required RackDeviceModel dev,
     required PortModel port,
@@ -9381,30 +9558,93 @@ class _RackEditorViewState extends State<RackEditorView> {
   }) {
     final isPendingSource = _pendingSourcePort?.id == port.id;
     final isConnected = connectedColor != null;
+    final cat = dev.template.category;
     final isMalePlug = port.portType == 'power_plug_male' ||
-        (dev.template.category == 'pdu' &&
+        (cat == 'pdu' &&
             (port.portNumber.startsWith('IN') ||
                 port.portNumber.startsWith('MACHO')));
     final isSchuko = port.portType == 'power_schuko' && !isMalePlug;
     final isPower = port.portType.contains('power') || isMalePlug;
-    final isFiberHollow =
-        port.portType == 'fiber_lc' && dev.template.category == 'gateway';
+    final isPatchboxCassette = cat == 'patchbox' && face == 'front';
+    final isSfpCage =
+        port.portType == 'sfp_plus' || port.portNumber.startsWith('SFP');
+    final isFiberCoupler =
+        !isSfpCage &&
+        (port.portType == 'fiber_lc' ||
+            port.portType == 'fiber_sc' ||
+            (cat == 'gateway' && port.portType.contains('fiber')));
 
     final rx = _computeVisualRelX(dev, port);
     final ry = _computeVisualRelY(dev, port, face);
 
-    final jackW = isMalePlug
-        ? 22.0
-        : (isSchuko ? 16.0 : (isPower ? 15.0 : 10.5));
-    final jackH = isMalePlug
-        ? 15.0
-        : (isSchuko ? 14.0 : (isPower ? 11.0 : 8.5));
-
     final centerX = _railWidth + rx * _rackInnerWidth;
     final centerY = ry * devHeight;
 
+    // Etiqueta corta para mostrar encima/debajo del puerto
+    String shortLabel;
+    if (isMalePlug) {
+      shortLabel = 'MACHO';
+    } else if (isSfpCage && cat == 'router') {
+      final sfpNum =
+          int.tryParse(port.portNumber.replaceAll(RegExp(r'[^0-9]'), '')) ?? 1;
+      shortLabel = '${8 + sfpNum}'; // En RT01 las 4 jaulas SFP se numeran 9..12
+    } else if (isSfpCage) {
+      shortLabel = port.portNumber.replaceFirst(RegExp(r'^SFP\+?'), '');
+    } else {
+      shortLabel = port.portNumber.replaceFirst(RegExp(r'^(KR-|R-|F)'), '');
+    }
+
+    // 1. Caso especial: Casete vertical PATCHBOX (24 módulos en 1 sola fila ocupando el alto de 1U)
+    if (isPatchboxCassette) {
+      const cassetteW = 15.6;
+      final cassetteH = (devHeight - 4.0).clamp(26.0, 34.0);
+      final activeColor = isPendingSource
+          ? const Color(0xFF10B981)
+          : (connectedColor ?? const Color(0xFF0F172A));
+      return Positioned(
+        left: centerX - cassetteW / 2,
+        top: (devHeight - cassetteH) / 2,
+        width: cassetteW,
+        height: cassetteH,
+        child: Tooltip(
+          message:
+              '${dev.code} • Casete PATCHBOX ${port.portNumber} (${port.portType.toUpperCase()})\n${isConnected ? 'Conectado (Clic para ver cable)' : 'Libre (Clic para tirar cable)'}',
+          child: InkWell(
+            onTap: () => _handlePortTap(dev, port),
+            child: CustomPaint(
+              size: Size(cassetteW, cassetteH),
+              painter: _TechnicalPortPainter(
+                kind: _TechPortKind.patchboxCassette,
+                isConnected: isConnected,
+                isPending: isPendingSource,
+                color: activeColor,
+                borderColor: isPendingSource
+                    ? Colors.amber
+                    : (connectedColor ?? const Color(0xFF64748B)),
+                label: shortLabel,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final jackW = isMalePlug
+        ? 22.0
+        : (isSchuko
+            ? 16.0
+            : (isPower
+                ? 15.0
+                : (isSfpCage ? 12.2 : (isFiberCoupler ? 11.0 : 11.2))));
+    final jackH = isMalePlug
+        ? 15.0
+        : (isSchuko
+            ? 14.0
+            : (isPower ? 11.0 : (isSfpCage ? 9.0 : (isFiberCoupler ? 9.2 : 9.0))));
+
     final facePorts = dev.portsForFace(face);
-    final hasTwoRows = facePorts.any((p) => p.rowIndex > 0);
+    final hasTwoRows =
+        !isPatchboxCassette && facePorts.any((p) => p.rowIndex > 0);
     final labelBelow = hasTwoRows && port.rowIndex > 0;
 
     Color jackFill;
@@ -9413,11 +9653,11 @@ class _RackEditorViewState extends State<RackEditorView> {
       jackFill = const Color(0xFF10B981);
       jackBorder = Colors.amber;
     } else if (isConnected) {
-      jackFill = isFiberHollow ? Colors.white : connectedColor;
+      jackFill = (isFiberCoupler || isSfpCage) ? Colors.white : connectedColor;
       jackBorder = connectedColor;
-    } else if (isFiberHollow) {
+    } else if (isFiberCoupler || isSfpCage) {
       jackFill = Colors.white;
-      jackBorder = const Color(0xFF475569);
+      jackBorder = const Color(0xFF334155);
     } else if (isMalePlug) {
       jackFill = const Color(0xFFEA580C);
       jackBorder = const Color(0xFFFACC15);
@@ -9426,13 +9666,8 @@ class _RackEditorViewState extends State<RackEditorView> {
       jackBorder = const Color(0xFF991B1B);
     } else {
       jackFill = const Color(0xFF0F172A);
-      jackBorder = const Color(0xFF0F172A);
+      jackBorder = const Color(0xFF475569);
     }
-
-    // Etiqueta corta para mostrar encima/debajo del puerto (1..24, PSU1, MACHO, etc.)
-    final shortLabel = isMalePlug
-        ? 'MACHO'
-        : port.portNumber.replaceFirst(RegExp(r'^(KR-|R-|F)'), '');
 
     final halfWidth = isMalePlug ? 16.0 : 10.0;
 
@@ -9462,60 +9697,74 @@ class _RackEditorViewState extends State<RackEditorView> {
                         ? connectedColor
                         : (isMalePlug
                             ? const Color(0xFFC2410C)
-                            : const Color(0xFF475569)),
+                            : const Color(0xFF334155)),
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.visible,
                 ),
               if (!labelBelow) const SizedBox(height: 1),
-              Container(
-                width: jackW,
-                height: jackH,
-                decoration: BoxDecoration(
-                  color: jackFill,
-                  borderRadius: BorderRadius.circular(
-                    isMalePlug ? 4 : (isSchuko ? 7 : 1.5),
+              if (isPower)
+                Container(
+                  width: jackW,
+                  height: jackH,
+                  decoration: BoxDecoration(
+                    color: jackFill,
+                    borderRadius: BorderRadius.circular(
+                      isMalePlug ? 4 : (isSchuko ? 7 : 1.5),
+                    ),
+                    border: Border.all(
+                      color: jackBorder,
+                      width: (isPendingSource || isMalePlug) ? 1.5 : 0.8,
+                    ),
                   ),
-                  border: Border.all(
-                    color: jackBorder,
-                    width:
-                        (isFiberHollow || isPendingSource || isMalePlug)
-                            ? 1.5
-                            : 0.8,
-                  ),
-                ),
-                child: isMalePlug
-                    ? Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(
-                            Icons.power,
-                            size: 10,
-                            color: Colors.white,
-                          ),
-                          const Text(
-                            'IN',
-                            style: TextStyle(
+                  child: isMalePlug
+                      ? const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.power,
+                              size: 10,
                               color: Colors.white,
-                              fontSize: 5.5,
-                              fontWeight: FontWeight.w900,
                             ),
-                          ),
-                        ],
-                      )
-                    : (isPower && !isFiberHollow
-                        ? Center(
-                            child: Text(
-                              shortLabel,
-                              style: const TextStyle(
+                            Text(
+                              'IN',
+                              style: TextStyle(
                                 color: Colors.white,
                                 fontSize: 5.5,
-                                fontWeight: FontWeight.bold,
+                                fontWeight: FontWeight.w900,
                               ),
                             ),
-                          )
-                        : null),
-              ),
+                          ],
+                        )
+                      : Center(
+                          child: Text(
+                            shortLabel,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 5.5,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                )
+              else
+                CustomPaint(
+                  size: Size(jackW, jackH),
+                  painter: _TechnicalPortPainter(
+                    kind: isSfpCage
+                        ? _TechPortKind.sfpCage
+                        : (isFiberCoupler
+                            ? _TechPortKind.fiberCoupler
+                            : _TechPortKind.rj45),
+                    isConnected: isConnected,
+                    isPending: isPendingSource,
+                    color: isPendingSource
+                        ? const Color(0xFF10B981)
+                        : (connectedColor ?? const Color(0xFF0F172A)),
+                    borderColor: jackBorder,
+                    latchDown: labelBelow,
+                  ),
+                ),
               if (labelBelow) const SizedBox(height: 1),
               if (labelBelow)
                 Text(
@@ -9526,7 +9775,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     fontWeight: FontWeight.w700,
                     color: isConnected
                         ? connectedColor
-                        : const Color(0xFF475569),
+                        : const Color(0xFF334155),
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.visible,
@@ -9609,5 +9858,306 @@ class _FilterChipBtn extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+enum _TechPortKind {
+  rj45,
+  patchboxCassette,
+  sfpCage,
+  fiberCoupler,
+}
+
+class _TechnicalPortPainter extends CustomPainter {
+  final _TechPortKind kind;
+  final bool isConnected;
+  final bool isPending;
+  final Color color;
+  final Color borderColor;
+  final bool latchDown;
+  final String? label;
+
+  const _TechnicalPortPainter({
+    required this.kind,
+    required this.isConnected,
+    required this.isPending,
+    required this.color,
+    required this.borderColor,
+    this.latchDown = false,
+    this.label,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    switch (kind) {
+      case _TechPortKind.rj45:
+        _paintRj45(canvas, Offset.zero & size);
+        break;
+      case _TechPortKind.patchboxCassette:
+        _paintPatchboxCassette(canvas, size);
+        break;
+      case _TechPortKind.sfpCage:
+        _paintSfpCage(canvas, Offset.zero & size);
+        break;
+      case _TechPortKind.fiberCoupler:
+        _paintFiberCoupler(canvas, Offset.zero & size);
+        break;
+    }
+  }
+
+  /// Dibuja la silueta técnica escalonada 8P8C de una boca RJ45 ("ETS"):
+  /// - Marco exterior metálico/plástico fino
+  /// - Cavidad interior escalonada (T invertida) con muesca de pestaña
+  /// - Si está libre: interior oscuro (`#0F172A`) con 2 puntos blancos superiores de contacto/guía
+  /// - Si está conectado: relleno del color del latiguillo (`#2563EB`) con lengüeta interior clara (`#93C5FD`)
+  void _paintRj45(Canvas canvas, Rect rect) {
+    final outerRRect = RRect.fromRectAndRadius(
+      rect,
+      const Radius.circular(1.2),
+    );
+    // Collarín técnico exterior
+    canvas.drawRRect(
+      outerRRect,
+      Paint()
+        ..color = (isConnected || isPending)
+            ? color.withValues(alpha: 0.14)
+            : const Color(0xFFF8FAFC)
+        ..style = PaintingStyle.fill,
+    );
+    canvas.drawRRect(
+      outerRRect,
+      Paint()
+        ..color = (isConnected || isPending)
+            ? borderColor
+            : const Color(0xFF64748B)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = (isConnected || isPending) ? 1.0 : 0.75,
+    );
+
+    // Silueta escalonada 8P8C dentro del collarín
+    final left = rect.left + 1.2;
+    final right = rect.right - 1.2;
+    final top = rect.top + 1.0;
+    final bottom = rect.bottom - 1.0;
+    final w = right - left;
+    final tabW = (w * 0.44).clamp(3.2, 5.0);
+    final tabLeft = left + (w - tabW) / 2;
+    final tabRight = tabLeft + tabW;
+    const stepH = 1.65;
+
+    final path = Path();
+    if (!latchDown) {
+      // Muesca de pestaña en la parte superior
+      path.moveTo(left, top + stepH);
+      path.lineTo(tabLeft, top + stepH);
+      path.lineTo(tabLeft, top);
+      path.lineTo(tabRight, top);
+      path.lineTo(tabRight, top + stepH);
+      path.lineTo(right, top + stepH);
+      path.lineTo(right, bottom);
+      path.lineTo(left, bottom);
+      path.close();
+    } else {
+      // Muesca de pestaña en la parte inferior (segunda fila de switches)
+      path.moveTo(left, top);
+      path.lineTo(right, top);
+      path.lineTo(right, bottom - stepH);
+      path.lineTo(tabRight, bottom - stepH);
+      path.lineTo(tabRight, bottom);
+      path.lineTo(tabLeft, bottom);
+      path.lineTo(tabLeft, bottom - stepH);
+      path.lineTo(left, bottom - stepH);
+      path.close();
+    }
+
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = (isConnected || isPending) ? color : const Color(0xFF0F172A)
+        ..style = PaintingStyle.fill,
+    );
+
+    if (isConnected || isPending) {
+      // Reflejo claro del clip del conector macho RJ45 insertado
+      final clipRect = Rect.fromLTWH(
+        tabLeft + 0.5,
+        latchDown ? (bottom - stepH - 1.8) : (top + 0.8),
+        tabW - 1.0,
+        2.2,
+      );
+      canvas.drawRect(
+        clipRect,
+        Paint()..color = Colors.white.withValues(alpha: 0.78),
+      );
+    } else {
+      // Dos destellos blancos superiores en las esquinas de la cavidad 8P8C (como en la imagen de referencia)
+      final dotPaint = Paint()..color = const Color(0xFFF1F5F9);
+      final dotY = latchDown ? (bottom - stepH - 1.8) : (top + stepH + 0.55);
+      canvas.drawRect(Rect.fromLTWH(left + 0.8, dotY, 1.35, 1.35), dotPaint);
+      canvas.drawRect(
+        Rect.fromLTWH(right - 2.15, dotY, 1.35, 1.35),
+        dotPaint,
+      );
+    }
+  }
+
+  /// Dibuja un módulo casete vertical completo de `PATCHBOX` (`PBX01..03`):
+  /// - Carcasa vertical blanca con borde gris/azul
+  /// - Pestaña/clip superior coloreado
+  /// - Número de casete (`1..24`) en la mitad superior
+  /// - Boca RJ45 8P8C escalonada en la mitad inferior
+  void _paintPatchboxCassette(Canvas canvas, Size size) {
+    final outerRect = Offset.zero & size;
+    final rrect = RRect.fromRectAndRadius(
+      outerRect,
+      const Radius.circular(1.5),
+    );
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.fill,
+    );
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..color = (isConnected || isPending)
+            ? borderColor
+            : const Color(0xFF94A3B8)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = (isConnected || isPending) ? 1.15 : 0.8,
+    );
+
+    // Clip / liberador superior del casete PATCHBOX
+    final clipRect = Rect.fromLTWH(2.2, 1.6, size.width - 4.4, 3.0);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(clipRect, const Radius.circular(0.8)),
+      Paint()
+        ..color = (isConnected || isPending)
+            ? color
+            : const Color(0xFF475569),
+    );
+
+    // Número del casete (1..24) en el centro
+    if (label != null && label!.isNotEmpty) {
+      final tp = TextPainter(
+        text: TextSpan(
+          text: label,
+          style: TextStyle(
+            fontSize: 6.2,
+            height: 1.0,
+            fontWeight: FontWeight.w800,
+            color: (isConnected || isPending) ? color : const Color(0xFF0F172A),
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: size.width);
+      tp.paint(
+        canvas,
+        Offset((size.width - tp.width) / 2, 6.4),
+      );
+    }
+
+    // Boca RJ45 escalonada en la parte inferior del casete
+    const jackW = 11.4;
+    const jackH = 9.2;
+    final jackRect = Rect.fromLTWH(
+      (size.width - jackW) / 2,
+      size.height - jackH - 2.2,
+      jackW,
+      jackH,
+    );
+    _paintRj45(canvas, jackRect);
+  }
+
+  /// Dibuja una jaula óptica SFP / SFP+ (`RT01` 9..12, `SW01..03` 1..4):
+  /// - Marco rectangular blanco con borde oscuro o azul
+  /// - Doble ranura horizontal interna de transceptor (`[=]`)
+  void _paintSfpCage(Canvas canvas, Rect rect) {
+    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(1.0));
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.fill,
+    );
+    final strokeColor = (isConnected || isPending)
+        ? borderColor
+        : const Color(0xFF334155);
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..color = strokeColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = (isConnected || isPending) ? 1.3 : 1.0,
+    );
+
+    // Dos ranuras horizontales internas de guía óptica [=]
+    final innerColor = (isConnected || isPending)
+        ? color
+        : const Color(0xFF475569);
+    final slotW = rect.width - 4.4;
+    final topSlot = Rect.fromLTWH(rect.left + 2.2, rect.top + 2.1, slotW, 1.4);
+    final bottomSlot = Rect.fromLTWH(
+      rect.left + 2.2,
+      rect.bottom - 3.5,
+      slotW,
+      1.4,
+    );
+    canvas.drawRect(topSlot, Paint()..color = innerColor);
+    canvas.drawRect(bottomSlot, Paint()..color = innerColor);
+  }
+
+  /// Dibuja un acoplador de fibra óptica LC/SC en bandejas de fibra (`FI-01`):
+  /// - Libre: cuadrado blanco hueco con borde técnico oscuro (`#334155`)
+  /// - Conectado (como boca 23 de `FI-01`): cuadrado blanco con marco exterior azul y núcleo dúplex azul interior (`[▣]`)
+  void _paintFiberCoupler(Canvas canvas, Rect rect) {
+    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(1.0));
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.fill,
+    );
+    final strokeColor = (isConnected || isPending)
+        ? borderColor
+        : const Color(0xFF334155);
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..color = strokeColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = (isConnected || isPending) ? 1.35 : 1.1,
+    );
+
+    if (isConnected || isPending) {
+      // Núcleo óptico interior azul [▣]
+      final coreRect = rect.deflate(2.35);
+      canvas.drawRect(
+        coreRect,
+        Paint()
+          ..color = color
+          ..style = PaintingStyle.fill,
+      );
+      // División central fina dúplex LC
+      canvas.drawLine(
+        Offset(coreRect.center.dx, coreRect.top + 0.5),
+        Offset(coreRect.center.dx, coreRect.bottom - 0.5),
+        Paint()
+          ..color = Colors.white.withValues(alpha: 0.85)
+          ..strokeWidth = 0.7,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _TechnicalPortPainter oldDelegate) {
+    return oldDelegate.kind != kind ||
+        oldDelegate.isConnected != isConnected ||
+        oldDelegate.isPending != isPending ||
+        oldDelegate.color != color ||
+        oldDelegate.borderColor != borderColor ||
+        oldDelegate.latchDown != latchDown ||
+        oldDelegate.label != label;
   }
 }
