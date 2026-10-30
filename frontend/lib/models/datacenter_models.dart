@@ -42,6 +42,10 @@ class RackSummary {
   final int onlineCount;
   final int offlineCount;
   final int warningCount;
+  final int ethCablesCount;
+  final int fiberCablesCount;
+  final int powerCablesCount;
+  final List<Map<String, dynamic>> externalFeeds;
   final List<Map<String, dynamic>> monitoredDevices;
 
   RackSummary({
@@ -65,6 +69,10 @@ class RackSummary {
     this.onlineCount = 0,
     this.offlineCount = 0,
     this.warningCount = 0,
+    this.ethCablesCount = 0,
+    this.fiberCablesCount = 0,
+    this.powerCablesCount = 0,
+    this.externalFeeds = const [],
     this.monitoredDevices = const [],
   });
 
@@ -90,6 +98,12 @@ class RackSummary {
       onlineCount: (json['online_count'] ?? 0) as int,
       offlineCount: (json['offline_count'] ?? 0) as int,
       warningCount: (json['warning_count'] ?? 0) as int,
+      ethCablesCount: (json['eth_cables_count'] ?? 0) as int,
+      fiberCablesCount: (json['fiber_cables_count'] ?? 0) as int,
+      powerCablesCount: (json['power_cables_count'] ?? 0) as int,
+      externalFeeds: ((json['external_feeds'] ?? []) as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList(),
       monitoredDevices: ((json['monitored_devices'] ?? []) as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList(),
@@ -231,6 +245,7 @@ class FloorNode {
   final int warningCount;
   final List<RoomNode> rooms;
   final List<FloorDeviceNode> floorDevices;
+  final List<Map<String, dynamic>> interRackLinks;
 
   FloorNode({
     required this.id,
@@ -244,6 +259,7 @@ class FloorNode {
     this.warningCount = 0,
     required this.rooms,
     this.floorDevices = const [],
+    this.interRackLinks = const [],
   });
 
   factory FloorNode.fromJson(Map<String, dynamic> json) {
@@ -262,6 +278,9 @@ class FloorNode {
           .toList(),
       floorDevices: ((json['floor_devices'] ?? []) as List)
           .map((e) => FloorDeviceNode.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      interRackLinks: ((json['inter_rack_links'] ?? []) as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
           .toList(),
     );
   }

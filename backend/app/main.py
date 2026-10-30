@@ -693,12 +693,59 @@ def get_locations_tree(db: Session = Depends(get_db)):
             .joinedload(RackDevice.template),
             joinedload(Location.floors)
             .joinedload(Floor.rooms)
+            .joinedload(Room.racks)
+            .joinedload(Rack.devices)
+            .joinedload(RackDevice.ports),
+            joinedload(Location.floors)
+            .joinedload(Floor.rooms)
             .joinedload(Room.aisles),
             joinedload(Location.floors)
             .joinedload(Floor.floor_devices),
         )
         .all()
     )
+
+    all_conns = (
+        db.query(Connection)
+        .options(
+            joinedload(Connection.source_port)
+            .joinedload(Port.device)
+            .joinedload(RackDevice.rack),
+            joinedload(Connection.target_port)
+            .joinedload(Port.device)
+            .joinedload(RackDevice.rack),
+        )
+        .all()
+    )
+
+    def _classify_media(cable_type: str) -> str:
+        ct = (cable_type or "").lower()
+        if "power" in ct:
+            return "power"
+        if "fiber" in ct or "dac" in ct or "sfp" in ct:
+            return "fiber"
+        return "ethernet"
+
+    rack_media_counts: dict[int, dict[str, int]] = {}
+    device_conn_counts: dict[int, int] = {}
+    for c in all_conns:
+        sp = c.source_port
+        tp = c.target_port
+        if not sp or not tp or not sp.device or not tp.device:
+            continue
+        sd = sp.device
+        td = tp.device
+        mg = _classify_media(c.cable_type)
+        device_conn_counts[sd.id] = device_conn_counts.get(sd.id, 0) + 1
+        if td.id != sd.id:
+            device_conn_counts[td.id] = device_conn_counts.get(td.id, 0) + 1
+        for r_id in {sd.rack_id, td.rack_id}:
+            if r_id is None:
+                continue
+            bucket = rack_media_counts.setdefault(
+                r_id, {"ethernet": 0, "fiber": 0, "power": 0}
+            )
+            bucket[mg] = bucket.get(mg, 0) + 1
 
     result = []
     for loc in locations:
@@ -719,6 +766,7 @@ def get_locations_tree(db: Session = Depends(get_db)):
             fl_offline = 0
             fl_warning = 0
             rooms_data = []
+            floor_rack_ids: set[int] = set()
             for rm in fl.rooms:
                 racks_count += len(rm.racks)
                 aisles_map = {a.id: a for a in rm.aisles}
@@ -733,9 +781,11 @@ def get_locations_tree(db: Session = Depends(get_db)):
                 ]
                 racks_data = []
                 for rk in rm.racks:
+                    floor_rack_ids.add(rk.id)
                     total_rack_units += rk.total_units
                     aisle_obj = aisles_map.get(rk.aisle_id)
                     rack_devs = [d for d in rk.devices if d.mounted_face != "external"]
+                    ext_devs = [d for d in rk.devices if d.mounted_face == "external"]
                     mon_devs = [d for d in rack_devs if d.monitoring_enabled]
                     rk_mon = len(mon_devs)
                     rk_on = len([d for d in mon_devs if d.status == "online"])
@@ -746,6 +796,30 @@ def get_locations_tree(db: Session = Depends(get_db)):
                     fl_online += rk_on
                     fl_offline += rk_off
                     fl_warning += rk_warn
+
+                    m_counts = rack_media_counts.get(
+                        rk.id, {"ethernet": 0, "fiber": 0, "power": 0}
+                    )
+                    ext_feeds_info = []
+                    for ed in ext_devs:
+                        cf = ed.custom_fields or {}
+                        ftype = str(cf.get("feed_type") or "power").lower()
+                        if ftype not in ("power", "fiber"):
+                            continue
+                        c_cnt = device_conn_counts.get(ed.id, 0)
+                        ext_feeds_info.append(
+                            {
+                                "id": ed.id,
+                                "code": ed.code,
+                                "name": ed.name,
+                                "feed_type": ftype,
+                                "color_hex": str(
+                                    cf.get("feed_color")
+                                    or ("#0284C7" if ftype == "fiber" else "#EA580C")
+                                ),
+                                "connected_count": c_cnt,
+                            }
+                        )
 
                     monitored_list = [
                         {
@@ -800,6 +874,10 @@ def get_locations_tree(db: Session = Depends(get_db)):
                             "online_count": rk_on,
                             "offline_count": rk_off,
                             "warning_count": rk_warn,
+                            "eth_cables_count": m_counts.get("ethernet", 0),
+                            "fiber_cables_count": m_counts.get("fiber", 0),
+                            "power_cables_count": m_counts.get("power", 0),
+                            "external_feeds": ext_feeds_info,
                             "monitored_devices": monitored_list,
                         }
                     )
@@ -818,6 +896,47 @@ def get_locations_tree(db: Session = Depends(get_db)):
             loc_online += fl_online
             loc_offline += fl_offline
             loc_warning += fl_warning
+
+            inter_rack_links = []
+            for c in all_conns:
+                sp = c.source_port
+                tp = c.target_port
+                if not sp or not tp or not sp.device or not tp.device:
+                    continue
+                sd = sp.device
+                td = tp.device
+                r1 = sd.rack
+                r2 = td.rack
+                if not r1 or not r2 or r1.id == r2.id:
+                    continue
+                if r1.id not in floor_rack_ids and r2.id not in floor_rack_ids:
+                    continue
+                mg = _classify_media(c.cable_type)
+                inter_rack_links.append(
+                    {
+                        "id": c.id,
+                        "source_rack_id": r1.id,
+                        "source_rack_code": r1.code,
+                        "source_device_code": sd.code,
+                        "source_port_number": sp.port_number,
+                        "target_rack_id": r2.id,
+                        "target_rack_code": r2.code,
+                        "target_device_code": td.code,
+                        "target_port_number": tp.port_number,
+                        "cable_type": c.cable_type or "utp_cat6a",
+                        "media_group": mg,
+                        "color_hex": c.color_hex or (
+                            "#06B6D4"
+                            if mg == "fiber"
+                            else ("#EA580C" if mg == "power" else "#2563EB")
+                        ),
+                        "label": c.label
+                        or f"{sd.code}:{sp.port_number} ↔ {td.code}:{tp.port_number}",
+                        "same_floor": (r1.id in floor_rack_ids)
+                        and (r2.id in floor_rack_ids),
+                    }
+                )
+
             floor_devices_data = [
                 {
                     "id": fd.id,
@@ -860,6 +979,7 @@ def get_locations_tree(db: Session = Depends(get_db)):
                     "warning_count": fl_warning,
                     "rooms": rooms_data,
                     "floor_devices": floor_devices_data,
+                    "inter_rack_links": inter_rack_links,
                 }
             )
 
