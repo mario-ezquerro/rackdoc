@@ -3622,7 +3622,9 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                 : <int>[rk.id];
             _saveMultipleRacksGeometry(targetIds);
           },
-          child: Container(
+          child: MouseRegion(
+            cursor: SystemMouseCursors.move,
+            child: Container(
             decoration: BoxDecoration(
               color: isSelected
                   ? const Color(0xFF1E3A8A)
@@ -3828,6 +3830,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
               ),
             ],
           ),
+        ),
         ),
         ),
       ),
@@ -4336,7 +4339,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
           },
           onPanEnd: (_) => _saveFloorDevicePosition(dev.id),
           child: MouseRegion(
-            cursor: SystemMouseCursors.click,
+            cursor: SystemMouseCursors.move,
             child: Row(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.center,

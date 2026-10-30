@@ -9006,7 +9006,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         builder: (ctx, candidate, _) {
           final isDropTarget = candidate.isNotEmpty;
           final interactiveChassis = MouseRegion(
-            cursor: _canEdit ? SystemMouseCursors.grab : SystemMouseCursors.basic,
+            cursor: _canEdit ? SystemMouseCursors.move : SystemMouseCursors.basic,
             onEnter: (_) => setState(() => _hoveredDeviceId = dev.id),
             onExit: (_) {
               if (_hoveredDeviceId == dev.id) {
