@@ -10,7 +10,7 @@ from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, Response
 from sqlalchemy import text
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from .database import engine, Base, SessionLocal, get_db, DEFAULT_DB_PATH
 from .models import (
@@ -686,21 +686,16 @@ def get_locations_tree(db: Session = Depends(get_db)):
     locations = (
         db.query(Location)
         .options(
-            joinedload(Location.floors)
-            .joinedload(Floor.rooms)
-            .joinedload(Room.racks)
-            .joinedload(Rack.devices)
+            selectinload(Location.floors)
+            .selectinload(Floor.rooms)
+            .selectinload(Room.racks)
+            .selectinload(Rack.devices)
             .joinedload(RackDevice.template),
-            joinedload(Location.floors)
-            .joinedload(Floor.rooms)
-            .joinedload(Room.racks)
-            .joinedload(Rack.devices)
-            .joinedload(RackDevice.ports),
-            joinedload(Location.floors)
-            .joinedload(Floor.rooms)
-            .joinedload(Room.aisles),
-            joinedload(Location.floors)
-            .joinedload(Floor.floor_devices),
+            selectinload(Location.floors)
+            .selectinload(Floor.rooms)
+            .selectinload(Room.aisles),
+            selectinload(Location.floors)
+            .selectinload(Floor.floor_devices),
         )
         .all()
     )
@@ -1080,11 +1075,11 @@ def delete_location(location_id: int, db: Session = Depends(get_db)):
     loc = (
         db.query(Location)
         .options(
-            joinedload(Location.floors)
-            .joinedload(Floor.rooms)
-            .joinedload(Room.racks)
-            .joinedload(Rack.devices)
-            .joinedload(RackDevice.ports)
+            selectinload(Location.floors)
+            .selectinload(Floor.rooms)
+            .selectinload(Room.racks)
+            .selectinload(Rack.devices)
+            .selectinload(RackDevice.ports)
         )
         .filter(Location.id == location_id)
         .first()
@@ -1139,10 +1134,10 @@ def delete_floor(floor_id: int, db: Session = Depends(get_db)):
     fl = (
         db.query(Floor)
         .options(
-            joinedload(Floor.rooms)
-            .joinedload(Room.racks)
-            .joinedload(Rack.devices)
-            .joinedload(RackDevice.ports)
+            selectinload(Floor.rooms)
+            .selectinload(Room.racks)
+            .selectinload(Rack.devices)
+            .selectinload(RackDevice.ports)
         )
         .filter(Floor.id == floor_id)
         .first()
@@ -1204,7 +1199,7 @@ def create_floor_device(
     if fd.linked_rack_id:
         rk = (
             db.query(Rack)
-            .options(joinedload(Rack.devices).joinedload(RackDevice.ports), joinedload(Rack.devices).joinedload(RackDevice.template))
+            .options(selectinload(Rack.devices).selectinload(RackDevice.ports), selectinload(Rack.devices).joinedload(RackDevice.template))
             .filter(Rack.id == fd.linked_rack_id)
             .first()
         )
@@ -1247,7 +1242,7 @@ def update_floor_device(
     for r_id in affected_rack_ids:
         rk = (
             db.query(Rack)
-            .options(joinedload(Rack.devices).joinedload(RackDevice.ports), joinedload(Rack.devices).joinedload(RackDevice.template))
+            .options(selectinload(Rack.devices).selectinload(RackDevice.ports), selectinload(Rack.devices).joinedload(RackDevice.template))
             .filter(Rack.id == r_id)
             .first()
         )
@@ -1279,7 +1274,7 @@ def delete_floor_device(device_id: int, db: Session = Depends(get_db)):
     if old_rack_id:
         rk = (
             db.query(Rack)
-            .options(joinedload(Rack.devices).joinedload(RackDevice.ports), joinedload(Rack.devices).joinedload(RackDevice.template))
+            .options(selectinload(Rack.devices).selectinload(RackDevice.ports), selectinload(Rack.devices).joinedload(RackDevice.template))
             .filter(Rack.id == old_rack_id)
             .first()
         )
@@ -1671,7 +1666,6 @@ def list_all_racks(db: Session = Depends(get_db)):
         .options(
             joinedload(Rack.room).joinedload(Room.floor).joinedload(Floor.location),
             joinedload(Rack.aisle),
-            joinedload(Rack.devices).joinedload(RackDevice.ports),
         )
         .all()
     )
@@ -1702,8 +1696,8 @@ def get_inter_rack_targets(rack_id: int, db: Session = Depends(get_db)):
         .options(
             joinedload(Rack.room).joinedload(Room.floor).joinedload(Floor.location),
             joinedload(Rack.aisle),
-            joinedload(Rack.devices).joinedload(RackDevice.template),
-            joinedload(Rack.devices).joinedload(RackDevice.ports),
+            selectinload(Rack.devices).joinedload(RackDevice.template),
+            selectinload(Rack.devices).selectinload(RackDevice.ports),
         )
         .filter(Rack.id != rack_id)
         .all()
@@ -2009,10 +2003,10 @@ def get_rack_detail(rack_id: int, db: Session = Depends(get_db)):
         db.query(Rack)
         .options(
             joinedload(Rack.room).joinedload(Room.floor).joinedload(Floor.location),
-            joinedload(Rack.room).joinedload(Room.aisles),
+            joinedload(Rack.room).selectinload(Room.aisles),
             joinedload(Rack.aisle),
-            joinedload(Rack.devices).joinedload(RackDevice.template),
-            joinedload(Rack.devices).joinedload(RackDevice.ports),
+            selectinload(Rack.devices).joinedload(RackDevice.template),
+            selectinload(Rack.devices).selectinload(RackDevice.ports),
         )
         .filter(Rack.id == rack_id)
         .first()
@@ -2040,10 +2034,10 @@ def get_rack_detail(rack_id: int, db: Session = Depends(get_db)):
             db.query(Rack)
             .options(
                 joinedload(Rack.room).joinedload(Room.floor).joinedload(Floor.location),
-                joinedload(Rack.room).joinedload(Room.aisles),
+                joinedload(Rack.room).selectinload(Room.aisles),
                 joinedload(Rack.aisle),
-                joinedload(Rack.devices).joinedload(RackDevice.template),
-                joinedload(Rack.devices).joinedload(RackDevice.ports),
+                selectinload(Rack.devices).joinedload(RackDevice.template),
+                selectinload(Rack.devices).selectinload(RackDevice.ports),
             )
             .filter(Rack.id == rack_id)
             .first()
