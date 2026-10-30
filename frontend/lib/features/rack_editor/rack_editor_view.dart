@@ -78,6 +78,14 @@ class _RackEditorViewState extends State<RackEditorView> {
   final TransformationController _transformController =
       TransformationController();
 
+  // Pila de Deshacer (Undo: Ctrl+Z en Windows/Linux o Cmd+Z en Mac) y Modo Mano (Barra Espaciadora)
+  final List<_RackUndoAction> _undoStack = [];
+  bool _isSpacePressed = false;
+  bool _isHandToolPinned = false;
+  bool _isSpaceDragging = false;
+
+  bool get _isPanHandMode => _isSpacePressed || _isHandToolPinned;
+
   // Dimensiones constantes del dibujo técnico del Rack (estilo Patchbox CAD) + Vista Dual (Front + Back) + Zona Exterior
   static const double _canvasWidth = 1165.0;
   static const double _dualCanvasWidth = 1915.0;
@@ -112,6 +120,7 @@ class _RackEditorViewState extends State<RackEditorView> {
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_handleHardwareKey);
     _highlightedDeviceId = widget.initialHighlightDeviceId;
     _selectedDeviceId = widget.initialHighlightDeviceId;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -122,9 +131,104 @@ class _RackEditorViewState extends State<RackEditorView> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
     _rackQuickSearchCtrl.dispose();
     _transformController.dispose();
     super.dispose();
+  }
+
+  bool _isTextInputFocused() {
+    final focus = FocusManager.instance.primaryFocus;
+    final ctx = focus?.context;
+    if (ctx == null) return false;
+    if (ctx.widget is EditableText) return true;
+    return ctx.findAncestorWidgetOfExactType<EditableText>() != null ||
+        ctx.findAncestorStateOfType<EditableTextState>() != null;
+  }
+
+  bool _handleHardwareKey(KeyEvent event) {
+    if (!mounted) return false;
+    if (_isTextInputFocused()) {
+      if (_isSpacePressed) {
+        setState(() {
+          _isSpacePressed = false;
+          _isSpaceDragging = false;
+        });
+      }
+      return false;
+    }
+
+    // 1. Barra Espaciadora -> Modo Mano (Pan del Dashboard del Rack)
+    if (event.logicalKey == LogicalKeyboardKey.space) {
+      if (event is KeyDownEvent || event is KeyRepeatEvent) {
+        if (!_isSpacePressed) {
+          setState(() => _isSpacePressed = true);
+        }
+        return true;
+      } else if (event is KeyUpEvent) {
+        if (_isSpacePressed || _isSpaceDragging) {
+          setState(() {
+            _isSpacePressed = false;
+            _isSpaceDragging = false;
+          });
+        }
+        return true;
+      }
+    }
+
+    // 2. Deshacer movimiento: Ctrl + Z (Windows/Linux) o Cmd + Z (macOS)
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.keyZ) {
+      final keys = HardwareKeyboard.instance.logicalKeysPressed;
+      final isMetaOrCtrl = keys.contains(LogicalKeyboardKey.metaLeft) ||
+          keys.contains(LogicalKeyboardKey.metaRight) ||
+          keys.contains(LogicalKeyboardKey.controlLeft) ||
+          keys.contains(LogicalKeyboardKey.controlRight);
+      final isShift = keys.contains(LogicalKeyboardKey.shiftLeft) ||
+          keys.contains(LogicalKeyboardKey.shiftRight);
+      if (isMetaOrCtrl && !isShift) {
+        _performUndo();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  Future<void> _performUndo() async {
+    if (!_canEdit) return;
+    final messenger = ScaffoldMessenger.of(context);
+    if (_undoStack.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('No hay movimientos recientes en el Rack para deshacer.'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+      return;
+    }
+    final action = _undoStack.removeLast();
+    try {
+      await widget.api.updateDevice(action.deviceId, {
+        'start_u': action.previousStartU,
+      });
+      await _loadRack();
+      setState(() => _selectedDeviceId = action.deviceId);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            '↩ Deshecho: "${action.deviceCode}" devuelto a U${action.previousStartU}',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('No se pudo deshacer el movimiento: $e'),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+    }
   }
 
   @override
@@ -605,17 +709,33 @@ class _RackEditorViewState extends State<RackEditorView> {
       return;
     }
 
+    final previousStartU = dev.startU;
     try {
       await widget.api.updateDevice(dev.id, {'start_u': targetStartU});
+      _undoStack.add(
+        _RackUndoAction(
+          deviceId: dev.id,
+          deviceCode: dev.code,
+          previousStartU: previousStartU,
+          newStartU: targetStartU,
+        ),
+      );
+      if (_undoStack.length > 35) {
+        _undoStack.removeAt(0);
+      }
       await _loadRack();
       setState(() => _selectedDeviceId = dev.id);
       final rangeLabel =
           uHeight > 1 ? 'U$targetStartU-U$targetEndU' : 'U$targetStartU';
       messenger.showSnackBar(
         SnackBar(
-          duration: const Duration(seconds: 2),
+          duration: const Duration(seconds: 3),
           content: Text(
-            'Equipo "${dev.code}" (${uHeight}U) movido a $rangeLabel libre (Front y Back sincronizados).',
+            'Equipo "${dev.code}" (${uHeight}U) movido a $rangeLabel libre (Ctrl+Z / ⌘Z para deshacer).',
+          ),
+          action: SnackBarAction(
+            label: 'Deshacer',
+            onPressed: _performUndo,
           ),
         ),
       );
@@ -6336,7 +6456,74 @@ class _RackEditorViewState extends State<RackEditorView> {
                         ),
                       ),
 
-                      // Controles Flotantes Superiores Izquierdos: [♊ Front + Back | Front | Back] + [📷 Foto Equipos ON/OFF] + Filtro de Cables
+                      // Capa superior cuando se pulsa la Barra Espaciadora (Modo Mano para arrastrar todo el dashboard del Rack)
+                      if (_isPanHandMode)
+                        Positioned.fill(
+                          child: MouseRegion(
+                            cursor: _isSpaceDragging
+                                ? SystemMouseCursors.grabbing
+                                : SystemMouseCursors.grab,
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onPanStart: (_) {
+                                setState(() => _isSpaceDragging = true);
+                              },
+                              onPanUpdate: (details) {
+                                final m = _transformController.value.clone();
+                                m.storage[12] += details.delta.dx;
+                                m.storage[13] += details.delta.dy;
+                                _transformController.value = m;
+                              },
+                              onPanEnd: (_) {
+                                setState(() => _isSpaceDragging = false);
+                              },
+                              onPanCancel: () {
+                                setState(() => _isSpaceDragging = false);
+                              },
+                              child: Align(
+                                alignment: Alignment.bottomCenter,
+                                child: Padding(
+                                  padding: const EdgeInsets.only(bottom: 18),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xEE0F172A),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(
+                                        color: const Color(0xFF38BDF8),
+                                        width: 1.4,
+                                      ),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.pan_tool_alt_rounded,
+                                          size: 15,
+                                          color: Color(0xFF38BDF8),
+                                        ),
+                                        SizedBox(width: 6),
+                                        Text(
+                                          'Modo Mano activo — Arrastra con el ratón para mover el dashboard del Rack',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 11.5,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                      // Controles Flotantes Superiores Izquierdos: [♊ Front + Back | Front | Back] + [📷 Foto Equipos ON/OFF] + Filtro de Cables + Mano + Deshacer
                       Positioned(
                         top: 14,
                         left: 14,
@@ -6536,6 +6723,116 @@ class _RackEditorViewState extends State<RackEditorView> {
                                 ],
                               ),
                             ),
+
+                            const SizedBox(width: 8),
+
+                            // Conmutador Modo Mano (Barra Espaciadora)
+                            Tooltip(
+                              message:
+                                  'Mantén pulsada la Barra Espaciadora (o activa este botón) para convertir el ratón en una mano y mover el dashboard',
+                              child: InkWell(
+                                onTap: () => setState(
+                                  () => _isHandToolPinned = !_isHandToolPinned,
+                                ),
+                                borderRadius: BorderRadius.circular(6),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 7,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _isPanHandMode
+                                        ? const Color(0xFF0F172A)
+                                        : Colors.white,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: _isPanHandMode
+                                          ? const Color(0xFF38BDF8)
+                                          : const Color(0xFFCBD5E1),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.pan_tool_alt_rounded,
+                                        size: 14,
+                                        color: _isPanHandMode
+                                            ? const Color(0xFF38BDF8)
+                                            : const Color(0xFF475569),
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Text(
+                                        _isPanHandMode
+                                            ? 'Mano: ACTIVA'
+                                            : 'Mano (Espacio)',
+                                        style: TextStyle(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: _isPanHandMode
+                                              ? Colors.white
+                                              : const Color(0xFF475569),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            if (_canEdit) ...[
+                              const SizedBox(width: 8),
+                              // Botón Deshacer (Ctrl+Z en Windows/Linux o Cmd+Z en Mac)
+                              Tooltip(
+                                message:
+                                    'Deshacer último movimiento de equipo en el Rack (Ctrl+Z / ⌘Z)',
+                                child: InkWell(
+                                  onTap:
+                                      _undoStack.isEmpty ? null : _performUndo,
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 7,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _undoStack.isNotEmpty
+                                          ? Colors.white
+                                          : const Color(0xFFF8FAFC),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(
+                                        color: const Color(0xFFCBD5E1),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.undo_rounded,
+                                          size: 14,
+                                          color: _undoStack.isNotEmpty
+                                              ? const Color(0xFF0F172A)
+                                              : const Color(0xFF94A3B8),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          _undoStack.isEmpty
+                                              ? 'Deshacer (⌘Z)'
+                                              : 'Deshacer (${_undoStack.length})',
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: _undoStack.isNotEmpty
+                                                ? const Color(0xFF0F172A)
+                                                : const Color(0xFF94A3B8),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -10160,4 +10457,18 @@ class _TechnicalPortPainter extends CustomPainter {
         oldDelegate.latchDown != latchDown ||
         oldDelegate.label != label;
   }
+}
+
+class _RackUndoAction {
+  final int deviceId;
+  final String deviceCode;
+  final int previousStartU;
+  final int newStartU;
+
+  const _RackUndoAction({
+    required this.deviceId,
+    required this.deviceCode,
+    required this.previousStartU,
+    required this.newStartU,
+  });
 }

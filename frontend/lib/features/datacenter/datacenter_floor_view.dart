@@ -41,6 +41,15 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   final Map<int, int> _rackRotations = {};
   double _floorImageScale = 1.0;
 
+  // Pila de Deshacer (Undo: Ctrl+Z en Windows/Linux o Cmd+Z en Mac) y Modo Mano (Barra Espaciadora)
+  final List<_FloorUndoSnapshot> _undoStack = [];
+  bool _isSpacePressed = false;
+  bool _isHandToolPinned = false;
+  bool _isSpaceDragging = false;
+  Offset _canvasPanOffset = Offset.zero;
+
+  bool get _isPanHandMode => _isSpacePressed || _isHandToolPinned;
+
   // Selección múltiple de Racks (Caja de selección con ratón o Shift + Clic)
   final Set<int> _selectedRackIds = {};
   Offset? _marqueeStart;
@@ -463,6 +472,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_handleHardwareKey);
     _syncFloorState();
     _loadCustomFloorDeviceTypes();
   }
@@ -481,6 +491,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
     _devCodeCtrl.dispose();
     _devNameCtrl.dispose();
     _devRoomCodeCtrl.dispose();
@@ -496,6 +507,126 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     _devContactDeptCtrl.dispose();
     _devNotesCtrl.dispose();
     super.dispose();
+  }
+
+  bool _isTextInputFocused() {
+    final focus = FocusManager.instance.primaryFocus;
+    final ctx = focus?.context;
+    if (ctx == null) return false;
+    if (ctx.widget is EditableText) return true;
+    return ctx.findAncestorWidgetOfExactType<EditableText>() != null ||
+        ctx.findAncestorStateOfType<EditableTextState>() != null;
+  }
+
+  bool _handleHardwareKey(KeyEvent event) {
+    if (!mounted) return false;
+    // No interceptar teclas cuando el usuario está escribiendo dentro de un TextField
+    if (_isTextInputFocused()) {
+      if (_isSpacePressed) {
+        setState(() {
+          _isSpacePressed = false;
+          _isSpaceDragging = false;
+        });
+      }
+      return false;
+    }
+
+    // 1. Barra Espaciadora -> Modo Mano (Pan del Dashboard)
+    if (event.logicalKey == LogicalKeyboardKey.space) {
+      if (event is KeyDownEvent || event is KeyRepeatEvent) {
+        if (!_isSpacePressed) {
+          setState(() => _isSpacePressed = true);
+        }
+        return true;
+      } else if (event is KeyUpEvent) {
+        if (_isSpacePressed || _isSpaceDragging) {
+          setState(() {
+            _isSpacePressed = false;
+            _isSpaceDragging = false;
+          });
+        }
+        return true;
+      }
+    }
+
+    // 2. Deshacer movimiento: Ctrl + Z (Windows/Linux) o Cmd + Z (macOS)
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.keyZ) {
+      final keys = HardwareKeyboard.instance.logicalKeysPressed;
+      final isMetaOrCtrl = keys.contains(LogicalKeyboardKey.metaLeft) ||
+          keys.contains(LogicalKeyboardKey.metaRight) ||
+          keys.contains(LogicalKeyboardKey.controlLeft) ||
+          keys.contains(LogicalKeyboardKey.controlRight);
+      final isShift = keys.contains(LogicalKeyboardKey.shiftLeft) ||
+          keys.contains(LogicalKeyboardKey.shiftRight);
+      if (isMetaOrCtrl && !isShift) {
+        _performUndo();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void _pushUndoSnapshot({
+    required String description,
+    Iterable<int> affectedRackIds = const [],
+    Iterable<int> affectedDeviceIds = const [],
+  }) {
+    _undoStack.add(
+      _FloorUndoSnapshot(
+        description: description,
+        rackPositions: Map<int, Offset>.from(_rackPositions),
+        rackSizes: Map<int, Size>.from(_rackSizes),
+        rackRotations: Map<int, int>.from(_rackRotations),
+        floorDevicePositions: Map<int, Offset>.from(_floorDevicePositions),
+        affectedRackIds: affectedRackIds.toSet(),
+        affectedDeviceIds: affectedDeviceIds.toSet(),
+      ),
+    );
+    if (_undoStack.length > 35) {
+      _undoStack.removeAt(0);
+    }
+  }
+
+  Future<void> _performUndo() async {
+    if (_undoStack.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No hay movimientos recientes para deshacer.'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+      return;
+    }
+    final snap = _undoStack.removeLast();
+    setState(() {
+      _rackPositions
+        ..clear()
+        ..addAll(snap.rackPositions);
+      _rackSizes
+        ..clear()
+        ..addAll(snap.rackSizes);
+      _rackRotations
+        ..clear()
+        ..addAll(snap.rackRotations);
+      _floorDevicePositions
+        ..clear()
+        ..addAll(snap.floorDevicePositions);
+    });
+    if (snap.affectedRackIds.isNotEmpty) {
+      await _saveMultipleRacksGeometry(snap.affectedRackIds);
+    }
+    for (final devId in snap.affectedDeviceIds) {
+      await _saveFloorDevicePosition(devId);
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('↩ Deshecho: ${snap.description}'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   void _syncFloorState() {
@@ -1462,6 +1593,10 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     bool packTightly = false,
   }) async {
     if (_selectedRackIds.length < 2) return;
+    _pushUndoSnapshot(
+      description: 'Alineación horizontal de ${_selectedRackIds.length} Racks',
+      affectedRackIds: _selectedRackIds,
+    );
     final ids = _selectedRackIds.toList()
       ..sort(
         (a, b) => (_rackPositions[a]?.dx ?? 0).compareTo(
@@ -1494,6 +1629,10 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     bool packTightly = false,
   }) async {
     if (_selectedRackIds.length < 2) return;
+    _pushUndoSnapshot(
+      description: 'Alineación vertical de ${_selectedRackIds.length} Racks',
+      affectedRackIds: _selectedRackIds,
+    );
     final ids = _selectedRackIds.toList()
       ..sort(
         (a, b) => (_rackPositions[a]?.dy ?? 0).compareTo(
@@ -1523,6 +1662,10 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   /// Iguala las dimensiones de todos los Racks seleccionados tomando el primero como referencia
   Future<void> _equalizeSelectedRacksSize() async {
     if (_selectedRackIds.length < 2) return;
+    _pushUndoSnapshot(
+      description: 'Igualar dimensiones de ${_selectedRackIds.length} Racks',
+      affectedRackIds: _selectedRackIds,
+    );
     final refId = _selectedRackIds.first;
     final refSize = _rackSizes[refId] ?? const Size(120.0, 90.0);
     setState(() {
@@ -2305,10 +2448,90 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 8),
+                  // Botón Deshacer (Ctrl+Z en Windows/Linux o Cmd+Z en Mac)
+                  Tooltip(
+                    message:
+                        'Deshacer último movimiento de Rack o Dispositivo (Ctrl+Z / ⌘Z)',
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        backgroundColor: _undoStack.isNotEmpty
+                            ? const Color(0xFFF8FAFC)
+                            : Colors.white,
+                      ),
+                      onPressed: _undoStack.isEmpty ? null : _performUndo,
+                      icon: const Icon(Icons.undo_rounded, size: 15),
+                      label: Text(
+                        _undoStack.isEmpty
+                            ? 'Deshacer (⌘Z / Ctrl+Z)'
+                            : 'Deshacer (${_undoStack.length})',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  // Botón Modo Mano (Barra Espaciadora) para mover el dashboard
+                  Tooltip(
+                    message:
+                        'Mantén pulsada la Barra Espaciadora (o activa este botón) para convertir el ratón en una mano y mover todo el dashboard',
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        backgroundColor: _isPanHandMode
+                            ? const Color(0xFF0F172A)
+                            : Colors.white,
+                        foregroundColor: _isPanHandMode
+                            ? Colors.white
+                            : const Color(0xFF334155),
+                        side: BorderSide(
+                          color: _isPanHandMode
+                              ? const Color(0xFF38BDF8)
+                              : const Color(0xFFCBD5E1),
+                        ),
+                      ),
+                      onPressed: () => setState(
+                        () => _isHandToolPinned = !_isHandToolPinned,
+                      ),
+                      icon: Icon(
+                        Icons.pan_tool_alt_rounded,
+                        size: 15,
+                        color: _isPanHandMode
+                            ? const Color(0xFF38BDF8)
+                            : const Color(0xFF475569),
+                      ),
+                      label: Text(
+                        _isPanHandMode
+                            ? 'Mano: ACTIVA (Espacio)'
+                            : 'Mano (Espacio)',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (_canvasPanOffset != Offset.zero) ...[
+                    const SizedBox(width: 4),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      tooltip: 'Restablecer posición centrada del lienzo',
+                      onPressed: () =>
+                          setState(() => _canvasPanOffset = Offset.zero),
+                      icon: const Icon(
+                        Icons.center_focus_strong_rounded,
+                        size: 16,
+                        color: Color(0xFF2563EB),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(width: 10),
                   const Expanded(
                     child: Text(
-                      'Arrastra equipos desde DEVICES LIBRARY al plano  •  1 Clic: Ver Settings  •  Doble Clic en Rack: Abrir en 3. Rack Editor',
+                      'Espacio + Arrastrar: Mover Dashboard ✋  •  Ctrl+Z / ⌘Z: Deshacer  •  Doble Clic en Rack: Abrir en Rack Editor',
                       style: TextStyle(
                         fontSize: 11,
                         color: Color(0xFF334155),
@@ -2477,139 +2700,327 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                     return Stack(
                                       fit: StackFit.expand,
                                       children: [
-                                        // A. Fondo interactivo: clic en vacío limpia selección, arrastrar dibuja caja de selección (Marquee)
-                                        GestureDetector(
-                                          behavior: HitTestBehavior.opaque,
-                                          onTap: () {
-                                            setState(() {
-                                              if (!_isShiftPressed) {
-                                                _selectedRackIds.clear();
-                                              }
-                                              _selectedFloorDeviceId = null;
-                                              _editingDeviceId = null;
-                                            });
-                                          },
-                                          onPanStart: (details) {
-                                            setState(() {
-                                              if (!_isShiftPressed) {
-                                                _selectedRackIds.clear();
-                                              }
-                                              _selectedFloorDeviceId = null;
-                                              _editingDeviceId = null;
-                                              _marqueeStart =
-                                                  details.localPosition;
-                                              _marqueeCurrent =
-                                                  details.localPosition;
-                                            });
-                                          },
-                                          onPanUpdate: (details) {
-                                            if (_marqueeStart == null) return;
-                                            final cur = details.localPosition;
-                                            final selRect = Rect.fromPoints(
-                                              _marqueeStart!,
-                                              cur,
-                                            );
-                                            setState(() {
-                                              _marqueeCurrent = cur;
-                                              for (final rk in floorRacks) {
-                                                final normPos =
-                                                    _rackPositions[rk.id] ??
-                                                        const Offset(
-                                                          0.25,
-                                                          0.35,
-                                                        );
-                                                final sz = _rackSizes[rk.id] ??
-                                                    const Size(120.0, 90.0);
-                                                final leftPx =
-                                                    (normPos.dx * canvasW).clamp(
-                                                  8.0,
-                                                  (canvasW - sz.width - 8.0)
-                                                      .clamp(8.0, canvasW),
-                                                );
-                                                final topPx =
-                                                    (normPos.dy * canvasH).clamp(
-                                                  8.0,
-                                                  (canvasH - sz.height - 8.0)
-                                                      .clamp(8.0, canvasH),
-                                                );
-                                                final rkRect = Rect.fromLTWH(
-                                                  leftPx,
-                                                  topPx,
-                                                  sz.width,
-                                                  sz.height,
-                                                );
-                                                if (selRect.overlaps(rkRect)) {
-                                                  _selectedRackIds.add(rk.id);
-                                                } else if (!_isShiftPressed) {
-                                                  _selectedRackIds.remove(rk.id);
-                                                }
-                                              }
-                                            });
-                                          },
-                                          onPanEnd: (_) {
-                                            setState(() {
-                                              _marqueeStart = null;
-                                              _marqueeCurrent = null;
-                                            });
-                                          },
+                                        // Lienzo desplazable con Modo Mano (Barra Espaciadora)
+                                        Transform.translate(
+                                          offset: _canvasPanOffset,
                                           child: Stack(
                                             fit: StackFit.expand,
                                             children: [
-                                              CustomPaint(
-                                                painter:
-                                                    _ArchitecturalGridPainter(),
-                                              ),
-                                              if (floorImageUrl.isNotEmpty)
-                                                Center(
-                                                  child: Transform.scale(
-                                                    scale: _floorImageScale,
-                                                    child: Image.network(
-                                                      floorImageUrl,
-                                                      fit: BoxFit.contain,
-                                                      errorBuilder:
-                                                          (ctx, err, _) {
-                                                        WidgetsBinding.instance
-                                                            .addPostFrameCallback(
-                                                                (_) {
-                                                          if (mounted &&
-                                                              !_floorPlanLoadError) {
-                                                            setState(
-                                                              () =>
-                                                                  _floorPlanLoadError =
-                                                                      true,
-                                                            );
-                                                          }
-                                                        });
-                                                        return const SizedBox
-                                                            .shrink();
-                                                      },
+                                              // A. Fondo interactivo: clic en vacío limpia selección, arrastrar dibuja caja de selección (Marquee)
+                                              GestureDetector(
+                                                behavior:
+                                                    HitTestBehavior.opaque,
+                                                onTap: () {
+                                                  setState(() {
+                                                    if (!_isShiftPressed) {
+                                                      _selectedRackIds.clear();
+                                                    }
+                                                    _selectedFloorDeviceId =
+                                                        null;
+                                                    _editingDeviceId = null;
+                                                  });
+                                                },
+                                                onPanStart: (details) {
+                                                  setState(() {
+                                                    if (!_isShiftPressed) {
+                                                      _selectedRackIds.clear();
+                                                    }
+                                                    _selectedFloorDeviceId =
+                                                        null;
+                                                    _editingDeviceId = null;
+                                                    _marqueeStart =
+                                                        details.localPosition;
+                                                    _marqueeCurrent =
+                                                        details.localPosition;
+                                                  });
+                                                },
+                                                onPanUpdate: (details) {
+                                                  if (_marqueeStart == null) {
+                                                    return;
+                                                  }
+                                                  final cur =
+                                                      details.localPosition;
+                                                  final selRect =
+                                                      Rect.fromPoints(
+                                                    _marqueeStart!,
+                                                    cur,
+                                                  );
+                                                  setState(() {
+                                                    _marqueeCurrent = cur;
+                                                    for (final rk
+                                                        in floorRacks) {
+                                                      final normPos =
+                                                          _rackPositions[
+                                                                  rk.id] ??
+                                                              const Offset(
+                                                                0.25,
+                                                                0.35,
+                                                              );
+                                                      final sz =
+                                                          _rackSizes[rk.id] ??
+                                                              const Size(
+                                                                120.0,
+                                                                90.0,
+                                                              );
+                                                      final leftPx = (normPos
+                                                                  .dx *
+                                                              canvasW)
+                                                          .clamp(
+                                                        8.0,
+                                                        (canvasW -
+                                                                sz.width -
+                                                                8.0)
+                                                            .clamp(
+                                                              8.0,
+                                                              canvasW,
+                                                            ),
+                                                      );
+                                                      final topPx = (normPos
+                                                                  .dy *
+                                                              canvasH)
+                                                          .clamp(
+                                                        8.0,
+                                                        (canvasH -
+                                                                sz.height -
+                                                                8.0)
+                                                            .clamp(
+                                                              8.0,
+                                                              canvasH,
+                                                            ),
+                                                      );
+                                                      final rkRect =
+                                                          Rect.fromLTWH(
+                                                        leftPx,
+                                                        topPx,
+                                                        sz.width,
+                                                        sz.height,
+                                                      );
+                                                      if (selRect.overlaps(
+                                                        rkRect,
+                                                      )) {
+                                                        _selectedRackIds.add(
+                                                          rk.id,
+                                                        );
+                                                      } else if (!_isShiftPressed) {
+                                                        _selectedRackIds.remove(
+                                                          rk.id,
+                                                        );
+                                                      }
+                                                    }
+                                                  });
+                                                },
+                                                onPanEnd: (_) {
+                                                  setState(() {
+                                                    _marqueeStart = null;
+                                                    _marqueeCurrent = null;
+                                                  });
+                                                },
+                                                child: Stack(
+                                                  fit: StackFit.expand,
+                                                  children: [
+                                                    CustomPaint(
+                                                      painter:
+                                                          _ArchitecturalGridPainter(),
                                                     ),
-                                                  ),
+                                                    if (floorImageUrl
+                                                        .isNotEmpty)
+                                                      Center(
+                                                        child: Transform.scale(
+                                                          scale:
+                                                              _floorImageScale,
+                                                          child: Image.network(
+                                                            floorImageUrl,
+                                                            fit: BoxFit.contain,
+                                                            errorBuilder:
+                                                                (ctx, err, _) {
+                                                              WidgetsBinding
+                                                                  .instance
+                                                                  .addPostFrameCallback(
+                                                                      (_) {
+                                                                if (mounted &&
+                                                                    !_floorPlanLoadError) {
+                                                                  setState(
+                                                                    () =>
+                                                                        _floorPlanLoadError =
+                                                                            true,
+                                                                  );
+                                                                }
+                                                              });
+                                                              return const SizedBox
+                                                                  .shrink();
+                                                            },
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    // A2. Líneas de Cableado Estructurado en Planta (Rack -> Roseta/ Cámara/AP y Roseta -> PC/Teléfono)
+                                                    if (_showFloorCables)
+                                                      IgnorePointer(
+                                                        child: CustomPaint(
+                                                          painter:
+                                                              _FloorConnectionsPainter(
+                                                            racks: floorRacks,
+                                                            rackPositions:
+                                                                _rackPositions,
+                                                            rackSizes:
+                                                                _rackSizes,
+                                                            floorDevices: floor
+                                                                .floorDevices,
+                                                            devicePositions:
+                                                                _floorDevicePositions,
+                                                            selectedDeviceId:
+                                                                _selectedFloorDeviceId,
+                                                            selectedRackIds:
+                                                                _selectedRackIds,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                  ],
                                                 ),
-                                              // A2. Líneas de Cableado Estructurado en Planta (Rack -> Roseta/ Cámara/AP y Roseta -> PC/Teléfono)
-                                              if (_showFloorCables)
-                                                IgnorePointer(
-                                                  child: CustomPaint(
-                                                    painter:
-                                                        _FloorConnectionsPainter(
-                                                      racks: floorRacks,
-                                                      rackPositions:
-                                                          _rackPositions,
-                                                      rackSizes: _rackSizes,
-                                                      floorDevices:
-                                                          floor.floorDevices,
-                                                      devicePositions:
-                                                          _floorDevicePositions,
-                                                      selectedDeviceId:
-                                                          _selectedFloorDeviceId,
-                                                      selectedRackIds:
-                                                          _selectedRackIds,
+                                              ),
+
+                                              // B. Dibujos de los Racks en Vista de Planta (Top-Down)
+                                              for (final rk in floorRacks)
+                                                _buildTopDownRackBox(
+                                                  rk: rk,
+                                                  canvasW: canvasW,
+                                                  canvasH: canvasH,
+                                                ),
+
+                                              // B2. Pines de Dispositivos de Planta (Cámaras, Rosetas Bi01, PCs, Control de Acceso, APs...)
+                                              for (final dev
+                                                  in floor.floorDevices)
+                                                _buildFloorDevicePin(
+                                                  dev: dev,
+                                                  canvasW: canvasW,
+                                                  canvasH: canvasH,
+                                                ),
+
+                                              // C. Caja de selección visual (Marquee) al arrastrar con el ratón
+                                              if (marqueeRect != null)
+                                                Positioned(
+                                                  left: marqueeRect.left,
+                                                  top: marqueeRect.top,
+                                                  width: marqueeRect.width,
+                                                  height: marqueeRect.height,
+                                                  child: IgnorePointer(
+                                                    child: Container(
+                                                      decoration: BoxDecoration(
+                                                        color: const Color(
+                                                          0xFF2563EB,
+                                                        ).withValues(
+                                                          alpha: 0.16,
+                                                        ),
+                                                        border: Border.all(
+                                                          color: const Color(
+                                                            0xFF2563EB,
+                                                          ),
+                                                          width: 1.8,
+                                                        ),
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(4),
+                                                      ),
                                                     ),
                                                   ),
                                                 ),
                                             ],
                                           ),
                                         ),
+
+                                        // Capa superior cuando se pulsa la Barra Espaciadora (Modo Mano para arrastrar todo el dashboard)
+                                        if (_isPanHandMode)
+                                          Positioned.fill(
+                                            child: MouseRegion(
+                                              cursor: _isSpaceDragging
+                                                  ? SystemMouseCursors.grabbing
+                                                  : SystemMouseCursors.grab,
+                                              child: GestureDetector(
+                                                behavior:
+                                                    HitTestBehavior.opaque,
+                                                onPanStart: (_) {
+                                                  setState(
+                                                    () =>
+                                                        _isSpaceDragging = true,
+                                                  );
+                                                },
+                                                onPanUpdate: (details) {
+                                                  setState(() {
+                                                    _canvasPanOffset +=
+                                                        details.delta;
+                                                  });
+                                                },
+                                                onPanEnd: (_) {
+                                                  setState(
+                                                    () => _isSpaceDragging =
+                                                        false,
+                                                  );
+                                                },
+                                                onPanCancel: () {
+                                                  setState(
+                                                    () => _isSpaceDragging =
+                                                        false,
+                                                  );
+                                                },
+                                                child: Align(
+                                                  alignment:
+                                                      Alignment.topCenter,
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                      top: 12,
+                                                    ),
+                                                    child: Container(
+                                                      padding: const EdgeInsets
+                                                          .symmetric(
+                                                        horizontal: 14,
+                                                        vertical: 6,
+                                                      ),
+                                                      decoration: BoxDecoration(
+                                                        color: const Color(
+                                                          0xEE0F172A,
+                                                        ),
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(20),
+                                                        border: Border.all(
+                                                          color: const Color(
+                                                            0xFF38BDF8,
+                                                          ),
+                                                          width: 1.4,
+                                                        ),
+                                                      ),
+                                                      child: const Row(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          Icon(
+                                                            Icons
+                                                                .pan_tool_alt_rounded,
+                                                            size: 15,
+                                                            color: Color(
+                                                              0xFF38BDF8,
+                                                            ),
+                                                          ),
+                                                          SizedBox(width: 6),
+                                                          Text(
+                                                            'Modo Mano activo — Arrastra con el ratón para mover el dashboard',
+                                                            style: TextStyle(
+                                                              color:
+                                                                  Colors.white,
+                                                              fontSize: 11.5,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w800,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
 
                                         if (isDraggingNew)
                                           IgnorePointer(
@@ -2744,46 +3155,6 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                                     ),
                                                   ),
                                                 ],
-                                              ),
-                                            ),
-                                          ),
-
-                                        // B. Dibujos de los Racks en Vista de Planta (Top-Down)
-                                        for (final rk in floorRacks)
-                                          _buildTopDownRackBox(
-                                            rk: rk,
-                                            canvasW: canvasW,
-                                            canvasH: canvasH,
-                                          ),
-
-                                        // B2. Pines de Dispositivos de Planta (Cámaras, Rosetas Bi01, PCs, Control de Acceso, APs...)
-                                        for (final dev in floor.floorDevices)
-                                          _buildFloorDevicePin(
-                                            dev: dev,
-                                            canvasW: canvasW,
-                                            canvasH: canvasH,
-                                          ),
-
-                                        // C. Caja de selección visual (Marquee) al arrastrar con el ratón
-                                        if (marqueeRect != null)
-                                          Positioned(
-                                            left: marqueeRect.left,
-                                            top: marqueeRect.top,
-                                            width: marqueeRect.width,
-                                            height: marqueeRect.height,
-                                            child: IgnorePointer(
-                                              child: Container(
-                                                decoration: BoxDecoration(
-                                                  color: const Color(0xFF2563EB)
-                                                      .withValues(alpha: 0.16),
-                                                  border: Border.all(
-                                                    color:
-                                                        const Color(0xFF2563EB),
-                                                    width: 1.8,
-                                                  ),
-                                                  borderRadius:
-                                                      BorderRadius.circular(4),
-                                                ),
                                               ),
                                             ),
                                           ),
@@ -3201,6 +3572,15 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                 _selectedRackIds.add(rk.id);
               }
             });
+            final targetIds = _selectedRackIds.contains(rk.id)
+                ? _selectedRackIds
+                : <int>{rk.id};
+            _pushUndoSnapshot(
+              description: targetIds.length > 1
+                  ? 'Mover ${targetIds.length} Racks'
+                  : 'Mover Rack ${rk.code}',
+              affectedRackIds: targetIds,
+            );
           },
           onPanUpdate: (details) {
             final dxNorm = details.delta.dx / canvasW;
@@ -3264,6 +3644,10 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                         // Botón rotar orientación Front/Back
                         InkWell(
                           onTap: () {
+                            _pushUndoSnapshot(
+                              description: 'Rotar Rack ${rk.code}',
+                              affectedRackIds: [rk.id],
+                            );
                             setState(() {
                               _rackRotations[rk.id] = ((rot + 90) % 360);
                             });
@@ -3385,6 +3769,12 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                 bottom: 0,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
+                  onPanStart: (_) {
+                    _pushUndoSnapshot(
+                      description: 'Redimensionar Rack ${rk.code}',
+                      affectedRackIds: [rk.id],
+                    );
+                  },
                   onPanUpdate: (details) {
                     setState(() {
                       final curSize = _rackSizes[rk.id] ?? baseSize;
@@ -3906,7 +4296,13 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => _selectFloorDevice(dev),
-          onPanStart: (_) => _selectFloorDevice(dev),
+          onPanStart: (_) {
+            _pushUndoSnapshot(
+              description: 'Mover dispositivo ${dev.code}',
+              affectedDeviceIds: [dev.id],
+            );
+            _selectFloorDevice(dev);
+          },
           onPanUpdate: (details) {
             final dxNorm = details.delta.dx / canvasW;
             final dyNorm = details.delta.dy / canvasH;
@@ -4977,4 +5373,24 @@ class _ArchitecturalGridPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _FloorUndoSnapshot {
+  final String description;
+  final Map<int, Offset> rackPositions;
+  final Map<int, Size> rackSizes;
+  final Map<int, int> rackRotations;
+  final Map<int, Offset> floorDevicePositions;
+  final Set<int> affectedRackIds;
+  final Set<int> affectedDeviceIds;
+
+  const _FloorUndoSnapshot({
+    required this.description,
+    required this.rackPositions,
+    required this.rackSizes,
+    required this.rackRotations,
+    required this.floorDevicePositions,
+    required this.affectedRackIds,
+    required this.affectedDeviceIds,
+  });
 }
