@@ -8643,6 +8643,9 @@ class _RackEditorViewState extends State<RackEditorView> {
     final heightPx = dev.uHeight * _uHeightPx;
     final isSelected = dev.id == _selectedDeviceId;
     final isHighlighted = dev.id == _highlightedDeviceId;
+    final isHovered = dev.id == _hoveredDeviceId;
+    final isActiveTarget = isHovered ||
+        ((isSelected || isHighlighted) && _hoveredDeviceId == null);
     final facePorts = dev.portsForFace(face);
     final isRearAutoView = dev.mountedFace != face;
     final isTray = dev.template.category == 'rack_tray' ||
@@ -8662,39 +8665,59 @@ class _RackEditorViewState extends State<RackEditorView> {
     Widget buildChassisContent({required bool isDropTarget}) {
       return Container(
         decoration: BoxDecoration(
-          // Cuando el equipo es seleccionado o localizado desde búsqueda/alarma, aplicamos un fondo grisáceo destacado
+          // Sombreado claro del elemento sobre el que está el ratón y va a actuar (o seleccionado)
           color: isDropTarget
               ? const Color(0xFFFEE2E2)
-              : ((isHighlighted || isSelected)
-                  ? const Color(0xFFD1D5DB)
-                  : (isTray
-                      ? const Color(0xFFF1F5F9)
-                      : (isRearAutoView
-                          ? const Color(0xFFF8FAFC)
-                          : Colors.white))),
+              : (isHovered
+                  ? const Color(0xFFDBEAFE)
+                  : ((isHighlighted || isSelected)
+                      ? const Color(0xFFD1D5DB)
+                      : (isTray
+                          ? const Color(0xFFF1F5F9)
+                          : (isRearAutoView
+                              ? const Color(0xFFF8FAFC)
+                              : Colors.white)))),
           border: Border.symmetric(
             horizontal: BorderSide(
-              color: (isHighlighted || isSelected)
-                  ? const Color(0xFF1E293B)
-                  : const Color(0xFFCBD5E1),
-              width: (isHighlighted || isSelected) ? 2.0 : 0.9,
+              color: isHovered
+                  ? const Color(0xFF0284C7)
+                  : ((isHighlighted || isSelected)
+                      ? const Color(0xFF1E293B)
+                      : const Color(0xFFCBD5E1)),
+              width: (isHovered || isHighlighted || isSelected) ? 2.0 : 0.9,
             ),
+            vertical: (isHovered || isHighlighted || isSelected)
+                ? BorderSide(
+                    color: isHovered
+                        ? const Color(0xFF0284C7)
+                        : const Color(0xFF1E293B),
+                    width: 1.4,
+                  )
+                : BorderSide.none,
           ),
-          boxShadow: (isHighlighted || isSelected)
+          boxShadow: isHovered
               ? [
                   BoxShadow(
-                    color: const Color(0xFF475569).withValues(alpha: 0.28),
-                    blurRadius: 8,
+                    color: const Color(0xFF0284C7).withValues(alpha: 0.30),
+                    blurRadius: 9,
                     spreadRadius: 1,
                   ),
                 ]
-              : null,
+              : ((isHighlighted || isSelected)
+                  ? [
+                      BoxShadow(
+                        color: const Color(0xFF475569).withValues(alpha: 0.28),
+                        blurRadius: 8,
+                        spreadRadius: 1,
+                      ),
+                    ]
+                  : null),
         ),
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            // Etiqueta de equipo localizado a la izquierda de la regla U cuando viene de búsqueda/alarma
-            if (isHighlighted || isSelected)
+            // Etiqueta en la regla U indicando el equipo activo sobre el que está el cursor o seleccionado
+            if (isHovered || isHighlighted || isSelected)
               Positioned(
                 left: -68,
                 top: (heightPx / 2) - 10,
@@ -8705,7 +8728,9 @@ class _RackEditorViewState extends State<RackEditorView> {
                       vertical: 2,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF334155),
+                      color: isHovered
+                          ? const Color(0xFF0284C7)
+                          : const Color(0xFF334155),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
@@ -8743,6 +8768,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                 isLeft: true,
                 verticalCode: dev.code.trim().length <= 1 ? null : dev.code,
                 statusColor: dev.monitoringEnabled ? statusColor : null,
+                isActiveTarget: isActiveTarget,
               ),
             ),
             Positioned(
@@ -8750,7 +8776,11 @@ class _RackEditorViewState extends State<RackEditorView> {
               top: 0,
               bottom: 0,
               width: _railWidth,
-              child: _buildDeviceMountingEar(dev.uHeight, isLeft: false),
+              child: _buildDeviceMountingEar(
+                dev.uHeight,
+                isLeft: false,
+                isActiveTarget: isActiveTarget,
+              ),
             ),
 
             // Para Patch Panels con código de 1 sola letra (A, B, C, D, E, F), se dibuja en horizontal junto a la orejeta izquierda
@@ -9048,7 +9078,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                   Padding(
                     padding: const EdgeInsets.only(right: 4),
                     child: Text(
-                      dev.code,
+                      '▾ ${dev.code}',
                       style: const TextStyle(
                         fontSize: 9.0,
                         fontWeight: FontWeight.w900,
@@ -9926,14 +9956,22 @@ class _RackEditorViewState extends State<RackEditorView> {
     bool isLeft = true,
     String? verticalCode,
     Color? statusColor,
+    bool isActiveTarget = false,
   }) {
     final hasVerticalCode =
         isLeft && verticalCode != null && verticalCode.trim().isNotEmpty;
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFFDDE3EC),
+      decoration: BoxDecoration(
+        color: isActiveTarget
+            ? const Color(0xFFBAE6FD)
+            : const Color(0xFFDDE3EC),
         border: Border.symmetric(
-          vertical: BorderSide(color: Color(0xFFB4BFCE), width: 0.9),
+          vertical: BorderSide(
+            color: isActiveTarget
+                ? const Color(0xFF0284C7)
+                : const Color(0xFFB4BFCE),
+            width: isActiveTarget ? 1.1 : 0.9,
+          ),
         ),
       ),
       child: hasVerticalCode
