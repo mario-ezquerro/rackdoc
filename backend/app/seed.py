@@ -1478,8 +1478,157 @@ def sync_system_defaults(db: Session):
             "back": back_list,
         }
 
-    # Asegurar plantillas adicionales para 'Power', 'Host - HP' (12 modelos), 'Host - Dell' (12 modelos) y 'Host - Supermicro' (11 modelos)
+    # Asegurar plantillas adicionales para 'Network' (Switches 48p), 'Patching & Passive' (Patch Panel 48p), 'Power', 'Host - HP', 'Host - Dell' y 'Host - Supermicro'
     extra_templates = [
+        # --- NETWORK (SWITCHES 48 PUERTOS + SFP+) ---
+        {
+            "library_group": "Network",
+            "category": "switch",
+            "manufacturer": "Cisco",
+            "model_name": "Catalyst 9300-48P PoE+ (48x RJ45 + 4x SFP+)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {
+                "front": [
+                    {
+                        "port_type": "rj45",
+                        "prefix": "",
+                        "count": 48,
+                        "rows": 2,
+                        "start_x": 0.06,
+                        "end_x": 0.81,
+                    },
+                    {
+                        "port_type": "sfp_plus",
+                        "prefix": "SFP",
+                        "count": 4,
+                        "rows": 2,
+                        "start_x": 0.85,
+                        "end_x": 0.94,
+                    },
+                ],
+                "back": [
+                    {
+                        "port_type": "power_c14",
+                        "prefix": "PSU",
+                        "count": 2,
+                        "rows": 1,
+                        "start_x": 0.15,
+                        "end_x": 0.30,
+                    },
+                ],
+            },
+        },
+        {
+            "library_group": "Network",
+            "category": "switch",
+            "manufacturer": "HPE Aruba",
+            "model_name": "Aruba CX 6300M 48G PoE+ (48x RJ45 + 4x SFP56)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {
+                "front": [
+                    {
+                        "port_type": "rj45",
+                        "prefix": "",
+                        "count": 48,
+                        "rows": 2,
+                        "start_x": 0.06,
+                        "end_x": 0.81,
+                    },
+                    {
+                        "port_type": "sfp_plus",
+                        "prefix": "SFP",
+                        "count": 4,
+                        "rows": 2,
+                        "start_x": 0.85,
+                        "end_x": 0.94,
+                    },
+                ],
+                "back": [
+                    {
+                        "port_type": "power_c14",
+                        "prefix": "PSU",
+                        "count": 2,
+                        "rows": 1,
+                        "start_x": 0.15,
+                        "end_x": 0.30,
+                    },
+                ],
+            },
+        },
+        {
+            "library_group": "Network",
+            "category": "switch",
+            "manufacturer": "Ubiquiti",
+            "model_name": "UniFi Pro Max 48 PoE (48x RJ45 + 4x SFP+)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#F8FAFC",
+            "layout_spec": {
+                "front": [
+                    {
+                        "port_type": "rj45",
+                        "prefix": "",
+                        "count": 48,
+                        "rows": 2,
+                        "start_x": 0.06,
+                        "end_x": 0.81,
+                    },
+                    {
+                        "port_type": "sfp_plus",
+                        "prefix": "SFP",
+                        "count": 4,
+                        "rows": 2,
+                        "start_x": 0.85,
+                        "end_x": 0.94,
+                    },
+                ],
+                "back": [
+                    {
+                        "port_type": "power_c14",
+                        "prefix": "PSU",
+                        "count": 2,
+                        "rows": 1,
+                        "start_x": 0.15,
+                        "end_x": 0.30,
+                    },
+                ],
+            },
+        },
+        {
+            "library_group": "Patching & Passive",
+            "category": "patch_panel",
+            "manufacturer": "R&M",
+            "model_name": "Patch Panel 48p Cat6A Alta Densidad (48x RJ45)",
+            "u_height": 1,
+            "is_full_depth": True,
+            "default_color": "#FFFFFF",
+            "layout_spec": {
+                "front": [
+                    {
+                        "port_type": "rj45",
+                        "prefix": "",
+                        "count": 48,
+                        "rows": 2,
+                        "start_x": 0.08,
+                        "end_x": 0.92,
+                    }
+                ],
+                "back": [
+                    {
+                        "port_type": "rj45",
+                        "prefix": "KR-",
+                        "count": 48,
+                        "rows": 2,
+                        "start_x": 0.08,
+                        "end_x": 0.92,
+                    }
+                ],
+            },
+        },
         # --- POWER ---
         {
             "library_group": "Power",
@@ -2778,6 +2927,40 @@ def sync_system_defaults(db: Session):
                     }
                 ]
                 tpl.layout_spec = spec
+            elif tpl.category == "switch":
+                front_groups = list(spec.get("front") or [])
+                changed_spec = False
+                for g in front_groups:
+                    pt = str(g.get("port_type", "")).lower()
+                    cnt = int(g.get("count", 0))
+                    if ("sfp" in pt or "fiber" in pt) and cnt >= 4 and int(g.get("rows", 1)) == 1:
+                        g["rows"] = 2
+                        changed_spec = True
+                if changed_spec:
+                    spec["front"] = front_groups
+                    tpl.layout_spec = spec
+
+    # Normalizar también puertos SFP frontales en Switches ya montados que se crearon con row_index=0 para >=4 SFP
+    for sw_dev in db.query(RackDevice).all():
+        if sw_dev.template and sw_dev.template.category == "switch":
+            front_sfps = [
+                p
+                for p in sw_dev.ports
+                if p.face == "front"
+                and (
+                    p.port_type == "sfp_plus"
+                    or "fiber" in (p.port_type or "")
+                    or (p.port_number or "").startswith("SFP")
+                )
+            ]
+            if len(front_sfps) >= 4 and all(p.row_index == 0 for p in front_sfps):
+                front_sfps.sort(key=lambda x: x.id)
+                cols = max(1, (len(front_sfps) + 1) // 2)
+                for idx, p in enumerate(front_sfps):
+                    p.row_index = idx % 2
+                    p.col_index = idx // 2
+                    p.rel_y = 0.32 if p.row_index == 0 else 0.68
+                    p.rel_x = round(0.85 + (0.09 * (p.col_index / max(1, cols - 1))), 4)
 
     db.flush()
 

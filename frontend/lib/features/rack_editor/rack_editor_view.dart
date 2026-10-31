@@ -396,20 +396,72 @@ class _RackEditorViewState extends State<RackEditorView> {
     return list;
   }
 
-  /// Ajusta la posición horizontal relativa `relX` para agrupar visualmente en bloques de 8 bocas
-  /// los paneles de 24 puertos de 1 fila (como Patch Panels A..E y FI-01 en la imagen de referencia),
-  /// los 24 casetes verticales de PATCHBOX en 1 sola fila, y los bloques RJ45 + SFP+ en Routers/Switches.
+  /// Determina si una boca debe dibujarse en la fila inferior (par en switches/routers/SFP, o 25..48 en patch panels de 48p).
+  bool _isPortBottomRow(RackDeviceModel dev, PortModel port, String face) {
+    final cat = dev.template.category;
+    if (cat == 'patchbox' && face == 'front') {
+      return false;
+    }
+    final numVal = int.tryParse(
+      port.portNumber.replaceAll(RegExp(r'[^0-9]'), ''),
+    );
+    final facePorts = dev.portsForFace(face);
+    if ((cat == 'patch_panel' || cat == 'gateway') &&
+        facePorts.length > 24 &&
+        numVal != null) {
+      return numVal > 24;
+    }
+    if ((cat == 'switch' || cat == 'router' || cat == 'firewall') &&
+        face == 'front' &&
+        numVal != null) {
+      final isSfp = port.portType == 'sfp_plus' ||
+          port.portType.contains('fiber') ||
+          port.portNumber.startsWith('SFP');
+      if (isSfp) {
+        final sfpCount = facePorts
+            .where(
+              (p) =>
+                  p.portType == 'sfp_plus' ||
+                  p.portType.contains('fiber') ||
+                  p.portNumber.startsWith('SFP'),
+            )
+            .length;
+        if (sfpCount >= 2) {
+          return numVal.isEven;
+        }
+      } else if (!port.portType.contains('power')) {
+        final rjCount = facePorts
+            .where(
+              (p) =>
+                  p.portType != 'sfp_plus' &&
+                  !p.portType.contains('fiber') &&
+                  !p.portNumber.startsWith('SFP') &&
+                  !p.portType.contains('power'),
+            )
+            .length;
+        if (rjCount >= 8) {
+          return numVal.isEven;
+        }
+      }
+    }
+    return port.rowIndex > 0;
+  }
+
+  /// Ajusta la posición horizontal relativa `relX` para agrupar visualmente en bloques:
+  /// - Patch Panels de 24p (1 fila de 3x8) y de 48p (2 filas de 3x8: 1..24 arriba y 25..48 abajo)
+  /// - Casetes verticales de PATCHBOX (24 módulos en 1 sola fila)
+  /// - Switches de 24 bocas (2x12 RJ45 + 2x2 SFP+) y Switches de 48 bocas (4 bloques de 2x6 = 48 RJ45 + bloque SFP+ a la derecha)
   double _computeVisualRelX(RackDeviceModel dev, PortModel port) {
     final cat = dev.template.category;
     final numVal = int.tryParse(
       port.portNumber.replaceAll(RegExp(r'[^0-9]'), ''),
     );
-    // 1. Patch Panels (A..F) y Bandeja de Fibra (FI-01): 3 bloques de 8 bocas (1..8, 9..16, 17..24)
+    // 1. Patch Panels (24p o 48p) y Bandeja de Fibra (FI-01): 3 bloques de 8 bocas por fila
     if ((cat == 'patch_panel' || cat == 'gateway') &&
         numVal != null &&
         numVal >= 1 &&
-        numVal <= 24) {
-      final idx = numVal - 1; // 0..23
+        numVal <= 48) {
+      final idx = (numVal - 1) % 24; // 0..23 dentro de su fila
       final block = idx ~/ 8; // 0, 1, 2
       final inBlock = idx % 8; // 0..7
       const baseStart = 0.082;
@@ -439,12 +491,63 @@ class _RackEditorViewState extends State<RackEditorView> {
         return 0.545 + (col / 3.0) * 0.115;
       }
     }
-    // 4. Switch (SW01..03): bloque 2x12 RJ45 (1..24) y a su derecha bloque 2x2 SFP+ (1..4)
+    // 4. Switch (24 puertos, 48 puertos o medida personalizada):
     if (cat == 'switch' && port.face == 'front' && numVal != null) {
-      if (port.portType == 'sfp_plus' || port.portNumber.startsWith('SFP')) {
-        final col = ((numVal - 1) ~/ 2).clamp(0, 1);
+      final frontPorts = dev.portsForFace('front');
+      final isSfp = port.portType == 'sfp_plus' ||
+          port.portType.contains('fiber') ||
+          port.portNumber.startsWith('SFP');
+      final rjCount = frontPorts
+          .where(
+            (p) =>
+                p.portType != 'sfp_plus' &&
+                !p.portType.contains('fiber') &&
+                !p.portNumber.startsWith('SFP') &&
+                !p.portType.contains('power'),
+          )
+          .length;
+      final sfpCount = frontPorts
+          .where(
+            (p) =>
+                p.portType == 'sfp_plus' ||
+                p.portType.contains('fiber') ||
+                p.portNumber.startsWith('SFP'),
+          )
+          .length;
+
+      if (isSfp) {
+        final sfpCols = ((sfpCount + 1) ~/ 2).clamp(1, 8);
+        final col = ((numVal - 1) ~/ 2).clamp(0, sfpCols - 1);
+        if (rjCount > 24) {
+          // En Switches de 48 bocas, las jaulas SFP+ se sitúan en el extremo derecho [0.858 .. 0.942]
+          final startSfp = 0.858;
+          final step = sfpCols <= 1 ? 0.0 : (0.084 / (sfpCols - 1)).clamp(0.028, 0.042);
+          return startSfp + col * step;
+        }
         return 0.775 + col * 0.036;
       }
+
+      if (rjCount > 24) {
+        // Switch de alta densidad (ej. 48 bocas RJ45 = 24 columnas organizadas en 4 bloques de 12 bocas / 6 columnas)
+        final totalCols = ((rjCount + 1) ~/ 2).clamp(1, 32);
+        final col = ((numVal - 1) ~/ 2).clamp(0, totalCols - 1);
+        final numBlocks = ((totalCols + 5) ~/ 6).clamp(1, 6);
+        final blockIdx = col ~/ 6;
+        final colInBlock = col % 6;
+        final minX = 0.056;
+        final maxX = sfpCount > 0 ? 0.808 : 0.938;
+        final blockGap = numBlocks > 1 ? 0.025 : 0.0;
+        final totalSpan = maxX - minX - blockGap * (numBlocks - 1);
+        final blockSpan = totalSpan / numBlocks;
+        final colsInThisBlock = (blockIdx == numBlocks - 1)
+            ? (totalCols - blockIdx * 6)
+            : 6;
+        final localFrac = colsInThisBlock <= 1
+            ? 0.5
+            : (colInBlock / (colsInThisBlock - 1));
+        return minX + blockIdx * (blockSpan + blockGap) + localFrac * blockSpan;
+      }
+
       if (numVal >= 1 && numVal <= 24) {
         final col = ((numVal - 1) ~/ 2).clamp(0, 11);
         return 0.365 + (col / 11.0) * 0.365;
@@ -460,9 +563,9 @@ class _RackEditorViewState extends State<RackEditorView> {
       return 0.65;
     }
     final facePorts = dev.portsForFace(face);
-    final hasTwoRows = facePorts.any((p) => p.rowIndex > 0);
+    final hasTwoRows = facePorts.any((p) => _isPortBottomRow(dev, p, face));
     if (hasTwoRows) {
-      return port.rowIndex == 0 ? 0.34 : 0.72;
+      return _isPortBottomRow(dev, port, face) ? 0.72 : 0.34;
     }
     return 0.58;
   }
@@ -1002,12 +1105,13 @@ class _RackEditorViewState extends State<RackEditorView> {
       });
     }
     if (sfpCount > 0) {
+      final useTwoSfpRows = sfpCount >= 4 || (sfpCount >= 2 && rj45Count >= 12);
       rawBlocks.add({
         'port_type': 'sfp_plus',
         'prefix': isBackFace ? 'B-SFP' : 'SFP',
         'count': sfpCount,
-        'rows': sfpCount >= 6 ? 2 : 1,
-        'weight': (sfpCount >= 6 ? (sfpCount / 2.0) : sfpCount.toDouble())
+        'rows': useTwoSfpRows ? 2 : 1,
+        'weight': (useTwoSfpRows ? (sfpCount / 2.0) : sfpCount.toDouble())
                 .clamp(1.5, 10.0) *
             1.15,
       });
@@ -9966,23 +10070,30 @@ class _RackEditorViewState extends State<RackEditorView> {
       );
     }
 
+    final facePorts = dev.portsForFace(face);
+    final isDenseFace = facePorts.length > 28;
     final jackW = isMalePlug
         ? 22.0
         : (isSchuko
             ? 16.0
             : (isPower
                 ? 15.0
-                : (isSfpCage ? 12.2 : (isFiberCoupler ? 11.0 : 11.2))));
+                : (isDenseFace
+                    ? (isSfpCage ? 10.2 : 9.6)
+                    : (isSfpCage ? 12.2 : (isFiberCoupler ? 11.0 : 11.2)))));
     final jackH = isMalePlug
         ? 15.0
         : (isSchuko
             ? 14.0
-            : (isPower ? 11.0 : (isSfpCage ? 9.0 : (isFiberCoupler ? 9.2 : 9.0))));
+            : (isPower
+                ? 11.0
+                : (isDenseFace
+                    ? 8.2
+                    : (isSfpCage ? 9.0 : (isFiberCoupler ? 9.2 : 9.0)))));
 
-    final facePorts = dev.portsForFace(face);
-    final hasTwoRows =
-        !isPatchboxCassette && facePorts.any((p) => p.rowIndex > 0);
-    final labelBelow = hasTwoRows && port.rowIndex > 0;
+    final hasTwoRows = !isPatchboxCassette &&
+        facePorts.any((p) => _isPortBottomRow(dev, p, face));
+    final labelBelow = hasTwoRows && _isPortBottomRow(dev, port, face);
 
     Color jackFill;
     Color jackBorder;
@@ -10006,7 +10117,8 @@ class _RackEditorViewState extends State<RackEditorView> {
       jackBorder = const Color(0xFF475569);
     }
 
-    final halfWidth = isMalePlug ? 16.0 : 10.0;
+    final halfWidth = isMalePlug ? 16.0 : (isDenseFace ? 8.0 : 10.0);
+    final labelFontSize = isMalePlug ? 5.8 : (isDenseFace ? 5.5 : 6.2);
 
     return Positioned(
       left: centerX - halfWidth,
@@ -10027,8 +10139,9 @@ class _RackEditorViewState extends State<RackEditorView> {
                 Text(
                   shortLabel,
                   style: TextStyle(
-                    fontSize: isMalePlug ? 5.8 : 6.2,
+                    fontSize: labelFontSize,
                     height: 1.0,
+                    letterSpacing: isDenseFace ? -0.2 : 0.0,
                     fontWeight: FontWeight.w800,
                     color: isConnected
                         ? connectedColor
@@ -10107,8 +10220,9 @@ class _RackEditorViewState extends State<RackEditorView> {
                 Text(
                   shortLabel,
                   style: TextStyle(
-                    fontSize: 6.2,
+                    fontSize: labelFontSize,
                     height: 1.0,
+                    letterSpacing: isDenseFace ? -0.2 : 0.0,
                     fontWeight: FontWeight.w700,
                     color: isConnected
                         ? connectedColor
