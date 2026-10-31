@@ -565,9 +565,9 @@ class _RackEditorViewState extends State<RackEditorView> {
     final facePorts = dev.portsForFace(face);
     final hasTwoRows = facePorts.any((p) => _isPortBottomRow(dev, p, face));
     if (hasTwoRows) {
-      return _isPortBottomRow(dev, port, face) ? 0.72 : 0.34;
+      return _isPortBottomRow(dev, port, face) ? 0.60 : 0.31;
     }
-    return 0.58;
+    return 0.56;
   }
 
   int _externalColsPerRow(RackDeviceModel ext) {
@@ -7341,6 +7341,18 @@ class _RackEditorViewState extends State<RackEditorView> {
             connectedPortColors: connectedPortColors,
           ),
 
+      // C0. Controles rápidos flotantes en pestaña superior exterior (para no tapar nunca las bocas del equipo)
+      if (_canEdit && _pendingSourcePort == null && _draggingData == null)
+        for (final dev in rack.devices)
+          if (dev.isVisibleOnFace(face) &&
+              (dev.id == _hoveredDeviceId ||
+                  (dev.id == _selectedDeviceId && _hoveredDeviceId == null)))
+            _buildDeviceFloatingToolbar(
+              dev: dev,
+              innerLeft: innerLeft,
+              totalUnits: rack.totalUnits,
+            ),
+
       // C1. Previsualización Multi-U en tiempo real al arrastrar un equipo
       if (showDropPreview && _hoveredDropU != null && _draggingData != null)
         Builder(
@@ -8631,12 +8643,8 @@ class _RackEditorViewState extends State<RackEditorView> {
     final heightPx = dev.uHeight * _uHeightPx;
     final isSelected = dev.id == _selectedDeviceId;
     final isHighlighted = dev.id == _highlightedDeviceId;
-    final isHovered = dev.id == _hoveredDeviceId;
     final facePorts = dev.portsForFace(face);
     final isRearAutoView = dev.mountedFace != face;
-    final rack = _rack;
-    final nextUpU = rack != null ? _findNearestFreeU(rack, dev, 1) : null;
-    final nextDownU = rack != null ? _findNearestFreeU(rack, dev, -1) : null;
     final isTray = dev.template.category == 'rack_tray' ||
         dev.template.modelName.toLowerCase().contains('bandeja');
     final isRoofFan = dev.template.isRoofFan;
@@ -8813,255 +8821,6 @@ class _RackEditorViewState extends State<RackEditorView> {
                 devHeight: heightPx,
                 connectedColor: connectedPortColors[port.id],
               ),
-
-            // Controles rápidos flotantes en el propio equipo (Arrastrar, Subir, Bajar, U Ocupadas -/+, Equipos en Bandeja, Foto, Cable a Otro Rack, Borrar)
-            if (_canEdit && (isHovered || isSelected))
-              Positioned(
-                left: _railWidth + 24,
-                top: 2,
-                child: Material(
-                  elevation: 3,
-                  borderRadius: BorderRadius.circular(5),
-                  color: const Color(0xFF0F172A).withValues(alpha: 0.92),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 1.5,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Tooltip(
-                          message:
-                              'Arrastra el equipo directamente a cualquier posición con U libres',
-                          child: Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 3),
-                            child: Icon(
-                              Icons.open_with_rounded,
-                              size: 13,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                        InkWell(
-                          onTap: nextUpU != null
-                              ? () => _moveDeviceToU(dev, nextUpU)
-                              : null,
-                          child: Tooltip(
-                            message: nextUpU != null
-                                ? 'Subir a U$nextUpU (${dev.uHeight}U libres)'
-                                : 'No hay ${dev.uHeight}U libres más arriba',
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 3,
-                              ),
-                              child: Icon(
-                                Icons.keyboard_arrow_up,
-                                size: 14,
-                                color: nextUpU != null
-                                    ? Colors.white
-                                    : Colors.white38,
-                              ),
-                            ),
-                          ),
-                        ),
-                        InkWell(
-                          onTap: nextDownU != null
-                              ? () => _moveDeviceToU(dev, nextDownU)
-                              : null,
-                          child: Tooltip(
-                            message: nextDownU != null
-                                ? 'Bajar a U$nextDownU (${dev.uHeight}U libres)'
-                                : 'No hay ${dev.uHeight}U libres más abajo',
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 3,
-                              ),
-                              child: Icon(
-                                Icons.keyboard_arrow_down,
-                                size: 14,
-                                color: nextDownU != null
-                                    ? Colors.white
-                                    : Colors.white38,
-                              ),
-                            ),
-                          ),
-                        ),
-                        InkWell(
-                          onTap: () => _showMoveDeviceToUDialog(dev),
-                          child: Tooltip(
-                            message:
-                                'Elegir U libre destino (Actual: U${dev.startU})',
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 3,
-                              ),
-                              child: Text(
-                                'U${dev.startU}',
-                                style: const TextStyle(
-                                  fontSize: 9.5,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF93C5FD),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        // Selector rápido -/+ de cuántas U ocupa en el propio chasis
-                        Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 3),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 3,
-                            vertical: 0.5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1E293B),
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(color: const Color(0xFF475569)),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              InkWell(
-                                onTap: dev.uHeight > 1
-                                    ? () => _quickAdjustDeviceUHeight(
-                                          dev,
-                                          dev.uHeight - 1,
-                                        )
-                                    : null,
-                                child: const Tooltip(
-                                  message: 'Reducir 1U de altura',
-                                  child: Icon(
-                                    Icons.remove,
-                                    size: 11,
-                                    color: Color(0xFF38BDF8),
-                                  ),
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 3,
-                                ),
-                                child: Text(
-                                  '${dev.uHeight}U',
-                                  style: const TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w800,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                              InkWell(
-                                onTap: dev.uHeight < 16
-                                    ? () => _quickAdjustDeviceUHeight(
-                                          dev,
-                                          dev.uHeight + 1,
-                                        )
-                                    : null,
-                                child: const Tooltip(
-                                  message: 'Ampliar +1U de altura',
-                                  child: Icon(
-                                    Icons.add,
-                                    size: 11,
-                                    color: Color(0xFF38BDF8),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (isTray)
-                          InkWell(
-                            onTap: () => _showManageTrayItemsDialog(dev),
-                            child: Tooltip(
-                              message:
-                                  'Colocar o gestionar Mini-Equipos dentro de esta Bandeja (Routers, Switches, Mini-PCs)',
-                              child: Container(
-                                margin: const EdgeInsets.symmetric(
-                                  horizontal: 3,
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 5,
-                                  vertical: 1,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF7C3AED),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(
-                                      Icons.inbox_outlined,
-                                      size: 11,
-                                      color: Colors.white,
-                                    ),
-                                    const SizedBox(width: 3),
-                                    Text(
-                                      '+ Equipos (${dev.trayItems.length})',
-                                      style: const TextStyle(
-                                        fontSize: 8.5,
-                                        fontWeight: FontWeight.w800,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        InkWell(
-                          onTap: () =>
-                              _showHardwarePhotoSearchDialog(device: dev),
-                          child: const Tooltip(
-                            message:
-                                'Buscar o cambiar Foto de Referencia del equipo',
-                            child: Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 3),
-                              child: Icon(
-                                Icons.photo_camera_outlined,
-                                size: 12.5,
-                                color: Color(0xFF38BDF8),
-                              ),
-                            ),
-                          ),
-                        ),
-                        InkWell(
-                          onTap: () => _showInterRackConnectionDialog(
-                            initialSourceDev: dev,
-                          ),
-                          child: const Tooltip(
-                            message:
-                                'Conectar fibra/cable desde este equipo hacia otro Rack',
-                            child: Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 3),
-                              child: Icon(
-                                Icons.compare_arrows,
-                                size: 13,
-                                color: Color(0xFF34D399),
-                              ),
-                            ),
-                          ),
-                        ),
-                        InkWell(
-                          onTap: () => _quickDeleteDevice(dev),
-                          child: const Tooltip(
-                            message: 'Borrar / Desmontar este equipo',
-                            child: Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 3),
-                              child: Icon(
-                                Icons.delete_outline,
-                                size: 13,
-                                color: Color(0xFFF87171),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
           ],
         ),
       );
@@ -9230,6 +8989,292 @@ class _RackEditorViewState extends State<RackEditorView> {
             child: interactiveChassis,
           );
         },
+      ),
+    );
+  }
+
+  /// Barra flotante de controles rápidos del equipo montado, situada como pestaña justo encima del borde superior
+  /// del chasis para no tapar jamás las bocas / puertos (1..48, SFP, etc.) del propio equipo.
+  Widget _buildDeviceFloatingToolbar({
+    required RackDeviceModel dev,
+    required double innerLeft,
+    required int totalUnits,
+  }) {
+    final topU = dev.endU;
+    final topY = _rackTopMargin + (totalUnits - topU) * _uHeightPx;
+    final rack = _rack;
+    final nextUpU = rack != null ? _findNearestFreeU(rack, dev, 1) : null;
+    final nextDownU = rack != null ? _findNearestFreeU(rack, dev, -1) : null;
+    final isTray = dev.template.category == 'rack_tray' ||
+        dev.template.modelName.toLowerCase().contains('bandeja');
+
+    return Positioned(
+      left: innerLeft + 4,
+      top: topY - 21,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hoveredDeviceId = dev.id),
+        onExit: (_) {
+          if (_hoveredDeviceId == dev.id) {
+            setState(() => _hoveredDeviceId = null);
+          }
+        },
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 2),
+          child: Material(
+            elevation: 4,
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(6),
+              bottom: Radius.circular(3),
+            ),
+            color: const Color(0xFF0F172A).withValues(alpha: 0.94),
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 5,
+                vertical: 1.5,
+              ),
+              decoration: BoxDecoration(
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(6),
+                  bottom: Radius.circular(3),
+                ),
+                border: Border.all(
+                  color: const Color(0xFF38BDF8).withValues(alpha: 0.55),
+                  width: 0.8,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: Text(
+                      dev.code,
+                      style: const TextStyle(
+                        fontSize: 9.0,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF38BDF8),
+                      ),
+                    ),
+                  ),
+                  const Tooltip(
+                    message:
+                        'Arrastra el equipo directamente a cualquier posición con U libres',
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 2.5),
+                      child: Icon(
+                        Icons.open_with_rounded,
+                        size: 12.5,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: nextUpU != null
+                        ? () => _moveDeviceToU(dev, nextUpU)
+                        : null,
+                    child: Tooltip(
+                      message: nextUpU != null
+                          ? 'Subir a U$nextUpU (${dev.uHeight}U libres)'
+                          : 'No hay ${dev.uHeight}U libres más arriba',
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2.5),
+                        child: Icon(
+                          Icons.keyboard_arrow_up,
+                          size: 14,
+                          color: nextUpU != null
+                              ? Colors.white
+                              : Colors.white38,
+                        ),
+                      ),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: nextDownU != null
+                        ? () => _moveDeviceToU(dev, nextDownU)
+                        : null,
+                    child: Tooltip(
+                      message: nextDownU != null
+                          ? 'Bajar a U$nextDownU (${dev.uHeight}U libres)'
+                          : 'No hay ${dev.uHeight}U libres más abajo',
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2.5),
+                        child: Icon(
+                          Icons.keyboard_arrow_down,
+                          size: 14,
+                          color: nextDownU != null
+                              ? Colors.white
+                              : Colors.white38,
+                        ),
+                      ),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: () => _showMoveDeviceToUDialog(dev),
+                    child: Tooltip(
+                      message:
+                          'Elegir U libre destino (Actual: U${dev.startU})',
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 3),
+                        child: Text(
+                          'U${dev.startU}',
+                          style: const TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF93C5FD),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 3,
+                      vertical: 0.5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E293B),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: const Color(0xFF475569)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        InkWell(
+                          onTap: dev.uHeight > 1
+                              ? () => _quickAdjustDeviceUHeight(
+                                    dev,
+                                    dev.uHeight - 1,
+                                  )
+                              : null,
+                          child: const Tooltip(
+                            message: 'Reducir 1U de altura',
+                            child: Icon(
+                              Icons.remove,
+                              size: 11,
+                              color: Color(0xFF38BDF8),
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          child: Text(
+                            '${dev.uHeight}U',
+                            style: const TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                        InkWell(
+                          onTap: dev.uHeight < 16
+                              ? () => _quickAdjustDeviceUHeight(
+                                    dev,
+                                    dev.uHeight + 1,
+                                  )
+                              : null,
+                          child: const Tooltip(
+                            message: 'Ampliar +1U de altura',
+                            child: Icon(
+                              Icons.add,
+                              size: 11,
+                              color: Color(0xFF38BDF8),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (isTray)
+                    InkWell(
+                      onTap: () => _showManageTrayItemsDialog(dev),
+                      child: Tooltip(
+                        message:
+                            'Colocar o gestionar Mini-Equipos dentro de esta Bandeja (Routers, Switches, Mini-PCs)',
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 3),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 1,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF7C3AED),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.inbox_outlined,
+                                size: 11,
+                                color: Colors.white,
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                '+ Equipos (${dev.trayItems.length})',
+                                style: const TextStyle(
+                                  fontSize: 8.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  InkWell(
+                    onTap: () => _showHardwarePhotoSearchDialog(device: dev),
+                    child: const Tooltip(
+                      message:
+                          'Buscar o cambiar Foto de Referencia del equipo',
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 3),
+                        child: Icon(
+                          Icons.photo_camera_outlined,
+                          size: 12.5,
+                          color: Color(0xFF38BDF8),
+                        ),
+                      ),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: () => _showInterRackConnectionDialog(
+                      initialSourceDev: dev,
+                    ),
+                    child: const Tooltip(
+                      message:
+                          'Conectar fibra/cable desde este equipo hacia otro Rack',
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 3),
+                        child: Icon(
+                          Icons.compare_arrows,
+                          size: 13,
+                          color: Color(0xFF34D399),
+                        ),
+                      ),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: () => _quickDeleteDevice(dev),
+                    child: const Tooltip(
+                      message: 'Borrar / Desmontar este equipo',
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 3),
+                        child: Icon(
+                          Icons.delete_outline,
+                          size: 13,
+                          color: Color(0xFFF87171),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -10081,6 +10126,10 @@ class _RackEditorViewState extends State<RackEditorView> {
                 : (isDenseFace
                     ? (isSfpCage ? 10.2 : 9.6)
                     : (isSfpCage ? 12.2 : (isFiberCoupler ? 11.0 : 11.2)))));
+    final hasTwoRows = !isPatchboxCassette &&
+        facePorts.any((p) => _isPortBottomRow(dev, p, face));
+    final labelBelow = hasTwoRows && _isPortBottomRow(dev, port, face);
+
     final jackH = isMalePlug
         ? 15.0
         : (isSchuko
@@ -10088,12 +10137,10 @@ class _RackEditorViewState extends State<RackEditorView> {
             : (isPower
                 ? 11.0
                 : (isDenseFace
-                    ? 8.2
-                    : (isSfpCage ? 9.0 : (isFiberCoupler ? 9.2 : 9.0)))));
-
-    final hasTwoRows = !isPatchboxCassette &&
-        facePorts.any((p) => _isPortBottomRow(dev, p, face));
-    final labelBelow = hasTwoRows && _isPortBottomRow(dev, port, face);
+                    ? 7.6
+                    : (hasTwoRows
+                        ? 8.2
+                        : (isSfpCage ? 9.0 : (isFiberCoupler ? 9.2 : 9.0))))));
 
     Color jackFill;
     Color jackBorder;
@@ -10118,13 +10165,16 @@ class _RackEditorViewState extends State<RackEditorView> {
     }
 
     final halfWidth = isMalePlug ? 16.0 : (isDenseFace ? 8.0 : 10.0);
-    final labelFontSize = isMalePlug ? 5.8 : (isDenseFace ? 5.5 : 6.2);
+    final labelFontSize = isMalePlug ? 5.8 : (isDenseFace ? 5.4 : 6.0);
+    const labelBandH = 8.0;
 
     return Positioned(
       left: centerX - halfWidth,
-      top: labelBelow ? (centerY - jackH / 2) : (centerY - jackH / 2 - 9),
+      top: labelBelow
+          ? (centerY - jackH / 2)
+          : (centerY - jackH / 2 - labelBandH),
       width: halfWidth * 2,
-      height: jackH + 10,
+      height: jackH + labelBandH,
       child: Tooltip(
         message: isMalePlug
             ? '${dev.code} • Conector MACHO de Entrada (${port.portNumber})\nConéctalo a las Tomas Eléctricas Exteriores (TOMA-A / TOMA-B)'
@@ -10133,7 +10183,8 @@ class _RackEditorViewState extends State<RackEditorView> {
           onTap: () => _handlePortTap(dev, port),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisAlignment:
+                labelBelow ? MainAxisAlignment.start : MainAxisAlignment.end,
             children: [
               if (!labelBelow)
                 Text(
