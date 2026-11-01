@@ -194,7 +194,7 @@ class RackDevice(Base):
     monitoring_enabled = Column(Boolean, default=False)
     monitor_method = Column(String(32), default="icmp")  # icmp | tcp
     monitor_port = Column(Integer, default=22)
-    status = Column(String(32), default="unknown")  # online | offline | warning | unknown
+    status = Column(String(32), default="unmonitored")  # online | offline | warning | unmonitored
     last_ping_ms = Column(Float, nullable=True)
     last_checked_at = Column(DateTime, nullable=True)
 
@@ -262,10 +262,17 @@ class FloorDevice(Base):
     name = Column(String(120), nullable=False)
     pos_x = Column(Float, default=0.50)
     pos_y = Column(Float, default=0.50)
+    fqdn = Column(String(255), default="")
     ip_address = Column(String(64), default="")
     mac_address = Column(String(64), default="")
     vlan = Column(Integer, nullable=True)
-    status = Column(String(32), default="online")  # online | offline | warning | passive
+    monitoring_enabled = Column(Boolean, default=False)
+    monitor_method = Column(String(32), default="icmp")
+    monitor_port = Column(Integer, default=22)
+    status = Column(String(32), default="unmonitored")  # online | offline | warning | unmonitored
+    last_ping_ms = Column(Float, nullable=True)
+    last_checked_at = Column(DateTime, nullable=True)
+    custom_fields = Column(JSON, default=dict)
 
     # Enlaces en el plano de planta (Rack -> Roseta/AP/CAM y Roseta -> Equipo final)
     linked_rack_id = Column(Integer, ForeignKey("racks.id", ondelete="SET NULL"), nullable=True)

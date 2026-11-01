@@ -403,10 +403,15 @@ class FloorDeviceCreate(BaseModel):
     name: str
     pos_x: float = 0.50
     pos_y: float = 0.50
+    fqdn: str = ""
     ip_address: str = ""
     mac_address: str = ""
     vlan: Optional[int] = None
-    status: str = "online"
+    monitoring_enabled: bool = False
+    monitor_method: str = "icmp"
+    monitor_port: int = 22
+    status: str = "unmonitored"
+    custom_fields: Dict[str, Any] = {}
     linked_rack_id: Optional[int] = None
     linked_rack_device_code: str = ""
     linked_outlet_id: Optional[int] = None
@@ -428,10 +433,15 @@ class FloorDeviceUpdate(BaseModel):
     name: Optional[str] = None
     pos_x: Optional[float] = None
     pos_y: Optional[float] = None
+    fqdn: Optional[str] = None
     ip_address: Optional[str] = None
     mac_address: Optional[str] = None
     vlan: Optional[int] = None
+    monitoring_enabled: Optional[bool] = None
+    monitor_method: Optional[str] = None
+    monitor_port: Optional[int] = None
     status: Optional[str] = None
+    custom_fields: Optional[Dict[str, Any]] = None
     linked_rack_id: Optional[int] = None
     linked_rack_device_code: Optional[str] = None
     linked_outlet_id: Optional[int] = None
@@ -454,5 +464,12 @@ class FloorDeviceCustomTypeCreate(BaseModel):
     pin_color_hex: str = "#7C3AED"
     default_port_hint: str = "SW01:Gi1/0/1"
     is_sensor: bool = False
+
+
+class MonitoringSettingsUpdate(BaseModel):
+    interval_seconds: Optional[int] = None
+    interval_minutes: Optional[int] = None
+    background_enabled: Optional[bool] = None
+
 
 

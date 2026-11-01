@@ -5204,50 +5204,78 @@ class _RackEditorViewState extends State<RackEditorView> {
                 ],
               ),
               const SizedBox(width: 14),
-              // Resumen de Sistemas Monitorizados (Heartbeat) en este Rack y su estado (Verde / Rojo / Ámbar)
+              // Resumen de Heartbeat en este Rack: Gris (Sin HB), Verde (OK), Naranja (Parcial), Rojo (Caído)
               Builder(
                 builder: (_) {
-                  final monDevs = rack.devices
-                      .where((d) => !d.isExternalFeed && d.monitoringEnabled)
+                  final physDevs = rack.devices
+                      .where((d) => !d.isExternalFeed)
                       .toList();
+                  final unmonCnt =
+                      physDevs.where((d) => !d.monitoringEnabled).length;
+                  final monDevs =
+                      physDevs.where((d) => d.monitoringEnabled).toList();
                   final onlineCnt =
                       monDevs.where((d) => d.status == 'online').length;
                   final offlineCnt =
                       monDevs.where((d) => d.status == 'offline').length;
                   final warnCnt = monDevs.length - onlineCnt - offlineCnt;
-                  return Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF8FAFC),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: offlineCnt > 0
-                            ? const Color(0xFFFCA5A5)
-                            : const Color(0xFFCBD5E1),
+                  return Tooltip(
+                    message:
+                        'Heartbeat en este Rack:\n⚪ Gris ($unmonCnt): Heartbeat desactivado\n🟢 Verde ($onlineCnt): Todos los chequeos OK\n🟠 Naranja ($warnCnt): Fallo parcial (1+ chequeo falla)\n🔴 Rojo ($offlineCnt): Todos los chequeos fallan',
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
                       ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.monitor_heart_outlined,
-                          size: 14,
-                          color: Color(0xFF0F172A),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: offlineCnt > 0
+                              ? const Color(0xFFFCA5A5)
+                              : (warnCnt > 0
+                                  ? const Color(0xFFFDE68A)
+                                  : const Color(0xFFCBD5E1)),
                         ),
-                        const SizedBox(width: 5),
-                        Text(
-                          'Monitorizados: ${monDevs.length}',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.monitor_heart_outlined,
+                            size: 14,
                             color: Color(0xFF0F172A),
                           ),
-                        ),
-                        if (onlineCnt > 0) ...[
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 5),
+                          const Text(
+                            'HB:',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          // Gris: Sin Heartbeat
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF94A3B8),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            '$unmonCnt',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF64748B),
+                            ),
+                          ),
+                          const SizedBox(width: 7),
+                          // Verde: OK
                           Container(
                             width: 7,
                             height: 7,
@@ -5265,9 +5293,27 @@ class _RackEditorViewState extends State<RackEditorView> {
                               color: Color(0xFF15803D),
                             ),
                           ),
-                        ],
-                        if (offlineCnt > 0) ...[
                           const SizedBox(width: 7),
+                          // Naranja: Fallo parcial
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFFD97706),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            '$warnCnt',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFFB45309),
+                            ),
+                          ),
+                          const SizedBox(width: 7),
+                          // Rojo: Fallo total
                           Container(
                             width: 7,
                             height: 7,
@@ -5286,27 +5332,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             ),
                           ),
                         ],
-                        if (warnCnt > 0) ...[
-                          const SizedBox(width: 7),
-                          Container(
-                            width: 7,
-                            height: 7,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFFD97706),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 3),
-                          Text(
-                            '$warnCnt',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                              color: Color(0xFFB45309),
-                            ),
-                          ),
-                        ],
-                      ],
+                      ),
                     ),
                   );
                 },
@@ -7823,7 +7849,8 @@ class _RackEditorViewState extends State<RackEditorView> {
           'pos_y': 0.48,
           'ip_address': ipCtrl.text.trim(),
           'vlan': 20,
-          'status': 'online',
+          'status': 'unmonitored',
+          'monitoring_enabled': false,
           'linked_rack_id': rack.id,
           'linked_rack_device_code': '',
         });
@@ -8790,7 +8817,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                 dev.uHeight,
                 isLeft: true,
                 verticalCode: dev.code.trim().length <= 1 ? null : dev.code,
-                statusColor: dev.monitoringEnabled ? statusColor : null,
+                statusColor: statusColor,
                 isActiveTarget: isActiveTarget,
               ),
             ),
@@ -8809,15 +8836,24 @@ class _RackEditorViewState extends State<RackEditorView> {
             // Para Patch Panels con código de 1 sola letra (A, B, C, D, E, F), se dibuja en horizontal junto a la orejeta izquierda
             if (dev.code.trim().length == 1)
               Positioned(
-                left: _railWidth + 5,
+                left: _railWidth + 4,
                 top: 0,
                 bottom: 0,
-                width: 18,
+                width: 22,
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      Container(
+                        width: 4.5,
+                        height: 4.5,
+                        decoration: BoxDecoration(
+                          color: statusColor,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 2.5),
                       Text(
                         dev.code.trim(),
                         style: const TextStyle(

@@ -104,18 +104,25 @@ class _RackDocShellState extends State<RackDocShell> {
   bool _isKioskMode = false;
   bool _kioskExitHovered = false;
   Timer? _kioskRefreshTimer;
+  Timer? _backgroundStatusPollTimer;
 
   @override
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleGlobalHardwareKey);
     _loadInitialData();
+    // El frontend consulta periódicamente al backend el estado de Heartbeat
+    _backgroundStatusPollTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _refreshDataSilently(),
+    );
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleGlobalHardwareKey);
     _kioskRefreshTimer?.cancel();
+    _backgroundStatusPollTimer?.cancel();
     _gateUserCtrl.dispose();
     _gatePassCtrl.dispose();
     _dashSearchCtrl.dispose();
@@ -555,20 +562,22 @@ class _RackDocShellState extends State<RackDocShell> {
   }
 
   String _formatMonitoredInline({
+    int unmonitored = 0,
     required int monitored,
     required int online,
+    int warning = 0,
     required int offline,
     String prefix = '',
   }) {
     final parts = <String>[];
     if (prefix.isNotEmpty) parts.add(prefix);
-    parts.add('Monit: $monitored');
-    final statusParts = <String>[];
-    if (online > 0) statusParts.add('🟢$online');
-    if (offline > 0) statusParts.add('🔴$offline');
-    if (statusParts.isNotEmpty) {
-      parts.add(statusParts.join(' '));
-    }
+    final statusParts = <String>[
+      '⚪$unmonitored',
+      '🟢$online',
+      if (warning > 0) '🟠$warning',
+      '🔴$offline',
+    ];
+    parts.add(statusParts.join(' '));
     return parts.join(' • ');
   }
 
@@ -1374,10 +1383,14 @@ class _RackDocShellState extends State<RackDocShell> {
                                                       ),
                                                       Text(
                                                         _formatMonitoredInline(
+                                                          unmonitored: loc
+                                                              .unmonitoredCount,
                                                           monitored: loc
                                                               .monitoredCount,
                                                           online:
                                                               loc.onlineCount,
+                                                          warning:
+                                                              loc.warningCount,
                                                           offline:
                                                               loc.offlineCount,
                                                           prefix:
@@ -1636,10 +1649,14 @@ class _RackDocShellState extends State<RackDocShell> {
                                                       ),
                                                       subtitle: Text(
                                                         _formatMonitoredInline(
+                                                          unmonitored: rk
+                                                              .unmonitoredCount,
                                                           monitored:
                                                               rk.monitoredCount,
                                                           online:
                                                               rk.onlineCount,
+                                                          warning:
+                                                              rk.warningCount,
                                                           offline:
                                                               rk.offlineCount,
                                                         ),
@@ -1949,6 +1966,7 @@ class _RackDocShellState extends State<RackDocShell> {
     int totalFloors = 0;
     int totalRooms = 0;
     int totalRacks = 0;
+    int totalUnmonitored = 0;
     int totalMonitored = 0;
     int totalOnline = 0;
     int totalOffline = 0;
@@ -1961,6 +1979,7 @@ class _RackDocShellState extends State<RackDocShell> {
       totalFloors += l.floorsCount;
       totalRooms += l.roomsCount;
       totalRacks += l.racksCount;
+      totalUnmonitored += l.unmonitoredCount;
       totalMonitored += l.monitoredCount;
       totalOnline += l.onlineCount;
       totalOffline += l.offlineCount;
@@ -2250,18 +2269,26 @@ class _RackDocShellState extends State<RackDocShell> {
                 color: const Color(0xFF0D9488),
               ),
               _DashboardCard(
+                title: 'Sin Heartbeat (Gris)',
+                value: '⚪ $totalUnmonitored Desactivados',
+                icon: Icons.radio_button_unchecked_rounded,
+                color: const Color(0xFF64748B),
+              ),
+              _DashboardCard(
                 title: 'Estado Online (Verde)',
-                value: totalOnline > 0
-                    ? '🟢 $totalOnline Online'
-                    : 'Sin equipos online',
+                value: '🟢 $totalOnline Online (de $totalMonitored act.)',
                 icon: Icons.check_circle_outline,
                 color: const Color(0xFF16A34A),
               ),
               _DashboardCard(
-                title: 'Alertas Offline (Rojo)',
-                value: totalOffline > 0
-                    ? '🔴 $totalOffline Offline${totalWarning > 0 ? ' • 🟠 $totalWarning' : ''}'
-                    : 'Sin alertas caídas',
+                title: 'Fallo Parcial (Naranja)',
+                value: '🟠 $totalWarning Parcial (1+ chequeo)',
+                icon: Icons.warning_amber_rounded,
+                color: const Color(0xFFD97706),
+              ),
+              _DashboardCard(
+                title: 'Fallo Total (Rojo)',
+                value: '🔴 $totalOffline Offline',
                 icon: Icons.error_outline,
                 color: const Color(0xFFDC2626),
               ),

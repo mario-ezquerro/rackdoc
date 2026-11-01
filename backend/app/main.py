@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
+import asyncio
 import uuid
 import base64
 import json
@@ -62,6 +64,7 @@ from .schemas import (
     FloorDeviceCreate,
     FloorDeviceUpdate,
     FloorDeviceCustomTypeCreate,
+    MonitoringSettingsUpdate,
 )
 from .seed import (
     seed_initial_data,
@@ -110,6 +113,13 @@ def _ensure_db_migrations():
         "ALTER TABLE users ADD COLUMN ad_dn VARCHAR(255) DEFAULT ''",
         "ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT 1",
         "ALTER TABLE ad_servers ADD COLUMN group_role_mapping JSON DEFAULT '[]'",
+        "ALTER TABLE floor_devices ADD COLUMN fqdn VARCHAR(255) DEFAULT ''",
+        "ALTER TABLE floor_devices ADD COLUMN monitoring_enabled BOOLEAN DEFAULT 0",
+        "ALTER TABLE floor_devices ADD COLUMN monitor_method VARCHAR(32) DEFAULT 'icmp'",
+        "ALTER TABLE floor_devices ADD COLUMN monitor_port INTEGER DEFAULT 22",
+        "ALTER TABLE floor_devices ADD COLUMN last_ping_ms FLOAT",
+        "ALTER TABLE floor_devices ADD COLUMN last_checked_at DATETIME",
+        "ALTER TABLE floor_devices ADD COLUMN custom_fields JSON DEFAULT '{}'",
     ]
     with engine.begin() as conn:
         for stmt in alter_statements:
@@ -536,19 +546,108 @@ def _ensure_demo_floor_devices(db: Session):
             db.commit()
 
 
+MONITORING_SETTINGS_PATH = DEFAULT_DB_PATH.parent / "monitoring_settings.json"
+_monitoring_wakeup_event: Optional[asyncio.Event] = None
+
+
+def _load_monitoring_settings() -> dict:
+    default_cfg = {
+        "interval_seconds": 300,  # 5 minutos por defecto
+        "background_enabled": True,
+        "last_run_at": None,
+        "last_checked_count": 0,
+    }
+    if MONITORING_SETTINGS_PATH.is_file():
+        try:
+            raw = json.loads(MONITORING_SETTINGS_PATH.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                default_cfg.update(raw)
+        except Exception:
+            pass
+    sec = int(default_cfg.get("interval_seconds") or 300)
+    default_cfg["interval_seconds"] = max(15, min(86400, sec))
+    default_cfg["interval_minutes"] = max(1, round(default_cfg["interval_seconds"] / 60))
+    return default_cfg
+
+
+def _save_monitoring_settings(cfg: dict) -> dict:
+    current = _load_monitoring_settings()
+    current.update(cfg)
+    sec = int(current.get("interval_seconds") or 300)
+    current["interval_seconds"] = max(15, min(86400, sec))
+    current["interval_minutes"] = max(1, round(current["interval_seconds"] / 60))
+    try:
+        MONITORING_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        MONITORING_SETTINGS_PATH.write_text(
+            json.dumps(current, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+    return current
+
+
+def _execute_background_monitoring_pass() -> list[dict]:
+    db = SessionLocal()
+    try:
+        results = check_all_monitored_devices(db)
+        _save_monitoring_settings(
+            {
+                "last_run_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+                "last_checked_count": len(results),
+            }
+        )
+        return results
+    except Exception:
+        return []
+    finally:
+        db.close()
+
+
+async def _background_heartbeat_loop(
+    stop_event: asyncio.Event,
+    wakeup_event: asyncio.Event,
+):
+    # Ejecución inicial ligera al arrancar para actualizar cualquier equipo con Heartbeat activo
+    await asyncio.sleep(2.0)
+    while not stop_event.is_set():
+        cfg = _load_monitoring_settings()
+        if cfg.get("background_enabled", True):
+            await asyncio.to_thread(_execute_background_monitoring_pass)
+        interval_sec = float(cfg.get("interval_seconds") or 300)
+        wakeup_event.clear()
+        try:
+            await asyncio.wait_for(wakeup_event.wait(), timeout=interval_sec)
+        except asyncio.TimeoutError:
+            pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _monitoring_wakeup_event
     Base.metadata.create_all(bind=engine)
     _ensure_db_migrations()
     db = SessionLocal()
     try:
         seed_initial_data(db)
-        sync_system_defaults(db)
         _ensure_demo_floor_devices(db)
+        sync_system_defaults(db)
         _sanitize_missing_upload_urls(db)
     finally:
         db.close()
-    yield
+
+    stop_event = asyncio.Event()
+    _monitoring_wakeup_event = asyncio.Event()
+    worker_task = asyncio.create_task(
+        _background_heartbeat_loop(stop_event, _monitoring_wakeup_event)
+    )
+    try:
+        yield
+    finally:
+        stop_event.set()
+        if _monitoring_wakeup_event is not None:
+            _monitoring_wakeup_event.set()
+        worker_task.cancel()
 
 
 app = FastAPI(
@@ -680,6 +779,77 @@ def health_check():
     return {"status": "ok", "service": "rackdoc-backend"}
 
 
+def _build_global_monitoring_summary(db: Session) -> dict:
+    cfg = _load_monitoring_settings()
+    rack_devs = (
+        db.query(RackDevice)
+        .filter(RackDevice.mounted_face != "external")
+        .all()
+    )
+    floor_devs = db.query(FloorDevice).all()
+    all_items = [*rack_devs, *floor_devs]
+
+    unmonitored_cnt = 0
+    monitored_cnt = 0
+    online_cnt = 0
+    warning_cnt = 0
+    offline_cnt = 0
+
+    for item in all_items:
+        if not getattr(item, "monitoring_enabled", False):
+            unmonitored_cnt += 1
+        else:
+            monitored_cnt += 1
+            st = (getattr(item, "status", "") or "offline").lower()
+            if st == "online":
+                online_cnt += 1
+            elif st == "warning":
+                warning_cnt += 1
+            else:
+                offline_cnt += 1
+
+    return {
+        **cfg,
+        "total_elements": len(all_items),
+        "unmonitored_count": unmonitored_cnt,
+        "monitored_count": monitored_cnt,
+        "online_count": online_cnt,
+        "warning_count": warning_cnt,
+        "offline_count": offline_cnt,
+    }
+
+
+@app.get("/api/settings/monitoring")
+def get_monitoring_settings_endpoint(db: Session = Depends(get_db)):
+    return _build_global_monitoring_summary(db)
+
+
+@app.put("/api/settings/monitoring")
+def update_monitoring_settings_endpoint(
+    payload: MonitoringSettingsUpdate,
+    db: Session = Depends(get_db),
+):
+    updates = {}
+    if payload.interval_seconds is not None:
+        updates["interval_seconds"] = max(15, min(86400, int(payload.interval_seconds)))
+    elif payload.interval_minutes is not None:
+        updates["interval_seconds"] = max(15, min(86400, int(payload.interval_minutes) * 60))
+    if payload.background_enabled is not None:
+        updates["background_enabled"] = bool(payload.background_enabled)
+    _save_monitoring_settings(updates)
+    if _monitoring_wakeup_event is not None:
+        _monitoring_wakeup_event.set()
+    return _build_global_monitoring_summary(db)
+
+
+@app.post("/api/settings/monitoring/run-now")
+async def run_monitoring_now_endpoint(db: Session = Depends(get_db)):
+    results = await asyncio.to_thread(_execute_background_monitoring_pass)
+    summary = _build_global_monitoring_summary(db)
+    summary["results"] = results
+    return summary
+
+
 @app.get("/api/locations")
 def get_locations_tree(db: Session = Depends(get_db)):
     _sanitize_missing_upload_urls(db)
@@ -749,6 +919,7 @@ def get_locations_tree(db: Session = Depends(get_db)):
         racks_count = 0
         total_rack_units = 0
         loc_monitored = 0
+        loc_unmonitored = 0
         loc_online = 0
         loc_offline = 0
         loc_warning = 0
@@ -757,6 +928,7 @@ def get_locations_tree(db: Session = Depends(get_db)):
         for fl in sorted(loc.floors, key=lambda x: x.level_number):
             rooms_count += len(fl.rooms)
             fl_monitored = 0
+            fl_unmonitored = 0
             fl_online = 0
             fl_offline = 0
             fl_warning = 0
@@ -782,12 +954,15 @@ def get_locations_tree(db: Session = Depends(get_db)):
                     rack_devs = [d for d in rk.devices if d.mounted_face != "external"]
                     ext_devs = [d for d in rk.devices if d.mounted_face == "external"]
                     mon_devs = [d for d in rack_devs if d.monitoring_enabled]
+                    unmon_devs = [d for d in rack_devs if not d.monitoring_enabled]
                     rk_mon = len(mon_devs)
+                    rk_unmon = len(unmon_devs)
                     rk_on = len([d for d in mon_devs if d.status == "online"])
-                    rk_off = len([d for d in mon_devs if d.status == "offline"])
-                    rk_warn = rk_mon - rk_on - rk_off
+                    rk_warn = len([d for d in mon_devs if d.status == "warning"])
+                    rk_off = rk_mon - rk_on - rk_warn
 
                     fl_monitored += rk_mon
+                    fl_unmonitored += rk_unmon
                     fl_online += rk_on
                     fl_offline += rk_off
                     fl_warning += rk_warn
@@ -829,11 +1004,11 @@ def get_locations_tree(db: Session = Depends(get_db)):
                             "category": d.template.category if d.template else "server",
                             "manufacturer": d.template.manufacturer if d.template else "",
                             "model_name": d.template.model_name if d.template else "",
-                            "monitoring_enabled": d.monitoring_enabled,
+                            "monitoring_enabled": bool(d.monitoring_enabled),
                             "monitor_method": d.monitor_method or "icmp",
                             "monitor_port": d.monitor_port or 22,
-                            "status": d.status or "unknown",
-                            "last_ping_ms": d.last_ping_ms,
+                            "status": (d.status or "offline") if d.monitoring_enabled else "unmonitored",
+                            "last_ping_ms": d.last_ping_ms if d.monitoring_enabled else None,
                             "custom_fields": d.custom_fields or {},
                             "rack_id": rk.id,
                             "rack_code": rk.code,
@@ -866,6 +1041,7 @@ def get_locations_tree(db: Session = Depends(get_db)):
                             "rotation_deg": rk.rotation_deg or 0,
                             "device_count": len(rack_devs),
                             "monitored_count": rk_mon,
+                            "unmonitored_count": rk_unmon,
                             "online_count": rk_on,
                             "offline_count": rk_off,
                             "warning_count": rk_warn,
@@ -887,7 +1063,22 @@ def get_locations_tree(db: Session = Depends(get_db)):
                         "racks": racks_data,
                     }
                 )
+
+            # Contabilizar también los elementos de planta (FloorDevice) de esta planta
+            fd_mon_list = [fd for fd in fl.floor_devices if getattr(fd, "monitoring_enabled", False)]
+            fd_unmon_list = [fd for fd in fl.floor_devices if not getattr(fd, "monitoring_enabled", False)]
+            fd_on_cnt = len([fd for fd in fd_mon_list if fd.status == "online"])
+            fd_warn_cnt = len([fd for fd in fd_mon_list if fd.status == "warning"])
+            fd_off_cnt = len(fd_mon_list) - fd_on_cnt - fd_warn_cnt
+
+            fl_monitored += len(fd_mon_list)
+            fl_unmonitored += len(fd_unmon_list)
+            fl_online += fd_on_cnt
+            fl_warning += fd_warn_cnt
+            fl_offline += fd_off_cnt
+
             loc_monitored += fl_monitored
+            loc_unmonitored += fl_unmonitored
             loc_online += fl_online
             loc_offline += fl_offline
             loc_warning += fl_warning
@@ -943,10 +1134,16 @@ def get_locations_tree(db: Session = Depends(get_db)):
                     "name": fd.name,
                     "pos_x": fd.pos_x if fd.pos_x is not None else 0.5,
                     "pos_y": fd.pos_y if fd.pos_y is not None else 0.5,
+                    "fqdn": getattr(fd, "fqdn", "") or "",
                     "ip_address": fd.ip_address or "",
                     "mac_address": fd.mac_address or "",
                     "vlan": fd.vlan,
-                    "status": fd.status or "online",
+                    "monitoring_enabled": bool(getattr(fd, "monitoring_enabled", False)),
+                    "monitor_method": getattr(fd, "monitor_method", "icmp") or "icmp",
+                    "monitor_port": getattr(fd, "monitor_port", 22) or 22,
+                    "status": (fd.status or "offline") if getattr(fd, "monitoring_enabled", False) else "unmonitored",
+                    "last_ping_ms": getattr(fd, "last_ping_ms", None) if getattr(fd, "monitoring_enabled", False) else None,
+                    "custom_fields": getattr(fd, "custom_fields", None) or {},
                     "linked_rack_id": fd.linked_rack_id,
                     "linked_rack_device_code": fd.linked_rack_device_code or "",
                     "linked_outlet_id": fd.linked_outlet_id,
@@ -969,6 +1166,7 @@ def get_locations_tree(db: Session = Depends(get_db)):
                     "map_image_url": fl.map_image_url or "",
                     "map_scale": fl.map_scale or 1.0,
                     "monitored_count": fl_monitored,
+                    "unmonitored_count": fl_unmonitored,
                     "online_count": fl_online,
                     "offline_count": fl_offline,
                     "warning_count": fl_warning,
@@ -998,6 +1196,7 @@ def get_locations_tree(db: Session = Depends(get_db)):
                 "racks_count": racks_count,
                 "total_rack_units": total_rack_units,
                 "monitored_count": loc_monitored,
+                "unmonitored_count": loc_unmonitored,
                 "online_count": loc_online,
                 "offline_count": loc_offline,
                 "warning_count": loc_warning,
@@ -1192,10 +1391,14 @@ def create_floor_device(
         data["linked_rack_id"] = None
     if data.get("linked_outlet_id") == 0:
         data["linked_outlet_id"] = None
+    if not data.get("monitoring_enabled"):
+        data["status"] = "unmonitored"
     fd = FloorDevice(floor_id=floor_id, **data)
     db.add(fd)
     db.commit()
     db.refresh(fd)
+    if fd.monitoring_enabled:
+        check_single_device(db, fd)
     if fd.linked_rack_id:
         rk = (
             db.query(Rack)
@@ -1213,6 +1416,12 @@ def create_floor_device(
         "name": fd.name,
         "pos_x": fd.pos_x,
         "pos_y": fd.pos_y,
+        "fqdn": fd.fqdn or "",
+        "ip_address": fd.ip_address or "",
+        "monitoring_enabled": bool(fd.monitoring_enabled),
+        "status": fd.status,
+        "last_ping_ms": fd.last_ping_ms,
+        "custom_fields": fd.custom_fields or {},
         "linked_rack_id": fd.linked_rack_id,
         "linked_outlet_id": fd.linked_outlet_id,
     }
@@ -1228,6 +1437,7 @@ def update_floor_device(
     if not fd:
         raise HTTPException(status_code=404, detail="Dispositivo de planta no encontrado")
     old_rack_id = fd.linked_rack_id
+    was_monitored = bool(getattr(fd, "monitoring_enabled", False))
     updates = payload.model_dump(exclude_unset=True)
     if "linked_rack_id" in updates and updates["linked_rack_id"] == 0:
         updates["linked_rack_id"] = None
@@ -1235,8 +1445,18 @@ def update_floor_device(
         updates["linked_outlet_id"] = None
     for k, v in updates.items():
         setattr(fd, k, v)
+    if not fd.monitoring_enabled:
+        fd.status = "unmonitored"
+        fd.last_ping_ms = None
     db.commit()
     db.refresh(fd)
+
+    if fd.monitoring_enabled and (
+        not was_monitored
+        or fd.status in ("unmonitored", "unknown", "passive", None)
+        or "monitoring_enabled" in updates
+    ):
+        check_single_device(db, fd)
 
     affected_rack_ids = {r_id for r_id in (old_rack_id, fd.linked_rack_id) if r_id}
     for r_id in affected_rack_ids:
@@ -1255,8 +1475,19 @@ def update_floor_device(
         "linked_rack_id": fd.linked_rack_id,
         "linked_outlet_id": fd.linked_outlet_id,
         "device_type": fd.device_type,
+        "monitoring_enabled": bool(fd.monitoring_enabled),
         "status_val": fd.status,
+        "last_ping_ms": fd.last_ping_ms,
+        "custom_fields": fd.custom_fields or {},
     }
+
+
+@app.post("/api/floor-devices/{device_id}/ping")
+def ping_floor_device_endpoint(device_id: int, db: Session = Depends(get_db)):
+    fd = db.query(FloorDevice).filter(FloorDevice.id == device_id).first()
+    if not fd:
+        raise HTTPException(status_code=404, detail="Dispositivo de planta no encontrado")
+    return check_single_device(db, fd)
 
 
 @app.delete("/api/floor-devices/{device_id}")
@@ -2220,7 +2451,7 @@ def add_device_to_rack(rack_id: int, payload: RackDeviceCreate, db: Session = De
         monitoring_enabled=payload.monitoring_enabled,
         monitor_method=payload.monitor_method,
         monitor_port=payload.monitor_port,
-        status="unknown",
+        status="unmonitored",
         serial_number=payload.serial_number,
         custom_fields=payload.custom_fields,
         notes=payload.notes,
@@ -2235,6 +2466,9 @@ def add_device_to_rack(rack_id: int, payload: RackDeviceCreate, db: Session = De
         _sync_custom_device_ports(db, device)
     db.commit()
     db.refresh(device)
+    if device.monitoring_enabled:
+        check_single_device(db, device)
+        db.refresh(device)
     return device
 
 
@@ -2441,8 +2675,13 @@ def update_rack_device(device_id: int, payload: RackDeviceUpdate, db: Session = 
             exclude_device_id=device.id,
         )
 
+    was_monitored = bool(device.monitoring_enabled)
     for k, v in updates.items():
         setattr(device, k, v)
+
+    if not device.monitoring_enabled:
+        device.status = "unmonitored"
+        device.last_ping_ms = None
 
     if "custom_fields" in updates:
         if (device.custom_fields or {}).get("tray_items") is not None:
@@ -2452,6 +2691,15 @@ def update_rack_device(device_id: int, payload: RackDeviceUpdate, db: Session = 
 
     db.commit()
     db.refresh(device)
+
+    if device.monitoring_enabled and (
+        not was_monitored
+        or device.status in ("unmonitored", "unknown", "passive", None)
+        or "monitoring_enabled" in updates
+    ):
+        check_single_device(db, device)
+        db.refresh(device)
+
     return device
 
 

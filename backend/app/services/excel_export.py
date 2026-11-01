@@ -371,7 +371,11 @@ def build_dashboard_inventory_data(
                     "gateway": d.gateway or "",
                     "vlan_mgmt": d.vlan_mgmt,
                     "mac_address": d.mac_address or "",
-                    "status": (d.status or "unknown").lower(),
+                    "status": (
+                        (d.status or "offline").lower()
+                        if d.monitoring_enabled
+                        else "unmonitored"
+                    ),
                     "monitoring_enabled": bool(d.monitoring_enabled),
                     "monitor_method": (d.monitor_method or "icmp").lower(),
                     "monitor_port": d.monitor_port or 22,
@@ -786,6 +790,10 @@ def build_dashboard_inventory_data(
             "total_patch_panel_bocas": total_pp_bocas,
             "occupied_patch_panel_bocas": occupied_pp_bocas,
             "free_patch_panel_bocas": max(0, total_pp_bocas - occupied_pp_bocas),
+            "unmonitored_count": sum(1 for ln in rack_lines if not ln["monitoring_enabled"]),
+            "online_count": sum(1 for ln in rack_lines if ln["monitoring_enabled"] and ln["status"] == "online"),
+            "warning_count": sum(1 for ln in rack_lines if ln["monitoring_enabled"] and ln["status"] == "warning"),
+            "offline_count": sum(1 for ln in rack_lines if ln["monitoring_enabled"] and ln["status"] == "offline"),
         },
         "rack_lines": rack_lines,
         "patch_panels": patch_panels,

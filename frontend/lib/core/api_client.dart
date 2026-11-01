@@ -362,6 +362,45 @@ class RackDocApiClient {
     return Map<String, dynamic>.from(data);
   }
 
+  Future<Map<String, dynamic>> pingFloorDevice(int deviceId) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/floor-devices/$deviceId/ping'),
+      headers: _headers,
+    );
+    final data = _decodeResponse(res) as Map;
+    return Map<String, dynamic>.from(data);
+  }
+
+  Future<Map<String, dynamic>> getMonitoringSettings() async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/settings/monitoring'),
+      headers: _headers,
+    );
+    final data = _decodeResponse(res) as Map;
+    return Map<String, dynamic>.from(data);
+  }
+
+  Future<Map<String, dynamic>> updateMonitoringSettings(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/settings/monitoring'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    final data = _decodeResponse(res) as Map;
+    return Map<String, dynamic>.from(data);
+  }
+
+  Future<Map<String, dynamic>> runMonitoringNow() async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/settings/monitoring/run-now'),
+      headers: _headers,
+    );
+    final data = _decodeResponse(res) as Map;
+    return Map<String, dynamic>.from(data);
+  }
+
   Future<List<Map<String, dynamic>>> pingAllRackDevices(int rackId) async {
     final res = await http.post(
       Uri.parse('$baseUrl/racks/$rackId/ping-all'),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_client.dart';
 import '../../core/image_file_picker.dart';
 import '../../models/datacenter_models.dart';
@@ -85,11 +86,59 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   final TextEditingController _devNotesCtrl = TextEditingController();
   int? _devLinkedRackId;
   int? _devLinkedOutletId;
-  String _devStatus = 'online';
+  String _devStatus = 'unmonitored';
   String _devCategory = 'camera';
   String? _settingsSavedBanner;
   bool _settingsSaveError = false;
   int _bannerSeq = 0;
+
+  // 1) HEARTBEAT (Background Monitoring) para Dispositivos / Sensores de Planta
+  bool _fdMonitorEnabled = false;
+  Set<String> _fdEnabledMonitorSystems = {'icmp'};
+  final TextEditingController _fdPingTargetCtrl = TextEditingController();
+  final TextEditingController _fdPingTimeoutCtrl = TextEditingController(
+    text: '1.5',
+  );
+  final TextEditingController _fdSshHbHostCtrl = TextEditingController();
+  final TextEditingController _fdSshHbPortCtrl = TextEditingController(
+    text: '22',
+  );
+  final TextEditingController _fdSshHbUserCtrl = TextEditingController(
+    text: 'admin',
+  );
+  final TextEditingController _fdHttpHbUrlCtrl = TextEditingController();
+  final TextEditingController _fdHttpHbExpectedCodeCtrl =
+      TextEditingController(text: '200');
+  final TextEditingController _fdTcpHbHostCtrl = TextEditingController();
+  final TextEditingController _fdTcpHbPortCtrl = TextEditingController(
+    text: '443',
+  );
+  final TextEditingController _fdUdpHbHostCtrl = TextEditingController();
+  final TextEditingController _fdUdpHbPortCtrl = TextEditingController(
+    text: '161',
+  );
+  final TextEditingController _fdSnmpHbHostCtrl = TextEditingController();
+  final TextEditingController _fdSnmpHbPortCtrl = TextEditingController(
+    text: '161',
+  );
+  final TextEditingController _fdSnmpHbCommunityCtrl = TextEditingController(
+    text: 'public',
+  );
+  bool _fdPinging = false;
+  Map<String, dynamic>? _fdLastPingResult;
+
+  // 2) CONECTAR (Ejecutado desde el Frontend — independiente del Heartbeat)
+  bool _fdConnectEnabled = false;
+  Set<String> _fdEnabledConnectSystems = {'https'};
+  final TextEditingController _fdConnSshHostCtrl = TextEditingController();
+  final TextEditingController _fdConnSshPortCtrl = TextEditingController(
+    text: '22',
+  );
+  final TextEditingController _fdConnSshUserCtrl = TextEditingController(
+    text: 'admin',
+  );
+  final TextEditingController _fdConnHttpUrlCtrl = TextEditingController();
+  final TextEditingController _fdConnHttpsUrlCtrl = TextEditingController();
 
   // Tipos personalizados creados por el usuario ("+ Nuevo Tipo a Medida")
   List<_FloorDeviceCatalogItem> _customCatalogItems = [];
@@ -513,6 +562,25 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     _devContactJobCtrl.dispose();
     _devContactDeptCtrl.dispose();
     _devNotesCtrl.dispose();
+    _fdPingTargetCtrl.dispose();
+    _fdPingTimeoutCtrl.dispose();
+    _fdSshHbHostCtrl.dispose();
+    _fdSshHbPortCtrl.dispose();
+    _fdSshHbUserCtrl.dispose();
+    _fdHttpHbUrlCtrl.dispose();
+    _fdHttpHbExpectedCodeCtrl.dispose();
+    _fdTcpHbHostCtrl.dispose();
+    _fdTcpHbPortCtrl.dispose();
+    _fdUdpHbHostCtrl.dispose();
+    _fdUdpHbPortCtrl.dispose();
+    _fdSnmpHbHostCtrl.dispose();
+    _fdSnmpHbPortCtrl.dispose();
+    _fdSnmpHbCommunityCtrl.dispose();
+    _fdConnSshHostCtrl.dispose();
+    _fdConnSshPortCtrl.dispose();
+    _fdConnSshUserCtrl.dispose();
+    _fdConnHttpUrlCtrl.dispose();
+    _fdConnHttpsUrlCtrl.dispose();
     super.dispose();
   }
 
@@ -736,7 +804,281 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     _devNotesCtrl.text = dev.notes;
     _devLinkedRackId = dev.linkedRackId;
     _devLinkedOutletId = dev.linkedOutletId;
-    _devStatus = dev.status.isEmpty ? 'online' : dev.status;
+    _fdMonitorEnabled = dev.monitoringEnabled;
+    _devStatus = !dev.monitoringEnabled
+        ? 'unmonitored'
+        : (dev.status.isEmpty ? 'online' : dev.status);
+
+    final baseHost = dev.ipAddress.trim().isNotEmpty
+        ? dev.ipAddress.trim()
+        : dev.fqdn.trim();
+    final hbCfgRaw = dev.customFields['heartbeat_config'];
+    final hbCfg = hbCfgRaw is Map
+        ? Map<String, dynamic>.from(hbCfgRaw)
+        : <String, dynamic>{};
+
+    final rawHbSystems = hbCfg['enabled_systems'];
+    if (rawHbSystems is List && rawHbSystems.isNotEmpty) {
+      _fdEnabledMonitorSystems = rawHbSystems
+          .map((e) => e.toString().toLowerCase())
+          .toSet();
+    } else {
+      _fdEnabledMonitorSystems = {
+        dev.monitorMethod.isEmpty ? 'icmp' : dev.monitorMethod,
+      };
+    }
+
+    _fdPingTargetCtrl.text = (hbCfg['icmp_target'] ?? baseHost).toString();
+    _fdPingTimeoutCtrl.text = (hbCfg['icmp_timeout_s'] ?? '1.5').toString();
+    _fdSshHbHostCtrl.text = (hbCfg['ssh_host'] ?? baseHost).toString();
+    _fdSshHbPortCtrl.text = (hbCfg['ssh_port'] ?? '22').toString();
+    _fdSshHbUserCtrl.text = (hbCfg['ssh_user'] ?? 'admin').toString();
+
+    final defaultWebUrl = baseHost.isNotEmpty ? 'https://$baseHost' : '';
+    _fdHttpHbUrlCtrl.text = (hbCfg['http_url'] ?? defaultWebUrl).toString();
+    _fdHttpHbExpectedCodeCtrl.text =
+        (hbCfg['http_expected_code'] ?? '200').toString();
+
+    _fdTcpHbHostCtrl.text = (hbCfg['tcp_host'] ?? baseHost).toString();
+    _fdTcpHbPortCtrl.text =
+        (hbCfg['tcp_port'] ?? (dev.monitorPort > 0 ? dev.monitorPort : 443))
+            .toString();
+
+    _fdUdpHbHostCtrl.text = (hbCfg['udp_host'] ?? baseHost).toString();
+    _fdUdpHbPortCtrl.text = (hbCfg['udp_port'] ?? '161').toString();
+
+    _fdSnmpHbHostCtrl.text = (hbCfg['snmp_host'] ?? baseHost).toString();
+    _fdSnmpHbPortCtrl.text = (hbCfg['snmp_port'] ?? '161').toString();
+    _fdSnmpHbCommunityCtrl.text =
+        (hbCfg['snmp_community'] ?? 'public').toString();
+
+    final connCfgRaw = dev.customFields['connect_config'];
+    final connCfg = connCfgRaw is Map
+        ? Map<String, dynamic>.from(connCfgRaw)
+        : <String, dynamic>{};
+    _fdConnectEnabled = connCfg['enabled'] == true;
+    final rawConnSystems = connCfg['enabled_systems'];
+    if (rawConnSystems is List && rawConnSystems.isNotEmpty) {
+      _fdEnabledConnectSystems = rawConnSystems
+          .map((e) => e.toString().toLowerCase())
+          .toSet();
+    } else {
+      _fdEnabledConnectSystems = {'https'};
+    }
+    _fdConnSshHostCtrl.text = (connCfg['ssh_host'] ?? baseHost).toString();
+    _fdConnSshPortCtrl.text = (connCfg['ssh_port'] ?? '22').toString();
+    _fdConnSshUserCtrl.text = (connCfg['ssh_user'] ?? 'admin').toString();
+    _fdConnHttpUrlCtrl.text = (connCfg['http_url'] ??
+            (baseHost.isNotEmpty ? 'http://$baseHost' : ''))
+        .toString();
+    _fdConnHttpsUrlCtrl.text = (connCfg['https_url'] ??
+            (baseHost.isNotEmpty ? 'https://$baseHost' : ''))
+        .toString();
+    _fdLastPingResult = null;
+  }
+
+  Map<String, dynamic> _buildFloorDevicePayload(FloorDeviceNode? currentDev) {
+    final existingCustom = currentDev != null
+        ? Map<String, dynamic>.from(currentDev.customFields)
+        : <String, dynamic>{};
+    final baseHost = _devIpCtrl.text.trim();
+    existingCustom['heartbeat_config'] = {
+      'enabled_systems': _fdEnabledMonitorSystems.toList(),
+      'icmp_target': _fdPingTargetCtrl.text.trim().isEmpty
+          ? baseHost
+          : _fdPingTargetCtrl.text.trim(),
+      'icmp_timeout_s':
+          double.tryParse(_fdPingTimeoutCtrl.text.trim()) ?? 1.5,
+      'ssh_host': _fdSshHbHostCtrl.text.trim().isEmpty
+          ? baseHost
+          : _fdSshHbHostCtrl.text.trim(),
+      'ssh_port': int.tryParse(_fdSshHbPortCtrl.text.trim()) ?? 22,
+      'ssh_user': _fdSshHbUserCtrl.text.trim().isEmpty
+          ? 'admin'
+          : _fdSshHbUserCtrl.text.trim(),
+      'http_url': _fdHttpHbUrlCtrl.text.trim(),
+      'http_expected_code':
+          int.tryParse(_fdHttpHbExpectedCodeCtrl.text.trim()) ?? 200,
+      'tcp_host': _fdTcpHbHostCtrl.text.trim().isEmpty
+          ? baseHost
+          : _fdTcpHbHostCtrl.text.trim(),
+      'tcp_port': int.tryParse(_fdTcpHbPortCtrl.text.trim()) ?? 443,
+      'udp_host': _fdUdpHbHostCtrl.text.trim().isEmpty
+          ? baseHost
+          : _fdUdpHbHostCtrl.text.trim(),
+      'udp_port': int.tryParse(_fdUdpHbPortCtrl.text.trim()) ?? 161,
+      'snmp_host': _fdSnmpHbHostCtrl.text.trim().isEmpty
+          ? baseHost
+          : _fdSnmpHbHostCtrl.text.trim(),
+      'snmp_port': int.tryParse(_fdSnmpHbPortCtrl.text.trim()) ?? 161,
+      'snmp_community': _fdSnmpHbCommunityCtrl.text.trim().isEmpty
+          ? 'public'
+          : _fdSnmpHbCommunityCtrl.text.trim(),
+    };
+    existingCustom['connect_config'] = {
+      'enabled': _fdConnectEnabled,
+      'enabled_systems': _fdEnabledConnectSystems.toList(),
+      'ssh_host': _fdConnSshHostCtrl.text.trim(),
+      'ssh_port': int.tryParse(_fdConnSshPortCtrl.text.trim()) ?? 22,
+      'ssh_user': _fdConnSshUserCtrl.text.trim().isEmpty
+          ? 'admin'
+          : _fdConnSshUserCtrl.text.trim(),
+      'http_url': _fdConnHttpUrlCtrl.text.trim(),
+      'https_url': _fdConnHttpsUrlCtrl.text.trim(),
+    };
+
+    final primaryMethod = _fdEnabledMonitorSystems.isNotEmpty
+        ? _fdEnabledMonitorSystems.first
+        : 'icmp';
+    int primaryPort = 22;
+    if (primaryMethod == 'ssh') {
+      primaryPort = int.tryParse(_fdSshHbPortCtrl.text.trim()) ?? 22;
+    } else if (primaryMethod == 'http') {
+      primaryPort =
+          _fdHttpHbUrlCtrl.text.trim().startsWith('http://') ? 80 : 443;
+    } else if (primaryMethod == 'tcp') {
+      primaryPort = int.tryParse(_fdTcpHbPortCtrl.text.trim()) ?? 443;
+    } else if (primaryMethod == 'udp') {
+      primaryPort = int.tryParse(_fdUdpHbPortCtrl.text.trim()) ?? 161;
+    } else if (primaryMethod == 'snmp') {
+      primaryPort = int.tryParse(_fdSnmpHbPortCtrl.text.trim()) ?? 161;
+    }
+
+    return {
+      'device_type': _devCategory,
+      'code': _devCodeCtrl.text.trim(),
+      'name': _devNameCtrl.text.trim(),
+      'room_code': _devRoomCodeCtrl.text.trim(),
+      'ip_address': _devIpCtrl.text.trim(),
+      'vlan': int.tryParse(_devVlanCtrl.text.trim()),
+      'status': _fdMonitorEnabled ? _devStatus : 'unmonitored',
+      'monitoring_enabled': _fdMonitorEnabled,
+      'monitor_method': primaryMethod,
+      'monitor_port': primaryPort,
+      'custom_fields': existingCustom,
+      'linked_rack_id': _devLinkedRackId ?? 0,
+      'linked_rack_device_code': _devRackPortCtrl.text.trim(),
+      'linked_outlet_id': _devLinkedOutletId ?? 0,
+      'responsible_person': _devRespCtrl.text.trim(),
+      'contact_first_name': _devContactFirstCtrl.text.trim(),
+      'contact_last_name': _devContactLastCtrl.text.trim(),
+      'contact_email': _devContactEmailCtrl.text.trim(),
+      'contact_phone': _devContactPhoneCtrl.text.trim(),
+      'contact_job_title': _devContactJobCtrl.text.trim(),
+      'contact_department': _devContactDeptCtrl.text.trim(),
+      'notes': _devNotesCtrl.text.trim(),
+    };
+  }
+
+  Future<void> _toggleFloorDeviceHeartbeat(
+    FloorDeviceNode dev,
+    bool enabled,
+  ) async {
+    setState(() {
+      _fdMonitorEnabled = enabled;
+      if (!enabled) {
+        _devStatus = 'unmonitored';
+        _fdLastPingResult = null;
+      } else if (_fdEnabledMonitorSystems.isEmpty) {
+        _fdEnabledMonitorSystems = {'icmp'};
+      }
+    });
+    await _saveSelectedFloorDeviceSettings(
+      customToast: enabled
+          ? '✓ Heartbeat activado en background para "${dev.code}".'
+          : '⚪ Heartbeat desactivado (Gris) para "${dev.code}".',
+    );
+  }
+
+  Future<void> _testFloorDeviceHeartbeatNow(FloorDeviceNode dev) async {
+    setState(() => _fdPinging = true);
+    try {
+      await widget.api.updateFloorDevice(dev.id, _buildFloorDevicePayload(dev));
+      final res = await widget.api.pingFloorDevice(dev.id);
+      if (mounted) {
+        final newStatus = (res['status'] ?? 'offline').toString();
+        setState(() {
+          _fdLastPingResult = res;
+          _devStatus = newStatus;
+          _editingDeviceId = null;
+        });
+        widget.onRefresh();
+        _showInlineSettingsBanner(
+          newStatus == 'online'
+              ? '🟢 Heartbeat OK en "${dev.code}" (${res['last_ping_ms'] ?? '-'} ms)'
+              : (newStatus == 'warning'
+                  ? '🟠 Heartbeat parcial (Naranja) en "${dev.code}"'
+                  : '🔴 Heartbeat fallido (Rojo) en "${dev.code}"'),
+          isError: newStatus == 'offline',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        _showInlineSettingsBanner('Error en Probar ahora: $e', isError: true);
+      }
+    } finally {
+      if (mounted) setState(() => _fdPinging = false);
+    }
+  }
+
+  Future<void> _launchFloorDeviceConnect(String proto) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      if (proto == 'ssh') {
+        final host = _fdConnSshHostCtrl.text.trim().isNotEmpty
+            ? _fdConnSshHostCtrl.text.trim()
+            : _devIpCtrl.text.trim();
+        if (host.isEmpty) {
+          messenger.showSnackBar(
+            const SnackBar(content: Text('Indica el Host/IP para Conectar SSH.')),
+          );
+          return;
+        }
+        final user = _fdConnSshUserCtrl.text.trim().isEmpty
+            ? 'admin'
+            : _fdConnSshUserCtrl.text.trim();
+        final port = int.tryParse(_fdConnSshPortCtrl.text.trim()) ?? 22;
+        final sshCmd =
+            port == 22 ? 'ssh $user@$host' : 'ssh -p $port $user@$host';
+        await Clipboard.setData(ClipboardData(text: sshCmd));
+        final uri = Uri.parse('ssh://$user@$host:$port');
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        if (mounted) {
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text('Abriendo SSH ($sshCmd copiado al portapapeles)'),
+              backgroundColor: const Color(0xFF0F172A),
+            ),
+          );
+        }
+      } else if (proto == 'http') {
+        String raw = _fdConnHttpUrlCtrl.text.trim();
+        if (raw.isEmpty && _devIpCtrl.text.trim().isNotEmpty) {
+          raw = 'http://${_devIpCtrl.text.trim()}';
+        }
+        if (raw.isEmpty) return;
+        if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
+          raw = 'http://$raw';
+        }
+        await launchUrl(Uri.parse(raw), mode: LaunchMode.externalApplication);
+      } else if (proto == 'https') {
+        String raw = _fdConnHttpsUrlCtrl.text.trim();
+        if (raw.isEmpty && _devIpCtrl.text.trim().isNotEmpty) {
+          raw = 'https://${_devIpCtrl.text.trim()}';
+        }
+        if (raw.isEmpty) return;
+        if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
+          raw = 'https://$raw';
+        }
+        await launchUrl(Uri.parse(raw), mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('No se pudo abrir la conexión: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _saveFloorDevicePosition(int deviceId) async {
@@ -770,27 +1112,20 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   Future<void> _saveSelectedFloorDeviceSettings({String? customToast}) async {
     final devId = _selectedFloorDeviceId;
     if (devId == null) return;
+    FloorDeviceNode? currentDev;
+    if (_floor != null) {
+      for (final d in _floor!.floorDevices) {
+        if (d.id == devId) {
+          currentDev = d;
+          break;
+        }
+      }
+    }
     try {
-      await widget.api.updateFloorDevice(devId, {
-        'device_type': _devCategory,
-        'code': _devCodeCtrl.text.trim(),
-        'name': _devNameCtrl.text.trim(),
-        'room_code': _devRoomCodeCtrl.text.trim(),
-        'ip_address': _devIpCtrl.text.trim(),
-        'vlan': int.tryParse(_devVlanCtrl.text.trim()),
-        'status': _devStatus,
-        'linked_rack_id': _devLinkedRackId ?? 0,
-        'linked_rack_device_code': _devRackPortCtrl.text.trim(),
-        'linked_outlet_id': _devLinkedOutletId ?? 0,
-        'responsible_person': _devRespCtrl.text.trim(),
-        'contact_first_name': _devContactFirstCtrl.text.trim(),
-        'contact_last_name': _devContactLastCtrl.text.trim(),
-        'contact_email': _devContactEmailCtrl.text.trim(),
-        'contact_phone': _devContactPhoneCtrl.text.trim(),
-        'contact_job_title': _devContactJobCtrl.text.trim(),
-        'contact_department': _devContactDeptCtrl.text.trim(),
-        'notes': _devNotesCtrl.text.trim(),
-      });
+      await widget.api.updateFloorDevice(
+        devId,
+        _buildFloorDevicePayload(currentDev),
+      );
       _editingDeviceId = null;
       widget.onRefresh();
       _showInlineSettingsBanner(
@@ -1509,7 +1844,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         'ip_address': ipCtrl.text.trim(),
         'pos_x': normX,
         'pos_y': normY,
-        'status': 'online',
+        'status': 'unmonitored',
+        'monitoring_enabled': false,
         'linked_rack_id': linkedRackId,
         'linked_rack_device_code': portCtrl.text.trim(),
         'linked_outlet_id': linkedOutletId,
@@ -2416,12 +2752,11 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                         [
                                           '$rCount racks',
                                           if (dCount > 0) '$dCount disp.',
-                                          if (fl.monitoredCount > 0)
-                                            'Monit: ${fl.monitoredCount}',
-                                          if (fl.onlineCount > 0)
-                                            '🟢${fl.onlineCount}',
-                                          if (fl.offlineCount > 0)
-                                            '🔴${fl.offlineCount}',
+                                          '⚪${fl.unmonitoredCount}',
+                                          '🟢${fl.onlineCount}',
+                                          if (fl.warningCount > 0)
+                                            '🟠${fl.warningCount}',
+                                          '🔴${fl.offlineCount}',
                                         ].join(' • '),
                                         style: TextStyle(
                                           fontSize: 10,
@@ -3994,40 +4329,47 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                         ],
                       ),
                     ],
-                    if (rk.monitoredCount > 0) ...[
-                      const SizedBox(height: 2),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 5,
-                          vertical: 1.5,
-                        ),
-                        decoration: BoxDecoration(
+                    const SizedBox(height: 2),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 1.5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: rk.offlineCount > 0
+                            ? const Color(0x44DC2626)
+                            : (rk.warningCount > 0
+                                ? const Color(0x44D97706)
+                                : (rk.onlineCount > 0
+                                    ? const Color(0x3316A34A)
+                                    : const Color(0x3364748B))),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
                           color: rk.offlineCount > 0
-                              ? const Color(0x44DC2626)
-                              : const Color(0x3316A34A),
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(
-                            color: rk.offlineCount > 0
-                                ? const Color(0xFFF87171)
-                                : const Color(0xFF4ADE80),
-                            width: 0.8,
-                          ),
-                        ),
-                        child: Text(
-                          [
-                            'Monit:${rk.monitoredCount}',
-                            if (rk.onlineCount > 0) '🟢${rk.onlineCount}',
-                            if (rk.offlineCount > 0) '🔴${rk.offlineCount}',
-                          ].join(' '),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 8.5,
-                            fontWeight: FontWeight.w800,
-                          ),
-                          overflow: TextOverflow.ellipsis,
+                              ? const Color(0xFFF87171)
+                              : (rk.warningCount > 0
+                                  ? const Color(0xFFFBBF24)
+                                  : (rk.onlineCount > 0
+                                      ? const Color(0xFF4ADE80)
+                                      : const Color(0xFF94A3B8))),
+                          width: 0.8,
                         ),
                       ),
-                    ],
+                      child: Text(
+                        [
+                          '⚪${rk.unmonitoredCount}',
+                          '🟢${rk.onlineCount}',
+                          if (rk.warningCount > 0) '🟠${rk.warningCount}',
+                          '🔴${rk.offlineCount}',
+                        ].join(' '),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                     const Spacer(),
                   ],
                 ),
@@ -4544,11 +4886,17 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     final Color pinBgColor =
         isSelected ? const Color(0xFF2563EB) : catItem.pinColor;
 
-    Color statusDotColor = const Color(0xFF22C55E);
-    if (effectiveStatus == 'offline') {
-      statusDotColor = const Color(0xFFEF4444);
-    } else if (effectiveStatus == 'warning') {
-      statusDotColor = const Color(0xFFF59E0B);
+    final effectiveMonitored =
+        isSelected ? _fdMonitorEnabled : dev.monitoringEnabled;
+    Color statusDotColor = const Color(0xFF94A3B8); // Gris: Sin Heartbeat
+    if (effectiveMonitored) {
+      if (effectiveStatus == 'offline') {
+        statusDotColor = const Color(0xFFEF4444); // Rojo: Todo falla
+      } else if (effectiveStatus == 'warning') {
+        statusDotColor = const Color(0xFFF59E0B); // Naranja: Fallo parcial
+      } else {
+        statusDotColor = const Color(0xFF22C55E); // Verde: Todo OK
+      }
     }
 
     return Positioned(
@@ -4977,12 +5325,6 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         ? _devCategory
         : 'camera';
 
-    final safeStatus = const {'online', 'warning', 'offline'}.contains(
-          _devStatus,
-        )
-        ? _devStatus
-        : 'online';
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -5064,51 +5406,575 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildCompactField(
-                        label: 'IP Address',
-                        controller: _devIpCtrl,
-                      ),
+                _buildCompactField(
+                  label: 'IP Address / Host',
+                  controller: _devIpCtrl,
+                ),
+                const SizedBox(height: 12),
+
+                // =============================================================
+                // SECCIÓN A: HEARTBEAT (Background Monitoring)
+                // - Desactivado por defecto (Gris). Si está desactivado, sólo
+                //   muestra el switch para activar/desactivar.
+                // - Si se activa, permite elegir 1 o varios sistemas + botón
+                //   "Probar ahora" (ejecutado en el Backend).
+                // =============================================================
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: _fdMonitorEnabled
+                        ? (_devStatus == 'offline'
+                            ? const Color(0xFFFEF2F2)
+                            : (_devStatus == 'warning'
+                                ? const Color(0xFFFFFBEB)
+                                : const Color(0xFFF0FDF4)))
+                        : const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _fdMonitorEnabled
+                          ? (_devStatus == 'offline'
+                              ? const Color(0xFFFCA5A5)
+                              : (_devStatus == 'warning'
+                                  ? const Color(0xFFFCD34D)
+                                  : const Color(0xFF86EFAC)))
+                          : const Color(0xFFCBD5E1),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        key: ValueKey('st_${dev.id}_$safeStatus'),
-                        initialValue: safeStatus,
-                        isDense: true,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF0F172A),
-                        ),
-                        decoration: _compactInputDecoration('Status'),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'online',
-                            child: Text('🟢 Online'),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: !_fdMonitorEnabled
+                                  ? const Color(0xFF94A3B8)
+                                  : (_devStatus == 'online'
+                                      ? const Color(0xFF16A34A)
+                                      : (_devStatus == 'warning'
+                                          ? const Color(0xFFD97706)
+                                          : const Color(0xFFDC2626))),
+                            ),
                           ),
-                          DropdownMenuItem(
-                            value: 'warning',
-                            child: Text('🟠 Warning'),
+                          const SizedBox(width: 7),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _fdMonitorEnabled
+                                      ? 'Heartbeat: ACTIVO (${_devStatus == 'online' ? 'Verde • OK' : (_devStatus == 'warning' ? 'Naranja • Parcial' : 'Rojo • Fallo')})'
+                                      : 'Heartbeat: DESACTIVADO (Gris)',
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w900,
+                                    color: Color(0xFF0F172A),
+                                  ),
+                                ),
+                                Text(
+                                  _fdMonitorEnabled
+                                      ? 'Comprobación periódica desde el Background'
+                                      : 'Sin chequeo automático de estado',
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    color: Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                          DropdownMenuItem(
-                            value: 'offline',
-                            child: Text('🔴 Offline'),
+                          Switch.adaptive(
+                            value: _fdMonitorEnabled,
+                            activeTrackColor: const Color(0xFF16A34A),
+                            onChanged: (v) =>
+                                _toggleFloorDeviceHeartbeat(dev, v),
                           ),
                         ],
-                        onChanged: (v) {
-                          if (v != null && v != _devStatus) {
-                            setState(() => _devStatus = v);
-                            _saveSelectedFloorDeviceSettings(
-                              customToast:
-                                  '✓ Estado de "${_devCodeCtrl.text.trim()}" actualizado a ${v.toUpperCase()}.',
-                            );
-                          }
-                        },
                       ),
+                      if (_fdMonitorEnabled) ...[
+                        const Divider(height: 14, color: Color(0xFFCBD5E1)),
+                        const Text(
+                          'Sistemas de chequeo activos (elige uno o varios):',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF334155),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 5,
+                          runSpacing: 5,
+                          children: [
+                            for (final entry in const [
+                              ('icmp', 'ICMP Ping'),
+                              ('ssh', 'SSH'),
+                              ('http', 'HTTP / HTTPS'),
+                              ('tcp', 'TCP'),
+                              ('udp', 'UDP'),
+                              ('snmp', 'SNMP'),
+                            ])
+                              FilterChip(
+                                label: Text(
+                                  entry.$2,
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: _fdEnabledMonitorSystems
+                                            .contains(entry.$1)
+                                        ? Colors.white
+                                        : const Color(0xFF1E293B),
+                                  ),
+                                ),
+                                selected: _fdEnabledMonitorSystems
+                                    .contains(entry.$1),
+                                selectedColor: const Color(0xFF0F172A),
+                                checkmarkColor: const Color(0xFF4ADE80),
+                                backgroundColor: Colors.white,
+                                visualDensity: VisualDensity.compact,
+                                onSelected: (sel) {
+                                  setState(() {
+                                    if (sel) {
+                                      _fdEnabledMonitorSystems.add(entry.$1);
+                                    } else if (_fdEnabledMonitorSystems.length >
+                                        1) {
+                                      _fdEnabledMonitorSystems.remove(entry.$1);
+                                    }
+                                  });
+                                },
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        if (_fdEnabledMonitorSystems.contains('icmp')) ...[
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 2,
+                                child: _buildCompactField(
+                                  label: 'ICMP Host / IP',
+                                  controller: _fdPingTargetCtrl,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: _buildCompactField(
+                                  label: 'Timeout (s)',
+                                  controller: _fdPingTimeoutCtrl,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                        ],
+                        if (_fdEnabledMonitorSystems.contains('ssh')) ...[
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 2,
+                                child: _buildCompactField(
+                                  label: 'SSH Host / IP (HB)',
+                                  controller: _fdSshHbHostCtrl,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: _buildCompactField(
+                                  label: 'Puerto SSH',
+                                  controller: _fdSshHbPortCtrl,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                        ],
+                        if (_fdEnabledMonitorSystems.contains('http')) ...[
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 2,
+                                child: _buildCompactField(
+                                  label: 'URL HTTP/HTTPS (HB)',
+                                  controller: _fdHttpHbUrlCtrl,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: _buildCompactField(
+                                  label: 'Cód. HTTP',
+                                  controller: _fdHttpHbExpectedCodeCtrl,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                        ],
+                        if (_fdEnabledMonitorSystems.contains('tcp')) ...[
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 2,
+                                child: _buildCompactField(
+                                  label: 'TCP Host / IP',
+                                  controller: _fdTcpHbHostCtrl,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: _buildCompactField(
+                                  label: 'Puerto TCP',
+                                  controller: _fdTcpHbPortCtrl,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                        ],
+                        if (_fdEnabledMonitorSystems.contains('udp')) ...[
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 2,
+                                child: _buildCompactField(
+                                  label: 'UDP Host / IP',
+                                  controller: _fdUdpHbHostCtrl,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: _buildCompactField(
+                                  label: 'Puerto UDP',
+                                  controller: _fdUdpHbPortCtrl,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                        ],
+                        if (_fdEnabledMonitorSystems.contains('snmp')) ...[
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 2,
+                                child: _buildCompactField(
+                                  label: 'SNMP Host / IP',
+                                  controller: _fdSnmpHbHostCtrl,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: _buildCompactField(
+                                  label: 'Comunidad',
+                                  controller: _fdSnmpHbCommunityCtrl,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                        ],
+                        if (_fdLastPingResult != null &&
+                            _fdLastPingResult!['protocol_results'] is List) ...[
+                          const SizedBox(height: 4),
+                          for (final pr
+                              in (_fdLastPingResult!['protocol_results']
+                                  as List))
+                            if (pr is Map)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 3),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      pr['status'] == 'online'
+                                          ? Icons.check_circle_rounded
+                                          : Icons.cancel_rounded,
+                                      size: 13,
+                                      color: pr['status'] == 'online'
+                                          ? const Color(0xFF16A34A)
+                                          : const Color(0xFFDC2626),
+                                    ),
+                                    const SizedBox(width: 5),
+                                    Expanded(
+                                      child: Text(
+                                        '${(pr['protocol'] ?? '').toString().toUpperCase()} (${pr['target'] ?? ''}): ${pr['detail'] ?? ''}',
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFF1E293B),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                        ],
+                        const SizedBox(height: 6),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            onPressed: _fdPinging
+                                ? null
+                                : () => _testFloorDeviceHeartbeatNow(dev),
+                            icon: _fdPinging
+                                ? const SizedBox(
+                                    width: 13,
+                                    height: 13,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(
+                                    Icons.bolt_rounded,
+                                    size: 15,
+                                  ),
+                            label: Text(
+                              _fdPinging
+                                  ? 'Comprobando en Background...'
+                                  : 'Probar ahora',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF0F172A),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+
+                // =============================================================
+                // SECCIÓN B: CONECTAR (Ejecutado desde el Frontend)
+                // - Independiente de las URLs/IPs del Heartbeat.
+                // - Si está desactivado, sólo muestra el switch para activar.
+                // - Si se activa, permite elegir SSH, HTTP y/o HTTPS y lanzar
+                //   la conexión directamente desde el navegador/cliente.
+                // =============================================================
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: _fdConnectEnabled
+                        ? const Color(0xFFEFF6FF)
+                        : const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _fdConnectEnabled
+                          ? const Color(0xFF93C5FD)
+                          : const Color(0xFFCBD5E1),
                     ),
-                  ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.open_in_new_rounded,
+                            size: 15,
+                            color: _fdConnectEnabled
+                                ? const Color(0xFF2563EB)
+                                : const Color(0xFF64748B),
+                          ),
+                          const SizedBox(width: 7),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _fdConnectEnabled
+                                      ? 'Conectar: ACTIVO (Frontend)'
+                                      : 'Conectar: DESACTIVADO',
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w900,
+                                    color: Color(0xFF0F172A),
+                                  ),
+                                ),
+                                const Text(
+                                  'Acceso directo SSH / HTTP / HTTPS desde el navegador',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Switch.adaptive(
+                            value: _fdConnectEnabled,
+                            activeTrackColor: const Color(0xFF2563EB),
+                            onChanged: (v) {
+                              setState(() {
+                                _fdConnectEnabled = v;
+                                if (v && _fdEnabledConnectSystems.isEmpty) {
+                                  _fdEnabledConnectSystems = {'https'};
+                                }
+                              });
+                              _saveSelectedFloorDeviceSettings(
+                                customToast: v
+                                    ? '✓ Panel Conectar activado en "${dev.code}".'
+                                    : '✓ Panel Conectar desactivado en "${dev.code}".',
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                      if (_fdConnectEnabled) ...[
+                        const Divider(height: 14, color: Color(0xFFBFDBFE)),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 5,
+                          children: [
+                            for (final entry in const [
+                              ('ssh', 'SSH'),
+                              ('http', 'HTTP'),
+                              ('https', 'HTTPS'),
+                            ])
+                              FilterChip(
+                                label: Text(
+                                  entry.$2,
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: _fdEnabledConnectSystems
+                                            .contains(entry.$1)
+                                        ? Colors.white
+                                        : const Color(0xFF1E3A8A),
+                                  ),
+                                ),
+                                selected: _fdEnabledConnectSystems
+                                    .contains(entry.$1),
+                                selectedColor: const Color(0xFF2563EB),
+                                checkmarkColor: Colors.white,
+                                backgroundColor: Colors.white,
+                                visualDensity: VisualDensity.compact,
+                                onSelected: (sel) {
+                                  setState(() {
+                                    if (sel) {
+                                      _fdEnabledConnectSystems.add(entry.$1);
+                                    } else if (_fdEnabledConnectSystems.length >
+                                        1) {
+                                      _fdEnabledConnectSystems.remove(entry.$1);
+                                    }
+                                  });
+                                },
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        if (_fdEnabledConnectSystems.contains('ssh')) ...[
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 2,
+                                child: _buildCompactField(
+                                  label: 'SSH Host / IP',
+                                  controller: _fdConnSshHostCtrl,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: _buildCompactField(
+                                  label: 'Puerto',
+                                  controller: _fdConnSshPortCtrl,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: _buildCompactField(
+                                  label: 'Usuario',
+                                  controller: _fdConnSshUserCtrl,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 5),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: () => _launchFloorDeviceConnect('ssh'),
+                              icon: const Icon(Icons.terminal_rounded, size: 14),
+                              label: const Text(
+                                'Conectar por SSH',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF0F172A),
+                                backgroundColor: Colors.white,
+                                visualDensity: VisualDensity.compact,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                        if (_fdEnabledConnectSystems.contains('http')) ...[
+                          _buildCompactField(
+                            label: 'URL HTTP (independiente de Heartbeat)',
+                            controller: _fdConnHttpUrlCtrl,
+                          ),
+                          const SizedBox(height: 5),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: () =>
+                                  _launchFloorDeviceConnect('http'),
+                              icon: const Icon(Icons.http_rounded, size: 15),
+                              label: const Text(
+                                'Conectar por HTTP',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF1D4ED8),
+                                backgroundColor: Colors.white,
+                                visualDensity: VisualDensity.compact,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                        if (_fdEnabledConnectSystems.contains('https')) ...[
+                          _buildCompactField(
+                            label: 'URL HTTPS (independiente de Heartbeat)',
+                            controller: _fdConnHttpsUrlCtrl,
+                          ),
+                          const SizedBox(height: 5),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: () =>
+                                  _launchFloorDeviceConnect('https'),
+                              icon: const Icon(Icons.lock_outline, size: 14),
+                              label: const Text(
+                                'Conectar por HTTPS',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF2563EB),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 12),
                 // Bloque destacado de Conexión al Rack

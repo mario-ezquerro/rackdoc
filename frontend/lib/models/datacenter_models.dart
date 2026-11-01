@@ -39,6 +39,7 @@ class RackSummary {
   final int rotationDeg;
   final int deviceCount;
   final int monitoredCount;
+  final int unmonitoredCount;
   final int onlineCount;
   final int offlineCount;
   final int warningCount;
@@ -66,6 +67,7 @@ class RackSummary {
     required this.rotationDeg,
     required this.deviceCount,
     this.monitoredCount = 0,
+    this.unmonitoredCount = 0,
     this.onlineCount = 0,
     this.offlineCount = 0,
     this.warningCount = 0,
@@ -77,6 +79,8 @@ class RackSummary {
   });
 
   factory RackSummary.fromJson(Map<String, dynamic> json) {
+    final devCnt = (json['device_count'] ?? 0) as int;
+    final monCnt = (json['monitored_count'] ?? 0) as int;
     return RackSummary(
       id: json['id'] as int,
       code: (json['code'] ?? '') as String,
@@ -93,8 +97,9 @@ class RackSummary {
       widthPx: ((json['width_px'] ?? 110.0) as num).toDouble(),
       depthPx: ((json['depth_px'] ?? 86.0) as num).toDouble(),
       rotationDeg: (json['rotation_deg'] ?? 0) as int,
-      deviceCount: (json['device_count'] ?? 0) as int,
-      monitoredCount: (json['monitored_count'] ?? 0) as int,
+      deviceCount: devCnt,
+      monitoredCount: monCnt,
+      unmonitoredCount: (json['unmonitored_count'] ?? (devCnt - monCnt).clamp(0, 9999)) as int,
       onlineCount: (json['online_count'] ?? 0) as int,
       offlineCount: (json['offline_count'] ?? 0) as int,
       warningCount: (json['warning_count'] ?? 0) as int,
@@ -157,10 +162,16 @@ class FloorDeviceNode {
   final String name;
   final double posX;
   final double posY;
+  final String fqdn;
   final String ipAddress;
   final String macAddress;
   final int? vlan;
+  final bool monitoringEnabled;
+  final String monitorMethod;
+  final int monitorPort;
   final String status;
+  final double? lastPingMs;
+  final Map<String, dynamic> customFields;
   final int? linkedRackId;
   final String linkedRackDeviceCode;
   final int? linkedOutletId;
@@ -186,10 +197,16 @@ class FloorDeviceNode {
     required this.name,
     required this.posX,
     required this.posY,
+    this.fqdn = '',
     required this.ipAddress,
     required this.macAddress,
     this.vlan,
+    this.monitoringEnabled = false,
+    this.monitorMethod = 'icmp',
+    this.monitorPort = 22,
     required this.status,
+    this.lastPingMs,
+    this.customFields = const {},
     this.linkedRackId,
     required this.linkedRackDeviceCode,
     this.linkedOutletId,
@@ -204,6 +221,7 @@ class FloorDeviceNode {
   });
 
   factory FloorDeviceNode.fromJson(Map<String, dynamic> json) {
+    final monEn = (json['monitoring_enabled'] ?? false) == true;
     return FloorDeviceNode(
       id: json['id'] as int,
       floorId: (json['floor_id'] ?? 0) as int,
@@ -214,10 +232,20 @@ class FloorDeviceNode {
       name: (json['name'] ?? '') as String,
       posX: ((json['pos_x'] ?? 0.5) as num).toDouble(),
       posY: ((json['pos_y'] ?? 0.5) as num).toDouble(),
+      fqdn: (json['fqdn'] ?? '') as String,
       ipAddress: (json['ip_address'] ?? '') as String,
       macAddress: (json['mac_address'] ?? '') as String,
       vlan: json['vlan'] as int?,
-      status: (json['status'] ?? 'online') as String,
+      monitoringEnabled: monEn,
+      monitorMethod: (json['monitor_method'] ?? 'icmp') as String,
+      monitorPort: (json['monitor_port'] ?? 22) as int,
+      status: monEn ? ((json['status'] ?? 'offline') as String) : 'unmonitored',
+      lastPingMs: json['last_ping_ms'] != null
+          ? (json['last_ping_ms'] as num).toDouble()
+          : null,
+      customFields: json['custom_fields'] != null
+          ? Map<String, dynamic>.from(json['custom_fields'] as Map)
+          : {},
       linkedRackId: json['linked_rack_id'] as int?,
       linkedRackDeviceCode: (json['linked_rack_device_code'] ?? '') as String,
       linkedOutletId: json['linked_outlet_id'] as int?,
@@ -240,6 +268,7 @@ class FloorNode {
   final String mapImageUrl;
   final double mapScale;
   final int monitoredCount;
+  final int unmonitoredCount;
   final int onlineCount;
   final int offlineCount;
   final int warningCount;
@@ -254,6 +283,7 @@ class FloorNode {
     required this.mapImageUrl,
     required this.mapScale,
     this.monitoredCount = 0,
+    this.unmonitoredCount = 0,
     this.onlineCount = 0,
     this.offlineCount = 0,
     this.warningCount = 0,
@@ -270,6 +300,7 @@ class FloorNode {
       mapImageUrl: (json['map_image_url'] ?? '') as String,
       mapScale: ((json['map_scale'] ?? 1.0) as num).toDouble(),
       monitoredCount: (json['monitored_count'] ?? 0) as int,
+      unmonitoredCount: (json['unmonitored_count'] ?? 0) as int,
       onlineCount: (json['online_count'] ?? 0) as int,
       offlineCount: (json['offline_count'] ?? 0) as int,
       warningCount: (json['warning_count'] ?? 0) as int,
@@ -305,6 +336,7 @@ class LocationNode {
   final int racksCount;
   final int totalRackUnits;
   final int monitoredCount;
+  final int unmonitoredCount;
   final int onlineCount;
   final int offlineCount;
   final int warningCount;
@@ -329,6 +361,7 @@ class LocationNode {
     required this.racksCount,
     required this.totalRackUnits,
     this.monitoredCount = 0,
+    this.unmonitoredCount = 0,
     this.onlineCount = 0,
     this.offlineCount = 0,
     this.warningCount = 0,
@@ -355,6 +388,7 @@ class LocationNode {
       racksCount: (json['racks_count'] ?? 0) as int,
       totalRackUnits: (json['total_rack_units'] ?? 0) as int,
       monitoredCount: (json['monitored_count'] ?? 0) as int,
+      unmonitoredCount: (json['unmonitored_count'] ?? 0) as int,
       onlineCount: (json['online_count'] ?? 0) as int,
       offlineCount: (json['offline_count'] ?? 0) as int,
       warningCount: (json['warning_count'] ?? 0) as int,

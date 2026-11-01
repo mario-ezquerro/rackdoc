@@ -1063,70 +1063,78 @@ class _LocationsViewState extends State<LocationsView> {
                                   ),
                                 ],
                               ),
-                              if (loc.monitoredCount > 0) ...[
-                                const SizedBox(height: 10),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 6,
-                                  ),
-                                  decoration: BoxDecoration(
+                              const SizedBox(height: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: loc.offlineCount > 0
+                                      ? const Color(0xFFFEF2F2)
+                                      : (loc.warningCount > 0
+                                          ? const Color(0xFFFFFBEB)
+                                          : (loc.onlineCount > 0
+                                              ? const Color(0xFFF0FDF4)
+                                              : const Color(0xFFF8FAFC))),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
                                     color: loc.offlineCount > 0
-                                        ? const Color(0xFFFEF2F2)
-                                        : const Color(0xFFF0FDF4),
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(
-                                      color: loc.offlineCount > 0
-                                          ? const Color(0xFFFECACA)
-                                          : const Color(0xFFBBF7D0),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.monitor_heart_rounded,
-                                        size: 14,
-                                        color: loc.offlineCount > 0
-                                            ? const Color(0xFFDC2626)
-                                            : const Color(0xFF16A34A),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        'Monitorizados: ${loc.monitoredCount}',
-                                        style: const TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w700,
-                                          color: Color(0xFF0F172A),
-                                        ),
-                                      ),
-                                      const Spacer(),
-                                      if (loc.onlineCount > 0)
-                                        _StatusDotPill(
-                                          color: const Color(0xFF16A34A),
-                                          count: loc.onlineCount,
-                                          label: 'Verde',
-                                        ),
-                                      if (loc.onlineCount > 0 &&
-                                          loc.offlineCount > 0)
-                                        const SizedBox(width: 6),
-                                      if (loc.offlineCount > 0)
-                                        _StatusDotPill(
-                                          color: const Color(0xFFDC2626),
-                                          count: loc.offlineCount,
-                                          label: 'Rojo',
-                                        ),
-                                      if (loc.warningCount > 0) ...[
-                                        const SizedBox(width: 6),
-                                        _StatusDotPill(
-                                          color: const Color(0xFFD97706),
-                                          count: loc.warningCount,
-                                          label: 'Aviso',
-                                        ),
-                                      ],
-                                    ],
+                                        ? const Color(0xFFFECACA)
+                                        : (loc.warningCount > 0
+                                            ? const Color(0xFFFDE68A)
+                                            : (loc.onlineCount > 0
+                                                ? const Color(0xFFBBF7D0)
+                                                : const Color(0xFFCBD5E1))),
                                   ),
                                 ),
-                              ],
+                                child: Wrap(
+                                  spacing: 6,
+                                  runSpacing: 4,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.monitor_heart_rounded,
+                                      size: 14,
+                                      color: loc.offlineCount > 0
+                                          ? const Color(0xFFDC2626)
+                                          : (loc.warningCount > 0
+                                              ? const Color(0xFFD97706)
+                                              : (loc.onlineCount > 0
+                                                  ? const Color(0xFF16A34A)
+                                                  : const Color(0xFF64748B))),
+                                    ),
+                                    const Text(
+                                      'Heartbeat:',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w800,
+                                        color: Color(0xFF0F172A),
+                                      ),
+                                    ),
+                                    _StatusDotPill(
+                                      color: const Color(0xFF94A3B8),
+                                      count: loc.unmonitoredCount,
+                                      label: 'Gris',
+                                    ),
+                                    _StatusDotPill(
+                                      color: const Color(0xFF16A34A),
+                                      count: loc.onlineCount,
+                                      label: 'Verde',
+                                    ),
+                                    _StatusDotPill(
+                                      color: const Color(0xFFD97706),
+                                      count: loc.warningCount,
+                                      label: 'Naranja',
+                                    ),
+                                    _StatusDotPill(
+                                      color: const Color(0xFFDC2626),
+                                      count: loc.offlineCount,
+                                      label: 'Rojo',
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -1318,12 +1326,11 @@ class _LocationsViewState extends State<LocationsView> {
                                     Text(
                                       [
                                         '${loc.floorsCount} plantas • ${loc.racksCount} racks',
-                                        if (loc.monitoredCount > 0)
-                                          'Monit: ${loc.monitoredCount}',
-                                        if (loc.onlineCount > 0)
-                                          '🟢${loc.onlineCount}',
-                                        if (loc.offlineCount > 0)
-                                          '🔴${loc.offlineCount}',
+                                        '⚪${loc.unmonitoredCount}',
+                                        '🟢${loc.onlineCount}',
+                                        if (loc.warningCount > 0)
+                                          '🟠${loc.warningCount}',
+                                        '🔴${loc.offlineCount}',
                                       ].join(' '),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
@@ -1590,10 +1597,11 @@ class _LocationsViewState extends State<LocationsView> {
                                   child: Text(
                                     [
                                       loc.code,
-                                      if (loc.onlineCount > 0)
-                                        '🟢${loc.onlineCount}',
-                                      if (loc.offlineCount > 0)
-                                        '🔴${loc.offlineCount}',
+                                      '⚪${loc.unmonitoredCount}',
+                                      '🟢${loc.onlineCount}',
+                                      if (loc.warningCount > 0)
+                                        '🟠${loc.warningCount}',
+                                      '🔴${loc.offlineCount}',
                                     ].join(' '),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,

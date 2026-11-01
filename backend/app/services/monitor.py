@@ -8,9 +8,9 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List, Union
 from sqlalchemy.orm import Session
-from ..models import RackDevice
+from ..models import RackDevice, FloorDevice
 
 
 def _encode_ber_length(length: int) -> bytes:
@@ -327,14 +327,40 @@ def check_host_connectivity(
         )
 
 
-def check_single_device(db: Session, device: RackDevice) -> Dict[str, Any]:
+def check_single_device(
+    db: Session,
+    device: Union[RackDevice, FloorDevice],
+) -> Dict[str, Any]:
+    if not getattr(device, "monitoring_enabled", False):
+        device.status = "unmonitored"
+        device.last_ping_ms = None
+        db.commit()
+        db.refresh(device)
+        return {
+            "device_id": device.id,
+            "code": device.code,
+            "target": device.ip_address or getattr(device, "fqdn", "") or "",
+            "method": "none",
+            "status": "unmonitored",
+            "last_ping_ms": None,
+            "last_checked_at": device.last_checked_at,
+            "detail": "Heartbeat desactivado (Sin monitorización en background).",
+            "checks": [],
+        }
+
     cf = dict(device.custom_fields or {})
     hb_cfg = dict(cf.get("heartbeat_config") or {})
 
     # Determinar qué checks están marcados en el equipo
-    raw_enabled = hb_cfg.get("enabled_checks")
+    raw_enabled = hb_cfg.get("enabled_checks") or hb_cfg.get("enabled_systems")
     if isinstance(raw_enabled, list) and len(raw_enabled) > 0:
-        enabled_checks = [str(x).lower().strip() for x in raw_enabled if str(x).strip()]
+        enabled_checks = []
+        for x in raw_enabled:
+            m_Norm = str(x).lower().strip()
+            if m_Norm == "https":
+                m_Norm = "http"
+            if m_Norm and m_Norm not in enabled_checks:
+                enabled_checks.append(m_Norm)
     else:
         primary = (device.monitor_method or "icmp").lower().strip()
         sec = [
@@ -364,6 +390,34 @@ def check_single_device(db: Session, device: RackDevice) -> Dict[str, Any]:
         c_cfg = dict(hb_cfg)
         if isinstance(per_check_configs.get(m), dict):
             c_cfg.update(per_check_configs[m])
+        elif m == "http" and isinstance(per_check_configs.get("https"), dict):
+            c_cfg.update(per_check_configs["https"])
+
+        # Soportar claves planas (FloorDevice) además de sub-diccionarios (RackDevice)
+        flat_host = ""
+        if m == "icmp":
+            flat_host = str(c_cfg.get("icmp_target") or "")
+        elif m == "ssh":
+            flat_host = str(c_cfg.get("ssh_host") or "")
+            if c_cfg.get("ssh_port") and not c_cfg.get("port"):
+                c_cfg["port"] = c_cfg.get("ssh_port")
+        elif m in ("http", "https"):
+            if c_cfg.get("http_url") and not c_cfg.get("url"):
+                c_cfg["url"] = c_cfg.get("http_url")
+            if c_cfg.get("http_expected_code") and not c_cfg.get("expected_status"):
+                c_cfg["expected_status"] = c_cfg.get("http_expected_code")
+        elif m == "tcp":
+            flat_host = str(c_cfg.get("tcp_host") or "")
+            if c_cfg.get("tcp_port") and not c_cfg.get("port"):
+                c_cfg["port"] = c_cfg.get("tcp_port")
+        elif m == "udp":
+            flat_host = str(c_cfg.get("udp_host") or "")
+            if c_cfg.get("udp_port") and not c_cfg.get("port"):
+                c_cfg["port"] = c_cfg.get("udp_port")
+        elif m == "snmp":
+            flat_host = str(c_cfg.get("snmp_host") or "")
+            if c_cfg.get("snmp_port") and not c_cfg.get("port"):
+                c_cfg["port"] = c_cfg.get("snmp_port")
 
         use_target = str(
             c_cfg.get("use_target")
@@ -372,9 +426,9 @@ def check_single_device(db: Session, device: RackDevice) -> Dict[str, Any]:
         )
         resolved_host = _resolve_target_host(
             device_ip=device.ip_address or "",
-            device_fqdn=device.fqdn or "",
+            device_fqdn=getattr(device, "fqdn", "") or "",
             use_target=use_target,
-            override_host=str(c_cfg.get("custom_host") or ""),
+            override_host=str(c_cfg.get("custom_host") or flat_host or ""),
         )
 
         default_port_for_m = {
@@ -405,6 +459,7 @@ def check_single_device(db: Session, device: RackDevice) -> Dict[str, Any]:
 
         check_results.append(
             {
+                "protocol": m,
                 "method": m,
                 "target": resolved_host,
                 "port": eff_port,
@@ -438,7 +493,7 @@ def check_single_device(db: Session, device: RackDevice) -> Dict[str, Any]:
         "code": device.code,
         "target": _resolve_target_host(
             device.ip_address or "",
-            device.fqdn or "",
+            getattr(device, "fqdn", "") or "",
             default_target_pref,
         ),
         "method": ",".join(enabled_checks),
@@ -447,10 +502,43 @@ def check_single_device(db: Session, device: RackDevice) -> Dict[str, Any]:
         "last_checked_at": device.last_checked_at,
         "detail": summary_text,
         "checks": check_results,
+        "protocol_results": check_results,
     }
 
 
-def check_all_monitored_devices(db: Session, rack_id: int | None = None) -> list[Dict[str, Any]]:
+def check_all_monitored_devices(
+    db: Session,
+    rack_id: int | None = None,
+    floor_id: int | None = None,
+) -> list[Dict[str, Any]]:
+    # Asegurar que los equipos con Heartbeat desactivado figuren en gris (unmonitored)
+    unmon_racks = (
+        db.query(RackDevice)
+        .filter(
+            RackDevice.monitoring_enabled.is_(False),
+            RackDevice.mounted_face != "external",
+            RackDevice.status != "unmonitored",
+        )
+        .all()
+    )
+    for ud in unmon_racks:
+        ud.status = "unmonitored"
+        ud.last_ping_ms = None
+
+    unmon_floors = (
+        db.query(FloorDevice)
+        .filter(
+            FloorDevice.monitoring_enabled.is_(False),
+            FloorDevice.status != "unmonitored",
+        )
+        .all()
+    )
+    for ufd in unmon_floors:
+        ufd.status = "unmonitored"
+        ufd.last_ping_ms = None
+    if unmon_racks or unmon_floors:
+        db.commit()
+
     query = db.query(RackDevice).filter(RackDevice.monitoring_enabled.is_(True))
     if rack_id is not None:
         query = query.filter(RackDevice.rack_id == rack_id)
@@ -460,6 +548,16 @@ def check_all_monitored_devices(db: Session, rack_id: int | None = None) -> list
         if dev.mounted_face == "external":
             continue
         results.append(check_single_device(db, dev))
+
+    fd_query = db.query(FloorDevice).filter(FloorDevice.monitoring_enabled.is_(True))
+    if floor_id is not None:
+        fd_query = fd_query.filter(FloorDevice.floor_id == floor_id)
+    elif rack_id is not None:
+        fd_query = fd_query.filter(FloorDevice.linked_rack_id == rack_id)
+    floor_devices = fd_query.all()
+    for fd in floor_devices:
+        results.append(check_single_device(db, fd))
+
     return results
 
 

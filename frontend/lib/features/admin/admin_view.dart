@@ -32,6 +32,21 @@ class _AdminViewState extends State<AdminView> {
   String _quickRole = 'editor';
   bool _creatingLocalUser = false;
 
+  // Configuración del Motor de Heartbeat en Background (por defecto cada 5 min)
+  Map<String, dynamic> _monitoringSettings = {
+    'interval_seconds': 300,
+    'interval_minutes': 5,
+    'background_enabled': true,
+    'unmonitored_count': 0,
+    'monitored_count': 0,
+    'online_count': 0,
+    'warning_count': 0,
+    'offline_count': 0,
+  };
+  final TextEditingController _hbMinutesCtrl = TextEditingController(text: '5');
+  bool _savingMonitoringSettings = false;
+  bool _runningMonitoringNow = false;
+
   @override
   void initState() {
     super.initState();
@@ -44,6 +59,7 @@ class _AdminViewState extends State<AdminView> {
     _quickFullNameCtrl.dispose();
     _quickEmailCtrl.dispose();
     _quickPasswordCtrl.dispose();
+    _hbMinutesCtrl.dispose();
     super.dispose();
   }
 
@@ -106,11 +122,18 @@ class _AdminViewState extends State<AdminView> {
       final res = await Future.wait([
         widget.api.getUsers(),
         widget.api.getAdServers(),
+        widget.api.getMonitoringSettings(),
       ]);
       if (mounted) {
+        final mon = res[2] as Map<String, dynamic>;
+        final mins =
+            (mon['interval_minutes'] as num?)?.toInt() ??
+            (((mon['interval_seconds'] as num?)?.toInt() ?? 300) ~/ 60);
         setState(() {
           _users = res[0] as List<UserModel>;
           _adServers = res[1] as List<ADServerModel>;
+          _monitoringSettings = mon;
+          _hbMinutesCtrl.text = '${mins < 1 ? 1 : mins}';
           _loading = false;
         });
       }
@@ -121,6 +144,72 @@ class _AdminViewState extends State<AdminView> {
           _loading = false;
         });
       }
+    }
+  }
+
+  Future<void> _saveHeartbeatIntervalMinutes(int minutes, {bool? bgEnabled}) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final safeMins = minutes.clamp(1, 1440);
+    setState(() => _savingMonitoringSettings = true);
+    try {
+      final res = await widget.api.updateMonitoringSettings({
+        'interval_minutes': safeMins,
+        'interval_seconds': safeMins * 60,
+        'background_enabled':
+            bgEnabled ?? (_monitoringSettings['background_enabled'] != false),
+      });
+      if (mounted) {
+        setState(() {
+          _monitoringSettings = res;
+          _hbMinutesCtrl.text = '$safeMins';
+        });
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              '✓ Frecuencia de chequeo Heartbeat actualizada a cada $safeMins min.',
+            ),
+            backgroundColor: const Color(0xFF15803D),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingMonitoringSettings = false);
+    }
+  }
+
+  Future<void> _triggerHeartbeatRunNow() async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _runningMonitoringNow = true);
+    try {
+      await widget.api.runMonitoringNow();
+      final mon = await widget.api.getMonitoringSettings();
+      if (mounted) {
+        setState(() {
+          _monitoringSettings = mon;
+        });
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              '✓ Comprobación en background completada: ⚪${mon['unmonitored_count'] ?? 0} Gris • 🟢${mon['online_count'] ?? 0} Verde • 🟠${mon['warning_count'] ?? 0} Naranja • 🔴${mon['offline_count'] ?? 0} Rojo',
+            ),
+            backgroundColor: const Color(0xFF0F172A),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _runningMonitoringNow = false);
     }
   }
 
@@ -1072,6 +1161,258 @@ class _AdminViewState extends State<AdminView> {
                 label: const Text('+ Conectar Servidor AD'),
               ),
             ],
+          ),
+
+          const SizedBox(height: 18),
+
+          // TARJETA DE CONFIGURACIÓN DEL MOTOR DE HEARTBEAT EN BACKGROUND
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFF86EFAC), width: 1.5),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x08000000),
+                  blurRadius: 8,
+                  offset: Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFDCFCE7),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(
+                        Icons.monitor_heart_rounded,
+                        size: 20,
+                        color: Color(0xFF15803D),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Motor de Heartbeat en Background — Frecuencia de Chequeo Automático',
+                            style: TextStyle(
+                              fontSize: 15.5,
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                          Text(
+                            'El backend comprueba periódicamente todos los equipos y sensores con Heartbeat activado. Por defecto cada 5 minutos (${_monitoringSettings['interval_minutes'] ?? 5} min actual).',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF475569),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Switch.adaptive(
+                      value: _monitoringSettings['background_enabled'] != false,
+                      activeTrackColor: const Color(0xFF16A34A),
+                      onChanged: (v) {
+                        final curMins =
+                            int.tryParse(_hbMinutesCtrl.text.trim()) ?? 5;
+                        _saveHeartbeatIntervalMinutes(curMins, bgEnabled: v);
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton.icon(
+                      onPressed: _runningMonitoringNow
+                          ? null
+                          : _triggerHeartbeatRunNow,
+                      icon: _runningMonitoringNow
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.bolt_rounded, size: 16),
+                      label: Text(
+                        _runningMonitoringNow
+                            ? 'Comprobando...'
+                            : 'Comprobar Todos Ahora',
+                      ),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF0F172A),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    const Text(
+                      'Frecuencia de chequeo:',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    for (final preset in const [1, 2, 5, 10, 15, 30, 60])
+                      ChoiceChip(
+                        label: Text(
+                          preset == 5 ? '5 min (Por defecto)' : '$preset min',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w800,
+                            color: ((_monitoringSettings['interval_minutes'] ??
+                                        5) ==
+                                    preset)
+                                ? Colors.white
+                                : const Color(0xFF0F172A),
+                          ),
+                        ),
+                        selected:
+                            (_monitoringSettings['interval_minutes'] ?? 5) ==
+                                preset,
+                        selectedColor: const Color(0xFF15803D),
+                        checkmarkColor: Colors.white,
+                        onSelected: _savingMonitoringSettings
+                            ? null
+                            : (_) => _saveHeartbeatIntervalMinutes(preset),
+                      ),
+                    SizedBox(
+                      width: 110,
+                      child: TextField(
+                        controller: _hbMinutesCtrl,
+                        keyboardType: TextInputType.number,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        decoration: InputDecoration(
+                          labelText: 'Minutos',
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                        ),
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _savingMonitoringSettings
+                          ? null
+                          : () {
+                              final mins =
+                                  int.tryParse(_hbMinutesCtrl.text.trim()) ?? 5;
+                              _saveHeartbeatIntervalMinutes(mins);
+                            },
+                      icon: const Icon(Icons.save_outlined, size: 15),
+                      label: const Text('Guardar Frecuencia'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // Resumen global de los 4 colores de estado
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 8,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                      ),
+                      child: Text(
+                        '⚪ Gris (Heartbeat desactivado): ${_monitoringSettings['unmonitored_count'] ?? 0}',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF475569),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF0FDF4),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFF86EFAC)),
+                      ),
+                      child: Text(
+                        '🟢 Verde (Todos los chequeos OK): ${_monitoringSettings['online_count'] ?? 0}',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF15803D),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFFBEB),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFFFCD34D)),
+                      ),
+                      child: Text(
+                        '🟠 Naranja (Fallo parcial 1+ chequeo): ${_monitoringSettings['warning_count'] ?? 0}',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFFB45309),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF2F2),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFFFCA5A5)),
+                      ),
+                      child: Text(
+                        '🔴 Rojo (Fallo total Heartbeat): ${_monitoringSettings['offline_count'] ?? 0}',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFFB91C1C),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
 
           const SizedBox(height: 18),
