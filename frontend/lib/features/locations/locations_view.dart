@@ -12,6 +12,8 @@ class LocationsView extends StatefulWidget {
   final VoidCallback onRefresh;
   final ValueChanged<int> onOpenDatacenter;
   final ValueChanged<int> onOpenRack;
+  final bool isKioskMode;
+  final VoidCallback? onToggleKioskMode;
 
   const LocationsView({
     super.key,
@@ -20,6 +22,8 @@ class LocationsView extends StatefulWidget {
     required this.onRefresh,
     required this.onOpenDatacenter,
     required this.onOpenRack,
+    this.isKioskMode = false,
+    this.onToggleKioskMode,
   });
 
   @override
@@ -659,65 +663,78 @@ class _LocationsViewState extends State<LocationsView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // 1. CABECERA SUPERIOR
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
-            ),
-            child: Row(
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Locations — Mapa de Centros de Datos',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF0F172A),
+          // 1. CABECERA SUPERIOR (oculta botones de edición en Modo Kiosco)
+          if (!widget.isKioskMode)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+              ),
+              child: Row(
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Locations — Mapa de Centros de Datos',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'PBX  >  Locations${selected != null ? '  >  ${selected.code} (${selected.name})' : ''}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Spacer(),
+                  if (widget.onToggleKioskMode != null) ...[
+                    OutlinedButton.icon(
+                      onPressed: widget.onToggleKioskMode,
+                      icon: const Icon(Icons.tv_rounded, size: 17),
+                      label: const Text('Modo Kiosco'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF0F172A),
+                        side: const BorderSide(color: Color(0xFF94A3B8)),
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'PBX  >  Locations${selected != null ? '  >  ${selected.code} (${selected.name})' : ''}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Color(0xFF64748B),
-                      ),
-                    ),
+                    const SizedBox(width: 10),
                   ],
-                ),
-                const Spacer(),
-                OutlinedButton.icon(
-                  onPressed: _uploading ? null : _uploadGlobalLocationsMap,
-                  icon: const Icon(Icons.upload_file_outlined, size: 18),
-                  label: Text(
-                    _uploading
-                        ? 'Subiendo...'
-                        : 'Subir Mapa Propio (JPG/PNG/GIF)',
+                  OutlinedButton.icon(
+                    onPressed: _uploading ? null : _uploadGlobalLocationsMap,
+                    icon: const Icon(Icons.upload_file_outlined, size: 18),
+                    label: Text(
+                      _uploading
+                          ? 'Subiendo...'
+                          : 'Subir Mapa Propio (JPG/PNG/GIF)',
+                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                OutlinedButton.icon(
-                  onPressed: () => _downloadExcel(locationId: selected?.id),
-                  icon: const Icon(Icons.table_view_outlined, size: 18),
-                  label: const Text('Exportar Excel (.xlsx)'),
-                ),
-                const SizedBox(width: 10),
-                FilledButton.icon(
-                  onPressed: () => _showLocationFormDialog(),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add location'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF1E3A8A),
-                    foregroundColor: Colors.white,
+                  const SizedBox(width: 10),
+                  OutlinedButton.icon(
+                    onPressed: () => _downloadExcel(locationId: selected?.id),
+                    icon: const Icon(Icons.table_view_outlined, size: 18),
+                    label: const Text('Exportar Excel (.xlsx)'),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 10),
+                  FilledButton.icon(
+                    onPressed: () => _showLocationFormDialog(),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add location'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF1E3A8A),
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
 
           // 2. CUERPO PRINCIPAL: MAPA (OpenStreetMap o IMAGEN SUBIDA CON DATACENTERS ARRASTRABLES) + TARJETAS
           Expanded(
@@ -725,149 +742,151 @@ class _LocationsViewState extends State<LocationsView> {
               physics: lockScroll
                   ? const NeverScrollableScrollPhysics()
                   : const ClampingScrollPhysics(),
-              padding: const EdgeInsets.all(24),
+              padding: EdgeInsets.all(widget.isKioskMode ? 14 : 24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   // Barra de modo del mapa y selector de capa OpenStreetMap / escala de imagen
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 8,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    alignment: WrapAlignment.spaceBetween,
-                    children: [
-                      SegmentedButton<String>(
-                        segments: [
-                          const ButtonSegment(
-                            value: 'api_map',
-                            icon: Icon(Icons.map_outlined, size: 16),
-                            label: Text('OpenStreetMap (Interactivo)'),
-                          ),
-                          ButtonSegment(
-                            value: 'custom_plan',
-                            icon: const Icon(Icons.image_outlined, size: 16),
-                            label: Text(
-                              customMapUrl.isNotEmpty
-                                  ? 'Mapa Subido (JPG/PNG/GIF ✓)'
-                                  : 'Mapa Subido (JPG/PNG/GIF)',
+                  if (!widget.isKioskMode) ...[
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      alignment: WrapAlignment.spaceBetween,
+                      children: [
+                        SegmentedButton<String>(
+                          segments: [
+                            const ButtonSegment(
+                              value: 'api_map',
+                              icon: Icon(Icons.map_outlined, size: 16),
+                              label: Text('OpenStreetMap (Interactivo)'),
                             ),
-                          ),
-                        ],
-                        selected: {_mapViewMode},
-                        onSelectionChanged: (s) {
-                          setState(() => _mapViewMode = s.first);
-                        },
-                      ),
-
-                      if (_mapViewMode == 'api_map')
-                        Wrap(
-                          spacing: 8,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            const Text(
-                              'Capa OSM:',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF475569),
-                              ),
-                            ),
-                            SegmentedButton<String>(
-                              segments: const [
-                                ButtonSegment(
-                                  value: 'osm_standard',
-                                  label: Text(
-                                    'OSM Estándar (Calles/Color)',
-                                    style: TextStyle(fontSize: 11),
-                                  ),
-                                ),
-                                ButtonSegment(
-                                  value: 'osm_light',
-                                  label: Text(
-                                    'OSM Claro',
-                                    style: TextStyle(fontSize: 11),
-                                  ),
-                                ),
-                                ButtonSegment(
-                                  value: 'osm_topo',
-                                  label: Text(
-                                    'Topográfico',
-                                    style: TextStyle(fontSize: 11),
-                                  ),
-                                ),
-                              ],
-                              selected: {_osmTileStyle},
-                              onSelectionChanged: (s) {
-                                setState(() => _osmTileStyle = s.first);
-                              },
-                            ),
-                            FilterChip(
-                              selected: _relocateByClickOnOsm,
-                              selectedColor: const Color(0xFFDBEAFE),
-                              checkmarkColor: const Color(0xFF1E3A8A),
-                              avatar: const Icon(
-                                Icons.pin_drop_outlined,
-                                size: 16,
-                                color: Color(0xFF1E3A8A),
-                              ),
+                            ButtonSegment(
+                              value: 'custom_plan',
+                              icon: const Icon(Icons.image_outlined, size: 16),
                               label: Text(
-                                selected != null
-                                    ? 'Situar ${selected.code} con clic'
-                                    : 'Situar con clic',
+                                customMapUrl.isNotEmpty
+                                    ? 'Mapa Subido (JPG/PNG/GIF ✓)'
+                                    : 'Mapa Subido (JPG/PNG/GIF)',
+                              ),
+                            ),
+                          ],
+                          selected: {_mapViewMode},
+                          onSelectionChanged: (s) {
+                            setState(() => _mapViewMode = s.first);
+                          },
+                        ),
+
+                        if (_mapViewMode == 'api_map')
+                          Wrap(
+                            spacing: 8,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              const Text(
+                                'Capa OSM:',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF475569),
+                                ),
+                              ),
+                              SegmentedButton<String>(
+                                segments: const [
+                                  ButtonSegment(
+                                    value: 'osm_standard',
+                                    label: Text(
+                                      'OSM Estándar (Calles/Color)',
+                                      style: TextStyle(fontSize: 11),
+                                    ),
+                                  ),
+                                  ButtonSegment(
+                                    value: 'osm_light',
+                                    label: Text(
+                                      'OSM Claro',
+                                      style: TextStyle(fontSize: 11),
+                                    ),
+                                  ),
+                                  ButtonSegment(
+                                    value: 'osm_topo',
+                                    label: Text(
+                                      'Topográfico',
+                                      style: TextStyle(fontSize: 11),
+                                    ),
+                                  ),
+                                ],
+                                selected: {_osmTileStyle},
+                                onSelectionChanged: (s) {
+                                  setState(() => _osmTileStyle = s.first);
+                                },
+                              ),
+                              FilterChip(
+                                selected: _relocateByClickOnOsm,
+                                selectedColor: const Color(0xFFDBEAFE),
+                                checkmarkColor: const Color(0xFF1E3A8A),
+                                avatar: const Icon(
+                                  Icons.pin_drop_outlined,
+                                  size: 16,
+                                  color: Color(0xFF1E3A8A),
+                                ),
+                                label: Text(
+                                  selected != null
+                                      ? 'Situar ${selected.code} con clic'
+                                      : 'Situar con clic',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                onSelected: (v) {
+                                  setState(() => _relocateByClickOnOsm = v);
+                                },
+                              ),
+                            ],
+                          ),
+
+                        if (_mapViewMode == 'custom_plan')
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text(
+                                'Tamaño/Escala Imagen:',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF475569),
+                                ),
+                              ),
+                              SizedBox(
+                                width: 140,
+                                child: Slider(
+                                  value: _mapImageScale,
+                                  min: 0.4,
+                                  max: 2.5,
+                                  divisions: 21,
+                                  label: '${(_mapImageScale * 100).round()}%',
+                                  onChanged: (v) {
+                                    setState(() => _mapImageScale = v);
+                                  },
+                                  onChangeEnd: _saveGlobalMapScale,
+                                ),
+                              ),
+                              Text(
+                                '${(_mapImageScale * 100).round()}%',
                                 style: const TextStyle(
                                   fontSize: 11,
-                                  fontWeight: FontWeight.w600,
+                                  fontWeight: FontWeight.bold,
                                 ),
                               ),
-                              onSelected: (v) {
-                                setState(() => _relocateByClickOnOsm = v);
-                              },
-                            ),
-                          ],
-                        ),
+                            ],
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                  ],
 
-                      if (_mapViewMode == 'custom_plan')
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text(
-                              'Tamaño/Escala Imagen:',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF475569),
-                              ),
-                            ),
-                            SizedBox(
-                              width: 140,
-                              child: Slider(
-                                value: _mapImageScale,
-                                min: 0.4,
-                                max: 2.5,
-                                divisions: 21,
-                                label: '${(_mapImageScale * 100).round()}%',
-                                onChanged: (v) {
-                                  setState(() => _mapImageScale = v);
-                                },
-                                onChangeEnd: _saveGlobalMapScale,
-                              ),
-                            ),
-                            Text(
-                              '${(_mapImageScale * 100).round()}%',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-
-                  // VISOR DEL MAPA (420px alto)
+                  // VISOR DEL MAPA (420px alto normal / 580px en Modo Kiosco)
                   Container(
-                    height: 420,
+                    height: widget.isKioskMode ? 580 : 420,
                     decoration: BoxDecoration(
                       color: const Color(0xFFE2E8F0),
                       borderRadius: BorderRadius.circular(10),

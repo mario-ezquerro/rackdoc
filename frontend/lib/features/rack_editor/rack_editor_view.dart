@@ -19,6 +19,8 @@ class RackEditorView extends StatefulWidget {
   final void Function(int rackId, int? deviceId)? onJumpToRackAndDevice;
   final VoidCallback onTemplatesChanged;
   final UserModel? currentUser;
+  final bool isKioskMode;
+  final VoidCallback? onToggleKioskMode;
 
   const RackEditorView({
     super.key,
@@ -31,6 +33,8 @@ class RackEditorView extends StatefulWidget {
     this.onJumpToRackAndDevice,
     required this.onTemplatesChanged,
     this.currentUser,
+    this.isKioskMode = false,
+    this.onToggleKioskMode,
   });
 
   @override
@@ -114,7 +118,8 @@ class _RackEditorViewState extends State<RackEditorView> {
   double get _effectiveCanvasWidth =>
       _isDualFace ? _dualCanvasWidth : _canvasWidth;
 
-  bool get _canEdit => widget.currentUser?.canEdit ?? true;
+  bool get _canEdit =>
+      !widget.isKioskMode && (widget.currentUser?.canEdit ?? true);
   bool get _canConnectRemote => widget.currentUser?.canConnectRemote ?? true;
 
   @override
@@ -5159,20 +5164,21 @@ class _RackEditorViewState extends State<RackEditorView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // 1. BARRA SUPERIOR (Nombre del Rack + Breadcrumb + Controles Rápidos de Mover/Borrar Elemento)
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
-          ),
-          child: Row(
-            children: [
-              IconButton(
-                onPressed: widget.onBackToLocations,
-                icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                tooltip: 'Volver al Mapa de Sedes y Pasillos',
-              ),
+        // 1. BARRA SUPERIOR (oculta en Modo Kiosco para presentar el Rack a pantalla completa)
+        if (!widget.isKioskMode)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+            ),
+            child: Row(
+              children: [
+                IconButton(
+                  onPressed: widget.onBackToLocations,
+                  icon: const Icon(Icons.arrow_back_rounded, size: 20),
+                  tooltip: 'Volver al Mapa de Sedes y Pasillos',
+                ),
               const SizedBox(width: 6),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -5763,6 +5769,21 @@ class _RackEditorViewState extends State<RackEditorView> {
                     ],
                   ),
                 ),
+              if (widget.onToggleKioskMode != null) ...[
+                OutlinedButton.icon(
+                  onPressed: widget.onToggleKioskMode,
+                  icon: const Icon(Icons.tv_rounded, size: 16),
+                  label: const Text(
+                    'Modo Kiosco',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF0F172A),
+                    side: const BorderSide(color: Color(0xFF94A3B8)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
               if (_canConnectRemote)
                 OutlinedButton.icon(
                   onPressed: () async {
@@ -5819,24 +5840,25 @@ class _RackEditorViewState extends State<RackEditorView> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // COLUMNA IZQUIERDA: Librería de Dispositivos (con Storage SAN, Storage NAS, Ventiladores y Bandejas U editables)
-              DeviceCatalogPanel(
-                templates: widget.templates,
-                selectedTemplateForClickMount: _selectedTemplateForClick,
-                onSelectTemplate: (tpl) {
-                  setState(() => _selectedTemplateForClick = tpl);
-                },
-                onCreateCustomTemplate: _showCreateCustomTemplateDialog,
-                onConfigureTemplatePhoto: (tpl) =>
-                    _showHardwarePhotoSearchDialog(template: tpl),
-                selectedLibraryGroup: _selectedLibraryGroup,
-                onSelectLibraryGroup: (group) {
-                  setState(() => _selectedLibraryGroup = group);
-                },
-                onExportLibrary: _handleExportLibraryDialog,
-                onImportLibrary: _handleImportLibraryDialog,
-                canEdit: _canEdit,
-              ),
+              // COLUMNA IZQUIERDA: Librería de Dispositivos (oculta en Modo Kiosco)
+              if (!widget.isKioskMode)
+                DeviceCatalogPanel(
+                  templates: widget.templates,
+                  selectedTemplateForClickMount: _selectedTemplateForClick,
+                  onSelectTemplate: (tpl) {
+                    setState(() => _selectedTemplateForClick = tpl);
+                  },
+                  onCreateCustomTemplate: _showCreateCustomTemplateDialog,
+                  onConfigureTemplatePhoto: (tpl) =>
+                      _showHardwarePhotoSearchDialog(template: tpl),
+                  selectedLibraryGroup: _selectedLibraryGroup,
+                  onSelectLibraryGroup: (group) {
+                    setState(() => _selectedLibraryGroup = group);
+                  },
+                  onExportLibrary: _handleExportLibraryDialog,
+                  onImportLibrary: _handleImportLibraryDialog,
+                  canEdit: _canEdit,
+                ),
 
               // COLUMNA CENTRAL: Lienzo interactivo del Rack con soporte simultáneo Front + Back y Bandeja Inter-Rack
               Expanded(
@@ -6985,28 +7007,29 @@ class _RackEditorViewState extends State<RackEditorView> {
                 ),
               ),
 
-              // COLUMNA DERECHA: Panel de Propiedades
-              PropertiesPanel(
-                api: widget.api,
-                rack: rack,
-                selectedDevice: _selectedDevice,
-                selectedConnection: _selectedConnection,
-                onRefreshRack: _loadRack,
-                onClearSelection: () {
-                  setState(() {
-                    _selectedDeviceId = null;
-                    _selectedConnectionId = null;
-                  });
-                },
-                onSwitchFace: (face) {
-                  setState(() => _activeFace = face);
-                },
-                onNavigateToRack: widget.onSwitchRack,
-                onDeleteRack: _canEdit ? _confirmDeleteCurrentRack : null,
-                onConfigureDevicePhoto: (dev) =>
-                    _showHardwarePhotoSearchDialog(device: dev),
-                currentUser: widget.currentUser,
-              ),
+              // COLUMNA DERECHA: Panel de Propiedades (oculto en Modo Kiosco)
+              if (!widget.isKioskMode)
+                PropertiesPanel(
+                  api: widget.api,
+                  rack: rack,
+                  selectedDevice: _selectedDevice,
+                  selectedConnection: _selectedConnection,
+                  onRefreshRack: _loadRack,
+                  onClearSelection: () {
+                    setState(() {
+                      _selectedDeviceId = null;
+                      _selectedConnectionId = null;
+                    });
+                  },
+                  onSwitchFace: (face) {
+                    setState(() => _activeFace = face);
+                  },
+                  onNavigateToRack: widget.onSwitchRack,
+                  onDeleteRack: _canEdit ? _confirmDeleteCurrentRack : null,
+                  onConfigureDevicePhoto: (dev) =>
+                      _showHardwarePhotoSearchDialog(device: dev),
+                  currentUser: widget.currentUser,
+                ),
             ],
           ),
         ),

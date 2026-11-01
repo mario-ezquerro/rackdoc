@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'core/api_client.dart';
 import 'core/image_file_picker.dart';
@@ -98,10 +100,56 @@ class _RackDocShellState extends State<RackDocShell> {
   bool _loading = true;
   String? _error;
 
+  // Modo Kiosco para presentar Locations, Datacenter, Rack Editor o Dashboard en monitores / videowalls
+  bool _isKioskMode = false;
+  bool _kioskExitHovered = false;
+  Timer? _kioskRefreshTimer;
+
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_handleGlobalHardwareKey);
     _loadInitialData();
+  }
+
+  @override
+  void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleGlobalHardwareKey);
+    _kioskRefreshTimer?.cancel();
+    _gateUserCtrl.dispose();
+    _gatePassCtrl.dispose();
+    _dashSearchCtrl.dispose();
+    super.dispose();
+  }
+
+  bool _handleGlobalHardwareKey(KeyEvent event) {
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.escape &&
+        _isKioskMode) {
+      if (mounted) {
+        _setKioskMode(false);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  void _toggleKioskMode() => _setKioskMode(!_isKioskMode);
+
+  void _setKioskMode(bool enabled) {
+    setState(() {
+      _isKioskMode = enabled;
+      if (!enabled) {
+        _kioskExitHovered = false;
+      }
+    });
+    _kioskRefreshTimer?.cancel();
+    if (enabled) {
+      _kioskRefreshTimer = Timer.periodic(
+        const Duration(seconds: 25),
+        (_) => _refreshDataSilently(),
+      );
+    }
   }
 
   Future<void> _loadInitialData() async {
@@ -933,19 +981,22 @@ class _RackDocShellState extends State<RackDocShell> {
     }
 
     return Scaffold(
-      body: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: Stack(
         children: [
-          // BARRA LATERAL IZQUIERDA CON EL FLUJO JERÁRQUICO + ICONO RUEDA CONFIGURACIÓN (USUARIOS/ROLES/AD)
-          Container(
-            width: 245,
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(right: BorderSide(color: Color(0xFFE2E8F0))),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // BARRA LATERAL IZQUIERDA CON EL FLUJO JERÁRQUICO + ICONO RUEDA CONFIGURACIÓN (oculta en Modo Kiosco)
+              if (!_isKioskMode)
+                Container(
+                  width: 245,
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    border: Border(right: BorderSide(color: Color(0xFFE2E8F0))),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 14, 12, 10),
                   child: Row(
@@ -1118,6 +1169,34 @@ class _RackDocShellState extends State<RackDocShell> {
                   active: _activeNav == 'admin',
                   onTap: () => setState(() => _activeNav = 'admin'),
                 ),
+                if (_activeNav != 'admin')
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 6, 10, 2),
+                    child: OutlinedButton.icon(
+                      onPressed: () => _setKioskMode(true),
+                      style: OutlinedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0F172A),
+                        foregroundColor: Colors.white,
+                        side: const BorderSide(color: Color(0xFF38BDF8)),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                      ),
+                      icon: const Icon(
+                        Icons.tv_rounded,
+                        size: 16,
+                        color: Color(0xFF38BDF8),
+                      ),
+                      label: const Text(
+                        'Modo Kiosco (Monitor)',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
 
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 14, 12, 6),
@@ -1629,6 +1708,126 @@ class _RackDocShellState extends State<RackDocShell> {
           ),
         ],
       ),
+      if (_isKioskMode) _buildDiscreetKioskExitOverlay(),
+    ],
+  ),
+);
+  }
+
+  /// Control flotante discreto en la esquina inferior derecha cuando el Modo Kiosco está activo:
+  /// Permanece casi transparente (opacidad 0.22) para no distraer en el monitor, y al acercar el ratón
+  /// se ilumina permitiendo cambiar de vista (1. Mapa / 2. Planta / 3. Rack / 4. Dashboard) o salir del Modo Kiosco.
+  Widget _buildDiscreetKioskExitOverlay() {
+    return Positioned(
+      right: 14,
+      bottom: 14,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _kioskExitHovered = true),
+        onExit: (_) => setState(() => _kioskExitHovered = false),
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 200),
+          opacity: _kioskExitHovered ? 0.96 : 0.22,
+          child: Material(
+            color: const Color(0xFF0F172A),
+            elevation: _kioskExitHovered ? 8 : 1,
+            borderRadius: BorderRadius.circular(20),
+            child: Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: _kioskExitHovered ? 10 : 8,
+                vertical: _kioskExitHovered ? 6 : 5,
+              ),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: _kioskExitHovered
+                      ? const Color(0xFF38BDF8)
+                      : const Color(0xFF475569),
+                  width: 1.0,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_kioskExitHovered) ...[
+                    _buildKioskQuickNavChip('1. Mapa', 'locations'),
+                    const SizedBox(width: 4),
+                    _buildKioskQuickNavChip('2. Planta', 'datacenter'),
+                    const SizedBox(width: 4),
+                    _buildKioskQuickNavChip('3. Rack', 'rack_editor'),
+                    const SizedBox(width: 4),
+                    _buildKioskQuickNavChip('4. Dashboard', 'dashboard'),
+                    Container(
+                      width: 1,
+                      height: 16,
+                      margin: const EdgeInsets.symmetric(horizontal: 8),
+                      color: const Color(0xFF475569),
+                    ),
+                  ],
+                  InkWell(
+                    onTap: () => _setKioskMode(false),
+                    borderRadius: BorderRadius.circular(14),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.fullscreen_exit_rounded,
+                            size: 16,
+                            color: Color(0xFF38BDF8),
+                          ),
+                          if (_kioskExitHovered) ...[
+                            const SizedBox(width: 5),
+                            const Text(
+                              'Salir Kiosco (Esc)',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildKioskQuickNavChip(String label, String navKey) {
+    final active = _activeNav == navKey;
+    return InkWell(
+      onTap: () {
+        setState(() => _activeNav = navKey);
+        if (navKey == 'dashboard') {
+          _refreshDataSilently();
+        }
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: active ? const Color(0xFF0284C7) : const Color(0xFF1E293B),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: active ? Colors.white : const Color(0xFFCBD5E1),
+            fontSize: 10.5,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
     );
   }
 
@@ -1680,6 +1879,8 @@ class _RackDocShellState extends State<RackDocShell> {
         onRefresh: _refreshDataSilently,
         onOpenDatacenter: _openDatacenter,
         onOpenRack: _openRack,
+        isKioskMode: _isKioskMode,
+        onToggleKioskMode: _toggleKioskMode,
       );
     }
 
@@ -1696,6 +1897,8 @@ class _RackDocShellState extends State<RackDocShell> {
         onBackToLocations: () => setState(() => _activeNav = 'locations'),
         onOpenRack: _openRack,
         onRefresh: _refreshDataSilently,
+        isKioskMode: _isKioskMode,
+        onToggleKioskMode: _toggleKioskMode,
       );
     }
 
@@ -1737,6 +1940,8 @@ class _RackDocShellState extends State<RackDocShell> {
           _openRack(rId, highlightDeviceId: devId),
       onTemplatesChanged: _refreshTemplates,
       currentUser: _currentUser,
+      isKioskMode: _isKioskMode,
+      onToggleKioskMode: _toggleKioskMode,
     );
   }
 
@@ -1964,47 +2169,59 @@ class _RackDocShellState extends State<RackDocShell> {
                   ],
                 ),
               ),
-              OutlinedButton.icon(
-                onPressed: _refreshDataSilently,
-                icon: const Icon(Icons.refresh, size: 17),
-                label: const Text('Actualizar Datos'),
-              ),
-              const SizedBox(width: 10),
-              OutlinedButton.icon(
-                onPressed: () {
-                  final url = Uri.parse(_api.getExcelTemplateUrl());
-                  launchUrl(url, mode: LaunchMode.externalApplication);
-                },
-                icon: const Icon(Icons.description_outlined, size: 17),
-                label: const Text('Plantilla Ejemplo (.xlsx)'),
-              ),
-              const SizedBox(width: 10),
-              FilledButton.icon(
-                onPressed: _showImportExcelDialog,
-                icon: const Icon(Icons.upload_file_rounded, size: 18),
-                label: const Text('Importar Excel (.xlsx)'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF1E3A8A),
+              if (!_isKioskMode) ...[
+                OutlinedButton.icon(
+                  onPressed: _toggleKioskMode,
+                  icon: const Icon(Icons.tv_rounded, size: 17),
+                  label: const Text('Modo Kiosco'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF0F172A),
+                    side: const BorderSide(color: Color(0xFF94A3B8)),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              FilledButton.icon(
-                onPressed: () {
-                  final url = Uri.parse(
-                    _api.getExcelExportUrl(rackId: _dashSelectedRackId),
-                  );
-                  launchUrl(url, mode: LaunchMode.externalApplication);
-                },
-                icon: const Icon(Icons.download_rounded, size: 18),
-                label: Text(
-                  _dashSelectedRackId != null
-                      ? 'Exportar Rack a Excel (.xlsx)'
-                      : 'Exportar Todo a Excel (.xlsx)',
+                const SizedBox(width: 10),
+                OutlinedButton.icon(
+                  onPressed: _refreshDataSilently,
+                  icon: const Icon(Icons.refresh, size: 17),
+                  label: const Text('Actualizar Datos'),
                 ),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF15803D),
+                const SizedBox(width: 10),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    final url = Uri.parse(_api.getExcelTemplateUrl());
+                    launchUrl(url, mode: LaunchMode.externalApplication);
+                  },
+                  icon: const Icon(Icons.description_outlined, size: 17),
+                  label: const Text('Plantilla Ejemplo (.xlsx)'),
                 ),
-              ),
+                const SizedBox(width: 10),
+                FilledButton.icon(
+                  onPressed: _showImportExcelDialog,
+                  icon: const Icon(Icons.upload_file_rounded, size: 18),
+                  label: const Text('Importar Excel (.xlsx)'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF1E3A8A),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                FilledButton.icon(
+                  onPressed: () {
+                    final url = Uri.parse(
+                      _api.getExcelExportUrl(rackId: _dashSelectedRackId),
+                    );
+                    launchUrl(url, mode: LaunchMode.externalApplication);
+                  },
+                  icon: const Icon(Icons.download_rounded, size: 18),
+                  label: Text(
+                    _dashSelectedRackId != null
+                        ? 'Exportar Rack a Excel (.xlsx)'
+                        : 'Exportar Todo a Excel (.xlsx)',
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF15803D),
+                  ),
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 20),

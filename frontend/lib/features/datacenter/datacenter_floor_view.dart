@@ -13,6 +13,8 @@ class DatacenterFloorView extends StatefulWidget {
   final VoidCallback onBackToLocations;
   final ValueChanged<int> onOpenRack;
   final VoidCallback onRefresh;
+  final bool isKioskMode;
+  final VoidCallback? onToggleKioskMode;
 
   const DatacenterFloorView({
     super.key,
@@ -24,6 +26,8 @@ class DatacenterFloorView extends StatefulWidget {
     required this.onBackToLocations,
     required this.onOpenRack,
     required this.onRefresh,
+    this.isKioskMode = false,
+    this.onToggleKioskMode,
   });
 
   @override
@@ -2136,313 +2140,336 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // 1. CABECERA DEL DATACENTER + SELECTOR DE SEDE + PESTAÑAS DE PLANTAS DEL EDIFICIO
-          Container(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    IconButton(
-                      onPressed: widget.onBackToLocations,
-                      icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                      tooltip: 'Volver al Mapa Global de Locations',
-                    ),
-                    const SizedBox(width: 6),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.apartment_rounded,
-                              size: 20,
-                              color: Color(0xFF1E3A8A),
-                            ),
-                            const SizedBox(width: 8),
-                            DropdownButton<int>(
-                              value: loc.id,
-                              underline: const SizedBox.shrink(),
-                              style: const TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w800,
-                                color: Color(0xFF0F172A),
+          if (!widget.isKioskMode)
+            Container(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      IconButton(
+                        onPressed: widget.onBackToLocations,
+                        icon: const Icon(Icons.arrow_back_rounded, size: 20),
+                        tooltip: 'Volver al Mapa Global de Locations',
+                      ),
+                      const SizedBox(width: 6),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.apartment_rounded,
+                                size: 20,
+                                color: Color(0xFF1E3A8A),
                               ),
-                              items: widget.locations
-                                  .map(
-                                    (l) => DropdownMenuItem<int>(
-                                      value: l.id,
-                                      child: Text('${l.name} (${l.code})'),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: (id) {
-                                if (id != null) {
-                                  setState(() => _selectedFloorId = null);
-                                  widget.onChangeLocation(id);
-                                }
-                              },
+                              const SizedBox(width: 8),
+                              DropdownButton<int>(
+                                value: loc.id,
+                                underline: const SizedBox.shrink(),
+                                style: const TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF0F172A),
+                                ),
+                                items: widget.locations
+                                    .map(
+                                      (l) => DropdownMenuItem<int>(
+                                        value: l.id,
+                                        child: Text('${l.name} (${l.code})'),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (id) {
+                                  if (id != null) {
+                                    setState(() => _selectedFloorId = null);
+                                    widget.onChangeLocation(id);
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                          Text(
+                            'PBX  >  Locations  >  ${loc.code}  >  ${floor?.name ?? 'Sin Planta'} (Vista de Planta 2D)',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF64748B),
                             ),
-                          ],
+                          ),
+                        ],
+                      ),
+                      const Spacer(),
+                      if (loc.monitoredCount > 0) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: loc.offlineCount > 0
+                                ? const Color(0xFFFEF2F2)
+                                : const Color(0xFFF0FDF4),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: loc.offlineCount > 0
+                                  ? const Color(0xFFFECACA)
+                                  : const Color(0xFFBBF7D0),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.monitor_heart_rounded,
+                                size: 14,
+                                color: loc.offlineCount > 0
+                                    ? const Color(0xFFDC2626)
+                                    : const Color(0xFF16A34A),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                [
+                                  'Datacenter Monitorizados: ${loc.monitoredCount}',
+                                  if (loc.onlineCount > 0)
+                                    '🟢 ${loc.onlineCount}',
+                                  if (loc.offlineCount > 0)
+                                    '🔴 ${loc.offlineCount}',
+                                  if (loc.warningCount > 0)
+                                    '🟠 ${loc.warningCount}',
+                                ].join(' • '),
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF0F172A),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                        Text(
-                          'PBX  >  Locations  >  ${loc.code}  >  ${floor?.name ?? 'Sin Planta'} (Vista de Planta 2D)',
-                          style: const TextStyle(
+                        const SizedBox(width: 10),
+                      ],
+                      if (widget.onToggleKioskMode != null) ...[
+                        OutlinedButton.icon(
+                          onPressed: widget.onToggleKioskMode,
+                          icon: const Icon(Icons.tv_rounded, size: 16),
+                          label: const Text(
+                            'Modo Kiosco',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF0F172A),
+                            side: const BorderSide(color: Color(0xFF94A3B8)),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                      ],
+                      if (floor != null) ...[
+                        OutlinedButton.icon(
+                          onPressed: _uploading
+                              ? null
+                              : () => _uploadFloorBlueprint(floor),
+                          icon:
+                              const Icon(Icons.upload_file_outlined, size: 16),
+                          label: Text(
+                            _uploading
+                                ? 'Subiendo...'
+                                : (floor.mapImageUrl.isNotEmpty
+                                    ? 'Cambiar Plano de Planta (JPG/PNG/GIF)'
+                                    : 'Subir Plano de Planta (JPG/PNG/GIF)'),
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                        if (floor.mapImageUrl.isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          IconButton(
+                            onPressed: () async {
+                              await widget.api.deleteCustomPlanImage(
+                                targetType: 'floor',
+                                targetId: floor.id,
+                              );
+                              widget.onRefresh();
+                            },
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              size: 18,
+                              color: Color(0xFFDC2626),
+                            ),
+                            tooltip: 'Quitar imagen de fondo de esta planta',
+                          ),
+                        ],
+                        const SizedBox(width: 10),
+                        OutlinedButton.icon(
+                          onPressed: () => _showDrawNewRackDialog(floor),
+                          icon: const Icon(Icons.dns_outlined, size: 16),
+                          label: const Text('+ Rack'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF1E3A8A),
+                            side: const BorderSide(color: Color(0xFF93C5FD)),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton.icon(
+                          onPressed: () => _showAddFloorDeviceModal(floor),
+                          icon: const Icon(
+                            Icons.add_location_alt_outlined,
+                            size: 17,
+                          ),
+                          label: const Text('+ Device'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF2563EB),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // BARRA DE PESTAÑAS DE PLANTAS DEL EDIFICIO (Floor 1, Floor 2, Floor 3...)
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        const Text(
+                          'PLANTAS DEL EDIFICIO:',
+                          style: TextStyle(
                             fontSize: 11,
+                            fontWeight: FontWeight.w800,
                             color: Color(0xFF64748B),
                           ),
                         ),
-                      ],
-                    ),
-                    const Spacer(),
-                    if (loc.monitoredCount > 0) ...[
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 5,
-                        ),
-                        decoration: BoxDecoration(
-                          color: loc.offlineCount > 0
-                              ? const Color(0xFFFEF2F2)
-                              : const Color(0xFFF0FDF4),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: loc.offlineCount > 0
-                                ? const Color(0xFFFECACA)
-                                : const Color(0xFFBBF7D0),
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.monitor_heart_rounded,
-                              size: 14,
-                              color: loc.offlineCount > 0
-                                  ? const Color(0xFFDC2626)
-                                  : const Color(0xFF16A34A),
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              [
-                                'Datacenter Monitorizados: ${loc.monitoredCount}',
-                                if (loc.onlineCount > 0) '🟢 ${loc.onlineCount}',
-                                if (loc.offlineCount > 0) '🔴 ${loc.offlineCount}',
-                                if (loc.warningCount > 0) '🟠 ${loc.warningCount}',
-                              ].join(' • '),
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF0F172A),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                    ],
-                    if (floor != null) ...[
-                      OutlinedButton.icon(
-                        onPressed: _uploading
-                            ? null
-                            : () => _uploadFloorBlueprint(floor),
-                        icon: const Icon(Icons.upload_file_outlined, size: 16),
-                        label: Text(
-                          _uploading
-                              ? 'Subiendo...'
-                              : (floor.mapImageUrl.isNotEmpty
-                                  ? 'Cambiar Plano de Planta (JPG/PNG/GIF)'
-                                  : 'Subir Plano de Planta (JPG/PNG/GIF)'),
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                      ),
-                      if (floor.mapImageUrl.isNotEmpty) ...[
-                        const SizedBox(width: 6),
-                        IconButton(
-                          onPressed: () async {
-                            await widget.api.deleteCustomPlanImage(
-                              targetType: 'floor',
-                              targetId: floor.id,
-                            );
-                            widget.onRefresh();
-                          },
-                          icon: const Icon(
-                            Icons.delete_outline,
-                            size: 18,
-                            color: Color(0xFFDC2626),
-                          ),
-                          tooltip: 'Quitar imagen de fondo de esta planta',
-                        ),
-                      ],
-                      const SizedBox(width: 10),
-                      OutlinedButton.icon(
-                        onPressed: () => _showDrawNewRackDialog(floor),
-                        icon: const Icon(Icons.dns_outlined, size: 16),
-                        label: const Text('+ Rack'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF1E3A8A),
-                          side: const BorderSide(color: Color(0xFF93C5FD)),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton.icon(
-                        onPressed: () => _showAddFloorDeviceModal(floor),
-                        icon: const Icon(Icons.add_location_alt_outlined, size: 17),
-                        label: const Text('+ Device'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFF2563EB),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-
-                const SizedBox(height: 12),
-
-                // BARRA DE PESTAÑAS DE PLANTAS DEL EDIFICIO (Floor 1, Floor 2, Floor 3...)
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      const Text(
-                        'PLANTAS DEL EDIFICIO:',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF64748B),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      ...loc.floors.map((fl) {
-                        final isSel = fl.id == floor?.id;
-                        int rCount = 0;
-                        for (final r in fl.rooms) {
-                          rCount += r.racks.length;
-                        }
-                        final dCount = fl.floorDevices.length;
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 8, bottom: 8),
-                          child: InkWell(
-                            onTap: () {
-                              setState(() {
-                                _selectedFloorId = fl.id;
-                                _selectedFloorDeviceId = null;
-                                _editingDeviceId = null;
-                                _syncFloorState();
-                              });
-                            },
-                            borderRadius: BorderRadius.circular(6),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 8,
-                              ),
-                              decoration: BoxDecoration(
-                                color: isSel
-                                    ? const Color(0xFF0F172A)
-                                    : const Color(0xFFF1F5F9),
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(
+                        const SizedBox(width: 12),
+                        ...loc.floors.map((fl) {
+                          final isSel = fl.id == floor?.id;
+                          int rCount = 0;
+                          for (final r in fl.rooms) {
+                            rCount += r.racks.length;
+                          }
+                          final dCount = fl.floorDevices.length;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8, bottom: 8),
+                            child: InkWell(
+                              onTap: () {
+                                setState(() {
+                                  _selectedFloorId = fl.id;
+                                  _selectedFloorDeviceId = null;
+                                  _editingDeviceId = null;
+                                  _syncFloorState();
+                                });
+                              },
+                              borderRadius: BorderRadius.circular(6),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
                                   color: isSel
                                       ? const Color(0xFF0F172A)
-                                      : const Color(0xFFCBD5E1),
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.layers,
-                                    size: 15,
+                                      : const Color(0xFFF1F5F9),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
                                     color: isSel
-                                        ? const Color(0xFF38BDF8)
-                                        : const Color(0xFF475569),
+                                        ? const Color(0xFF0F172A)
+                                        : const Color(0xFFCBD5E1),
                                   ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    fl.name,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.layers,
+                                      size: 15,
                                       color: isSel
-                                          ? Colors.white
-                                          : const Color(0xFF1E293B),
+                                          ? const Color(0xFF38BDF8)
+                                          : const Color(0xFF475569),
                                     ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 1.5,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: isSel
-                                          ? Colors.white24
-                                          : const Color(0xFFE2E8F0),
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Text(
-                                      [
-                                        '$rCount racks',
-                                        if (dCount > 0) '$dCount disp.',
-                                        if (fl.monitoredCount > 0)
-                                          'Monit: ${fl.monitoredCount}',
-                                        if (fl.onlineCount > 0)
-                                          '🟢${fl.onlineCount}',
-                                        if (fl.offlineCount > 0)
-                                          '🔴${fl.offlineCount}',
-                                      ].join(' • '),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      fl.name,
                                       style: TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
                                         color: isSel
                                             ? Colors.white
-                                            : const Color(0xFF334155),
+                                            : const Color(0xFF1E293B),
                                       ),
                                     ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  InkWell(
-                                    onTap: () => _confirmDeleteFloor(fl),
-                                    child: Tooltip(
-                                      message:
-                                          'Eliminar esta Planta (${fl.name})',
-                                      child: Icon(
-                                        Icons.delete_outline,
-                                        size: 15,
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 1.5,
+                                      ),
+                                      decoration: BoxDecoration(
                                         color: isSel
-                                            ? const Color(0xFFFCA5A5)
-                                            : const Color(0xFFDC2626),
+                                            ? Colors.white24
+                                            : const Color(0xFFE2E8F0),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Text(
+                                        [
+                                          '$rCount racks',
+                                          if (dCount > 0) '$dCount disp.',
+                                          if (fl.monitoredCount > 0)
+                                            'Monit: ${fl.monitoredCount}',
+                                          if (fl.onlineCount > 0)
+                                            '🟢${fl.onlineCount}',
+                                          if (fl.offlineCount > 0)
+                                            '🔴${fl.offlineCount}',
+                                        ].join(' • '),
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: isSel
+                                              ? Colors.white
+                                              : const Color(0xFF334155),
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 8),
+                                    InkWell(
+                                      onTap: () => _confirmDeleteFloor(fl),
+                                      child: Tooltip(
+                                        message:
+                                            'Eliminar esta Planta (${fl.name})',
+                                        child: Icon(
+                                          Icons.delete_outline,
+                                          size: 15,
+                                          color: isSel
+                                              ? const Color(0xFFFCA5A5)
+                                              : const Color(0xFFDC2626),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
+                          );
+                        }),
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: TextButton.icon(
+                            onPressed: () => _showAddFloorDialog(loc),
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text('+ Añadir Planta'),
                           ),
-                        );
-                      }),
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: TextButton.icon(
-                          onPressed: () => _showAddFloorDialog(loc),
-                          icon: const Icon(Icons.add, size: 16),
-                          label: const Text('+ Añadir Planta'),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
 
-          // 2. BARRA DE CONTROLES DE LA VISTA DE PLANTA (Paneles, Cableado de Planta, Escala y Selección)
-          if (floor != null)
+          // 2. BARRA DE CONTROLES DE LA VISTA DE PLANTA (oculta en Modo Kiosco)
+          if (floor != null && !widget.isKioskMode)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
               decoration: const BoxDecoration(
@@ -2698,13 +2725,13 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       // COLUMNA IZQUIERDA: DEVICES LIBRARY
-                      if (_showLeftLibrary)
+                      if (_showLeftLibrary && !widget.isKioskMode)
                         _buildLeftDevicesLibraryPanel(floor),
 
                       // COLUMNA CENTRAL: LIENZO INTERACTIVO DE PLANTA 2D CON DRAG TARGET Y CABLEADO
                       Expanded(
                         child: Padding(
-                          padding: const EdgeInsets.all(12),
+                          padding: EdgeInsets.all(widget.isKioskMode ? 6 : 12),
                           child: Container(
                             decoration: BoxDecoration(
                               color: Colors.white,
@@ -3661,7 +3688,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       ),
 
                       // COLUMNA DERECHA: PANEL DE SETTINGS (Dispositivo o Rack seleccionado)
-                      if (_showRightSettings)
+                      if (_showRightSettings && !widget.isKioskMode)
                         _buildRightSettingsPanel(floor, floorRacks),
                     ],
                   ),
