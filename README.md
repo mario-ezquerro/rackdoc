@@ -16,9 +16,15 @@ Permite gestionar visualmente desde la ubicación geográfica de los Datacenters
   - Las regletas `Power Strip 1U (8x Schuko)` incluyen8 tomas hembra (`SCH1..SCH8`) para alimentar los equipos del rack y **1 conector macho de entrada (`MACHO-IN1` — `power_schuko_male`)** para enchufar la regleta directamente a las tomas eléctricas exteriores (`TOMA-A` / `TOMA-B`).
 - **📥 Importación de Datos desde Excel (`.xlsx`) con Plantilla de Ejemplo**:
   - Nuevo flujo en **Sidebar** y **4. Dashboard & Excel**: permite **descargar primero un Excel de ejemplo (`RackDoc_Plantilla_Importacion_Ejemplo.xlsx`)** con 3 hojas guiadas (`1_Racks_y_Sedes`, `2_Equipos_y_Hosts`, `3_Instrucciones_y_Librerias`) y a continuación **subir/importar un archivo `.xlsx`** para dar de alta o actualizar masivamente Sedes, Plantas, Racks y Equipos/Hosts.
-- **💓 Monitorización Heartbeat Multi-Método y Indicadores Inteligentes**:
-  - Cada switch, firewall o servidor permite activar Heartbeat (`ICMP Ping`, `SSH`, `HTTPS/SSL`, `HTTP URL`, `TCP Port`, `SNMP`) con parámetros extra (URL Path, Host Header/SNI, validación SSL, usuario SSH, comunidad SNMP, timeout).
-  - Visualización del nº de sistemas monitorizados en **Locations**, **Datacenter**, **Rack** y **Dashboard** (con buscador y ordenación), **ocultando automáticamente los puntos de color (`🟢` / `🔴`) cuando su contador es `0`** (solo se muestran si hay más de cero equipos en ese estado).
+- **💓 Monitorización Heartbeat en Background (4 Estados: ⚪ Gris, 🟢 Verde, 🟠 Naranja, 🔴 Rojo) + apartado independiente "Conectar" (`SSH` / `HTTP` / `HTTPS`)**:
+  - Por defecto todos los equipos de Rack y de Planta tienen el Heartbeat desactivado (`⚪ Gris`). Al activarlo, permite seleccionar **uno o varios protocolos simultáneamente** (`ICMP Ping`, `TCP Port`, `HTTP`, `HTTPS`) con botón **Probar Ahora**.
+  - **Semáforo de 4 colores**: `⚪ Gris` (Heartbeat desactivado), `🟢 Verde` (todos los chequeos activos responden OK), `🟠 Naranja` (al menos 1 chequeo falla y otro responde OK), `🔴 Rojo` (todos los chequeos activos fallan).
+  - **Frecuencia configurable en `5. Configuración`**: Por defecto cada **5 minutos** (`300s`), ajustable en caliente desde la interfaz.
+  - **Apartado independiente `Conectar`**: Permite lanzar desde el navegador conexiones directas `SSH`, `HTTP` o `HTTPS` con IP/URL y puerto independientes de la IP del Heartbeat.
+- **🖥️ Modo Kiosco NOC / Videowall**:
+  - Disponible en **1. Locations**, **2. Datacenter**, **3. Rack Editor** y **4. Dashboard** para pantallas de monitorización 24x7 sin distracciones, con salida mediante `ESC` o píldora flotante discreta.
+- **📘 API REST Versionada (`/api/v1`) compatible al 100% con OpenAPI 3.1.0 y Swagger UI**:
+  - Los **46 paths (64 operaciones HTTP)** están versionados bajo **`/api/v1/...`** (manteniendo `/api/...` como alias retrocompatible transparente) y categorizados en **10 grupos OpenAPI 3.1.0** con `summary`, `description` y esquemas Pydantic v2 en **Swagger UI (`/docs`)** y **ReDoc (`/redoc`)**.
 - **🖼️ Gestión Resiliente de Planos Personalizados**:
   - Persistencia garantizada de planos subidos en el volumen Docker `/app/data/uploads` y tarjeta UX interactiva en caso de plano no disponible para subir uno nuevo o conmutar a la cuadrícula técnica CAD sin errores en pantalla.
 
@@ -101,8 +107,29 @@ docker compose up -d --build
 ```
 
 - **Aplicación Web (Frontend Flutter + Nginx)**: [http://localhost:8181](http://localhost:8181)
-- **API REST & Documentación OpenAPI (FastAPI)**: [http://localhost:8180/docs](http://localhost:8180/docs)
+- **Swagger UI Interactivo (`/api/v1`)**: [http://localhost:8180/docs](http://localhost:8180/docs) (o [http://localhost:8181/docs](http://localhost:8181/docs))
+- **Documentación ReDoc**: [http://localhost:8180/redoc](http://localhost:8180/redoc)
+- **Esquema OpenAPI 3.1.0 JSON**: [http://localhost:8180/openapi.json](http://localhost:8180/openapi.json)
 - **Credenciales por defecto**: Usuario `admin` / Contraseña `admin`
+
+---
+
+## 📘 Especificación OpenAPI 3.1.0 y Endpoints `/api/v1`
+
+El backend cumple íntegramente con la especificación oficial **[OpenAPI 3.1.0 (OAS)](https://github.com/OAI/OpenAPI-Specification)**. Todos los endpoints del cliente Flutter Web consumen el prefijo versionado **`/api/v1`** (manteniendo `/api` como alias retrocompatible):
+
+| Categoría OpenAPI (`tag`) | Prefijo / Rutas principales (`/api/v1/...`) | Descripción |
+| :--- | :--- | :--- |
+| **Monitoring & Heartbeat** | `GET/PUT /api/v1/monitoring/settings`, `POST /api/v1/monitoring/run-now`, `POST /api/v1/devices/{id}/ping`, `POST /api/v1/floor-devices/{id}/ping` | Motor Heartbeat en background (cada 5 min por defecto) y comprobación multiprotocolo bajo demanda (`⚪ Gris`, `🟢 Verde`, `🟠 Naranja`, `🔴 Rojo`). |
+| **Locations & Topology** | `GET/POST/PUT/DELETE /api/v1/locations`, `POST/PUT/DELETE /api/v1/floors` | Jerarquía geográfica de Sedes (Datacenters) y Plantas. |
+| **Datacenter Rooms & Aisles** | `POST/PUT/DELETE /api/v1/rooms`, `POST/PUT/DELETE /api/v1/aisles` | Salas técnicas, pasillos fríos/calientes y posicionamiento 2D de racks. |
+| **Floor Devices & Environmental Sensors** | `GET/POST/PUT/DELETE /api/v1/rooms/{id}/floor-devices`, `POST /api/v1/floor-devices/{id}/remote-console` | Equipos de planta (cámaras IP, APs Wi-Fi, impresoras, SAI/UPS, sensores IoT y rosetas). |
+| **Racks & Rack Devices** | `GET/PUT/DELETE /api/v1/racks/{id}`, `POST /api/v1/racks/{id}/devices`, `PUT/DELETE /api/v1/devices/{id}` | Inventario 42U Front/Back, validación de colisiones U, bandejas multi-equipo y acometidas exteriores. |
+| **Cabling & Connections** | `POST/PUT/DELETE /api/v1/connections`, `GET /api/v1/racks/{id}/inter-rack-targets` | Trazabilidad punto a punto de latiguillos UTP, fibra óptica OM4/OS2 y cables eléctricos intra-rack e inter-rack. |
+| **Device Templates & Library** | `GET/POST/PUT/DELETE /api/v1/templates`, `GET /api/v1/templates/export`, `POST /api/v1/templates/import` | Catálogo de plantillas hardware y fotos de chasis desde Wikimedia Commons. |
+| **Dashboard, KPIs & Excel Reports** | `GET /api/v1/reports/dashboard-inventory`, `GET /api/v1/reports/excel`, `POST /api/v1/reports/excel/import` | KPIs ejecutivos de capacidad U, estados Heartbeat y auditoría Excel (`.xlsx`). |
+| **Authentication, RBAC & Active Directory** | `POST /api/v1/auth/login`, `GET/POST/PUT/DELETE /api/v1/users`, `GET/POST/PUT/DELETE /api/v1/ad-servers` | Autenticación local y Multi-Active Directory (LDAP/LDAPS) con 4 roles RBAC. |
+| **Static Assets & Uploads** | `POST/DELETE /api/v1/upload-plan`, `GET /api/v1/uploads/{filename}` | Subida y entrega de planos arquitectónicos personalizados. |
 
 ---
 

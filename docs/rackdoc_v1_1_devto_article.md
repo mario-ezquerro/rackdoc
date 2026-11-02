@@ -102,7 +102,11 @@ Need to display your global datacenter map, 2D floor plan, 42U rack elevation, o
   - `operator`: Read-only on physical rack geometry, **with permission to test Heartbeats and launch SSH/HTTP/HTTPS connections**.
   - `viewer`: Strict read-only auditing mode.
 - **Multi-Active Directory (LDAP / LDAPS) + Local Users**: Connect multiple AD domains with automatic `Group DN → Role` mapping alongside local database accounts.
-- **Sub-Second Startup Optimization**: By deferring heavy base64 floorplan blobs on the initial `/api/locations` tree query (`defer(UploadAsset.data_url)`) and enabling FastAPI `GZipMiddleware`, initial load time dropped from puluhan megabytes to **~4.5 KB in <15 ms**.
+- **Versioned `/api/v1` REST API & Full OpenAPI 3.1.0 / Swagger UI Documentation**:
+  - All **46 API paths (64 HTTP operations)** are cleanly versioned under **`/api/v1/...`** (with `/api/...` preserved as a transparent backward-compatible alias).
+  - 100% of endpoints are documented with Pydantic v2 schemas, summaries, descriptions, and organized into **10 OpenAPI 3.1.0 tags** (`Monitoring & Heartbeat`, `Locations & Topology`, `Datacenter Rooms & Aisles`, `Floor Devices & Environmental Sensors`, `Racks & Rack Devices`, `Cabling & Connections`, `Device Templates & Library`, `Dashboard, KPIs & Excel Reports`, `Authentication, RBAC & Active Directory`, and `Static Assets & Uploads`).
+  - Interactive **Swagger UI** is available out of the box at `/docs` (and `/api/v1/docs`), **ReDoc** at `/redoc`, and the machine-readable **OpenAPI 3.1.0 JSON** specification at `/openapi.json`.
+- **Sub-Second Startup Optimization**: By deferring heavy base64 floorplan blobs on the initial `/api/v1/locations` tree query (`defer(UploadAsset.data_url)`) and enabling FastAPI `GZipMiddleware`, initial load time dropped from megabytes to **~4.5 KB in <15 ms**.
 
 ---
 

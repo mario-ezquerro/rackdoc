@@ -8,9 +8,9 @@ import base64
 import json
 import urllib.parse
 import urllib.request
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse, Response
+from fastapi.responses import StreamingResponse, FileResponse, Response, RedirectResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -650,15 +650,88 @@ async def lifespan(app: FastAPI):
         worker_task.cancel()
 
 
+OPENAPI_TAGS_METADATA = [
+    {
+        "name": "Health & System",
+        "description": "Estado de salud del servicio backend y metadatos de versión.",
+    },
+    {
+        "name": "Heartbeat & Monitoring",
+        "description": "Motor de comprobación periódica en background (ICMP, SSH, HTTP/HTTPS, TCP, UDP, SNMP), configuración de intervalo (por defecto 5 min) y semáforo de 4 estados (Gris/Verde/Naranja/Rojo).",
+    },
+    {
+        "name": "Locations, Floors & Blueprints",
+        "description": "Jerarquía geográfica de Sedes (Locations), Plantas (Floors), Salas (Rooms), Pasillos (Aisles) y subida/descarga de planos 2D (JPG/PNG/GIF/WEBP).",
+    },
+    {
+        "name": "Floor Devices & Sensors",
+        "description": "Dispositivos y sensores de planta (temperatura, humedad, consumo kW/A, humo, agua, cámaras IP, control de acceso, rosetas, puestos) y tipos personalizados.",
+    },
+    {
+        "name": "Racks & External Feeds",
+        "description": "Gestión de armarios Rack (42U-48U), coordenadas 2D en planta, rotación, tomas eléctricas exteriores Schuko y cajas exteriores de fibra óptica.",
+    },
+    {
+        "name": "Rack Devices & Hardware",
+        "description": "Equipos montados en rack (switches, routers, firewalls, servidores, almacenamiento SAN/NAS, SAI/UPS, PDUs, patch panels, bandejas U con mini-equipos).",
+    },
+    {
+        "name": "Device Templates & Library",
+        "description": "Catálogo de plantillas hardware Front/Back, exportación/importación JSON de librerías y buscador/proxy de fotografías de chasis.",
+    },
+    {
+        "name": "Connections & Structured Cabling",
+        "description": "Latiguillos y cableado estructurado punto a punto (UTP Cat6/6A, Fibra OM4/OS2, DAC, Alimentación AC) intra-rack e inter-rack.",
+    },
+    {
+        "name": "Reports & Excel (.xlsx)",
+        "description": "Inventario consolidado para el Dashboard (Hierro U42→U1, Patch Panels boca a boca, Heartbeat) y exportación/importación Excel (.xlsx).",
+    },
+    {
+        "name": "Auth, Users & Active Directory (RBAC)",
+        "description": "Autenticación local y Multi-Active Directory (LDAP/LDAPS) con control de acceso basado en 4 roles (admin, editor, operator, viewer).",
+    },
+]
+
 app = FastAPI(
     title="RackDoc DCIM API",
-    description="API de Gestión Visual de Centros de Datos, Racks (Front/Back), Planos JPG/PNG/GIF, Red, Monitorización y Exportación Excel",
+    summary="API RESTful OpenAPI 3.1.0 (v1) para Gestión Visual de Centros de Datos, Racks, Cableado, Sensores y Heartbeat",
+    description=(
+        "Especificación **OpenAPI 3.1.0** de **RackDoc DCIM**.\n\n"
+        "- **Prefijo canónico versionado**: `/api/v1` (con soporte retrocompatible en `/api`).\n"
+        "- **Motor de Heartbeat en Background**: chequeo periódico multiprotocolo (`ICMP`, `SSH`, `HTTP/HTTPS`, `TCP`, `UDP`, `SNMP`) con 4 estados (`unmonitored` Gris, `online` Verde, `warning` Naranja, `offline` Rojo).\n"
+        "- **Documentación interactiva**: Swagger UI (`/docs` y `/api/v1/docs`) y ReDoc (`/redoc`)."
+    ),
     version="1.2.0",
+    openapi_tags=OPENAPI_TAGS_METADATA,
+    contact={
+        "name": "RackDoc DCIM Project",
+        "url": "https://github.com/mario-ezquerro/rackdoc",
+    },
+    license_info={
+        "name": "MIT License",
+        "url": "https://opensource.org/licenses/MIT",
+    },
+    servers=[
+        {"url": "/", "description": "Servidor activo (Frontend Proxy :8181 o Backend Directo :8180)"},
+        {"url": "http://localhost:8180", "description": "Backend FastAPI directo (:8180)"},
+        {"url": "http://localhost:8181", "description": "Proxy Nginx Frontend (:8181)"},
+    ],
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
     lifespan=lifespan,
 )
 
+api_router = APIRouter()
 
-@app.get("/api/uploads/{filename}")
+
+@api_router.get(
+    "/uploads/{filename}",
+    tags=["Locations, Floors & Blueprints"],
+    summary="Obtener imagen de plano o recurso subido",
+    description="Devuelve el archivo binario de imagen (JPG, PNG, GIF, WEBP) asociado al plano de una sede, planta o sala.",
+)
 def get_uploaded_plan_file(filename: str, db: Session = Depends(get_db)):
     safe_name = Path(filename).name
     file_path = UPLOADS_DIR / safe_name
@@ -774,9 +847,14 @@ def _check_u_collision(
             )
 
 
-@app.get("/api/health")
+@api_router.get(
+    "/health",
+    tags=["Health & System"],
+    summary="Comprobar estado del servicio (Healthcheck)",
+    description="Devuelve el estado operativo del servicio backend y versión de la API.",
+)
 def health_check():
-    return {"status": "ok", "service": "rackdoc-backend"}
+    return {"status": "ok", "service": "rackdoc-backend", "api_version": "v1"}
 
 
 def _build_global_monitoring_summary(db: Session) -> dict:
@@ -819,12 +897,22 @@ def _build_global_monitoring_summary(db: Session) -> dict:
     }
 
 
-@app.get("/api/settings/monitoring")
+@api_router.get(
+    "/settings/monitoring",
+    tags=["Heartbeat & Monitoring"],
+    summary="Obtener configuración y contadores globales de Heartbeat",
+    description="Devuelve la frecuencia de chequeo en background (por defecto 300s / 5 min) y los contadores globales de los 4 estados: Gris (unmonitored), Verde (online), Naranja (warning) y Rojo (offline).",
+)
 def get_monitoring_settings_endpoint(db: Session = Depends(get_db)):
     return _build_global_monitoring_summary(db)
 
 
-@app.put("/api/settings/monitoring")
+@api_router.put(
+    "/settings/monitoring",
+    tags=["Heartbeat & Monitoring"],
+    summary="Actualizar frecuencia del motor de Heartbeat en background",
+    description="Permite modificar el intervalo de comprobación periódica en minutos o segundos y activar/pausar el worker de background.",
+)
 def update_monitoring_settings_endpoint(
     payload: MonitoringSettingsUpdate,
     db: Session = Depends(get_db),
@@ -842,7 +930,12 @@ def update_monitoring_settings_endpoint(
     return _build_global_monitoring_summary(db)
 
 
-@app.post("/api/settings/monitoring/run-now")
+@api_router.post(
+    "/settings/monitoring/run-now",
+    tags=["Heartbeat & Monitoring"],
+    summary="Ejecutar pasada completa de Heartbeat ahora mismo",
+    description="Lanza inmediatamente en background la comprobación de todos los equipos de rack y dispositivos/sensores de planta que tengan Heartbeat activo.",
+)
 async def run_monitoring_now_endpoint(db: Session = Depends(get_db)):
     results = await asyncio.to_thread(_execute_background_monitoring_pass)
     summary = _build_global_monitoring_summary(db)
@@ -850,7 +943,12 @@ async def run_monitoring_now_endpoint(db: Session = Depends(get_db)):
     return summary
 
 
-@app.get("/api/locations")
+@api_router.get(
+    "/locations",
+    tags=["Locations, Floors & Blueprints"],
+    summary="Obtener árbol completo de Sedes, Plantas, Salas, Racks y Sensores",
+    description="Devuelve la jerarquía completa del CPD con contadores agregados de Heartbeat (Gris, Verde, Naranja, Rojo), Racks y dispositivos de planta.",
+)
 def get_locations_tree(db: Session = Depends(get_db)):
     _sanitize_missing_upload_urls(db)
     locations = (
@@ -1206,7 +1304,12 @@ def get_locations_tree(db: Session = Depends(get_db)):
     return result
 
 
-@app.post("/api/locations")
+@api_router.post(
+    "/locations",
+    tags=["Locations, Floors & Blueprints"],
+    summary="Crear una nueva Sede / Datacenter",
+    description="Crea una nueva sede geográfica con una planta, sala y pasillo iniciales por defecto.",
+)
 def create_location(payload: LocationCreate, db: Session = Depends(get_db)):
     data = payload.model_dict() if hasattr(payload, "model_dict") else payload.model_dump()
     raw_code = (data.get("code") or "CPD").strip() or "CPD"
@@ -1243,7 +1346,12 @@ def _delete_connections_for_port_ids(db: Session, port_ids: list[int]):
     ).delete(synchronize_session=False)
 
 
-@app.put("/api/locations/{location_id}")
+@api_router.put(
+    "/locations/{location_id}",
+    tags=["Locations, Floors & Blueprints"],
+    summary="Actualizar datos o coordenadas de una Sede / Datacenter",
+    description="Actualiza código, nombre, dirección, coordenadas GPS o posición en el mapa personalizado de una sede.",
+)
 def update_location(location_id: int, payload: LocationUpdate, db: Session = Depends(get_db)):
     loc = db.query(Location).filter(Location.id == location_id).first()
     if not loc:
@@ -1269,7 +1377,12 @@ def update_location(location_id: int, payload: LocationUpdate, db: Session = Dep
     return {"status": "ok", "id": loc.id}
 
 
-@app.delete("/api/locations/{location_id}")
+@api_router.delete(
+    "/locations/{location_id}",
+    tags=["Locations, Floors & Blueprints"],
+    summary="Eliminar una Sede / Datacenter",
+    description="Elimina una sede y limpia en cascada sus plantas, salas, racks, equipos y conexiones.",
+)
 def delete_location(location_id: int, db: Session = Depends(get_db)):
     loc = (
         db.query(Location)
@@ -1300,7 +1413,12 @@ def delete_location(location_id: int, db: Session = Depends(get_db)):
     return {"status": "deleted", "id": location_id}
 
 
-@app.post("/api/floors")
+@api_router.post(
+    "/floors",
+    tags=["Locations, Floors & Blueprints"],
+    summary="Crear una nueva Planta en una Sede",
+    description="Añade una nueva planta (Floor) al edificio con una sala técnica y pasillo por defecto.",
+)
 def create_floor(payload: FloorCreate, db: Session = Depends(get_db)):
     fl = Floor(**payload.model_dump())
     db.add(fl)
@@ -1316,7 +1434,12 @@ def create_floor(payload: FloorCreate, db: Session = Depends(get_db)):
     return {"id": fl.id, "name": fl.name}
 
 
-@app.put("/api/floors/{floor_id}")
+@api_router.put(
+    "/floors/{floor_id}",
+    tags=["Locations, Floors & Blueprints"],
+    summary="Actualizar nombre, nivel o escala de plano de una Planta",
+    description="Modifica los metadatos o la escala visual del plano 2D de una planta.",
+)
 def update_floor(floor_id: int, payload: FloorUpdate, db: Session = Depends(get_db)):
     fl = db.query(Floor).filter(Floor.id == floor_id).first()
     if not fl:
@@ -1328,7 +1451,12 @@ def update_floor(floor_id: int, payload: FloorUpdate, db: Session = Depends(get_
     return {"status": "ok", "id": fl.id}
 
 
-@app.delete("/api/floors/{floor_id}")
+@api_router.delete(
+    "/floors/{floor_id}",
+    tags=["Locations, Floors & Blueprints"],
+    summary="Eliminar una Planta",
+    description="Elimina una planta junto con sus salas, racks y dispositivos asociados.",
+)
 def delete_floor(floor_id: int, db: Session = Depends(get_db)):
     fl = (
         db.query(Floor)
@@ -1357,7 +1485,12 @@ def delete_floor(floor_id: int, db: Session = Depends(get_db)):
     return {"status": "deleted", "id": floor_id}
 
 
-@app.post("/api/rooms")
+@api_router.post(
+    "/rooms",
+    tags=["Locations, Floors & Blueprints"],
+    summary="Crear una nueva Sala técnica en una Planta",
+    description="Crea una sala (Room) con dimensiones en metros dentro de una planta.",
+)
 def create_room(payload: RoomCreate, db: Session = Depends(get_db)):
     rm = Room(**payload.model_dump())
     db.add(rm)
@@ -1366,7 +1499,12 @@ def create_room(payload: RoomCreate, db: Session = Depends(get_db)):
     return {"id": rm.id, "name": rm.name}
 
 
-@app.post("/api/aisles")
+@api_router.post(
+    "/aisles",
+    tags=["Locations, Floors & Blueprints"],
+    summary="Crear un nuevo Pasillo (Frío/Caliente) en una Sala",
+    description="Crea un pasillo técnico (Aisle) dentro de una sala del CPD.",
+)
 def create_aisle(payload: AisleCreate, db: Session = Depends(get_db)):
     aisle = Aisle(**payload.model_dump())
     db.add(aisle)
@@ -1375,7 +1513,12 @@ def create_aisle(payload: AisleCreate, db: Session = Depends(get_db)):
     return {"id": aisle.id, "code": aisle.code, "name": aisle.name}
 
 
-@app.post("/api/floors/{floor_id}/floor-devices")
+@api_router.post(
+    "/floors/{floor_id}/floor-devices",
+    tags=["Floor Devices & Sensors"],
+    summary="Añadir un Dispositivo o Sensor al plano 2D de una Planta",
+    description="Coloca un nuevo sensor o equipo en el plano de planta (con Heartbeat desactivado en Gris por defecto) y sincroniza su boca en el Rack vinculado.",
+)
 def create_floor_device(
     floor_id: int,
     payload: FloorDeviceCreate,
@@ -1427,7 +1570,12 @@ def create_floor_device(
     }
 
 
-@app.put("/api/floor-devices/{device_id}")
+@api_router.put(
+    "/floor-devices/{device_id}",
+    tags=["Floor Devices & Sensors"],
+    summary="Actualizar un Dispositivo o Sensor de Planta (Settings, Heartbeat y Conectar)",
+    description="Actualiza posición 2D, IP, VLAN, Rack vinculado, configuración de Heartbeat en background y configuración de Conectar desde el frontend.",
+)
 def update_floor_device(
     device_id: int,
     payload: FloorDeviceUpdate,
@@ -1482,7 +1630,12 @@ def update_floor_device(
     }
 
 
-@app.post("/api/floor-devices/{device_id}/ping")
+@api_router.post(
+    "/floor-devices/{device_id}/ping",
+    tags=["Heartbeat & Monitoring", "Floor Devices & Sensors"],
+    summary="Probar ahora el Heartbeat de un Dispositivo o Sensor de Planta",
+    description="Ejecuta inmediatamente en el backend todos los sistemas de chequeo activos del dispositivo/sensor de planta y actualiza su estado (Gris/Verde/Naranja/Rojo).",
+)
 def ping_floor_device_endpoint(device_id: int, db: Session = Depends(get_db)):
     fd = db.query(FloorDevice).filter(FloorDevice.id == device_id).first()
     if not fd:
@@ -1490,7 +1643,12 @@ def ping_floor_device_endpoint(device_id: int, db: Session = Depends(get_db)):
     return check_single_device(db, fd)
 
 
-@app.delete("/api/floor-devices/{device_id}")
+@api_router.delete(
+    "/floor-devices/{device_id}",
+    tags=["Floor Devices & Sensors"],
+    summary="Eliminar un Dispositivo o Sensor de Planta",
+    description="Elimina el dispositivo o sensor del plano 2D y sincroniza las bocas exteriores del Rack vinculado.",
+)
 def delete_floor_device(device_id: int, db: Session = Depends(get_db)):
     fd = db.query(FloorDevice).filter(FloorDevice.id == device_id).first()
     if not fd:
@@ -1514,7 +1672,12 @@ def delete_floor_device(device_id: int, db: Session = Depends(get_db)):
     return {"status": "deleted", "id": device_id}
 
 
-@app.get("/api/floor-device-types")
+@api_router.get(
+    "/floor-device-types",
+    tags=["Floor Devices & Sensors"],
+    summary="Listar tipos personalizados de Dispositivos y Sensores de Planta",
+    description="Devuelve el catálogo de tipos de sensores y dispositivos a medida creados por el usuario.",
+)
 def get_custom_floor_device_types(db: Session = Depends(get_db)):
     rows = db.query(FloorDeviceCustomType).order_by(FloorDeviceCustomType.id).all()
     return [
@@ -1533,7 +1696,12 @@ def get_custom_floor_device_types(db: Session = Depends(get_db)):
     ]
 
 
-@app.post("/api/floor-device-types")
+@api_router.post(
+    "/floor-device-types",
+    tags=["Floor Devices & Sensors"],
+    summary="Crear un nuevo tipo personalizado de Sensor o Dispositivo de Planta",
+    description="Registra una nueva categoría de sensor o equipo de planta con icono, color de pin, prefijo e indicación de puerto por defecto.",
+)
 def create_custom_floor_device_type(
     payload: FloorDeviceCustomTypeCreate,
     db: Session = Depends(get_db),
@@ -1580,7 +1748,12 @@ def create_custom_floor_device_type(
     }
 
 
-@app.delete("/api/floor-device-types/{type_id}")
+@api_router.delete(
+    "/floor-device-types/{type_id}",
+    tags=["Floor Devices & Sensors"],
+    summary="Eliminar un tipo personalizado de Dispositivo de Planta",
+    description="Elimina del catálogo un tipo personalizado de sensor o dispositivo de planta.",
+)
 def delete_custom_floor_device_type(type_id: int, db: Session = Depends(get_db)):
     row = (
         db.query(FloorDeviceCustomType)
@@ -1594,7 +1767,12 @@ def delete_custom_floor_device_type(type_id: int, db: Session = Depends(get_db))
     return {"status": "deleted", "id": type_id}
 
 
-@app.post("/api/racks")
+@api_router.post(
+    "/racks",
+    tags=["Racks & External Feeds"],
+    summary="Crear un nuevo armario Rack",
+    description="Crea un nuevo armario Rack (por defecto 42U) e inicializa sus tomas exteriores de energía y fibra.",
+)
 def create_rack(payload: RackCreate, db: Session = Depends(get_db)):
     rk = Rack(**payload.model_dump())
     db.add(rk)
@@ -1605,7 +1783,13 @@ def create_rack(payload: RackCreate, db: Session = Depends(get_db)):
     return {"id": rk.id, "code": rk.code, "name": rk.name}
 
 
-@app.get("/api/templates", response_model=list[DeviceTemplateSchema])
+@api_router.get(
+    "/templates",
+    response_model=list[DeviceTemplateSchema],
+    tags=["Device Templates & Library"],
+    summary="Listar catálogo de Plantillas de Equipos Hardware",
+    description="Devuelve todas las plantillas de chasis hardware con su geometría de puertos Front y Back.",
+)
 def get_device_templates(db: Session = Depends(get_db)):
     return (
         db.query(DeviceTemplate)
@@ -1619,7 +1803,13 @@ def get_device_templates(db: Session = Depends(get_db)):
     )
 
 
-@app.post("/api/templates", response_model=DeviceTemplateSchema)
+@api_router.post(
+    "/templates",
+    response_model=DeviceTemplateSchema,
+    tags=["Device Templates & Library"],
+    summary="Crear una nueva Plantilla de Equipo Hardware",
+    description="Registra en la librería un nuevo modelo de equipo rackeable o de bandeja con su altura U y distribución de bocas Front/Back.",
+)
 def create_device_template(payload: DeviceTemplateCreate, db: Session = Depends(get_db)):
     tpl = DeviceTemplate(**payload.model_dump())
     db.add(tpl)
@@ -1628,7 +1818,12 @@ def create_device_template(payload: DeviceTemplateCreate, db: Session = Depends(
     return tpl
 
 
-@app.get("/api/templates/photo-proxy")
+@api_router.get(
+    "/templates/photo-proxy",
+    tags=["Device Templates & Library"],
+    summary="Proxy CORS de fotografías de chasis hardware",
+    description="Descarga y sirve fotografías externas de equipos hardware añadiendo cabeceras CORS para el lienzo de Flutter Web.",
+)
 def proxy_hardware_photo(url: str):
     """Proxy de imágenes externas para evitar bloqueos CORS en Flutter Web."""
     target = (url or "").strip()
@@ -1657,7 +1852,12 @@ def proxy_hardware_photo(url: str):
         raise HTTPException(status_code=502, detail=f"No se pudo cargar imagen: {exc}")
 
 
-@app.get("/api/templates/search-photo")
+@api_router.get(
+    "/templates/search-photo",
+    tags=["Device Templates & Library"],
+    summary="Buscar fotografías de hardware en Wikimedia Commons",
+    description="Busca imágenes reales de chasis hardware (servidores, switches, routers, firewalls, SAIs, PDUs) mediante Wikimedia Commons API con limpieza semántica.",
+)
 def search_hardware_photos(q: str = "server rack"):
     """Busca imágenes de referencia de equipos hardware en Internet (Wikimedia Commons API) con limpieza inteligente de modelo."""
     import re
@@ -1762,7 +1962,13 @@ def search_hardware_photos(q: str = "server rack"):
     return {"query": query_str, "results": results[:12]}
 
 
-@app.put("/api/templates/{template_id}", response_model=DeviceTemplateSchema)
+@api_router.put(
+    "/templates/{template_id}",
+    response_model=DeviceTemplateSchema,
+    tags=["Device Templates & Library"],
+    summary="Actualizar plantilla de equipamiento hardware",
+    description="Modifica especificaciones de plantilla (altura U, fabricante, modelo, color, layout de puertos o URL de foto).",
+)
 def update_device_template(
     template_id: int,
     payload: DeviceTemplateUpdate,
@@ -1788,7 +1994,12 @@ def update_device_template(
     return tpl
 
 
-@app.delete("/api/templates/{template_id}")
+@api_router.delete(
+    "/templates/{template_id}",
+    tags=["Device Templates & Library"],
+    summary="Eliminar plantilla de equipamiento hardware",
+    description="Elimina una plantilla del catálogo si no está montada actualmente en ningún equipo de rack.",
+)
 def delete_device_template(template_id: int, db: Session = Depends(get_db)):
     tpl = db.query(DeviceTemplate).filter(DeviceTemplate.id == template_id).first()
     if not tpl:
@@ -1804,7 +2015,12 @@ def delete_device_template(template_id: int, db: Session = Depends(get_db)):
     return {"status": "deleted", "id": template_id}
 
 
-@app.get("/api/templates/export")
+@api_router.get(
+    "/templates/export",
+    tags=["Device Templates & Library"],
+    summary="Exportar librería de plantillas hardware en JSON",
+    description="Exporta todas las plantillas de chasis hardware (o un grupo específico) en formato JSON portable.",
+)
 def export_device_templates(
     library_group: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -1832,7 +2048,12 @@ def export_device_templates(
     }
 
 
-@app.post("/api/templates/import")
+@api_router.post(
+    "/templates/import",
+    tags=["Device Templates & Library"],
+    summary="Importar librería de plantillas hardware desde JSON",
+    description="Importa o actualiza un lote de plantillas de chasis hardware en el catálogo del sistema.",
+)
 def import_device_templates(
     payload: DeviceLibraryImportRequest,
     db: Session = Depends(get_db),
@@ -1890,7 +2111,12 @@ def import_device_templates(
     }
 
 
-@app.get("/api/racks")
+@api_router.get(
+    "/racks",
+    tags=["Racks & Rack Devices"],
+    summary="Listar todos los Racks del inventario",
+    description="Devuelve la lista global de armarios rack con su ubicación jerárquica (Sede, Planta, Sala y Pasillo).",
+)
 def list_all_racks(db: Session = Depends(get_db)):
     racks = (
         db.query(Rack)
@@ -1919,7 +2145,12 @@ def list_all_racks(db: Session = Depends(get_db)):
     return out
 
 
-@app.get("/api/racks/{rack_id}/inter-rack-targets")
+@api_router.get(
+    "/racks/{rack_id}/inter-rack-targets",
+    tags=["Racks & Rack Devices", "Cabling & Connections"],
+    summary="Obtener Racks, equipos y puertos disponibles para cableado Inter-Rack",
+    description="Lista los demás Racks del CPD junto con sus equipos y el estado libre/ocupado de sus puertos para tender latiguillos o fibras entre Racks.",
+)
 def get_inter_rack_targets(rack_id: int, db: Session = Depends(get_db)):
     """Devuelve todos los demás Racks del CPD con sus equipos y puertos libres/ocupados para conectar fibras/cables Inter-Rack."""
     all_racks = (
@@ -2228,7 +2459,12 @@ def _sync_rack_floor_devices_box(db: Session, rack: Rack) -> bool:
     return changed
 
 
-@app.get("/api/racks/{rack_id}")
+@api_router.get(
+    "/racks/{rack_id}",
+    tags=["Racks & Rack Devices"],
+    summary="Obtener detalle completo de un Rack (equipos, puertos, acometidas y latiguillos)",
+    description="Devuelve la topología 42U completa de un armario Rack, sus equipos montados Front/Back, tomas exteriores, equipos de planta vinculados y cables.",
+)
 def get_rack_detail(rack_id: int, db: Session = Depends(get_db)):
     rack = (
         db.query(Rack)
@@ -2336,7 +2572,12 @@ def get_rack_detail(rack_id: int, db: Session = Depends(get_db)):
     }
 
 
-@app.put("/api/racks/{rack_id}")
+@api_router.put(
+    "/racks/{rack_id}",
+    tags=["Racks & Rack Devices"],
+    summary="Actualizar propiedades de un armario Rack",
+    description="Modifica código, nombre, altura en U, pasillo asignado, fabricante, número de serie o posición en el plano de un Rack.",
+)
 def update_rack(rack_id: int, payload: RackUpdate, db: Session = Depends(get_db)):
     rack = db.query(Rack).filter(Rack.id == rack_id).first()
     if not rack:
@@ -2364,7 +2605,12 @@ def update_rack(rack_id: int, payload: RackUpdate, db: Session = Depends(get_db)
     return {"status": "ok", "id": rack.id}
 
 
-@app.delete("/api/racks/{rack_id}")
+@api_router.delete(
+    "/racks/{rack_id}",
+    tags=["Racks & Rack Devices"],
+    summary="Eliminar un armario Rack",
+    description="Elimina un armario Rack junto con sus equipos montados y las conexiones asociadas.",
+)
 def delete_rack(rack_id: int, db: Session = Depends(get_db)):
     rack = (
         db.query(Rack)
@@ -2382,7 +2628,13 @@ def delete_rack(rack_id: int, db: Session = Depends(get_db)):
     return {"status": "deleted", "id": rack_id}
 
 
-@app.post("/api/racks/{rack_id}/devices", response_model=RackDeviceSchema)
+@api_router.post(
+    "/racks/{rack_id}/devices",
+    response_model=RackDeviceSchema,
+    tags=["Racks & Rack Devices"],
+    summary="Montar un nuevo equipo en un Rack",
+    description="Instala un dispositivo hardware en la unidad U y cara indicadas tras verificar colisiones de espacio U.",
+)
 def add_device_to_rack(rack_id: int, payload: RackDeviceCreate, db: Session = Depends(get_db)):
     rack = db.query(Rack).filter(Rack.id == rack_id).first()
     if not rack:
@@ -2642,7 +2894,13 @@ def _sync_tray_items_ports(db: Session, device: RackDevice):
     db.flush()
 
 
-@app.put("/api/devices/{device_id}", response_model=RackDeviceSchema)
+@api_router.put(
+    "/devices/{device_id}",
+    response_model=RackDeviceSchema,
+    tags=["Racks & Rack Devices"],
+    summary="Actualizar equipo montado en Rack",
+    description="Actualiza posición U, cara de montaje, direccionamiento IP/MAC/VLAN, Heartbeat multiprotocolo, enlaces de conexión SSH/Web o bandeja multi-equipo.",
+)
 def update_rack_device(device_id: int, payload: RackDeviceUpdate, db: Session = Depends(get_db)):
     device = (
         db.query(RackDevice)
@@ -2703,7 +2961,12 @@ def update_rack_device(device_id: int, payload: RackDeviceUpdate, db: Session = 
     return device
 
 
-@app.delete("/api/devices/{device_id}")
+@api_router.delete(
+    "/devices/{device_id}",
+    tags=["Racks & Rack Devices"],
+    summary="Desmontar y eliminar equipo de un Rack",
+    description="Retira el dispositivo del armario Rack y elimina los latiguillos conectados a sus bocas.",
+)
 def delete_rack_device(device_id: int, db: Session = Depends(get_db)):
     device = db.query(RackDevice).filter(RackDevice.id == device_id).first()
     if not device:
@@ -2721,7 +2984,12 @@ def delete_rack_device(device_id: int, db: Session = Depends(get_db)):
     return {"status": "deleted", "id": device_id}
 
 
-@app.post("/api/devices/{device_id}/ping")
+@api_router.post(
+    "/devices/{device_id}/ping",
+    tags=["Monitoring & Heartbeat"],
+    summary="Ejecutar comprobación Heartbeat de un equipo de Rack ahora",
+    description="Lanza inmediatamente todos los chequeos Heartbeat configurados en el dispositivo (ICMP, TCP, HTTP/HTTPS) y devuelve estado agregado (online, degraded, offline, unmonitored) y desglose por protocolo.",
+)
 def ping_device_endpoint(device_id: int, db: Session = Depends(get_db)):
     device = db.query(RackDevice).filter(RackDevice.id == device_id).first()
     if not device:
@@ -2729,12 +2997,22 @@ def ping_device_endpoint(device_id: int, db: Session = Depends(get_db)):
     return check_single_device(db, device)
 
 
-@app.post("/api/racks/{rack_id}/ping-all")
+@api_router.post(
+    "/racks/{rack_id}/ping-all",
+    tags=["Monitoring & Heartbeat"],
+    summary="Ejecutar Heartbeat en todos los equipos de un Rack",
+    description="Comprueba simultáneamente el estado Heartbeat de todos los dispositivos con monitorización activa en el Rack especificado.",
+)
 def ping_all_rack_devices_endpoint(rack_id: int, db: Session = Depends(get_db)):
     return check_all_monitored_devices(db, rack_id=rack_id)
 
 
-@app.post("/api/devices/{device_id}/remote-console")
+@api_router.post(
+    "/devices/{device_id}/remote-console",
+    tags=["Monitoring & Heartbeat", "Racks & Rack Devices"],
+    summary="Ejecutar diagnóstico o consola remota sobre un equipo de Rack",
+    description="Realiza pruebas de conectividad SSH o inspección HTTP/HTTPS desde el backend hacia la IP de gestión del equipo.",
+)
 def device_remote_console_endpoint(
     device_id: int,
     payload: dict,
@@ -2746,7 +3024,13 @@ def device_remote_console_endpoint(
     return run_device_remote_console(db, device, payload or {})
 
 
-@app.post("/api/racks/{rack_id}/external-outlets", response_model=RackDeviceSchema)
+@api_router.post(
+    "/racks/{rack_id}/external-outlets",
+    response_model=RackDeviceSchema,
+    tags=["Racks & Rack Devices", "Cabling & Connections"],
+    summary="Crear acometida exterior en un Rack (Eléctrica Schuko o Fibra Óptica)",
+    description="Añade una caja exterior de alimentación eléctrica Schuko o de fibra óptica LC/SC fuera del chasis 42U para alimentar PDUs, SAIs o switches.",
+)
 def create_external_outlet(
     rack_id: int,
     payload: ExternalOutletCreate,
@@ -2808,7 +3092,13 @@ def create_external_outlet(
     return dev
 
 
-@app.put("/api/external-outlets/{device_id}", response_model=RackDeviceSchema)
+@api_router.put(
+    "/external-outlets/{device_id}",
+    response_model=RackDeviceSchema,
+    tags=["Racks & Rack Devices", "Cabling & Connections"],
+    summary="Actualizar acometida exterior de Rack",
+    description="Modifica el número de bocas/tomas, color identificativo, altura U de referencia o nombre de una acometida exterior.",
+)
 def update_external_outlet(
     device_id: int,
     payload: ExternalOutletUpdate,
@@ -2865,7 +3155,12 @@ def update_external_outlet(
     return dev
 
 
-@app.delete("/api/external-outlets/{device_id}")
+@api_router.delete(
+    "/external-outlets/{device_id}",
+    tags=["Racks & Rack Devices", "Cabling & Connections"],
+    summary="Eliminar acometida exterior de un Rack",
+    description="Elimina una acometida exterior y sus cables asociados (manteniendo siempre al menos 1 toma en el Rack).",
+)
 def delete_external_outlet(device_id: int, db: Session = Depends(get_db)):
     dev = (
         db.query(RackDevice)
@@ -2897,7 +3192,13 @@ def delete_external_outlet(device_id: int, db: Session = Depends(get_db)):
     return {"status": "deleted", "id": device_id}
 
 
-@app.post("/api/connections", response_model=ConnectionSchema)
+@api_router.post(
+    "/connections",
+    response_model=ConnectionSchema,
+    tags=["Cabling & Connections"],
+    summary="Tender un nuevo cable / latiguillo entre dos puertos",
+    description="Conecta dos bocas (intra-rack, inter-rack, acometida exterior o equipo de planta) validando que ambos puertos estén libres.",
+)
 def create_connection(payload: ConnectionCreate, db: Session = Depends(get_db)):
     if payload.source_port_id == payload.target_port_id:
         raise HTTPException(status_code=400, detail="No puedes conectar un puerto consigo mismo.")
@@ -2965,7 +3266,13 @@ def create_connection(payload: ConnectionCreate, db: Session = Depends(get_db)):
     return _serialize_connection(conn)
 
 
-@app.put("/api/connections/{connection_id}", response_model=ConnectionSchema)
+@api_router.put(
+    "/connections/{connection_id}",
+    response_model=ConnectionSchema,
+    tags=["Cabling & Connections"],
+    summary="Actualizar propiedades de un cable o latiguillo",
+    description="Modifica tipo de cable, color hexadecimal, canal de enrutamiento (left/right), etiqueta, VLAN o longitud en metros.",
+)
 def update_connection(connection_id: int, payload: ConnectionUpdate, db: Session = Depends(get_db)):
     conn = (
         db.query(Connection)
@@ -2987,7 +3294,12 @@ def update_connection(connection_id: int, payload: ConnectionUpdate, db: Session
     return _serialize_connection(conn)
 
 
-@app.delete("/api/connections/{connection_id}")
+@api_router.delete(
+    "/connections/{connection_id}",
+    tags=["Cabling & Connections"],
+    summary="Desconectar y eliminar un cable o latiguillo",
+    description="Elimina la conexión física entre dos puertos y libera ambas bocas.",
+)
 def delete_connection(connection_id: int, db: Session = Depends(get_db)):
     conn = (
         db.query(Connection)
@@ -3013,7 +3325,12 @@ def delete_connection(connection_id: int, db: Session = Depends(get_db)):
     return {"status": "deleted", "id": connection_id}
 
 
-@app.post("/api/upload-plan")
+@api_router.post(
+    "/upload-plan",
+    tags=["Static Assets & Uploads"],
+    summary="Subir plano arquitectónico personalizado (Sede, Planta o Sala)",
+    description="Permite subir una imagen (PNG, JPG, WEBP, GIF) y asociarla como plano de fondo de una Sede, Planta o Sala.",
+)
 async def upload_custom_plan_image(
     target_type: str = Form(...),  # location | floor | room
     target_id: int = Form(...),
@@ -3034,7 +3351,7 @@ async def upload_custom_plan_image(
     content = await file.read()
     dest_path.write_bytes(content)
 
-    relative_url = f"/api/uploads/{safe_filename}"
+    relative_url = f"/api/v1/uploads/{safe_filename}"
 
     if target_type == "location":
         obj = db.query(Location).filter(Location.id == target_id).first()
@@ -3053,7 +3370,12 @@ async def upload_custom_plan_image(
     return {"status": "ok", "map_image_url": relative_url}
 
 
-@app.delete("/api/upload-plan/{target_type}/{target_id}")
+@api_router.delete(
+    "/upload-plan/{target_type}/{target_id}",
+    tags=["Static Assets & Uploads"],
+    summary="Restablecer plano arquitectónico por defecto",
+    description="Elimina la referencia al plano personalizado de una Sede, Planta o Sala.",
+)
 def delete_custom_plan_image(
     target_type: str,
     target_id: int,
@@ -3076,7 +3398,12 @@ def delete_custom_plan_image(
     return {"status": "deleted"}
 
 
-@app.get("/api/reports/dashboard-inventory")
+@api_router.get(
+    "/reports/dashboard-inventory",
+    tags=["Dashboard, KPIs & Excel Reports"],
+    summary="Obtener KPIs ejecutivos e inventario consolidado del Dashboard",
+    description="Devuelve métricas de capacidad U, estados Heartbeat (online, degraded, offline, unmonitored), desglose por sede/rack y matriz de cableado.",
+)
 def get_dashboard_inventory_report(
     location_id: Optional[int] = None,
     rack_id: Optional[int] = None,
@@ -3089,7 +3416,12 @@ def get_dashboard_inventory_report(
     )
 
 
-@app.get("/api/reports/excel")
+@api_router.get(
+    "/reports/excel",
+    tags=["Dashboard, KPIs & Excel Reports"],
+    summary="Exportar auditoría completa DCIM en libro Excel (.xlsx)",
+    description="Genera y descarga un archivo Excel multi-pestaña con el inventario de sedes, racks, equipos montados, mapa de puertos y matriz de conexiones.",
+)
 def export_excel_report(
     location_id: Optional[int] = None,
     rack_id: Optional[int] = None,
@@ -3104,7 +3436,12 @@ def export_excel_report(
     )
 
 
-@app.get("/api/reports/excel/template")
+@api_router.get(
+    "/reports/excel/template",
+    tags=["Dashboard, KPIs & Excel Reports"],
+    summary="Descargar plantilla Excel de ejemplo para importación masiva",
+    description="Genera una plantilla Excel (.xlsx) con ejemplos e instrucciones para carga masiva de infraestructura DCIM.",
+)
 def download_excel_import_template():
     excel_io = generate_excel_import_template()
     return StreamingResponse(
@@ -3116,7 +3453,12 @@ def download_excel_import_template():
     )
 
 
-@app.post("/api/reports/excel/import")
+@api_router.post(
+    "/reports/excel/import",
+    tags=["Dashboard, KPIs & Excel Reports"],
+    summary="Importar inventario DCIM desde archivo Excel (.xlsx)",
+    description="Procesa un archivo Excel multi-hoja e importa o actualiza sedes, salas, racks, equipos y conexiones.",
+)
 async def import_excel_report(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -3143,7 +3485,12 @@ async def import_excel_report(
 VALID_ROLES = {"admin", "editor", "operator", "viewer"}
 
 
-@app.post("/api/auth/login")
+@api_router.post(
+    "/auth/login",
+    tags=["Authentication, RBAC & Active Directory"],
+    summary="Iniciar sesión (Local o Active Directory / LDAP)",
+    description="Autentica un usuario local o de dominio Active Directory (`DOMAIN\\user` o `user@domain`) y devuelve su token de sesión y rol RBAC.",
+)
 def login_endpoint(payload: LoginRequest, db: Session = Depends(get_db)):
     uname = payload.username.strip()
     pwd = payload.password
@@ -3192,12 +3539,24 @@ def login_endpoint(payload: LoginRequest, db: Session = Depends(get_db)):
     }
 
 
-@app.get("/api/users", response_model=list[UserSchema])
+@api_router.get(
+    "/users",
+    response_model=list[UserSchema],
+    tags=["Authentication, RBAC & Active Directory"],
+    summary="Listar usuarios registrados y sus roles RBAC",
+    description="Devuelve todos los usuarios dados de alta en RackDoc (locales y de Active Directory) con su nivel de permisos (`admin`, `editor`, `operator`, `viewer`).",
+)
 def list_users(db: Session = Depends(get_db)):
     return db.query(User).order_by(User.id).all()
 
 
-@app.post("/api/users", response_model=UserSchema)
+@api_router.post(
+    "/users",
+    response_model=UserSchema,
+    tags=["Authentication, RBAC & Active Directory"],
+    summary="Crear nuevo usuario",
+    description="Registra una nueva cuenta de usuario local o vinculada a Active Directory asignándole un rol RBAC.",
+)
 def create_user(payload: UserCreate, db: Session = Depends(get_db)):
     uname = payload.username.strip()
     if not uname:
@@ -3225,7 +3584,13 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)):
     return user
 
 
-@app.put("/api/users/{user_id}", response_model=UserSchema)
+@api_router.put(
+    "/users/{user_id}",
+    response_model=UserSchema,
+    tags=["Authentication, RBAC & Active Directory"],
+    summary="Actualizar usuario o cambiar rol RBAC",
+    description="Modifica datos de perfil, contraseña, estado activo/inactivo o nivel de rol RBAC de un usuario.",
+)
 def update_user(user_id: int, payload: UserUpdate, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -3251,7 +3616,12 @@ def update_user(user_id: int, payload: UserUpdate, db: Session = Depends(get_db)
     return user
 
 
-@app.delete("/api/users/{user_id}")
+@api_router.delete(
+    "/users/{user_id}",
+    tags=["Authentication, RBAC & Active Directory"],
+    summary="Eliminar usuario",
+    description="Elimina una cuenta de usuario (impidiendo borrar el único administrador del sistema).",
+)
 def delete_user(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -3268,12 +3638,24 @@ def delete_user(user_id: int, db: Session = Depends(get_db)):
     return {"status": "deleted", "id": user_id}
 
 
-@app.get("/api/ad-servers", response_model=list[ADServerSchema])
+@api_router.get(
+    "/ad-servers",
+    response_model=list[ADServerSchema],
+    tags=["Authentication, RBAC & Active Directory"],
+    summary="Listar servidores Active Directory / LDAP",
+    description="Devuelve los controladores de dominio Active Directory / LDAP configurados y su mapeo de grupos a roles RBAC.",
+)
 def list_ad_servers(db: Session = Depends(get_db)):
     return db.query(ADServer).order_by(ADServer.id).all()
 
 
-@app.post("/api/ad-servers", response_model=ADServerSchema)
+@api_router.post(
+    "/ad-servers",
+    response_model=ADServerSchema,
+    tags=["Authentication, RBAC & Active Directory"],
+    summary="Añadir servidor Active Directory / LDAP",
+    description="Registra un nuevo controlador de dominio Active Directory / LDAP con soporte de mapeo de grupos a roles.",
+)
 def create_ad_server(payload: ADServerCreate, db: Session = Depends(get_db)):
     srv = ADServer(**payload.model_dump())
     db.add(srv)
@@ -3282,7 +3664,13 @@ def create_ad_server(payload: ADServerCreate, db: Session = Depends(get_db)):
     return srv
 
 
-@app.put("/api/ad-servers/{ad_id}", response_model=ADServerSchema)
+@api_router.put(
+    "/ad-servers/{ad_id}",
+    response_model=ADServerSchema,
+    tags=["Authentication, RBAC & Active Directory"],
+    summary="Actualizar servidor Active Directory / LDAP",
+    description="Actualiza parámetros de conexión LDAP/LDAPS, Base DN o mapeo de grupos de un servidor Active Directory.",
+)
 def update_ad_server(ad_id: int, payload: ADServerUpdate, db: Session = Depends(get_db)):
     srv = db.query(ADServer).filter(ADServer.id == ad_id).first()
     if not srv:
@@ -3294,7 +3682,12 @@ def update_ad_server(ad_id: int, payload: ADServerUpdate, db: Session = Depends(
     return srv
 
 
-@app.delete("/api/ad-servers/{ad_id}")
+@api_router.delete(
+    "/ad-servers/{ad_id}",
+    tags=["Authentication, RBAC & Active Directory"],
+    summary="Eliminar servidor Active Directory / LDAP",
+    description="Elimina la configuración de un servidor Active Directory / LDAP.",
+)
 def delete_ad_server(ad_id: int, db: Session = Depends(get_db)):
     srv = db.query(ADServer).filter(ADServer.id == ad_id).first()
     if not srv:
@@ -3304,7 +3697,12 @@ def delete_ad_server(ad_id: int, db: Session = Depends(get_db)):
     return {"status": "deleted", "id": ad_id}
 
 
-@app.post("/api/ad-servers/{ad_id}/search-users")
+@api_router.post(
+    "/ad-servers/{ad_id}/search-users",
+    tags=["Authentication, RBAC & Active Directory"],
+    summary="Buscar cuentas y grupos en un directorio Active Directory",
+    description="Consulta cuentas de usuario en el servidor Active Directory especificado y sugiere el rol RBAC según su grupo AD.",
+)
 def search_ad_directory_users(
     ad_id: int,
     payload: ADUserSearchRequest,
@@ -3420,7 +3818,12 @@ def search_ad_directory_users(
     }
 
 
-@app.post("/api/ad-servers/{ad_id}/import-users")
+@api_router.post(
+    "/ad-servers/{ad_id}/import-users",
+    tags=["Authentication, RBAC & Active Directory"],
+    summary="Importar usuarios desde Active Directory con asignación de rol RBAC",
+    description="Importa o actualiza un lote de usuarios del directorio Active Directory vinculándolos al servidor AD y rol RBAC seleccionados.",
+)
 def import_ad_users(
     ad_id: int,
     payload: ADUserImportRequest,
@@ -3462,3 +3865,29 @@ def import_ad_users(
 
     db.commit()
     return {"status": "ok", "imported_count": len(imported), "usernames": imported}
+
+
+# ==============================================================================
+# MONTAJE DE RUTAS VERSIONADAS (/api/v1) + RETROCOMPATIBILIDAD (/api) Y REDOCS
+# ==============================================================================
+@app.get("/api/v1/docs", include_in_schema=False)
+def redirect_v1_docs():
+    return RedirectResponse(url="/docs")
+
+
+@app.get("/api/v1/redoc", include_in_schema=False)
+def redirect_v1_redoc():
+    return RedirectResponse(url="/redoc")
+
+
+@app.get("/api/v1/openapi.json", include_in_schema=False)
+def redirect_v1_openapi():
+    return RedirectResponse(url="/openapi.json")
+
+
+# Montamos el router principal bajo /api/v1 (documentado en OpenAPI 3.1.0 / Swagger UI)
+app.include_router(api_router, prefix="/api/v1")
+
+# Mantenemos /api como alias retrocompatible transparente (oculto del esquema para no duplicar)
+app.include_router(api_router, prefix="/api", include_in_schema=False)
+

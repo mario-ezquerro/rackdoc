@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_client.dart';
 import '../../models/datacenter_models.dart';
 
@@ -1149,6 +1150,28 @@ class _AdminViewState extends State<AdminView> {
                   ],
                 ),
               ),
+              OutlinedButton.icon(
+                onPressed: () {
+                  launchUrl(
+                    Uri.parse(widget.api.getSwaggerDocsUrl()),
+                    mode: LaunchMode.externalApplication,
+                  );
+                },
+                icon: const Icon(Icons.api_rounded, size: 16),
+                label: const Text('Swagger UI (/api/v1)'),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: () {
+                  launchUrl(
+                    Uri.parse(widget.api.getOpenApiSpecUrl()),
+                    mode: LaunchMode.externalApplication,
+                  );
+                },
+                icon: const Icon(Icons.data_object_rounded, size: 16),
+                label: const Text('OpenAPI 3.1 JSON'),
+              ),
+              const SizedBox(width: 10),
               FilledButton.icon(
                 onPressed: () => _showCreateOrEditUserDialog(),
                 icon: const Icon(Icons.person_add_alt_1, size: 16),

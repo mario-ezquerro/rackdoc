@@ -11,14 +11,21 @@ class RackDocApiClient {
   static String _resolveDefaultBaseUrl() {
     const envUrl = String.fromEnvironment('API_BASE_URL', defaultValue: '');
     if (envUrl.isNotEmpty) {
-      if (envUrl.startsWith('/') &&
+      final normalizedEnv = envUrl == '/api' ? '/api/v1' : envUrl;
+      if (normalizedEnv.startsWith('/') &&
           (Uri.base.scheme == 'http' || Uri.base.scheme == 'https')) {
-        return '${Uri.base.origin}$envUrl';
+        return '${Uri.base.origin}$normalizedEnv';
       }
-      return envUrl;
+      return normalizedEnv;
     }
-    return 'http://127.0.0.1:8180/api';
+    return 'http://127.0.0.1:8180/api/v1';
   }
+
+  String get rootOrigin => baseUrl.replaceFirst(RegExp(r'/api(/v1)?$'), '');
+
+  String getSwaggerDocsUrl() => '$rootOrigin/docs';
+  String getRedocUrl() => '$rootOrigin/redoc';
+  String getOpenApiSpecUrl() => '$rootOrigin/openapi.json';
 
   Map<String, String> get _headers => {
         'Content-Type': 'application/json; charset=UTF-8',
@@ -507,9 +514,7 @@ class RackDocApiClient {
     if (mapImageUrl.startsWith('http://') || mapImageUrl.startsWith('https://')) {
       return mapImageUrl;
     }
-    // mapImageUrl viene como '/api/uploads/...' y baseUrl termina en '/api'
-    if (mapImageUrl.startsWith('/api/') && baseUrl.endsWith('/api')) {
-      final rootOrigin = baseUrl.substring(0, baseUrl.length - 4);
+    if (mapImageUrl.startsWith('/api/')) {
       return '$rootOrigin$mapImageUrl';
     }
     return '$baseUrl$mapImageUrl';
