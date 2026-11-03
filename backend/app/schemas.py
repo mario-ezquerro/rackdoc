@@ -472,4 +472,110 @@ class MonitoringSettingsUpdate(BaseModel):
     background_enabled: Optional[bool] = None
 
 
+class CmdbSubnetCreate(BaseModel):
+    cidr: str
+    name: str
+    vlan_id: Optional[int] = None
+    gateway: str = ""
+    subnet_mask: str = "255.255.255.0"
+    dns_servers: str = ""
+    environment: str = "production"
+    location_id: Optional[int] = None
+    notes: str = ""
+
+
+class CmdbSubnetUpdate(BaseModel):
+    cidr: Optional[str] = None
+    name: Optional[str] = None
+    vlan_id: Optional[int] = None
+    gateway: Optional[str] = None
+    subnet_mask: Optional[str] = None
+    dns_servers: Optional[str] = None
+    environment: Optional[str] = None
+    location_id: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class CmdbIpAddressInput(BaseModel):
+    id: Optional[int] = None
+    subnet_id: Optional[int] = None
+    ip_address: str
+    subnet_mask: str = "255.255.255.0"
+    gateway: str = ""
+    vlan_id: Optional[int] = None
+    ip_role: str = "primary_service"
+    interface_name: str = "eth0"
+    mac_address: str = ""
+    fqdn: str = ""
+    is_heartbeat_ip: bool = False
+    allocation_status: str = "assigned"
+    notes: str = ""
+
+
+class CmdbAssetCreate(BaseModel):
+    code: str
+    name: str
+    hostname: str = ""
+    fqdn: str = ""
+    asset_class: str = "virtual_machine"
+    environment: str = "production"
+    criticality: str = "high"
+    lifecycle_status: str = "active"
+    os_or_firmware: str = ""
+    cpu_cores: int = 0
+    ram_gb: float = 0.0
+    storage_gb: float = 0.0
+    hypervisor_or_platform: str = ""
+    serial_or_uuid: str = ""
+    owner_team: str = "Sistemas & Infraestructura"
+    responsible_person: str = "Alex Geng"
+    host_rack_device_id: Optional[int] = None
+    parent_asset_id: Optional[int] = None
+    monitoring_enabled: bool = False
+    monitor_method: str = "icmp"
+    monitor_port: int = 22
+    management_links: List[Dict[str, Any]] = []
+    custom_fields: Dict[str, Any] = {}
+    notes: str = ""
+    ip_addresses: List[CmdbIpAddressInput] = []
+
+
+class CmdbAssetUpdate(BaseModel):
+    code: Optional[str] = None
+    name: Optional[str] = None
+    hostname: Optional[str] = None
+    fqdn: Optional[str] = None
+    asset_class: Optional[str] = None
+    environment: Optional[str] = None
+    criticality: Optional[str] = None
+    lifecycle_status: Optional[str] = None
+    os_or_firmware: Optional[str] = None
+    cpu_cores: Optional[int] = None
+    ram_gb: Optional[float] = None
+    storage_gb: Optional[float] = None
+    hypervisor_or_platform: Optional[str] = None
+    serial_or_uuid: Optional[str] = None
+    owner_team: Optional[str] = None
+    responsible_person: Optional[str] = None
+    host_rack_device_id: Optional[int] = None
+    parent_asset_id: Optional[int] = None
+    monitoring_enabled: Optional[bool] = None
+    monitor_method: Optional[str] = None
+    monitor_port: Optional[int] = None
+    management_links: Optional[List[Dict[str, Any]]] = None
+    custom_fields: Optional[Dict[str, Any]] = None
+    notes: Optional[str] = None
+    ip_addresses: Optional[List[CmdbIpAddressInput]] = None
+
+
+class CmdbVerifyIpRequest(BaseModel):
+    target_ip: str = ""
+    subnet_id: Optional[int] = None
+    ports: List[int] = [22, 80, 443, 3389, 445, 8006, 902, 161]
+    timeout_sec: float = 0.8
+    count_limit: int = 12
+    only_suggest_free: bool = False
+
+
+
 

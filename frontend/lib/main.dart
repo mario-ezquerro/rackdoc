@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'core/api_client.dart';
 import 'core/image_file_picker.dart';
 import 'features/admin/admin_view.dart';
+import 'features/cmdb/cmdb_view.dart';
 import 'features/datacenter/datacenter_floor_view.dart';
 import 'features/locations/locations_view.dart';
 import 'features/rack_editor/rack_editor_view.dart';
@@ -976,6 +977,52 @@ class _RackDocShellState extends State<RackDocShell> {
                   style: TextStyle(fontSize: 11, color: Color(0xFF475569)),
                 ),
               ),
+              const SizedBox(height: 12),
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => launchUrl(
+                  Uri.parse('https://github.com/mario-ezquerro/rackdoc'),
+                  mode: LaunchMode.externalApplication,
+                ),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0F172A),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.code_rounded,
+                        size: 16,
+                        color: Color(0xFF38BDF8),
+                      ),
+                      SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          'Repositorio Oficial GitHub: github.com/mario-ezquerro/rackdoc',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      SizedBox(width: 6),
+                      Icon(
+                        Icons.open_in_new_rounded,
+                        size: 13,
+                        color: Color(0xFF94A3B8),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -1046,6 +1093,36 @@ class _RackDocShellState extends State<RackDocShell> {
                           ],
                         ),
                       ),
+                      // ICONO REPOSITORIO GITHUB OFICIAL
+                      Tooltip(
+                        message:
+                            'Repositorio GitHub: https://github.com/mario-ezquerro/rackdoc',
+                        child: InkWell(
+                          onTap: () => launchUrl(
+                            Uri.parse(
+                              'https://github.com/mario-ezquerro/rackdoc',
+                            ),
+                            mode: LaunchMode.externalApplication,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: const Color(0xFFCBD5E1),
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.code_rounded,
+                              size: 18,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
                       // ICONO RUEDA DE CONFIGURACIÓN (Usuarios, Contraseñas, Roles RBAC y Servidores AD)
                       Tooltip(
                         message:
@@ -1173,8 +1250,14 @@ class _RackDocShellState extends State<RackDocShell> {
                   },
                 ),
                 _SidebarItem(
+                  icon: Icons.hub_rounded,
+                  label: '5. CMDB & Control IPs',
+                  active: _activeNav == 'cmdb',
+                  onTap: () => setState(() => _activeNav = 'cmdb'),
+                ),
+                _SidebarItem(
                   icon: Icons.settings_rounded,
-                  label: '5. Configuración (Usuarios/AD)',
+                  label: '6. Configuración (Usuarios/AD)',
                   active: _activeNav == 'admin',
                   onTap: () => setState(() => _activeNav = 'admin'),
                 ),
@@ -1712,6 +1795,54 @@ class _RackDocShellState extends State<RackDocShell> {
                           style: TextStyle(fontSize: 11),
                         ),
                       ),
+                      const SizedBox(height: 6),
+                      InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () => launchUrl(
+                          Uri.parse(
+                            'https://github.com/mario-ezquerro/rackdoc',
+                          ),
+                          mode: LaunchMode.externalApplication,
+                        ),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 7,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0F172A),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.code_rounded,
+                                size: 14,
+                                color: Color(0xFF38BDF8),
+                              ),
+                              SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  'GitHub: mario-ezquerro/rackdoc',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              SizedBox(width: 4),
+                              Icon(
+                                Icons.open_in_new_rounded,
+                                size: 12,
+                                color: Color(0xFF94A3B8),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -1773,6 +1904,8 @@ class _RackDocShellState extends State<RackDocShell> {
                     _buildKioskQuickNavChip('3. Rack', 'rack_editor'),
                     const SizedBox(width: 4),
                     _buildKioskQuickNavChip('4. Dashboard', 'dashboard'),
+                    const SizedBox(width: 4),
+                    _buildKioskQuickNavChip('5. CMDB', 'cmdb'),
                     Container(
                       width: 1,
                       height: 16,
@@ -1921,6 +2054,20 @@ class _RackDocShellState extends State<RackDocShell> {
 
     if (_activeNav == 'dashboard') {
       return _buildDashboardOverview();
+    }
+
+    if (_activeNav == 'cmdb') {
+      return CmdbView(
+        api: _api,
+        canEdit: _currentUser.canEdit,
+        onNavigateToRackDevice: (rackId, deviceId) {
+          _openRack(rackId, highlightDeviceId: deviceId);
+        },
+        onExportExcel: () async {
+          final url = _api.getExcelExportUrl();
+          await launchUrl(Uri.parse(url));
+        },
+      );
     }
 
     if (_activeNav == 'admin') {

@@ -8,6 +8,10 @@ Permite gestionar visualmente desde la ubicación geográfica de los Datacenters
 
 ## ✨ Novedades Principales de RackDoc8
 
+- **🗂️ Módulo Independiente `5. CMDB & Control IPs` (Multi-IP, VMs, Clusters & Verificador Manual Anti-Conflictos)**:
+  - **Inventario Maestro Físico + Virtual/Lógico**: Gestiona desde un apartado propio tanto los equipos físicos sincronizados del Rack Editor y Plantas como **Máquinas Virtuales (VMs)**, **Contenedores (LXC/K8s)**, **Clusters HA / VIPs**, **Appliances Virtuales** e **Instancias Cloud/VPS** (con vínculo opcional al Servidor Físico/Hipervisor padre del Rack).
+  - **Múltiples IPs por Máquina**: Separa claramente la **IP de Gestión / Manager (`mgmt_heartbeat`)** usada por el Heartbeat del resto de **IPs de Operación/Servicio** (`primary_service`, `secondary_service`, `vip_cluster`, `storage`, `backup`, `vmotion_replication`, `ilo_idrac`, `public_wan`).
+  - **Verificador Manual Profundo de IPs Libres ("Deep IP Probe")**: Antes de asignar una nueva IP, comprueba bajo demanda si está verdaderamente libre en la red combinando **4 sondas reales** (*Ping ICMP + Sondeo TCP Multi-Puerto con detección de rechazo activo TCP RST + Tabla ARP/MAC L2 + DNS Inverso PTR*) y un buscador automático de próximas IPs libres por Subred/VLAN (`.1` a `.254`).
 - **🎨 Identidad Visual RackDoc8**: Logo y favicon personalizado de **RackDoc8** en la pestaña del navegador (`favicon.svg` / `favicon.png`) y en toda la interfaz.
 - **🔆 Tomas Exteriores de Fibra Óptica con Conectores Ajustables (`FIBRA-EXT-1`)**:
   - Además de las tomas eléctricas exteriores Schuko (`TOMA-A`, `TOMA-B`), cada rack cuenta con **Tomas Exteriores de Fibra Óptica** (`FIBRA-EXT-1`, conectores ópticos `FO1..FON` LC/SC).

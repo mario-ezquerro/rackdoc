@@ -306,3 +306,112 @@ class FloorDeviceCustomType(Base):
     is_sensor = Column(Boolean, default=False)
 
 
+class CmdbSubnet(Base):
+    __tablename__ = "cmdb_subnets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cidr = Column(String(64), unique=True, index=True, nullable=False)  # Ej: "10.20.1.0/24"
+    name = Column(String(120), nullable=False)  # Ej: "VLAN 10 - Gestión & Heartbeat CPD"
+    vlan_id = Column(Integer, nullable=True)
+    gateway = Column(String(64), default="")
+    subnet_mask = Column(String(64), default="255.255.255.0")
+    dns_servers = Column(String(255), default="")
+    environment = Column(String(40), default="production")  # production | preprod | dev | mgmt | dmz | storage | cloud
+    location_id = Column(Integer, ForeignKey("locations.id", ondelete="SET NULL"), nullable=True)
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    ip_addresses = relationship("CmdbIpAddress", back_populates="subnet")
+
+
+class CmdbAsset(Base):
+    __tablename__ = "cmdb_assets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(64), unique=True, index=True, nullable=False)  # Ej: VM-ERP-01, CLU-DB-01, CI-SRV01
+    name = Column(String(160), nullable=False)
+    hostname = Column(String(120), default="")
+    fqdn = Column(String(255), default="")
+
+    # Clasificación CMDB (físicos, virtuales, contenedores, clusters, cloud, otros)
+    asset_class = Column(String(50), index=True, default="virtual_machine", nullable=False)
+    # virtual_machine | container_lxc | physical_server | cluster_vip | virtual_appliance |
+    # cloud_instance | network_security | storage_san_nas | floor_endpoint | other_machine
+    environment = Column(String(40), default="production")  # production | preprod | dev | mgmt | dr
+    criticality = Column(String(32), default="high")  # critical | high | medium | low
+    lifecycle_status = Column(String(40), default="active")  # active | maintenance | planned | decommissioned
+
+    # Especificaciones técnicas de la máquina (física o virtual)
+    os_or_firmware = Column(String(120), default="")
+    cpu_cores = Column(Integer, default=0)
+    ram_gb = Column(Float, default=0.0)
+    storage_gb = Column(Float, default=0.0)
+    hypervisor_or_platform = Column(String(120), default="")  # Ej: VMware vSphere 8, Proxmox VE, Baremetal, AWS, K8s
+    serial_or_uuid = Column(String(120), default="")
+
+    # Propiedad y Gobierno
+    owner_team = Column(String(120), default="Sistemas & Infraestructura")
+    responsible_person = Column(String(120), default="Alex Geng")
+
+    # Origen y Relaciones con Racks, Plantas e Hipervisores Padres
+    sync_source = Column(String(32), default="cmdb")  # cmdb | rack_device | floor_device
+    rack_device_id = Column(Integer, ForeignKey("rack_devices.id", ondelete="SET NULL"), nullable=True, index=True)
+    floor_device_id = Column(Integer, ForeignKey("floor_devices.id", ondelete="SET NULL"), nullable=True, index=True)
+    host_rack_device_id = Column(Integer, ForeignKey("rack_devices.id", ondelete="SET NULL"), nullable=True, index=True)
+    parent_asset_id = Column(Integer, ForeignKey("cmdb_assets.id", ondelete="SET NULL"), nullable=True)
+
+    # Monitorización (Heartbeat sobre su IP de Gestión) y Accesos Remotos
+    monitoring_enabled = Column(Boolean, default=False)
+    monitor_method = Column(String(32), default="icmp")  # icmp | ssh | http | https | tcp | udp | snmp
+    monitor_port = Column(Integer, default=22)
+    status = Column(String(32), default="unmonitored")  # online | offline | warning | unmonitored
+    last_ping_ms = Column(Float, nullable=True)
+    last_checked_at = Column(DateTime, nullable=True)
+    management_links = Column(JSON, default=list)
+    custom_fields = Column(JSON, default=dict)
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+    ip_addresses = relationship(
+        "CmdbIpAddress",
+        back_populates="asset",
+        cascade="all, delete-orphan",
+        order_by="CmdbIpAddress.id",
+    )
+
+
+class CmdbIpAddress(Base):
+    __tablename__ = "cmdb_ip_addresses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_id = Column(Integer, ForeignKey("cmdb_assets.id", ondelete="CASCADE"), nullable=True, index=True)
+    subnet_id = Column(Integer, ForeignKey("cmdb_subnets.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    ip_address = Column(String(64), index=True, nullable=False)
+    subnet_mask = Column(String(64), default="255.255.255.0")
+    gateway = Column(String(64), default="")
+    vlan_id = Column(Integer, nullable=True)
+
+    # Rol de la IP dentro de la máquina:
+    # mgmt_heartbeat | ilo_idrac | primary_service | secondary_service | vip_cluster |
+    # storage | backup | vmotion_replication | public_wan | reserved
+    ip_role = Column(String(40), default="primary_service", nullable=False)
+    interface_name = Column(String(64), default="eth0")  # Ej: mgmt0, eno1, ens192, bond0.20, vip0, iDRAC
+    mac_address = Column(String(64), default="")
+    fqdn = Column(String(255), default="")
+    is_heartbeat_ip = Column(Boolean, default=False)
+
+    # Estado administrativo y de verificación manual contra la red real
+    allocation_status = Column(String(32), default="assigned")  # assigned | reserved | dhcp | conflict | deprecated
+    last_verification_status = Column(String(40), default="unverified")
+    # free_confirmed | active_in_network | no_response | conflict_unregistered | unverified
+    last_verified_at = Column(DateTime, nullable=True)
+    last_verification_detail = Column(Text, default="")
+    notes = Column(Text, default="")
+
+    asset = relationship("CmdbAsset", back_populates="ip_addresses")
+    subnet = relationship("CmdbSubnet", back_populates="ip_addresses")
+
+
+

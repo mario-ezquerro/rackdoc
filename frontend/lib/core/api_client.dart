@@ -766,4 +766,127 @@ class RackDocApiClient {
     );
     return Map<String, dynamic>.from(_decodeResponse(res) as Map);
   }
+
+  // --- CMDB & IPAM + Verificador Manual Multi-Sonda de IPs ---
+
+  Future<Map<String, dynamic>> fetchCmdbOverview() async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/cmdb/overview'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> createCmdbAsset(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/cmdb/assets'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> updateCmdbAsset(
+    int assetId,
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/cmdb/assets/$assetId'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> deleteCmdbAsset(int assetId) async {
+    final res = await http.delete(
+      Uri.parse('$baseUrl/cmdb/assets/$assetId'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> addCmdbAssetIp(
+    int assetId,
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/cmdb/assets/$assetId/ips'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> deleteCmdbIp(int ipId) async {
+    final res = await http.delete(
+      Uri.parse('$baseUrl/cmdb/ips/$ipId'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> runCmdbAssetHeartbeat(int assetId) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/cmdb/assets/$assetId/heartbeat'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> createCmdbSubnet(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/cmdb/subnets'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> updateCmdbSubnet(
+    int subnetId,
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/cmdb/subnets/$subnetId'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> deleteCmdbSubnet(int subnetId) async {
+    final res = await http.delete(
+      Uri.parse('$baseUrl/cmdb/subnets/$subnetId'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> verifyCmdbIp({
+    String targetIp = '',
+    int? subnetId,
+    List<int>? ports,
+    double timeoutSec = 0.7,
+    int countLimit = 8,
+    bool onlySuggestFree = false,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/cmdb/verify-ip'),
+      headers: _headers,
+      body: jsonEncode({
+        'target_ip': targetIp,
+        'subnet_id': subnetId,
+        'ports': ports ?? [22, 80, 443, 3389, 445, 8006, 902, 161],
+        'timeout_sec': timeoutSec,
+        'count_limit': countLimit,
+        'only_suggest_free': onlySuggestFree,
+      }),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
 }

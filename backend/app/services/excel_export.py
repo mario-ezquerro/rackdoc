@@ -1127,6 +1127,73 @@ def generate_datacenter_excel(
         ])
     _style_worksheet(ws_cables)
 
+    # ---------------------------------------------------------
+    # HOJA 5: CMDB — Hosts, Máquinas Virtuales, Clusters y Múltiples IPs
+    # ---------------------------------------------------------
+    try:
+        from .cmdb_service import build_cmdb_overview
+        cmdb_data = build_cmdb_overview(db)
+        ws_cmdb = wb.create_sheet(title="5_CMDB_Hosts_y_Multi_IP")
+        ws_cmdb.append([
+            "Código CI",
+            "Nombre Máquina / Activo",
+            "Clase CI (Físico/VM/Cluster/Cloud)",
+            "Origen",
+            "Hostname",
+            "FQDN Principal",
+            "Entorno",
+            "Criticidad",
+            "Estado Ciclo Vida",
+            "SO / Firmware",
+            "vCPUs / Cores",
+            "RAM (GB)",
+            "Disco (GB)",
+            "Plataforma / Hipervisor",
+            "Ubicación / Host Padre en Rack",
+            "IP Heartbeat / Manager",
+            "IPs Adicionales (Servicio / VIP / Storage / Backup)",
+            "Total IPs",
+            "Detalle Todas las Interfaces e IPs",
+            "Estado Heartbeat",
+            "Equipo Propietario",
+            "Responsable",
+            "Notas",
+        ])
+        for ast in cmdb_data.get("assets", []):
+            all_ips_detail = " ; ".join(
+                f"[{ip.get('ip_role_label', ip.get('ip_role'))}] {ip.get('interface_name')}: {ip.get('ip_address')} "
+                f"(VLAN {ip.get('vlan_id') or '-'}, DNS: {ip.get('fqdn') or '-'})"
+                for ip in ast.get("ip_addresses", [])
+            )
+            ws_cmdb.append([
+                ast.get("code", ""),
+                ast.get("name", ""),
+                ast.get("asset_class_label", ""),
+                ast.get("sync_source", "").upper(),
+                ast.get("hostname", ""),
+                ast.get("fqdn", ""),
+                ast.get("environment", "").upper(),
+                ast.get("criticality", "").upper(),
+                ast.get("lifecycle_status", "").upper(),
+                ast.get("os_or_firmware", ""),
+                ast.get("cpu_cores", 0),
+                ast.get("ram_gb", 0),
+                ast.get("storage_gb", 0),
+                ast.get("hypervisor_or_platform", ""),
+                ast.get("physical_location_label", ""),
+                ast.get("heartbeat_ip", ""),
+                ", ".join(ast.get("service_ips", [])),
+                ast.get("ip_count", 0),
+                all_ips_detail,
+                ast.get("status", "").upper(),
+                ast.get("owner_team", ""),
+                ast.get("responsible_person", ""),
+                ast.get("notes", ""),
+            ])
+        _style_worksheet(ws_cmdb)
+    except Exception:
+        pass
+
     output = BytesIO()
     wb.save(output)
     output.seek(0)
