@@ -4176,13 +4176,46 @@ def run_cmdb_asset_heartbeat_endpoint(asset_id: int, db: Session = Depends(get_d
     summary="Crear nueva Subred / VLAN en el IPAM de la CMDB",
 )
 def create_cmdb_subnet_endpoint(payload: CmdbSubnetCreate, db: Session = Depends(get_db)):
-    cidr_clean = payload.cidr.strip()
-    if not cidr_clean:
-        raise HTTPException(status_code=400, detail="El bloque CIDR es obligatorio (ej. 10.20.40.0/24).")
-    exists = db.query(CmdbSubnet).filter(CmdbSubnet.cidr == cidr_clean).first()
+    import ipaddress as _ipaddress
+
+    cidr_raw = (payload.cidr or "").strip()
+    if not cidr_raw:
+        raise HTTPException(status_code=400, detail="El bloque CIDR es obligatorio (ej. 10.20.40.0/24 o 10.20.40.0/23).")
+    if "/" not in cidr_raw:
+        cidr_raw = f"{cidr_raw}/24"
+    try:
+        net = _ipaddress.ip_network(cidr_raw, strict=False)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"El bloque CIDR '{cidr_raw}' no es válido: {exc}",
+        )
+    cidr_norm = str(net)
+    exists = db.query(CmdbSubnet).filter(CmdbSubnet.cidr == cidr_norm).first()
     if exists:
-        raise HTTPException(status_code=409, detail=f"La subred '{cidr_clean}' ya está registrada.")
-    sub = CmdbSubnet(**payload.model_dump())
+        raise HTTPException(status_code=409, detail=f"La subred '{cidr_norm}' ya está registrada.")
+
+    data = payload.model_dump()
+    data["cidr"] = cidr_norm
+    data["subnet_mask"] = str(net.netmask)
+
+    gw_clean = (data.get("gateway") or "").strip()
+    first_usable = (
+        str(_ipaddress.ip_address(int(net.network_address) + 1))
+        if net.num_addresses > 2
+        else str(net.network_address)
+    )
+    if gw_clean:
+        try:
+            gw_ip = _ipaddress.ip_address(gw_clean)
+            if gw_ip not in net or (net.num_addresses > 2 and gw_ip in (net.network_address, net.broadcast_address)):
+                data["gateway"] = first_usable
+        except ValueError:
+            data["gateway"] = first_usable
+    else:
+        data["gateway"] = first_usable
+
+    sub = CmdbSubnet(**data)
     db.add(sub)
     db.commit()
     return build_cmdb_overview(db)
@@ -4198,10 +4231,36 @@ def update_cmdb_subnet_endpoint(
     payload: CmdbSubnetUpdate,
     db: Session = Depends(get_db),
 ):
+    import ipaddress as _ipaddress
+
     sub = db.query(CmdbSubnet).filter(CmdbSubnet.id == subnet_id).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subred no encontrada.")
-    for k, v in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    if "cidr" in updates and updates["cidr"]:
+        cidr_raw = updates["cidr"].strip()
+        if "/" not in cidr_raw:
+            cidr_raw = f"{cidr_raw}/24"
+        try:
+            net = _ipaddress.ip_network(cidr_raw, strict=False)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"El bloque CIDR '{cidr_raw}' no es válido: {exc}")
+        updates["cidr"] = str(net)
+        updates["subnet_mask"] = str(net.netmask)
+        first_usable = (
+            str(_ipaddress.ip_address(int(net.network_address) + 1))
+            if net.num_addresses > 2
+            else str(net.network_address)
+        )
+        gw_candidate = (updates.get("gateway") if "gateway" in updates else sub.gateway or "").strip()
+        try:
+            gw_ip = _ipaddress.ip_address(gw_candidate)
+            if gw_ip not in net or (net.num_addresses > 2 and gw_ip in (net.network_address, net.broadcast_address)):
+                updates["gateway"] = first_usable
+        except ValueError:
+            updates["gateway"] = first_usable
+
+    for k, v in updates.items():
         setattr(sub, k, v)
     db.commit()
     return build_cmdb_overview(db)

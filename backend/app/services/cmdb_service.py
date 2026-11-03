@@ -1714,16 +1714,82 @@ def build_cmdb_overview(db: Session) -> Dict[str, Any]:
         for a in assets
     ]
 
-    # Construir detalle de subredes y mapa de ocupación
+    # Construir detalle de subredes y mapa de ocupación (respetando la máscara real /23, /24, /25, /26, etc.)
     all_ips = db.query(CmdbIpAddress).options(joinedload(CmdbIpAddress.asset)).all()
     serialized_subnets = []
+    subnets_dirty = False
     for sub in subnets:
+        raw_cidr = (sub.cidr or "").strip()
+        if raw_cidr and "/" not in raw_cidr:
+            raw_cidr = f"{raw_cidr}/24"
         try:
-            net = ipaddress.ip_network(sub.cidr.strip(), strict=False)
+            net = ipaddress.ip_network(raw_cidr, strict=False)
+            total_addresses = net.num_addresses
             total_usable = max(1, net.num_addresses - 2) if net.num_addresses > 2 else net.num_addresses
+            canonical_cidr = str(net)
+            real_mask = str(net.netmask)
+            network_addr_str = str(net.network_address)
+            broadcast_addr_str = str(net.broadcast_address) if net.num_addresses > 1 else ""
+            first_usable_str = (
+                str(ipaddress.ip_address(int(net.network_address) + 1))
+                if net.num_addresses > 2
+                else str(net.network_address)
+            )
+            last_usable_str = (
+                str(ipaddress.ip_address(int(net.broadcast_address) - 1))
+                if net.num_addresses > 2
+                else str(net.broadcast_address)
+            )
+            prefix_len = net.prefixlen
+
+            # Normalizar automáticamente si la subred tenía máscara por defecto errónea o CIDR sin alinear a dirección de red
+            if sub.cidr != canonical_cidr:
+                existing_same = (
+                    db.query(CmdbSubnet)
+                    .filter(CmdbSubnet.cidr == canonical_cidr, CmdbSubnet.id != sub.id)
+                    .first()
+                )
+                if not existing_same:
+                    sub.cidr = canonical_cidr
+                    subnets_dirty = True
+            if sub.subnet_mask != real_mask:
+                sub.subnet_mask = real_mask
+                subnets_dirty = True
+            gw_val = (sub.gateway or "").strip()
+            try:
+                gw_ip = ipaddress.ip_address(gw_val) if gw_val else None
+                if gw_ip is None or gw_ip not in net or (net.num_addresses > 2 and gw_ip in (net.network_address, net.broadcast_address)):
+                    sub.gateway = first_usable_str
+                    subnets_dirty = True
+            except ValueError:
+                sub.gateway = first_usable_str
+                subnets_dirty = True
+
+            # Generar todas las direcciones del bloque CIDR (incluyendo Dirección de Red y Broadcast) hasta 4096 IPs (/20)
+            max_grid_ips = min(net.num_addresses, 4096)
+            base_int = int(net.network_address)
+            address_list = [str(ipaddress.ip_address(base_int + offset)) for offset in range(max_grid_ips)]
+            sub_blocks_24: List[str] = []
+            if net.prefixlen < 24 and net.num_addresses <= 4096:
+                seen_b24 = set()
+                for ip_s in address_list:
+                    b24 = ip_s.rsplit(".", 1)[0]
+                    if b24 not in seen_b24:
+                        seen_b24.add(b24)
+                        sub_blocks_24.append(b24)
         except ValueError:
             net = None
+            total_addresses = 256
             total_usable = 254
+            canonical_cidr = sub.cidr
+            real_mask = sub.subnet_mask or "255.255.255.0"
+            network_addr_str = ""
+            broadcast_addr_str = ""
+            first_usable_str = ""
+            last_usable_str = ""
+            prefix_len = 24
+            address_list = []
+            sub_blocks_24 = []
 
         sub_ips = [
             ip for ip in all_ips
@@ -1756,10 +1822,16 @@ def build_cmdb_overview(db: Session) -> Dict[str, Any]:
             {
                 "id": sub.id,
                 "cidr": sub.cidr,
+                "prefixlen": prefix_len,
                 "name": sub.name,
                 "vlan_id": sub.vlan_id,
                 "gateway": sub.gateway,
                 "subnet_mask": sub.subnet_mask,
+                "network_address": network_addr_str,
+                "broadcast_address": broadcast_addr_str,
+                "first_usable_ip": first_usable_str,
+                "last_usable_ip": last_usable_str,
+                "total_addresses": total_addresses,
                 "dns_servers": sub.dns_servers,
                 "environment": sub.environment,
                 "location_id": sub.location_id,
@@ -1769,8 +1841,13 @@ def build_cmdb_overview(db: Session) -> Dict[str, Any]:
                 "free_count": max(0, total_usable - occupied_count),
                 "usage_percent": usage_pct,
                 "allocated_ips": list(used_map.values()),
+                "address_list": address_list,
+                "sub_blocks_24": sub_blocks_24,
             }
         )
+
+    if subnets_dirty:
+        db.commit()
 
     # Lista de servidores físicos del Rack para selector de "Host Hipervisor Padre"
     physical_hosts = []

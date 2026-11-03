@@ -55,6 +55,7 @@ class _CmdbViewState extends State<CmdbView> {
 
   // Estado de '3. Subredes, VLANs & Mapa Visual IPAM'
   int? _selectedIpamSubnetId;
+  String _selectedIpamSubBlock24 = 'all';
 
   static const Map<String, String> _assetClassLabels = {
     'virtual_machine': 'Máquina Virtual (VM)',
@@ -2360,7 +2361,7 @@ class _CmdbViewState extends State<CmdbView> {
   }
 
   // ===========================================================================
-  // PESTAÑA 3: SUBREDES, VLANs Y MAPA VISUAL IPAM (.1 a .254)
+  // PESTAÑA 3: SUBREDES, VLANs Y MAPA VISUAL IPAM (SEGÚN MÁSCARA REAL /23, /24, /25...)
   // ===========================================================================
   Widget _buildSubnetsAndIpamGridTab() {
     final subnets = _subnets;
@@ -2370,9 +2371,67 @@ class _CmdbViewState extends State<CmdbView> {
     );
 
     final String cidr = (selectedSubnet['cidr'] ?? '10.20.20.0/24').toString();
-    final String basePrefix = cidr.contains('.')
-        ? cidr.split('/')[0].rsplitThreeOctets()
-        : '10.20.20';
+    final parsedCidr = _ParsedCidrBlock.tryParse(cidr);
+
+    final int prefixLen = (selectedSubnet['prefixlen'] as int?) ??
+        parsedCidr?.prefixLen ??
+        24;
+    final String subnetMask =
+        (selectedSubnet['subnet_mask'] ?? parsedCidr?.subnetMask ?? '255.255.255.0')
+            .toString();
+    final String networkAddress =
+        (selectedSubnet['network_address'] ?? parsedCidr?.networkAddress ?? '')
+            .toString();
+    final String broadcastAddress =
+        (selectedSubnet['broadcast_address'] ?? parsedCidr?.broadcastAddress ?? '')
+            .toString();
+    final String firstUsableIp =
+        (selectedSubnet['first_usable_ip'] ?? parsedCidr?.firstUsableIp ?? '')
+            .toString();
+    final String lastUsableIp =
+        (selectedSubnet['last_usable_ip'] ?? parsedCidr?.lastUsableIp ?? '')
+            .toString();
+    final int totalAddresses = (selectedSubnet['total_addresses'] as int?) ??
+        parsedCidr?.totalAddresses ??
+        256;
+    final int totalUsable = (selectedSubnet['total_usable'] as int?) ??
+        parsedCidr?.totalUsable ??
+        254;
+
+    // Lista completa de direcciones IP del bloque según su máscara real (incluyendo Dirección de Red y Broadcast)
+    List<String> fullAddressList =
+        ((selectedSubnet['address_list'] as List?) ?? [])
+            .map((e) => e.toString())
+            .toList();
+    if (fullAddressList.isEmpty && parsedCidr != null) {
+      fullAddressList = parsedCidr.buildAddressList(maxLimit: 4096);
+    }
+
+    final List<String> subBlocks24 =
+        ((selectedSubnet['sub_blocks_24'] as List?) ?? [])
+            .map((e) => e.toString())
+            .toList();
+    if (subBlocks24.isEmpty && prefixLen < 24 && fullAddressList.isNotEmpty) {
+      final seen = <String>{};
+      for (final ip in fullAddressList) {
+        final b24 = ip.rsplitThreeOctets();
+        if (seen.add(b24)) {
+          subBlocks24.add(b24);
+        }
+      }
+    }
+
+    final String activeBlockFilter =
+        (subBlocks24.length > 1 && subBlocks24.contains(_selectedIpamSubBlock24))
+            ? _selectedIpamSubBlock24
+            : 'all';
+
+    final List<String> displayedAddresses = activeBlockFilter == 'all'
+        ? fullAddressList
+        : fullAddressList
+            .where((ip) => ip.startsWith('$activeBlockFilter.'))
+            .toList();
+
     final List<Map<String, dynamic>> allocatedList =
         ((selectedSubnet['allocated_ips'] as List?) ?? [])
             .map((e) => Map<String, dynamic>.from(e as Map))
@@ -2382,13 +2441,14 @@ class _CmdbViewState extends State<CmdbView> {
         (item['ip_address'] ?? '').toString(): item,
     };
     final String gwIp = (selectedSubnet['gateway'] ?? '').toString();
+    final bool multiOctetLabel = prefixLen < 24;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Columna izquierda: Lista de Subredes / VLANs
         Container(
-          width: 340,
+          width: 355,
           decoration: const BoxDecoration(
             color: Colors.white,
             border: Border(right: BorderSide(color: Color(0xFFE2E8F0))),
@@ -2417,10 +2477,10 @@ class _CmdbViewState extends State<CmdbView> {
                     ),
                     if (widget.canEdit)
                       FilledButton.tonalIcon(
-                        onPressed: _openCreateSubnetDialog,
+                        onPressed: () => _openCreateSubnetDialog(),
                         icon: const Icon(Icons.add, size: 15),
                         label: const Text(
-                          'Nueva VLAN',
+                          'Nueva Red / VLAN',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w800,
@@ -2441,6 +2501,11 @@ class _CmdbViewState extends State<CmdbView> {
                     final isSel = id == selectedSubnet['id'];
                     final double pct =
                         (s['usage_percent'] as num?)?.toDouble() ?? 0.0;
+                    final String sMask = (s['subnet_mask'] ?? '').toString();
+                    final String sNetAddr =
+                        (s['network_address'] ?? '').toString();
+                    final String sBcastAddr =
+                        (s['broadcast_address'] ?? '').toString();
                     return Card(
                       elevation: 0,
                       margin: const EdgeInsets.only(bottom: 8),
@@ -2458,8 +2523,10 @@ class _CmdbViewState extends State<CmdbView> {
                       ),
                       child: InkWell(
                         borderRadius: BorderRadius.circular(8),
-                        onTap: () =>
-                            setState(() => _selectedIpamSubnetId = id),
+                        onTap: () => setState(() {
+                          _selectedIpamSubnetId = id;
+                          _selectedIpamSubBlock24 = 'all';
+                        }),
                         child: Padding(
                           padding: const EdgeInsets.all(12),
                           child: Column(
@@ -2467,15 +2534,16 @@ class _CmdbViewState extends State<CmdbView> {
                             children: [
                               Row(
                                 children: [
-                                  Text(
-                                    (s['cidr'] ?? '').toString(),
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w900,
-                                      fontFamily: 'monospace',
+                                  Expanded(
+                                    child: Text(
+                                      (s['cidr'] ?? '').toString(),
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w900,
+                                        fontFamily: 'monospace',
+                                      ),
                                     ),
                                   ),
-                                  const Spacer(),
                                   if (s['vlan_id'] != null)
                                     Container(
                                       padding: const EdgeInsets.symmetric(
@@ -2495,15 +2563,52 @@ class _CmdbViewState extends State<CmdbView> {
                                         ),
                                       ),
                                     ),
+                                  if (widget.canEdit) ...[
+                                    const SizedBox(width: 4),
+                                    InkWell(
+                                      borderRadius: BorderRadius.circular(4),
+                                      onTap: () =>
+                                          _openCreateSubnetDialog(existing: s),
+                                      child: const Padding(
+                                        padding: EdgeInsets.all(3),
+                                        child: Icon(
+                                          Icons.edit_outlined,
+                                          size: 15,
+                                          color: Color(0xFF475569),
+                                        ),
+                                      ),
+                                    ),
+                                    InkWell(
+                                      borderRadius: BorderRadius.circular(4),
+                                      onTap: () => _confirmDeleteSubnet(s),
+                                      child: const Padding(
+                                        padding: EdgeInsets.all(3),
+                                        child: Icon(
+                                          Icons.delete_outline,
+                                          size: 15,
+                                          color: Colors.redAccent,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
-                              const SizedBox(height: 4),
+                              const SizedBox(height: 3),
                               Text(
                                 (s['name'] ?? '').toString(),
                                 style: const TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
                                   color: Color(0xFF334155),
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Máscara: $sMask • Red: $sNetAddr • Bcast: $sBcastAddr',
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  fontFamily: 'monospace',
+                                  color: Color(0xFF475569),
                                 ),
                               ),
                               const SizedBox(height: 6),
@@ -2518,7 +2623,7 @@ class _CmdbViewState extends State<CmdbView> {
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                'Ocupadas: ${s['occupied_count']} / ${s['total_usable']} (${pct.toStringAsFixed(1)}%) • GW: ${s['gateway'] ?? '-'}',
+                                'Ocupadas: ${s['occupied_count']} / ${s['total_usable']} útiles (${pct.toStringAsFixed(1)}%) • GW: ${s['gateway'] ?? '-'}',
                                 style: const TextStyle(
                                   fontSize: 10.5,
                                   color: Color(0xFF64748B),
@@ -2535,12 +2640,12 @@ class _CmdbViewState extends State<CmdbView> {
             ],
           ),
         ),
-        // Lienzo derecho: Mapa Visual de las 254 IPs de la Subred (.1 a .254)
+        // Lienzo derecho: Mapa Visual de todas las IPs según su máscara (/23 = 512 IPs, /24 = 256 IPs, /25 = 128 IPs, etc.)
         Expanded(
           child: selectedSubnet.isEmpty
               ? const Center(child: Text('Selecciona o crea una subred'))
               : Padding(
-                  padding: const EdgeInsets.all(18),
+                  padding: const EdgeInsets.all(16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -2559,7 +2664,7 @@ class _CmdbViewState extends State<CmdbView> {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  'Haz clic en cualquier casilla (.1 a .254): si está ocupada verás su Máquina y Rol; si está libre podrás verificarla con Ping+TCP+ARP o asignarla a un Host.',
+                                  'Mostrando las $totalAddresses direcciones de la máscara /$prefixLen ($subnetMask): incluyendo Dirección de Red ($networkAddress), $totalUsable hosts útiles ($firstUsableIp a $lastUsableIp) y Dirección de Broadcast ($broadcastAddress).',
                                   style: const TextStyle(
                                     fontSize: 11.5,
                                     color: Color(0xFF475569),
@@ -2568,7 +2673,28 @@ class _CmdbViewState extends State<CmdbView> {
                               ],
                             ),
                           ),
+                          const SizedBox(width: 8),
                           FilledButton.tonalIcon(
+                            onPressed: () {
+                              setState(() {
+                                _verifyIpCtrl.text = cidr;
+                                _verifySelectedSubnetId =
+                                    selectedSubnet['id'] as int?;
+                                _activeTab = 'verifier';
+                              });
+                              _runManualVerification(customIp: cidr);
+                            },
+                            icon: const Icon(Icons.radar_rounded, size: 16),
+                            label: Text(
+                              'Escanear Rango $cidr',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
                             onPressed: () {
                               setState(() {
                                 _verifySelectedSubnetId =
@@ -2577,9 +2703,9 @@ class _CmdbViewState extends State<CmdbView> {
                               });
                               _runManualVerification(onlySuggestFree: true);
                             },
-                            icon: const Icon(Icons.radar_rounded, size: 16),
+                            icon: const Icon(Icons.auto_fix_high_rounded, size: 15),
                             label: const Text(
-                              'Sugerir y Verificar Próxima IP Libre de esta VLAN',
+                              'Sugerir IP Libre',
                               style: TextStyle(
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w800,
@@ -2588,7 +2714,141 @@ class _CmdbViewState extends State<CmdbView> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
+                      // Ficha técnica de la Red según su Máscara (Dirección de Red, Broadcast, Máscara, Rango Útil, Gateway)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 9,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFCBD5E1)),
+                        ),
+                        child: Wrap(
+                          spacing: 14,
+                          runSpacing: 8,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            _buildSubnetSpecPill(
+                              icon: Icons.tag_rounded,
+                              label: 'Máscara',
+                              value: '$subnetMask (/$prefixLen)',
+                              color: const Color(0xFF0F172A),
+                            ),
+                            _buildSubnetSpecPill(
+                              icon: Icons.hub_rounded,
+                              label: 'Dirección de Red (No asignable)',
+                              value: networkAddress,
+                              color: const Color(0xFF3730A3),
+                              bgColor: const Color(0xFFE0E7FF),
+                            ),
+                            _buildSubnetSpecPill(
+                              icon: Icons.podcasts_rounded,
+                              label: 'Dirección de Broadcast (No asignable)',
+                              value: broadcastAddress,
+                              color: const Color(0xFF86198F),
+                              bgColor: const Color(0xFFFAE8FF),
+                            ),
+                            _buildSubnetSpecPill(
+                              icon: Icons.swap_horiz_rounded,
+                              label: 'Rango Hosts Útiles',
+                              value: '$firstUsableIp ➔ $lastUsableIp ($totalUsable IPs)',
+                              color: const Color(0xFF0369A1),
+                            ),
+                            _buildSubnetSpecPill(
+                              icon: Icons.router_rounded,
+                              label: 'Gateway',
+                              value: gwIp.isEmpty ? '-' : gwIp,
+                              color: const Color(0xFFB45309),
+                              bgColor: const Color(0xFFFEF3C7),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      // Leyenda de colores + Selector de sub-bloque /24 cuando la máscara es mayor (/23, /22, etc.)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Wrap(
+                              spacing: 10,
+                              runSpacing: 6,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                _buildLegendDot(
+                                  const Color(0xFFE0E7FF),
+                                  const Color(0xFF4338CA),
+                                  'DIR. RED ($networkAddress)',
+                                ),
+                                _buildLegendDot(
+                                  const Color(0xFFFAE8FF),
+                                  const Color(0xFFA21CAF),
+                                  'BROADCAST ($broadcastAddress)',
+                                ),
+                                _buildLegendDot(
+                                  const Color(0xFFFEF3C7),
+                                  const Color(0xFFF59E0B),
+                                  'Gateway ($gwIp)',
+                                ),
+                                _buildLegendDot(
+                                  const Color(0xFFE0F2FE),
+                                  const Color(0xFF0284C7),
+                                  'Ocupada (Heartbeat)',
+                                ),
+                                _buildLegendDot(
+                                  const Color(0xFFDCFCE7),
+                                  const Color(0xFF16A34A),
+                                  'Ocupada (Servicio/VIP)',
+                                ),
+                                _buildLegendDot(
+                                  const Color(0xFFF8FAFC),
+                                  const Color(0xFFCBD5E1),
+                                  'IP Libre Asignable',
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (subBlocks24.length > 1)
+                            Wrap(
+                              spacing: 6,
+                              children: [
+                                ChoiceChip(
+                                  selected: activeBlockFilter == 'all',
+                                  label: Text(
+                                    'Toda la red /$prefixLen (${fullAddressList.length} IPs)',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  onSelected: (_) => setState(
+                                    () => _selectedIpamSubBlock24 = 'all',
+                                  ),
+                                ),
+                                ...subBlocks24.map((b24) {
+                                  final isBlockSel = activeBlockFilter == b24;
+                                  return ChoiceChip(
+                                    selected: isBlockSel,
+                                    label: Text(
+                                      'Bloque $b24.x (256)',
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        fontFamily: 'monospace',
+                                      ),
+                                    ),
+                                    onSelected: (_) => setState(
+                                      () => _selectedIpamSubBlock24 = b24,
+                                    ),
+                                  );
+                                }),
+                              ],
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
                       Expanded(
                         child: Container(
                           padding: const EdgeInsets.all(14),
@@ -2599,30 +2859,55 @@ class _CmdbViewState extends State<CmdbView> {
                           ),
                           child: GridView.builder(
                             gridDelegate:
-                                const SliverGridDelegateWithMaxCrossAxisExtent(
-                              maxCrossAxisExtent: 68,
+                                SliverGridDelegateWithMaxCrossAxisExtent(
+                              maxCrossAxisExtent: multiOctetLabel ? 84 : 72,
                               mainAxisSpacing: 6,
                               crossAxisSpacing: 6,
-                              childAspectRatio: 1.35,
+                              childAspectRatio: multiOctetLabel ? 1.48 : 1.32,
                             ),
-                            itemCount: 254,
+                            itemCount: displayedAddresses.length,
                             itemBuilder: (ctx, idx) {
-                              final octet = idx + 1;
-                              final ipStr = '$basePrefix.$octet';
-                              final isGw = ipStr == gwIp;
+                              final ipStr = displayedAddresses[idx];
+                              final bool isNetworkAddr =
+                                  ipStr == networkAddress && totalAddresses > 2;
+                              final bool isBroadcastAddr =
+                                  ipStr == broadcastAddress && totalAddresses > 2;
+                              final bool isGw = ipStr == gwIp &&
+                                  !isNetworkAddr &&
+                                  !isBroadcastAddr;
                               final alloc = allocatedByIp[ipStr];
                               final bool isOccupied = alloc != null;
                               final bool isHb =
                                   alloc?['is_heartbeat_ip'] == true;
 
+                              final parts = ipStr.split('.');
+                              final String cellIpLabel =
+                                  (multiOctetLabel && parts.length == 4)
+                                      ? '.${parts[2]}.${parts[3]}'
+                                      : (parts.isNotEmpty
+                                          ? '.${parts.last}'
+                                          : ipStr);
+
                               Color bg = const Color(0xFFF8FAFC);
                               Color border = const Color(0xFFE2E8F0);
                               Color txt = const Color(0xFF475569);
+                              String roleBadge = 'Libre';
 
-                              if (isGw) {
+                              if (isNetworkAddr) {
+                                bg = const Color(0xFFE0E7FF);
+                                border = const Color(0xFF4338CA);
+                                txt = const Color(0xFF312E81);
+                                roleBadge = 'DIR. RED';
+                              } else if (isBroadcastAddr) {
+                                bg = const Color(0xFFFAE8FF);
+                                border = const Color(0xFFA21CAF);
+                                txt = const Color(0xFF701A75);
+                                roleBadge = 'BROADCAST';
+                              } else if (isGw) {
                                 bg = const Color(0xFFFEF3C7);
                                 border = const Color(0xFFF59E0B);
                                 txt = const Color(0xFF92400E);
+                                roleBadge = 'GATEWAY';
                               } else if (isOccupied) {
                                 bg = isHb
                                     ? const Color(0xFFE0F2FE)
@@ -2633,14 +2918,22 @@ class _CmdbViewState extends State<CmdbView> {
                                 txt = isHb
                                     ? const Color(0xFF075985)
                                     : const Color(0xFF14532D);
+                                roleBadge =
+                                    (alloc['asset_code'] ?? '').toString();
                               }
 
+                              final String tooltipMsg = isNetworkAddr
+                                  ? '$ipStr • DIRECCIÓN DE RED ($cidr)\nIdentificador de la subred (Todos los bits de host a 0). Reservada por protocolo IPv4; NO asignable a equipos.'
+                                  : isBroadcastAddr
+                                      ? '$ipStr • DIRECCIÓN DE BROADCAST ($cidr)\nDirección de difusión de la subred (Todos los bits de host a 1). Reservada por protocolo IPv4; NO asignable a equipos.'
+                                      : isGw
+                                          ? '$ipStr • PUERTA DE ENLACE (GATEWAY) DE LA SUBRED'
+                                          : isOccupied
+                                              ? '$ipStr • OCUPADA por ${alloc['asset_code']} (${alloc['asset_name']})\nRol: ${alloc['ip_role_label']} (${alloc['interface_name']})'
+                                              : '$ipStr • IP LIBRE ASIGNABLE en $cidr (Clic para verificar en red o asignar)';
+
                               return Tooltip(
-                                message: isGw
-                                    ? '$ipStr • GATEWAY DE SUBRED'
-                                    : isOccupied
-                                        ? '$ipStr • OCUPADA por ${alloc['asset_code']} (${alloc['asset_name']})\nRol: ${alloc['ip_role_label']} (${alloc['interface_name']})'
-                                        : '$ipStr • LIBRE en CMDB (Clic para verificar en red o asignar)',
+                                message: tooltipMsg,
                                 child: InkWell(
                                   borderRadius: BorderRadius.circular(6),
                                   onTap: () => _onTapIpamCell(
@@ -2648,40 +2941,52 @@ class _CmdbViewState extends State<CmdbView> {
                                     subnet: selectedSubnet,
                                     allocated: alloc,
                                     isGateway: isGw,
+                                    isNetworkAddress: isNetworkAddr,
+                                    isBroadcastAddress: isBroadcastAddr,
                                   ),
                                   child: Container(
                                     decoration: BoxDecoration(
                                       color: bg,
                                       borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: border),
+                                      border: Border.all(
+                                        color: border,
+                                        width: (isNetworkAddr ||
+                                                isBroadcastAddr ||
+                                                isGw ||
+                                                isOccupied)
+                                            ? 1.4
+                                            : 1.0,
+                                      ),
                                     ),
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 4,
-                                      vertical: 3,
+                                      vertical: 2,
                                     ),
                                     child: Column(
                                       mainAxisAlignment:
                                           MainAxisAlignment.center,
                                       children: [
                                         Text(
-                                          '.$octet',
+                                          cellIpLabel,
                                           style: TextStyle(
-                                            fontSize: 11,
+                                            fontSize:
+                                                multiOctetLabel ? 10.0 : 11.0,
                                             fontWeight: FontWeight.w900,
                                             fontFamily: 'monospace',
                                             color: txt,
                                           ),
+                                          overflow: TextOverflow.ellipsis,
                                         ),
                                         Text(
-                                          isGw
-                                              ? 'GW'
-                                              : isOccupied
-                                                  ? (alloc['asset_code'] ?? '')
-                                                      .toString()
-                                                  : 'Libre',
+                                          roleBadge,
                                           style: TextStyle(
-                                            fontSize: 8.5,
-                                            fontWeight: FontWeight.w700,
+                                            fontSize: 8.0,
+                                            fontWeight: (isNetworkAddr ||
+                                                    isBroadcastAddr ||
+                                                    isGw ||
+                                                    isOccupied)
+                                                ? FontWeight.w900
+                                                : FontWeight.w600,
                                             color: txt,
                                           ),
                                           overflow: TextOverflow.ellipsis,
@@ -2703,23 +3008,130 @@ class _CmdbViewState extends State<CmdbView> {
     );
   }
 
+  Widget _buildSubnetSpecPill({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+    Color? bgColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bgColor ?? Colors.white,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 5),
+          Text(
+            '$label: ',
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+              color: color.withValues(alpha: 0.85),
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              fontFamily: 'monospace',
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLegendDot(Color bg, Color border, String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: border, width: 1.4),
+          ),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          text,
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF334155),
+          ),
+        ),
+      ],
+    );
+  }
+
   void _onTapIpamCell({
     required String ipStr,
     required Map<String, dynamic> subnet,
     required Map<String, dynamic>? allocated,
     required bool isGateway,
+    bool isNetworkAddress = false,
+    bool isBroadcastAddress = false,
   }) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('Dirección IP $ipStr (${subnet['cidr']})'),
         content: SizedBox(
-          width: 460,
+          width: 480,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (isGateway)
+              if (isNetworkAddress)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE0E7FF),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF4338CA)),
+                  ),
+                  child: Text(
+                    'DIRECCIÓN DE RED (${subnet['cidr']} • Máscara ${subnet['subnet_mask']})\n\n'
+                    'La dirección $ipStr es la Dirección de Red del bloque CIDR (todos los bits de host a 0). '
+                    'Está reservada por el protocolo IPv4 para identificar la subred en las tablas de encaminamiento y NO debe asignarse a ninguna máquina.',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12.5,
+                      color: Color(0xFF312E81),
+                    ),
+                  ),
+                )
+              else if (isBroadcastAddress)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFAE8FF),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFA21CAF)),
+                  ),
+                  child: Text(
+                    'DIRECCIÓN DE BROADCAST (${subnet['cidr']} • Máscara ${subnet['subnet_mask']})\n\n'
+                    'La dirección $ipStr es la Dirección de Difusión (Broadcast) del bloque CIDR (todos los bits de host a 1). '
+                    'Está reservada por el protocolo IPv4 para enviar paquetes a todos los nodos de la subred y NO debe asignarse a ninguna máquina.',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12.5,
+                      color: Color(0xFF701A75),
+                    ),
+                  ),
+                )
+              else if (isGateway)
                 const Text(
                   'Esta IP es la Puerta de Enlace (Gateway) configurada para esta subred.',
                   style: TextStyle(fontWeight: FontWeight.w700),
@@ -2739,7 +3151,7 @@ class _CmdbViewState extends State<CmdbView> {
                   Text('FQDN / DNS: ${allocated['fqdn']}'),
               ] else
                 const Text(
-                  'Esta dirección IP figura como LIBRE en la CMDB.\n'
+                  'Esta dirección IP de host figura como LIBRE en la CMDB.\n'
                   'Antes de asignarla a una máquina, te recomendamos lanzar el Verificador Manual (Ping + Puertos TCP + ARP + DNS) para confirmar que nadie la esté usando sin documentar.',
                 ),
             ],
@@ -2750,17 +3162,22 @@ class _CmdbViewState extends State<CmdbView> {
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Cerrar'),
           ),
-          OutlinedButton.icon(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _verifyIpCtrl.text = ipStr;
-              setState(() => _activeTab = 'verifier');
-              _runManualVerification(customIp: ipStr);
-            },
-            icon: const Icon(Icons.radar_rounded, size: 16),
-            label: const Text('Verificar ahora en Red (Ping + TCP + ARP)'),
-          ),
-          if (widget.canEdit && allocated == null && !isGateway) ...[
+          if (!isNetworkAddress && !isBroadcastAddress)
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _verifyIpCtrl.text = ipStr;
+                setState(() => _activeTab = 'verifier');
+                _runManualVerification(customIp: ipStr);
+              },
+              icon: const Icon(Icons.radar_rounded, size: 16),
+              label: const Text('Verificar ahora en Red (Ping + TCP + ARP)'),
+            ),
+          if (widget.canEdit &&
+              allocated == null &&
+              !isGateway &&
+              !isNetworkAddress &&
+              !isBroadcastAddress) ...[
             FilledButton.icon(
               onPressed: () {
                 Navigator.pop(ctx);
@@ -4044,110 +4461,333 @@ class _CmdbViewState extends State<CmdbView> {
     }
   }
 
-  Future<void> _openCreateSubnetDialog() async {
-    final cidrCtrl = TextEditingController(text: '10.20.40.0/24');
-    final nameCtrl = TextEditingController(
-      text: 'VLAN 40 — Nueva Red de Servicios',
+  Future<void> _openCreateSubnetDialog({
+    Map<String, dynamic>? existing,
+  }) async {
+    final bool isEdit = existing != null;
+    final cidrCtrl = TextEditingController(
+      text: (existing?['cidr'] ?? '10.20.40.0/24').toString(),
     );
-    final vlanCtrl = TextEditingController(text: '40');
-    final gwCtrl = TextEditingController(text: '10.20.40.1');
-    final dnsCtrl = TextEditingController(text: '10.20.1.5');
-    final notesCtrl = TextEditingController();
-    String env = 'production';
+    final nameCtrl = TextEditingController(
+      text: (existing?['name'] ?? 'VLAN 40 — Nueva Red de Servicios').toString(),
+    );
+    final vlanCtrl = TextEditingController(
+      text: (existing?['vlan_id'] ?? '40').toString(),
+    );
+    final gwCtrl = TextEditingController(
+      text: (existing?['gateway'] ?? '10.20.40.1').toString(),
+    );
+    final dnsCtrl = TextEditingController(
+      text: (existing?['dns_servers'] ?? '10.20.1.5').toString(),
+    );
+    final notesCtrl = TextEditingController(
+      text: (existing?['notes'] ?? '').toString(),
+    );
+    String env = (existing?['environment'] ?? 'production').toString();
+    bool userEditedGateway = isEdit;
 
     await showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Registrar Nueva Subred / VLAN en IPAM'),
-        content: SizedBox(
-          width: 460,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: cidrCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Bloque CIDR (ej. 10.20.40.0/24)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Nombre Descriptivo de la Subred / VLAN',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: vlanCtrl,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          final parsed = _ParsedCidrBlock.tryParse(cidrCtrl.text.trim());
+          return AlertDialog(
+            title: Text(
+              isEdit
+                  ? 'Editar Subred / VLAN (${existing['cidr']})'
+                  : 'Registrar Nueva Subred / VLAN en IPAM',
+            ),
+            content: SizedBox(
+              width: 520,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: cidrCtrl,
+                      onChanged: (val) {
+                        final p = _ParsedCidrBlock.tryParse(val.trim());
+                        setModalState(() {
+                          if (p != null && !userEditedGateway) {
+                            gwCtrl.text = p.firstUsableIp;
+                          }
+                        });
+                      },
                       decoration: const InputDecoration(
-                        labelText: 'VLAN ID',
+                        labelText:
+                            'Bloque CIDR con su máscara (ej. 10.20.40.0/23, 10.20.40.0/24, 192.168.1.128/25)',
                         border: OutlineInputBorder(),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: gwCtrl,
+                    const SizedBox(height: 8),
+                    if (parsed != null)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF0F9FF),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFF7DD3FC)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Cálculo automático por máscara /${parsed.prefixLen} (${parsed.subnetMask}):',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF0C4A6E),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '• Red normalizada: ${parsed.canonicalCidr}\n'
+                              '• Dirección de Red (No asignable): ${parsed.networkAddress}\n'
+                              '• Dirección de Broadcast (No asignable): ${parsed.broadcastAddress}\n'
+                              '• Rango de IPs útiles: ${parsed.firstUsableIp} a ${parsed.lastUsableIp} (${parsed.totalUsable} hosts útiles / ${parsed.totalAddresses} totales)',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontFamily: 'monospace',
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF0369A1),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      const Text(
+                        'Introduce un bloque CIDR válido (por ejemplo 10.20.40.0/23 o 192.168.10.0/24).',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.redAccent,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: nameCtrl,
                       decoration: const InputDecoration(
-                        labelText: 'Gateway',
+                        labelText: 'Nombre Descriptivo de la Subred / VLAN',
                         border: OutlineInputBorder(),
                       ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: dnsCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Servidores DNS',
-                  border: OutlineInputBorder(),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: vlanCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'VLAN ID',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: gwCtrl,
+                            onChanged: (_) => userEditedGateway = true,
+                            decoration: const InputDecoration(
+                              labelText: 'Gateway de la Subred',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: dnsCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Servidores DNS',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: notesCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Notas',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: notesCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Notas',
-                  border: OutlineInputBorder(),
-                ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton.icon(
+                onPressed: parsed == null
+                    ? null
+                    : () async {
+                        final payload = {
+                          'cidr': parsed.canonicalCidr,
+                          'subnet_mask': parsed.subnetMask,
+                          'name': nameCtrl.text.trim(),
+                          'vlan_id': int.tryParse(vlanCtrl.text.trim()),
+                          'gateway': gwCtrl.text.trim().isNotEmpty
+                              ? gwCtrl.text.trim()
+                              : parsed.firstUsableIp,
+                          'dns_servers': dnsCtrl.text.trim(),
+                          'environment': env,
+                          'notes': notesCtrl.text.trim(),
+                        };
+                        try {
+                          if (isEdit) {
+                            await widget.api.updateCmdbSubnet(
+                              existing['id'] as int,
+                              payload,
+                            );
+                          } else {
+                            await widget.api.createCmdbSubnet(payload);
+                          }
+                          if (!ctx.mounted) return;
+                          Navigator.pop(ctx);
+                          setState(() => _selectedIpamSubBlock24 = 'all');
+                          await _loadOverview(silent: true);
+                        } catch (e) {
+                          if (!ctx.mounted) return;
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(
+                              content: Text('Error guardando subred: $e'),
+                            ),
+                          );
+                        }
+                      },
+                icon: const Icon(Icons.save, size: 16),
+                label: Text(isEdit ? 'Guardar Cambios' : 'Guardar Subred'),
               ),
             ],
-          ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _confirmDeleteSubnet(Map<String, dynamic> subnet) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('¿Eliminar subred ${subnet['cidr']}?'),
+        content: Text(
+          'Se eliminará la subred "${subnet['name']}" del IPAM. Las máquinas e IPs seguirán existiendo en el inventario CMDB.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
+            onPressed: () => Navigator.pop(ctx, false),
             child: const Text('Cancelar'),
           ),
-          FilledButton.icon(
-            onPressed: () async {
-              await widget.api.createCmdbSubnet({
-                'cidr': cidrCtrl.text.trim(),
-                'name': nameCtrl.text.trim(),
-                'vlan_id': int.tryParse(vlanCtrl.text.trim()),
-                'gateway': gwCtrl.text.trim(),
-                'dns_servers': dnsCtrl.text.trim(),
-                'environment': env,
-                'notes': notesCtrl.text.trim(),
-              });
-              if (!ctx.mounted) return;
-              Navigator.pop(ctx);
-              await _loadOverview(silent: true);
-            },
-            icon: const Icon(Icons.save, size: 16),
-            label: const Text('Guardar Subred'),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Eliminar Subred'),
           ),
         ],
       ),
     );
+    if (ok == true) {
+      await widget.api.deleteCmdbSubnet(subnet['id'] as int);
+      if (_selectedIpamSubnetId == subnet['id']) {
+        _selectedIpamSubnetId = null;
+      }
+      await _loadOverview(silent: true);
+    }
+  }
+}
+
+class _ParsedCidrBlock {
+  final String canonicalCidr;
+  final int prefixLen;
+  final String subnetMask;
+  final String networkAddress;
+  final String broadcastAddress;
+  final String firstUsableIp;
+  final String lastUsableIp;
+  final int totalAddresses;
+  final int totalUsable;
+  final int networkInt;
+
+  const _ParsedCidrBlock({
+    required this.canonicalCidr,
+    required this.prefixLen,
+    required this.subnetMask,
+    required this.networkAddress,
+    required this.broadcastAddress,
+    required this.firstUsableIp,
+    required this.lastUsableIp,
+    required this.totalAddresses,
+    required this.totalUsable,
+    required this.networkInt,
+  });
+
+  static _ParsedCidrBlock? tryParse(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty) return null;
+    final slashParts = s.split('/');
+    if (slashParts.length > 2) return null;
+    final ipPart = slashParts[0].trim();
+    final prefix = slashParts.length == 2
+        ? int.tryParse(slashParts[1].trim())
+        : 24;
+    if (prefix == null || prefix < 8 || prefix > 32) return null;
+
+    final octets = ipPart.split('.');
+    if (octets.length != 4) return null;
+    int ipInt = 0;
+    for (final o in octets) {
+      final v = int.tryParse(o);
+      if (v == null || v < 0 || v > 255) return null;
+      ipInt = (ipInt << 8) | v;
+    }
+    ipInt = ipInt & 0xFFFFFFFF;
+
+    final int hostBits = 32 - prefix;
+    final int maskInt =
+        prefix == 0 ? 0 : ((0xFFFFFFFF << hostBits) & 0xFFFFFFFF);
+    final int netInt = (ipInt & maskInt) & 0xFFFFFFFF;
+    final int totalAddr = 1 << hostBits;
+    final int bcastInt = (netInt + totalAddr - 1) & 0xFFFFFFFF;
+    final int firstInt = totalAddr > 2 ? netInt + 1 : netInt;
+    final int lastInt = totalAddr > 2 ? bcastInt - 1 : bcastInt;
+    final int usable = totalAddr > 2 ? totalAddr - 2 : totalAddr;
+
+    final netStr = _intToIpv4(netInt);
+    return _ParsedCidrBlock(
+      canonicalCidr: '$netStr/$prefix',
+      prefixLen: prefix,
+      subnetMask: _intToIpv4(maskInt),
+      networkAddress: netStr,
+      broadcastAddress: _intToIpv4(bcastInt),
+      firstUsableIp: _intToIpv4(firstInt),
+      lastUsableIp: _intToIpv4(lastInt),
+      totalAddresses: totalAddr,
+      totalUsable: usable,
+      networkInt: netInt,
+    );
+  }
+
+  List<String> buildAddressList({int maxLimit = 4096}) {
+    final count = totalAddresses < maxLimit ? totalAddresses : maxLimit;
+    return List<String>.generate(
+      count,
+      (offset) => _intToIpv4((networkInt + offset) & 0xFFFFFFFF),
+    );
+  }
+
+  static String _intToIpv4(int val) {
+    final a = (val >> 24) & 0xFF;
+    final b = (val >> 16) & 0xFF;
+    final c = (val >> 8) & 0xFF;
+    final d = val & 0xFF;
+    return '$a.$b.$c.$d';
   }
 }
 
