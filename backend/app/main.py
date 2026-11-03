@@ -74,6 +74,7 @@ from .schemas import (
     CmdbAssetCreate,
     CmdbAssetUpdate,
     CmdbVerifyIpRequest,
+    CmdbImportDiscoveredRequest,
 )
 from .seed import (
     seed_initial_data,
@@ -95,6 +96,7 @@ from .services.cmdb_service import (
     verify_ip_target_or_find_free,
     check_cmdb_asset_heartbeat,
     sync_physical_devices_to_cmdb,
+    import_discovered_hosts_to_cmdb,
     _match_subnet_for_ip,
 )
 from .services.excel_export import (
@@ -4242,6 +4244,32 @@ def verify_cmdb_ip_endpoint(payload: CmdbVerifyIpRequest, db: Session = Depends(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@api_router.post(
+    "/cmdb/import-discovered",
+    tags=["CMDB, Multi-IP & IP Verification"],
+    summary="Incorporar a la CMDB los equipos e IPs seleccionados tras escanear un rango CIDR",
+    description=(
+        "Permite añadir en bloque o selectivamente a la CMDB las máquinas detectadas tras escanear un rango "
+        "como '1.1.1.1/24' o '10.20.20.0/24', y registrar opcionalmente la propia subred CIDR en el IPAM."
+    ),
+)
+def import_discovered_cmdb_endpoint(
+    payload: CmdbImportDiscoveredRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return import_discovered_hosts_to_cmdb(
+            db=db,
+            register_subnet_cidr=payload.register_subnet_cidr,
+            subnet_name=payload.subnet_name,
+            vlan_id=payload.vlan_id,
+            items=[item.model_dump() for item in payload.items],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
 
 
 

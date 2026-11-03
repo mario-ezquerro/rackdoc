@@ -572,9 +572,28 @@ class CmdbVerifyIpRequest(BaseModel):
     target_ip: str = ""
     subnet_id: Optional[int] = None
     ports: List[int] = [22, 80, 443, 3389, 445, 8006, 902, 161]
-    timeout_sec: float = 0.8
-    count_limit: int = 12
+    timeout_sec: float = 0.6
+    count_limit: int = 254
     only_suggest_free: bool = False
+
+
+class CmdbDiscoveredHostItem(BaseModel):
+    ip_address: str
+    hostname: str = ""
+    fqdn: str = ""
+    mac_address: str = ""
+    asset_class: str = "other_machine"
+    environment: str = "production"
+    open_ports: List[int] = []
+    notes: str = ""
+
+
+class CmdbImportDiscoveredRequest(BaseModel):
+    register_subnet_cidr: Optional[str] = None
+    subnet_name: Optional[str] = None
+    vlan_id: Optional[int] = None
+    items: List[CmdbDiscoveredHostItem] = []
+
 
 
 

@@ -871,8 +871,8 @@ class RackDocApiClient {
     String targetIp = '',
     int? subnetId,
     List<int>? ports,
-    double timeoutSec = 0.7,
-    int countLimit = 8,
+    double timeoutSec = 0.6,
+    int countLimit = 254,
     bool onlySuggestFree = false,
   }) async {
     final res = await http.post(
@@ -885,6 +885,25 @@ class RackDocApiClient {
         'timeout_sec': timeoutSec,
         'count_limit': countLimit,
         'only_suggest_free': onlySuggestFree,
+      }),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> importDiscoveredCmdbHosts({
+    String? registerSubnetCidr,
+    String? subnetName,
+    int? vlanId,
+    required List<Map<String, dynamic>> items,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/cmdb/import-discovered'),
+      headers: _headers,
+      body: jsonEncode({
+        'register_subnet_cidr': registerSubnetCidr,
+        'subnet_name': subnetName,
+        'vlan_id': vlanId,
+        'items': items,
       }),
     );
     return Map<String, dynamic>.from(_decodeResponse(res) as Map);

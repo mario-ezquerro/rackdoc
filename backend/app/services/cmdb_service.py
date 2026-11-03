@@ -911,94 +911,106 @@ def _lookup_reverse_dns(target_ip: str) -> Optional[str]:
         return None
 
 
-def verify_single_ip_manual(
-    db: Session,
-    target_ip: str,
-    ports: Optional[List[int]] = None,
-    timeout_sec: float = 0.8,
+def _probe_ip_network_only(
+    ip_clean: str,
+    probe_ports: List[int],
+    timeout_sec: float = 0.6,
+    is_bulk_scan: bool = False,
 ) -> Dict[str, Any]:
     """
-    Ejecuta la verificación manual multicapa ("Deep IP Probe") sobre una IP para comprobar:
-    1) Estado documental en la CMDB (¿está libre o asignada a qué máquina y con qué rol?)
-    2) Sonda 1 - Ping ICMP real y latencia en ms
-    3) Sonda 2 - Sondeo TCP multi-puerto en paralelo (detecta puertos abiertos o respuestas TCP RST de hosts con Ping bloqueado)
-    4) Sonda 3 - Tabla ARP / Vecinos L2 (detecta dirección MAC en la red local aunque tenga firewall estricto)
-    5) Sonda 4 - Resolución DNS Inversa (PTR)
+    Sondeo puro de red (sin tocar sesión de BD, 100% thread-safe para escanear /24 en paralelo).
+    Ejecuta:
+    1) ICMP Ping
+    2) Sondeo TCP a puertos comunes (detectando tanto SYN-ACK 'open' como rechazo activo 'refused_alive')
+    3) Tabla ARP local (MAC Address)
+    4) DNS Inverso (PTR)
     """
-    ip_clean = (target_ip or "").strip().split("/")[0].strip()
-    try:
-        ipaddress.ip_address(ip_clean)
-    except ValueError:
-        raise ValueError(f"La dirección IP '{target_ip}' no tiene un formato IPv4/IPv6 válido.")
-
-    probe_ports = ports or [22, 80, 443, 3389, 445, 8006, 902, 161]
     start_ts = time.perf_counter()
+    eff_icmp_timeout = 0.35 if is_bulk_scan else max(0.45, min(timeout_sec, 1.5))
+    eff_tcp_timeout = 0.25 if is_bulk_scan else max(0.3, min(timeout_sec, 0.8))
 
-    # 1. Buscar en CMDB si la IP está documentada
-    cmdb_records = (
-        db.query(CmdbIpAddress)
-        .options(joinedload(CmdbIpAddress.asset))
-        .filter(CmdbIpAddress.ip_address == ip_clean)
-        .all()
-    )
-    documented_in_cmdb = len(cmdb_records) > 0
-    cmdb_owners: List[Dict[str, Any]] = []
-    for rec in cmdb_records:
-        ast = rec.asset
-        cmdb_owners.append(
-            {
-                "ip_id": rec.id,
-                "asset_id": ast.id if ast else None,
-                "asset_code": ast.code if ast else "RESERVA-IPAM",
-                "asset_name": ast.name if ast else "IP Reservada sin Máquina",
-                "asset_class": ast.asset_class if ast else "reserved",
-                "ip_role": rec.ip_role,
-                "ip_role_label": IP_ROLE_LABELS.get(rec.ip_role, rec.ip_role),
-                "interface_name": rec.interface_name,
-                "is_heartbeat_ip": rec.is_heartbeat_ip,
-                "fqdn": rec.fqdn or (ast.fqdn if ast else ""),
-                "allocation_status": rec.allocation_status,
-            }
-        )
-
-    # 2. Sonda ICMP Ping
     icmp_status, icmp_ms, icmp_detail = check_host_connectivity(
         host=ip_clean,
         method="icmp",
         port=0,
-        timeout_sec=max(0.5, min(timeout_sec, 2.0)),
+        timeout_sec=eff_icmp_timeout,
     )
     icmp_alive = icmp_status == "online"
 
-    # 3. Sonda TCP Multi-Puerto concurrente
     open_ports: List[int] = []
     refused_ports: List[int] = []
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(probe_ports)))) as pool:
-        futures = [
-            pool.submit(_probe_single_tcp_port, ip_clean, p, max(0.35, min(timeout_sec, 1.0)))
-            for p in probe_ports
-        ]
-        for fut in futures:
-            p_num, p_state = fut.result()
+    ports_to_check = probe_ports[:4] if is_bulk_scan else probe_ports
+    for p in ports_to_check:
+        p_num, p_state = _probe_single_tcp_port(ip_clean, p, eff_tcp_timeout)
+        if p_state == "open":
+            open_ports.append(p_num)
+        elif p_state == "refused_alive":
+            refused_ports.append(p_num)
+
+    # Si en modo masivo respondió a ping o algún puerto, probamos el resto de puertos para dar el informe completo
+    if is_bulk_scan and (icmp_alive or open_ports or refused_ports) and len(probe_ports) > 4:
+        for p in probe_ports[4:]:
+            p_num, p_state = _probe_single_tcp_port(ip_clean, p, eff_tcp_timeout)
             if p_state == "open":
                 open_ports.append(p_num)
             elif p_state == "refused_alive":
                 refused_ports.append(p_num)
 
     tcp_alive = len(open_ports) > 0 or len(refused_ports) > 0
-
-    # 4. Sonda ARP (Caché L2 tras haber enviado paquetes ICMP y TCP SYN)
-    arp_mac = _lookup_arp_mac(ip_clean)
+    arp_mac = _lookup_arp_mac(ip_clean) if (not is_bulk_scan or icmp_alive or tcp_alive) else None
+    if not arp_mac and not is_bulk_scan:
+        arp_mac = _lookup_arp_mac(ip_clean)
     arp_alive = arp_mac is not None
 
-    # 5. Sonda DNS Inverso (PTR)
-    ptr_hostname = _lookup_reverse_dns(ip_clean)
+    # En escaneos masivos (/24), hacer DNS PTR sobre las IPs activas (o todas si es rango pequeño) para no bloquear 254 timeouts DNS
+    ptr_hostname = (
+        _lookup_reverse_dns(ip_clean)
+        if (not is_bulk_scan or icmp_alive or tcp_alive or arp_alive)
+        else None
+    )
     has_ptr = ptr_hostname is not None and ptr_hostname != ip_clean
-
-    network_responding = icmp_alive or tcp_alive or arp_alive
     elapsed_total_ms = round((time.perf_counter() - start_ts) * 1000.0, 1)
 
-    # Determinar veredicto del semáforo CMDB
+    return {
+        "ip_clean": ip_clean,
+        "icmp_alive": icmp_alive,
+        "icmp_ms": icmp_ms,
+        "icmp_detail": icmp_detail,
+        "tcp_alive": tcp_alive,
+        "tested_ports": probe_ports,
+        "open_ports": open_ports,
+        "refused_ports": refused_ports,
+        "arp_alive": arp_alive,
+        "arp_mac": arp_mac,
+        "has_ptr": has_ptr,
+        "ptr_hostname": ptr_hostname,
+        "elapsed_ms": elapsed_total_ms,
+    }
+
+
+def _assemble_ip_verification_result(
+    probe_data: Dict[str, Any],
+    cmdb_owners: List[Dict[str, Any]],
+    matched_sub: Optional[CmdbSubnet],
+    now_dt: datetime,
+) -> Dict[str, Any]:
+    ip_clean = probe_data["ip_clean"]
+    icmp_alive = probe_data["icmp_alive"]
+    icmp_ms = probe_data["icmp_ms"]
+    icmp_detail = probe_data["icmp_detail"]
+    tcp_alive = probe_data["tcp_alive"]
+    probe_ports = probe_data["tested_ports"]
+    open_ports = probe_data["open_ports"]
+    refused_ports = probe_data["refused_ports"]
+    arp_alive = probe_data["arp_alive"]
+    arp_mac = probe_data["arp_mac"]
+    has_ptr = probe_data["has_ptr"]
+    ptr_hostname = probe_data["ptr_hostname"]
+    elapsed_total_ms = probe_data["elapsed_ms"]
+
+    documented_in_cmdb = len(cmdb_owners) > 0
+    network_responding = icmp_alive or tcp_alive or arp_alive
+
     if not documented_in_cmdb and not network_responding and not has_ptr:
         verdict = "free_confirmed"
         verdict_label = "LIBRE CONFIRMADA (Segura para asignar)"
@@ -1010,7 +1022,7 @@ def verify_single_ip_manual(
         )
     elif not documented_in_cmdb and (network_responding or has_ptr):
         verdict = "conflict_unregistered"
-        verdict_label = "¡CONFLICTO FANTASMA! (Responde en red pero NO está en la CMDB)"
+        verdict_label = "DETECTADO EN RED (No registrado en CMDB)"
         verdict_severity = "danger"
         can_safely_assign = False
         reasons = []
@@ -1025,12 +1037,12 @@ def verify_single_ip_manual(
         if has_ptr:
             reasons.append(f"tiene DNS PTR ({ptr_hostname})")
         recommendation = (
-            f"¡PELIGRO DE CONFLICTO IP! Aunque figuraba libre en la CMDB, un equipo en la red {', '.join(reasons)}. "
-            "NO asignes esta IP a otra máquina; regístrala en la CMDB para corregir el desfase."
+            f"Equipo activo detectado en la red ({', '.join(reasons)}) que aún NO está registrado en la CMDB. "
+            "Puedes seleccionarlo y añadirlo a la CMDB directamente desde aquí (y no debes asignar su IP a otra máquina)."
         )
     elif documented_in_cmdb and network_responding:
         verdict = "active_in_network"
-        verdict_label = "OCUPADA Y ACTIVA (Coherente con CMDB)"
+        verdict_label = "YA EN CMDB Y ACTIVA EN RED"
         verdict_severity = "info"
         can_safely_assign = False
         owner_names = ", ".join(f"{o['asset_code']} ({o['ip_role_label']})" for o in cmdb_owners)
@@ -1038,7 +1050,6 @@ def verify_single_ip_manual(
             f"La IP ya está asignada en la CMDB a [{owner_names}] y responde activamente en la red."
         )
     else:
-        # documented_in_cmdb and not network_responding
         verdict = "no_response"
         verdict_label = "ASIGNADA EN CMDB PERO SIN RESPUESTA EN RED"
         verdict_severity = "warning"
@@ -1056,18 +1067,6 @@ def verify_single_ip_manual(
         f"DNS PTR: {ptr_hostname or 'Sin PTR'}",
     ]
     summary_text = " | ".join(probe_summary_parts)
-
-    # Si existe en la CMDB, guardar la fecha y resultado de esta verificación manual
-    now_dt = datetime.utcnow()
-    if cmdb_records:
-        for rec in cmdb_records:
-            rec.last_verification_status = verdict
-            rec.last_verified_at = now_dt
-            rec.last_verification_detail = summary_text
-        db.commit()
-
-    subnets = db.query(CmdbSubnet).all()
-    matched_sub = _match_subnet_for_ip(ip_clean, subnets)
 
     return {
         "ip_address": ip_clean,
@@ -1122,46 +1121,94 @@ def verify_single_ip_manual(
     }
 
 
+def verify_single_ip_manual(
+    db: Session,
+    target_ip: str,
+    ports: Optional[List[int]] = None,
+    timeout_sec: float = 0.8,
+) -> Dict[str, Any]:
+    res = verify_ip_target_or_find_free(
+        db=db,
+        target_ip=target_ip,
+        ports=ports,
+        timeout_sec=timeout_sec,
+        count_limit=1,
+        only_suggest_free=False,
+    )
+    return res["results"][0]
+
+
 def verify_ip_target_or_find_free(
     db: Session,
     target_ip: str = "",
     subnet_id: Optional[int] = None,
     ports: Optional[List[int]] = None,
-    timeout_sec: float = 0.7,
-    count_limit: int = 8,
+    timeout_sec: float = 0.6,
+    count_limit: int = 254,
     only_suggest_free: bool = False,
 ) -> Dict[str, Any]:
     """
-    Soporta 3 modos de operación manual:
-    1) Si se pasa una IP única (ej. '10.20.20.45'): verifica esa IP en profundidad.
-    2) Si se pasa un rango corto (ej. '10.20.20.40-10.20.20.48' o '10.20.20.40-48'): verifica cada IP del rango.
-    3) Si 'only_suggest_free=True' (o no se pasa target_ip pero sí subnet_id): busca en la subred seleccionada
-       las siguientes IPs que no estén asignadas en la CMDB y las verifica en vivo en la red hasta encontrar
-       IPs libres confirmadas ('free_confirmed') listas para asignar.
+    Soporta 4 modos de operación manual:
+    1) Red CIDR completa (ej. '1.1.1.1/24', '10.20.20.0/24', '192.168.1.0/28'):
+       Analiza en paralelo todas las IPs del rango CIDR (hasta 254 hosts), detectando qué máquinas responden
+       en la red (estén o no en la CMDB) y qué IPs están libres, permitiendo añadir los hallazgos a la CMDB.
+    2) Rango con guion (ej. '10.20.20.1-254' o '10.20.20.40-10.20.20.60'):
+       Analiza todas las IPs del intervalo indicado.
+    3) IP única o lista separada por comas (ej. '10.20.20.45' o '1.1.1.1, 1.1.1.2').
+    4) Buscador inteligente por Subred ('only_suggest_free=True'): sugiere y verifica las siguientes IPs libres.
     """
     raw = (target_ip or "").strip()
     ips_to_test: List[str] = []
+    scanned_cidr: Optional[str] = None
+    eff_limit = max(1, min(count_limit or 254, 256))
 
     if raw and not only_suggest_free:
-        if "-" in raw:
-            left, right = [x.strip() for x in raw.split("-", 1)]
-            start_ip = ipaddress.ip_address(left)
-            if "." in right:
-                end_ip = ipaddress.ip_address(right)
+        if "/" in raw:
+            # Soportar notación CIDR como '1.1.1.1/24' o '10.20.20.0/24' (strict=False convierte 1.1.1.1/24 en la red 1.1.1.0/24)
+            try:
+                net = ipaddress.ip_network(raw, strict=False)
+            except ValueError as exc:
+                raise ValueError(
+                    f"El rango CIDR '{raw}' no es válido (ejemplo válido: 1.1.1.1/24 o 10.20.20.0/24): {exc}"
+                )
+            scanned_cidr = str(net)
+            if net.num_addresses <= 2:
+                ips_to_test = [str(ip) for ip in net][:eff_limit]
             else:
-                prefix = left.rsplit(".", 1)[0]
-                end_ip = ipaddress.ip_address(f"{prefix}.{int(right)}")
+                for idx, host_ip in enumerate(net.hosts()):
+                    if idx >= eff_limit:
+                        break
+                    ips_to_test.append(str(host_ip))
+        elif "-" in raw:
+            left, right = [x.strip() for x in raw.split("-", 1)]
+            try:
+                start_ip = ipaddress.ip_address(left)
+                if "." in right:
+                    end_ip = ipaddress.ip_address(right)
+                else:
+                    prefix = left.rsplit(".", 1)[0]
+                    end_ip = ipaddress.ip_address(f"{prefix}.{int(right)}")
+            except ValueError as exc:
+                raise ValueError(f"El rango de IPs '{raw}' no tiene un formato válido: {exc}")
             curr = int(start_ip)
             end_val = int(end_ip)
             if end_val < curr:
                 curr, end_val = end_val, curr
-            max_span = min(end_val - curr + 1, max(1, min(count_limit, 25)))
+            max_span = min(end_val - curr + 1, eff_limit)
             for offset in range(max_span):
                 ips_to_test.append(str(ipaddress.ip_address(curr + offset)))
         elif "," in raw:
             parts = [p.strip() for p in raw.split(",") if p.strip()]
-            ips_to_test = parts[: max(1, min(count_limit, 25))]
+            for p in parts[:eff_limit]:
+                ipaddress.ip_address(p)
+                ips_to_test.append(p)
         else:
+            try:
+                ipaddress.ip_address(raw)
+            except ValueError:
+                raise ValueError(
+                    f"La IP o rango '{raw}' no es válido. Usa una IP (10.20.20.45), un CIDR (1.1.1.1/24) o un rango (10.20.20.1-50)."
+                )
             ips_to_test = [raw]
     else:
         # Buscar candidatas libres en la subred indicada (o la primera subred disponible)
@@ -1174,6 +1221,7 @@ def verify_ip_target_or_find_free(
             raise ValueError("No hay subredes configuradas en la CMDB para buscar IPs libres.")
 
         net = ipaddress.ip_network(subnet.cidr.strip(), strict=False)
+        scanned_cidr = str(net)
         used_ips = {
             row.ip_address.strip()
             for row in db.query(CmdbIpAddress).all()
@@ -1182,7 +1230,7 @@ def verify_ip_target_or_find_free(
         if subnet.gateway:
             used_ips.add(subnet.gateway.strip())
 
-        # Empezar a buscar a partir de .15 (dejando margen de primeros hosts de red/gateways)
+        suggest_cap = min(eff_limit, 12)
         candidates: List[str] = []
         for host_ip in net.hosts():
             ip_str = str(host_ip)
@@ -1191,30 +1239,250 @@ def verify_ip_target_or_find_free(
                 continue
             if ip_str not in used_ips:
                 candidates.append(ip_str)
-            if len(candidates) >= max(1, min(count_limit, 15)):
+            if len(candidates) >= suggest_cap:
                 break
         ips_to_test = candidates
 
-    results: List[Dict[str, Any]] = []
-    for ip_candidate in ips_to_test:
-        res = verify_single_ip_manual(
-            db=db,
-            target_ip=ip_candidate,
-            ports=ports,
-            timeout_sec=timeout_sec,
+    probe_ports = ports or [22, 80, 443, 3389, 445, 8006, 902, 161]
+    is_bulk = len(ips_to_test) > 12
+
+    # 1. Pre-cargar datos CMDB en el hilo principal (thread-safe)
+    all_cmdb_records = (
+        db.query(CmdbIpAddress)
+        .options(joinedload(CmdbIpAddress.asset))
+        .filter(CmdbIpAddress.ip_address.in_(ips_to_test))
+        .all()
+        if ips_to_test
+        else []
+    )
+    records_by_ip: Dict[str, List[CmdbIpAddress]] = {}
+    owners_by_ip: Dict[str, List[Dict[str, Any]]] = {}
+    for rec in all_cmdb_records:
+        records_by_ip.setdefault(rec.ip_address, []).append(rec)
+        ast = rec.asset
+        owners_by_ip.setdefault(rec.ip_address, []).append(
+            {
+                "ip_id": rec.id,
+                "asset_id": ast.id if ast else None,
+                "asset_code": ast.code if ast else "RESERVA-IPAM",
+                "asset_name": ast.name if ast else "IP Reservada sin Máquina",
+                "asset_class": ast.asset_class if ast else "reserved",
+                "ip_role": rec.ip_role,
+                "ip_role_label": IP_ROLE_LABELS.get(rec.ip_role, rec.ip_role),
+                "interface_name": rec.interface_name,
+                "is_heartbeat_ip": rec.is_heartbeat_ip,
+                "fqdn": rec.fqdn or (ast.fqdn if ast else ""),
+                "allocation_status": rec.allocation_status,
+            }
         )
-        results.append(res)
+
+    subnets = db.query(CmdbSubnet).all()
+
+    # 2. Ejecutar el sondeo de red en paralelo (alta velocidad para rangos /24)
+    max_workers = min(48, max(1, len(ips_to_test)))
+    probe_outputs_by_ip: Dict[str, Dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        fut_map = {
+            pool.submit(
+                _probe_ip_network_only,
+                ip_candidate,
+                probe_ports,
+                timeout_sec,
+                is_bulk,
+            ): ip_candidate
+            for ip_candidate in ips_to_test
+        }
+        for fut, ip_key in fut_map.items():
+            probe_outputs_by_ip[ip_key] = fut.result()
+
+    # 3. Ensamblar resultados manteniendo el orden y actualizar registros CMDB existentes
+    now_dt = datetime.utcnow()
+    results: List[Dict[str, Any]] = []
+    db_modified = False
+
+    for ip_candidate in ips_to_test:
+        pdata = probe_outputs_by_ip[ip_candidate]
+        c_owners = owners_by_ip.get(ip_candidate, [])
+        matched_sub = _match_subnet_for_ip(ip_candidate, subnets)
+        assembled = _assemble_ip_verification_result(
+            probe_data=pdata,
+            cmdb_owners=c_owners,
+            matched_sub=matched_sub,
+            now_dt=now_dt,
+        )
+        results.append(assembled)
+
+        if ip_candidate in records_by_ip:
+            for rec in records_by_ip[ip_candidate]:
+                rec.last_verification_status = assembled["verdict"]
+                rec.last_verified_at = now_dt
+                rec.last_verification_detail = assembled["summary"]
+                db_modified = True
+
+    if db_modified:
+        db.commit()
+
+    # Si es un escaneo masivo (> 1 IP), ordenar poniendo primero los equipos detectados en red y los registrados en CMDB
+    if len(results) > 1 and not only_suggest_free:
+        verdict_priority = {
+            "conflict_unregistered": 0,  # Nuevos equipos encontrados en la red que NO están en la CMDB
+            "active_in_network": 1,      # Equipos en la CMDB que responden en la red
+            "no_response": 2,            # Equipos en la CMDB que no responden
+            "free_confirmed": 3,         # IPs libres confirmadas
+        }
+        results.sort(
+            key=lambda r: (
+                verdict_priority.get(r["verdict"], 9),
+                int(ipaddress.ip_address(r["ip_address"])),
+            )
+        )
 
     free_confirmed_list = [r["ip_address"] for r in results if r["verdict"] == "free_confirmed"]
     conflicts_list = [r["ip_address"] for r in results if r["verdict"] == "conflict_unregistered"]
+    active_in_cmdb_list = [r["ip_address"] for r in results if r["verdict"] == "active_in_network"]
+    no_response_list = [r["ip_address"] for r in results if r["verdict"] == "no_response"]
+
+    cidr_already_in_cmdb = False
+    if scanned_cidr:
+        cidr_already_in_cmdb = any(s.cidr.strip() == scanned_cidr for s in subnets)
 
     return {
+        "scanned_input": raw,
+        "scanned_cidr": scanned_cidr,
+        "cidr_already_in_cmdb": cidr_already_in_cmdb,
         "tested_count": len(results),
         "free_confirmed_count": len(free_confirmed_list),
         "conflict_count": len(conflicts_list),
+        "active_in_cmdb_count": len(active_in_cmdb_list),
+        "no_response_count": len(no_response_list),
         "suggested_free_ip": free_confirmed_list[0] if free_confirmed_list else None,
         "results": results,
     }
+
+
+def import_discovered_hosts_to_cmdb(
+    db: Session,
+    register_subnet_cidr: Optional[str] = None,
+    subnet_name: Optional[str] = None,
+    vlan_id: Optional[int] = None,
+    items: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Permite incorporar de una sola vez a la CMDB los equipos/IPs encontrados tras analizar un rango CIDR
+    (ej. '1.1.1.1/24' o '10.20.20.0/24') que el administrador haya seleccionado, así como registrar
+    opcionalmente la propia subred CIDR en el IPAM si aún no existía.
+    """
+    created_subnet = None
+    if register_subnet_cidr and register_subnet_cidr.strip():
+        net = ipaddress.ip_network(register_subnet_cidr.strip(), strict=False)
+        cidr_norm = str(net)
+        existing_sub = db.query(CmdbSubnet).filter(CmdbSubnet.cidr == cidr_norm).first()
+        if not existing_sub:
+            first_host = str(next(net.hosts(), net.network_address))
+            existing_sub = CmdbSubnet(
+                cidr=cidr_norm,
+                name=(subnet_name or "").strip() or f"Subred Descubierta {cidr_norm}",
+                vlan_id=vlan_id,
+                gateway=first_host,
+                subnet_mask=str(net.netmask),
+                environment="production",
+                notes="Subred añadida desde el Escáner/Verificador de Rangos IP de la CMDB.",
+            )
+            db.add(existing_sub)
+            db.flush()
+            created_subnet = cidr_norm
+
+    subnets = db.query(CmdbSubnet).all()
+    created_assets_count = 0
+    for item in (items or []):
+        ip_str = str(item.get("ip_address") or "").strip()
+        if not ip_str:
+            continue
+        # Comprobar si ya existe la IP en la CMDB
+        existing_ip = db.query(CmdbIpAddress).filter(CmdbIpAddress.ip_address == ip_str).first()
+        if existing_ip:
+            continue
+
+        last_oct = ip_str.replace(".", "-")
+        ptr_fqdn = str(item.get("fqdn") or "").strip()
+        raw_host = str(item.get("hostname") or "").strip()
+        if not raw_host and ptr_fqdn:
+            raw_host = ptr_fqdn.split(".")[0]
+        if not raw_host:
+            raw_host = f"host-{last_oct}"
+
+        base_code = f"DISC-{ip_str.split('.')[-2]}-{ip_str.split('.')[-1]}" if "." in ip_str else f"DISC-{last_oct}"
+        code = base_code.upper()
+        suffix = 1
+        while db.query(CmdbAsset).filter(CmdbAsset.code == code).first():
+            suffix += 1
+            code = f"{base_code}-{suffix}".upper()
+
+        open_ports = item.get("open_ports") or []
+        asset_class = str(item.get("asset_class") or "other_machine")
+        mon_method = "icmp"
+        mon_port = 22
+        if 22 in open_ports:
+            mon_method, mon_port = "ssh", 22
+        elif 443 in open_ports:
+            mon_method, mon_port = "https", 443
+        elif 80 in open_ports:
+            mon_method, mon_port = "http", 80
+        elif open_ports:
+            mon_method, mon_port = "tcp", int(open_ports[0])
+
+        matched_sub = _match_subnet_for_ip(ip_str, subnets)
+        asset = CmdbAsset(
+            code=code,
+            name=ptr_fqdn or f"Equipo Detectado ({ip_str})",
+            hostname=raw_host,
+            fqdn=ptr_fqdn,
+            asset_class=asset_class,
+            environment=str(item.get("environment") or "production"),
+            criticality="medium",
+            lifecycle_status="active",
+            os_or_firmware=f"Detectado en escaneo (Puertos: {open_ports})" if open_ports else "Detectado por Sondeo de Red",
+            hypervisor_or_platform="Descubrimiento Manual CMDB",
+            owner_team="Sistemas & Redes",
+            responsible_person="Alex Geng",
+            sync_source="cmdb",
+            monitoring_enabled=True,
+            monitor_method=mon_method,
+            monitor_port=mon_port,
+            status="online",
+            last_checked_at=datetime.utcnow(),
+            notes=str(item.get("notes") or f"Incorporado desde escaneo de rango ({ip_str})"),
+        )
+        db.add(asset)
+        db.flush()
+
+        db.add(
+            CmdbIpAddress(
+                asset_id=asset.id,
+                subnet_id=matched_sub.id if matched_sub else None,
+                ip_address=ip_str,
+                subnet_mask=matched_sub.subnet_mask if matched_sub else "255.255.255.0",
+                gateway=matched_sub.gateway if matched_sub else "",
+                vlan_id=matched_sub.vlan_id if matched_sub else vlan_id,
+                ip_role="mgmt_heartbeat",
+                interface_name="eth0",
+                mac_address=str(item.get("mac_address") or "").strip(),
+                fqdn=ptr_fqdn,
+                is_heartbeat_ip=True,
+                allocation_status="assigned",
+                last_verification_status="active_in_network",
+                last_verified_at=datetime.utcnow(),
+                last_verification_detail="Añadido tras verificación de rango IP en CMDB",
+            )
+        )
+        created_assets_count += 1
+
+    db.commit()
+    overview = build_cmdb_overview(db)
+    overview["imported_assets_count"] = created_assets_count
+    overview["created_subnet"] = created_subnet
+    return overview
+
 
 
 def check_cmdb_asset_heartbeat(db: Session, asset: CmdbAsset) -> Dict[str, Any]:

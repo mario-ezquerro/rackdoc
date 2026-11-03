@@ -37,15 +37,21 @@ class _CmdbViewState extends State<CmdbView> {
   int? _expandedAssetId;
   int? _runningHeartbeatAssetId;
 
-  // Estado de '2. Verificador Manual de IPs Libres (Control Anti-Conflictos)'
+  // Estado de '2. Verificador Manual de IPs Libres y Escáner de Rangos CIDR (ej. 1.1.1.1/24)'
   final TextEditingController _verifyIpCtrl = TextEditingController(
-    text: '10.20.20.45',
+    text: '10.20.20.0/24',
   );
   int? _verifySelectedSubnetId;
-  final int _verifyCountLimit = 6;
+  final int _verifyCountLimit = 254;
   bool _verifyingIp = false;
   Map<String, dynamic>? _verificationReport;
   String? _verifyError;
+  String _scanResultFilter = 'all';
+  final Set<String> _selectedDiscoveredIps = {};
+  final Set<String> _dismissedScanIps = {};
+  String _bulkImportAssetClass = 'virtual_machine';
+  bool _alsoRegisterScannedSubnet = true;
+  bool _importingDiscovered = false;
 
   // Estado de '3. Subredes, VLANs & Mapa Visual IPAM'
   int? _selectedIpamSubnetId;
@@ -199,12 +205,26 @@ class _CmdbViewState extends State<CmdbView> {
       final res = await widget.api.verifyCmdbIp(
         targetIp: customIp ?? _verifyIpCtrl.text.trim(),
         subnetId: _verifySelectedSubnetId,
-        countLimit: _verifyCountLimit,
+        countLimit: onlySuggestFree ? 10 : _verifyCountLimit,
         onlySuggestFree: onlySuggestFree,
       );
       if (!mounted) return;
+      final rawList = ((res['results'] as List?) ?? [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      final autoSelected = <String>{};
+      for (final item in rawList) {
+        if (item['verdict'] == 'conflict_unregistered') {
+          autoSelected.add((item['ip_address'] ?? '').toString());
+        }
+      }
       setState(() {
         _verificationReport = res;
+        _dismissedScanIps.clear();
+        _selectedDiscoveredIps
+          ..clear()
+          ..addAll(autoSelected);
+        _scanResultFilter = 'all';
         _verifyingIp = false;
       });
       await _loadOverview(silent: true);
@@ -214,6 +234,95 @@ class _CmdbViewState extends State<CmdbView> {
         _verifyError = e.toString().replaceFirst('Exception: ', '');
         _verifyingIp = false;
       });
+    }
+  }
+
+  Future<void> _importSelectedDiscoveredToCmdb(
+    List<Map<String, dynamic>> allScanResults,
+  ) async {
+    final selectedRows = allScanResults
+        .where(
+          (r) =>
+              _selectedDiscoveredIps.contains(
+                (r['ip_address'] ?? '').toString(),
+              ) &&
+              r['documented_in_cmdb'] != true,
+        )
+        .toList();
+    final String? scannedCidr =
+        _verificationReport?['scanned_cidr'] as String?;
+    final bool cidrAlreadyInCmdb =
+        _verificationReport?['cidr_already_in_cmdb'] == true;
+    final bool shouldCreateSubnet =
+        _alsoRegisterScannedSubnet &&
+        scannedCidr != null &&
+        scannedCidr.isNotEmpty &&
+        !cidrAlreadyInCmdb;
+
+    if (selectedRows.isEmpty && !shouldCreateSubnet) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Marca al menos una IP no registrada en la CMDB (o la casilla de crear subred) para añadirla.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _importingDiscovered = true);
+    try {
+      final itemsPayload = selectedRows.map((r) {
+        final probes = Map<String, dynamic>.from((r['probes'] as Map?) ?? {});
+        final dns = Map<String, dynamic>.from((probes['dns_ptr'] as Map?) ?? {});
+        final arp = Map<String, dynamic>.from((probes['arp'] as Map?) ?? {});
+        final tcp = Map<String, dynamic>.from((probes['tcp'] as Map?) ?? {});
+        final String ptr = (dns['ptr_hostname'] ?? '').toString();
+        final String mac = (arp['mac_address'] ?? '').toString();
+        final List<int> openPorts = ((tcp['open_ports'] as List?) ?? [])
+            .map((e) => (e as num).toInt())
+            .toList();
+        return {
+          'ip_address': (r['ip_address'] ?? '').toString(),
+          'hostname': ptr.isNotEmpty ? ptr.split('.').first : '',
+          'fqdn': ptr,
+          'mac_address': mac,
+          'asset_class': _bulkImportAssetClass,
+          'environment': 'production',
+          'open_ports': openPorts,
+          'notes': 'Añadido desde escaneo de rango (${r['summary'] ?? ''})',
+        };
+      }).toList();
+
+      final updatedOverview = await widget.api.importDiscoveredCmdbHosts(
+        registerSubnetCidr: shouldCreateSubnet ? scannedCidr : null,
+        subnetName: shouldCreateSubnet ? 'Red $scannedCidr' : null,
+        items: itemsPayload,
+      );
+      if (!mounted) return;
+      final int importedCount =
+          (updatedOverview['imported_assets_count'] as int?) ??
+              itemsPayload.length;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF15803D),
+          content: Text(
+            'Se han añadido $importedCount máquina(s)/IP(s) a la CMDB${shouldCreateSubnet ? ' y la subred $scannedCidr' : ''}.',
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+        ),
+      );
+      setState(() {
+        _overview = updatedOverview;
+        _importingDiscovered = false;
+      });
+      await _runManualVerification(onlySuggestFree: false);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _importingDiscovered = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error importando en CMDB: $e')),
+      );
     }
   }
 
@@ -1425,14 +1534,38 @@ class _CmdbViewState extends State<CmdbView> {
   }
 
   // ===========================================================================
-  // PESTAÑA 2: VERIFICADOR MANUAL DE IPs LIBRES (PING + TCP + ARP + DNS PTR)
+  // PESTAÑA 2: VERIFICADOR MANUAL DE IPs Y ESCÁNER DE RANGOS CIDR (ej. 1.1.1.1/24)
   // ===========================================================================
   Widget _buildManualIpVerifierTab() {
-    final results = ((_verificationReport?['results'] as List?) ?? [])
+    final allResults = ((_verificationReport?['results'] as List?) ?? [])
         .map((e) => Map<String, dynamic>.from(e as Map))
+        .where((r) => !_dismissedScanIps.contains((r['ip_address'] ?? '').toString()))
         .toList();
+
+    final int conflictCount = allResults
+        .where((r) => r['verdict'] == 'conflict_unregistered')
+        .length;
+    final int freeCount = allResults
+        .where((r) => r['verdict'] == 'free_confirmed')
+        .length;
+    final int activeInCmdbCount = allResults
+        .where((r) => r['verdict'] == 'active_in_network')
+        .length;
+    final int noResponseCount = allResults
+        .where((r) => r['verdict'] == 'no_response')
+        .length;
+
+    final filteredResults = allResults.where((r) {
+      if (_scanResultFilter == 'all') return true;
+      return (r['verdict'] ?? '').toString() == _scanResultFilter;
+    }).toList();
+
     final String? suggestedFree =
         _verificationReport?['suggested_free_ip'] as String?;
+    final String? scannedCidr =
+        _verificationReport?['scanned_cidr'] as String?;
+    final bool cidrAlreadyInCmdb =
+        _verificationReport?['cidr_already_in_cmdb'] == true;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -1460,7 +1593,7 @@ class _CmdbViewState extends State<CmdbView> {
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Control Manual de Disponibilidad IP y Detección de "IPs Fantasma" antes de Asignar',
+                        'Escáner y Verificador Manual de IPs, Rangos y Redes CIDR (ej. 1.1.1.1/24) con Incorporación Selectiva a la CMDB',
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w900,
@@ -1472,8 +1605,9 @@ class _CmdbViewState extends State<CmdbView> {
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Como las CMDB históricas suelen fallar cuando alguien usa una IP sin documentarla (o apaga el Ping ICMP por firewall), este verificador manual lanza 4 sondas reales bajo demanda:\n'
-                  '① Ping ICMP (Echo)  •  ② Sondeo TCP Multi-Puerto (22, 80, 443, 3389 RDP, 445 SMB, 8006, 902, 161 + detección de rechazo activo TCP RST)  •  ③ Tabla ARP L2 (MAC local)  •  ④ DNS Inverso (PTR).',
+                  'Introduce una IP concreta (10.20.20.45), un rango (10.20.20.1-50) o una red CIDR completa (ej. 1.1.1.1/24 o 10.20.20.0/24). '
+                  'El sistema analizará en paralelo todo el rango con 4 sondas reales (Ping ICMP + Puertos TCP + Caché ARP MAC + DNS PTR) '
+                  'y te permitirá decidir qué equipos o IPs encontradas quieres añadir a la CMDB y cuáles descartar.',
                   style: TextStyle(
                     fontSize: 12,
                     color: Color(0xFF475569),
@@ -1487,9 +1621,11 @@ class _CmdbViewState extends State<CmdbView> {
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     SizedBox(
-                      width: 310,
+                      width: 360,
                       child: TextField(
                         controller: _verifyIpCtrl,
+                        onSubmitted: (_) =>
+                            _runManualVerification(onlySuggestFree: false),
                         style: const TextStyle(
                           fontSize: 13,
                           fontFamily: 'monospace',
@@ -1497,7 +1633,7 @@ class _CmdbViewState extends State<CmdbView> {
                         ),
                         decoration: InputDecoration(
                           labelText:
-                              'IP o Rango Corto a Verificar (ej. 10.20.20.45 o 10.20.20.40-45)',
+                              'IP, Rango o Red CIDR (ej. 1.1.1.1/24, 10.20.20.0/24 o 10.20.20.1-50)',
                           prefixIcon: const Icon(Icons.radar_rounded, size: 18),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
@@ -1527,9 +1663,11 @@ class _CmdbViewState extends State<CmdbView> {
                               ),
                             )
                           : const Icon(Icons.play_arrow_rounded, size: 18),
-                      label: const Text(
-                        'Verificar IP / Rango Ahora',
-                        style: TextStyle(
+                      label: Text(
+                        _verifyingIp
+                            ? 'Analizando Rango en Red...'
+                            : 'Analizar IP / Rango CIDR Ahora',
+                        style: const TextStyle(
                           fontWeight: FontWeight.w800,
                           fontSize: 12.5,
                         ),
@@ -1586,7 +1724,7 @@ class _CmdbViewState extends State<CmdbView> {
                       ),
                       icon: const Icon(Icons.auto_fix_high_rounded, size: 17),
                       label: const Text(
-                        'Sugerir y Verificar Próximas IPs Libres en Subred',
+                        'Sugerir Próximas IPs Libres en Subred',
                         style: TextStyle(
                           fontWeight: FontWeight.w900,
                           fontSize: 12,
@@ -1634,7 +1772,7 @@ class _CmdbViewState extends State<CmdbView> {
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            'IP Libre Confirmada recomendada para asignar: $suggestedFree (0 respuestas en Ping, TCP, ARP y DNS + Libre en CMDB)',
+                            'Primera IP Libre Confirmada en el análisis: $suggestedFree (0 respuestas en Ping, TCP, ARP y DNS + Libre en CMDB)',
                             style: const TextStyle(
                               fontWeight: FontWeight.w900,
                               color: Color(0xFF14532D),
@@ -1667,11 +1805,191 @@ class _CmdbViewState extends State<CmdbView> {
                     ),
                   ),
                 ],
+                // Barra de Filtros e Incorporación Selectiva a la CMDB tras escanear un rango
+                if (allResults.isNotEmpty) ...[
+                  const Divider(height: 24),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      const Text(
+                        'Filtrar resultados del rango:',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                      _buildScanFilterChip(
+                        'all',
+                        'Todos (${allResults.length})',
+                        const Color(0xFF0F172A),
+                      ),
+                      _buildScanFilterChip(
+                        'conflict_unregistered',
+                        'Detectados en Red NO en CMDB ($conflictCount)',
+                        const Color(0xFFB91C1C),
+                      ),
+                      _buildScanFilterChip(
+                        'free_confirmed',
+                        'IPs Libres Confirmadas ($freeCount)',
+                        const Color(0xFF15803D),
+                      ),
+                      _buildScanFilterChip(
+                        'active_in_network',
+                        'Ya en CMDB y Activos ($activeInCmdbCount)',
+                        const Color(0xFF1D4ED8),
+                      ),
+                      _buildScanFilterChip(
+                        'no_response',
+                        'En CMDB Sin Respuesta ($noResponseCount)',
+                        const Color(0xFFB45309),
+                      ),
+                    ],
+                  ),
+                  if (widget.canEdit) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                      ),
+                      child: Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.playlist_add_check_rounded,
+                            color: Color(0xFF1E3A8A),
+                          ),
+                          Text(
+                            'Seleccionados para añadir a CMDB: ${_selectedDiscoveredIps.length}',
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                          OutlinedButton(
+                            onPressed: () {
+                              setState(() {
+                                _selectedDiscoveredIps.clear();
+                                for (final r in allResults) {
+                                  if (r['verdict'] == 'conflict_unregistered') {
+                                    _selectedDiscoveredIps.add(
+                                      (r['ip_address'] ?? '').toString(),
+                                    );
+                                  }
+                                }
+                              });
+                            },
+                            child: Text(
+                              'Marcar Detectados en Red ($conflictCount)',
+                              style: const TextStyle(fontSize: 11.5),
+                            ),
+                          ),
+                          OutlinedButton(
+                            onPressed: () => setState(
+                              () => _selectedDiscoveredIps.clear(),
+                            ),
+                            child: const Text(
+                              'Desmarcar Todos',
+                              style: TextStyle(fontSize: 11.5),
+                            ),
+                          ),
+                          DropdownButtonHideUnderline(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: const Color(0xFFCBD5E1),
+                                ),
+                              ),
+                              child: DropdownButton<String>(
+                                value: _bulkImportAssetClass,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF0F172A),
+                                ),
+                                items: _assetClassLabels.entries.map((e) {
+                                  return DropdownMenuItem<String>(
+                                    value: e.key,
+                                    child: Text('Crear como: ${e.value}'),
+                                  );
+                                }).toList(),
+                                onChanged: (v) {
+                                  if (v != null) {
+                                    setState(() => _bulkImportAssetClass = v);
+                                  }
+                                },
+                              ),
+                            ),
+                          ),
+                          if (scannedCidr != null &&
+                              scannedCidr.isNotEmpty &&
+                              !cidrAlreadyInCmdb)
+                            FilterChip(
+                              selected: _alsoRegisterScannedSubnet,
+                              label: Text(
+                                'Registrar también subred $scannedCidr en IPAM',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              onSelected: (v) => setState(
+                                () => _alsoRegisterScannedSubnet = v,
+                              ),
+                            ),
+                          FilledButton.icon(
+                            onPressed: _importingDiscovered
+                                ? null
+                                : () =>
+                                    _importSelectedDiscoveredToCmdb(allResults),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF1E3A8A),
+                            ),
+                            icon: _importingDiscovered
+                                ? const SizedBox(
+                                    width: 15,
+                                    height: 15,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(
+                                    Icons.library_add_check_rounded,
+                                    size: 16,
+                                  ),
+                            label: Text(
+                              'Añadir Seleccionados (${_selectedDiscoveredIps.length}) a la CMDB',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
               ],
             ),
           ),
           const SizedBox(height: 16),
-          if (results.isEmpty && !_verifyingIp)
+          if (filteredResults.isEmpty && !_verifyingIp)
             Container(
               padding: const EdgeInsets.all(32),
               alignment: Alignment.center,
@@ -1689,7 +2007,7 @@ class _CmdbViewState extends State<CmdbView> {
                   ),
                   SizedBox(height: 8),
                   Text(
-                    'Introduce una IP o pulsa "Sugerir y Verificar Próximas IPs Libres" para ejecutar las 4 sondas en vivo.',
+                    'Introduce una IP, rango o red CIDR (ej. 1.1.1.1/24 o 10.20.20.0/24) y pulsa "Analizar IP / Rango CIDR Ahora".',
                     style: TextStyle(
                       fontSize: 13,
                       color: Color(0xFF64748B),
@@ -1700,9 +2018,27 @@ class _CmdbViewState extends State<CmdbView> {
               ),
             )
           else
-            ...results.map(_buildSingleVerificationResultCard),
+            ...filteredResults.map(_buildSingleVerificationResultCard),
         ],
       ),
+    );
+  }
+
+  Widget _buildScanFilterChip(String key, String label, Color color) {
+    final active = _scanResultFilter == key;
+    return ChoiceChip(
+      selected: active,
+      selectedColor: color,
+      backgroundColor: Colors.white,
+      label: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: active ? FontWeight.w900 : FontWeight.w700,
+          color: active ? Colors.white : color,
+        ),
+      ),
+      onSelected: (_) => setState(() => _scanResultFilter = key),
     );
   }
 
@@ -1711,7 +2047,8 @@ class _CmdbViewState extends State<CmdbView> {
     final String verdict = (r['verdict'] ?? '').toString();
     final String verdictLabel = (r['verdict_label'] ?? '').toString();
     final String recommendation = (r['recommendation'] ?? '').toString();
-    final bool canAssign = r['can_safely_assign'] == true;
+    final bool documentedInCmdb = r['documented_in_cmdb'] == true;
+    final bool isSelectedForImport = _selectedDiscoveredIps.contains(ip);
     final Map<String, dynamic> probes = Map<String, dynamic>.from(
       (r['probes'] as Map?) ?? {},
     );
@@ -1765,27 +2102,43 @@ class _CmdbViewState extends State<CmdbView> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
               color: headerBg,
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(9),
               ),
             ),
-            child: Row(
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Icon(vIcon, color: badgeCol, size: 22),
-                const SizedBox(width: 10),
+                if (widget.canEdit && !documentedInCmdb)
+                  Checkbox(
+                    value: isSelectedForImport,
+                    activeColor: const Color(0xFF1E3A8A),
+                    visualDensity: VisualDensity.compact,
+                    onChanged: (v) {
+                      setState(() {
+                        if (v == true) {
+                          _selectedDiscoveredIps.add(ip);
+                        } else {
+                          _selectedDiscoveredIps.remove(ip);
+                        }
+                      });
+                    },
+                  ),
+                Icon(vIcon, color: badgeCol, size: 20),
                 Text(
                   ip,
                   style: TextStyle(
-                    fontSize: 16,
+                    fontSize: 15.5,
                     fontWeight: FontWeight.w900,
                     fontFamily: 'monospace',
                     color: badgeCol,
                   ),
                 ),
-                const SizedBox(width: 12),
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 10,
@@ -1798,67 +2151,81 @@ class _CmdbViewState extends State<CmdbView> {
                   child: Text(
                     verdictLabel,
                     style: const TextStyle(
-                      fontSize: 11,
+                      fontSize: 10.5,
                       fontWeight: FontWeight.w900,
                       color: Colors.white,
                     ),
                   ),
                 ),
-                const Spacer(),
                 Text(
-                  'Tiempo sondeo: ${r['elapsed_ms'] ?? '--'} ms',
+                  '(${r['elapsed_ms'] ?? '--'} ms)',
                   style: const TextStyle(
                     fontSize: 11,
                     color: Color(0xFF475569),
                   ),
                 ),
-                if (widget.canEdit && canAssign) ...[
-                  const SizedBox(width: 12),
+                if (widget.canEdit && !documentedInCmdb) ...[
                   FilledButton.icon(
-                    onPressed: () =>
-                        _openAssignVerifiedIpToExistingAssetDialog(ip),
+                    onPressed: () async {
+                      await _importSelectedDiscoveredToCmdb([r]);
+                    },
                     style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF15803D),
+                      backgroundColor: verdict == 'conflict_unregistered'
+                          ? const Color(0xFFB91C1C)
+                          : const Color(0xFF1E3A8A),
                       visualDensity: VisualDensity.compact,
                     ),
-                    icon: const Icon(Icons.add_link_rounded, size: 15),
+                    icon: const Icon(Icons.add_task_rounded, size: 15),
                     label: const Text(
-                      'Asignar IP a un Host',
+                      'Añadir a CMDB (1 clic)',
                       style: TextStyle(fontSize: 11.5),
                     ),
                   ),
-                  const SizedBox(width: 6),
                   OutlinedButton.icon(
-                    onPressed: () => _openAssetEditorDialog(prefilledIp: ip),
-                    style: OutlinedButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                    ),
-                    icon: const Icon(Icons.dns_rounded, size: 15),
-                    label: const Text(
-                      'Nueva Máquina con esta IP',
-                      style: TextStyle(fontSize: 11.5),
-                    ),
-                  ),
-                ],
-                if (widget.canEdit && verdict == 'conflict_unregistered') ...[
-                  const SizedBox(width: 12),
-                  FilledButton.icon(
                     onPressed: () => _openAssetEditorDialog(
                       prefilledIp: ip,
                       prefilledFqdn: (dns['ptr_hostname'] ?? '').toString(),
                       prefilledMac: (arp['mac_address'] ?? '').toString(),
                     ),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFB91C1C),
+                    style: OutlinedButton.styleFrom(
                       visualDensity: VisualDensity.compact,
                     ),
-                    icon: const Icon(Icons.library_add_check_rounded, size: 15),
+                    icon: const Icon(Icons.edit_note_rounded, size: 15),
                     label: const Text(
-                      'Registrar Equipo Detectado en CMDB',
+                      'Editar y Añadir a CMDB',
+                      style: TextStyle(fontSize: 11.5),
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () =>
+                        _openAssignVerifiedIpToExistingAssetDialog(ip),
+                    style: OutlinedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    icon: const Icon(Icons.add_link_rounded, size: 15),
+                    label: const Text(
+                      'Vincular a Host Existente',
                       style: TextStyle(fontSize: 11.5),
                     ),
                   ),
                 ],
+                TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _dismissedScanIps.add(ip);
+                      _selectedDiscoveredIps.remove(ip);
+                    });
+                  },
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF64748B),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  icon: const Icon(Icons.close_rounded, size: 15),
+                  label: const Text(
+                    'Descartar / No añadir',
+                    style: TextStyle(fontSize: 11),
+                  ),
+                ),
               ],
             ),
           ),
