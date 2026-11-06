@@ -4800,19 +4800,77 @@ def delete_alert_contact_group_endpoint(group_id: int, db: Session = Depends(get
 @api_router.post(
     "/network-hosts/notification-rules",
     tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
-    summary="Crear una Regla de Enrutamiento de Avisos (Host / HostGroup -> Persona / ContactGroup)",
+    summary="Crear o actualizar una Regla de Enrutamiento de Avisos (Host / HostGroup -> Persona / ContactGroup)",
 )
 def create_notification_rule_endpoint(payload: NotificationRoutingRuleInput, db: Session = Depends(get_db)):
+    existing = None
+    if payload.scope_type == "host_group" and payload.host_group_id:
+        existing = (
+            db.query(NotificationRoutingRule)
+            .filter(
+                NotificationRoutingRule.scope_type == "host_group",
+                NotificationRoutingRule.host_group_id == payload.host_group_id,
+            )
+            .first()
+        )
+    elif payload.scope_type == "single_host" and payload.asset_id:
+        existing = (
+            db.query(NotificationRoutingRule)
+            .filter(
+                NotificationRoutingRule.scope_type == "single_host",
+                NotificationRoutingRule.asset_id == payload.asset_id,
+            )
+            .first()
+        )
+
+    is_replace = (payload.description or "").strip() == "__REPLACE__"
+    clean_desc = "" if is_replace else (payload.description or "")
+
+    if existing:
+        if is_replace:
+            new_cg_ids = list(dict.fromkeys(payload.contact_group_ids or []))
+            new_c_ids = list(dict.fromkeys(payload.contact_ids or []))
+            if not new_cg_ids and not new_c_ids:
+                db.delete(existing)
+                db.commit()
+                return build_network_hosts_overview(db)
+            existing.contact_group_ids = new_cg_ids
+            existing.contact_ids = new_c_ids
+        else:
+            merged_cg = list(existing.contact_group_ids or [])
+            for gid in (payload.contact_group_ids or []):
+                if gid not in merged_cg:
+                    merged_cg.append(gid)
+            merged_c = list(existing.contact_ids or [])
+            for cid in (payload.contact_ids or []):
+                if cid not in merged_c:
+                    merged_c.append(cid)
+            existing.contact_group_ids = merged_cg
+            existing.contact_ids = merged_c
+        if payload.name and payload.name.strip():
+            existing.name = payload.name.strip()
+        if clean_desc:
+            existing.description = clean_desc
+        existing.enabled = payload.enabled
+        existing.send_email = payload.send_email
+        existing.send_webhook = payload.send_webhook
+        existing.only_on_hard_state = payload.only_on_hard_state
+        db.commit()
+        return build_network_hosts_overview(db)
+
+    if is_replace and not (payload.contact_group_ids or []) and not (payload.contact_ids or []):
+        return build_network_hosts_overview(db)
+
     rule = NotificationRoutingRule(
         name=payload.name.strip(),
-        description=payload.description,
+        description=clean_desc,
         enabled=payload.enabled,
         scope_type=payload.scope_type,
         host_group_id=payload.host_group_id,
         asset_id=payload.asset_id,
         asset_class_filter=payload.asset_class_filter,
-        contact_group_ids=payload.contact_group_ids,
-        contact_ids=payload.contact_ids,
+        contact_group_ids=list(dict.fromkeys(payload.contact_group_ids or [])),
+        contact_ids=list(dict.fromkeys(payload.contact_ids or [])),
         send_email=payload.send_email,
         send_webhook=payload.send_webhook,
         only_on_hard_state=payload.only_on_hard_state,
@@ -5011,8 +5069,8 @@ def create_tech_stack_node_endpoint(payload: TechStackNodeInput, db: Session = D
         custom_label=payload.custom_label.strip(),
         pos_x=max(0.01, min(0.95, payload.pos_x)),
         pos_y=max(0.01, min(0.94, payload.pos_y)),
-        width_px=max(140.0, min(380.0, payload.width_px or 200.0)),
-        height_px=max(82.0, min(280.0, payload.height_px or 110.0)),
+        width_px=max(140.0, min(520.0, payload.width_px or 236.0)),
+        height_px=max(82.0, min(360.0, payload.height_px or 134.0)),
         ssh_enabled=payload.ssh_enabled,
         ssh_user=payload.ssh_user.strip() or "root",
         ssh_port=payload.ssh_port or 22,
@@ -5040,9 +5098,9 @@ def move_tech_stack_node_endpoint(
     if payload.pos_y is not None:
         sn.pos_y = max(0.01, min(0.94, payload.pos_y))
     if payload.width_px is not None:
-        sn.width_px = max(140.0, min(380.0, payload.width_px))
+        sn.width_px = max(140.0, min(520.0, payload.width_px))
     if payload.height_px is not None:
-        sn.height_px = max(82.0, min(280.0, payload.height_px))
+        sn.height_px = max(82.0, min(360.0, payload.height_px))
     if payload.role_layer is not None:
         sn.role_layer = payload.role_layer
     if payload.custom_label is not None:

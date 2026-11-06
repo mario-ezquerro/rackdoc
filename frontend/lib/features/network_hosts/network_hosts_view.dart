@@ -66,15 +66,33 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
   int? _selectedStackNodeId;
   String? _selectedBoxId;
 
+  // Seguimiento 1:1 exacto con el ratón (coordenadas globales) para Nodos, Cajas y Ventana Flotante
+  Offset? _nodeDragStartGlobal;
+  Offset? _nodeDragStartPx;
+  Offset? _nodeResizeStartGlobal;
+  Size? _nodeResizeStartSize;
+
+  Offset? _boxDragStartGlobal;
+  Offset? _boxDragStartPx;
+  Offset? _boxResizeStartGlobal;
+  Rect? _boxResizeStartRect;
+
+  Offset? _floatWinDragStartGlobal;
+  Offset? _floatWinDragStartPos;
+
   bool _showStackLeftLibrary = true;
   bool _showStackRightSettings = true;
   bool _showStackEdges = true;
   double _stackCanvasScale = 1.0;
   bool _isStackHandMode = false;
 
-  // Modo interactivo para enlazar elementos como se quiera en el lienzo
+  // Modo interactivo para enlazar elementos desde los pequeños cuadrados en el medio de los 4 lados
   bool _isLinkModeActive = false;
   int? _linkSourceNodeId;
+  String? _linkSourceSide; // 'top' | 'bottom' | 'left' | 'right'
+  Offset? _linkLiveMousePos;
+  int? _hoveredSideNodeId;
+  String? _hoveredSideName;
 
   // Ventana Flotante Arrastrable con Datos Técnicos y Gráficas Prometheus Afinadas
   bool _showFloatingTechWindow = false;
@@ -164,6 +182,17 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
   Map<String, dynamic> get _summary =>
       Map<String, dynamic>.from((_overview['summary'] as Map?) ?? {});
 
+  Map<String, dynamic> get _smtpConfig =>
+      Map<String, dynamic>.from((_overview['smtp_config'] as Map?) ?? {});
+
+  // Estado de la Matriz 4 Columnas (Estilo Active Directory + Drag & Drop) en '6. Avisos & Alarmas'
+  int? _selectedAlertHostGroupId;
+  int? _selectedAlertUserGroupId;
+  int? _selectedAlertContactId;
+  String _alertGroupSourceFilter = 'all'; // 'all' | 'ad' | 'local' | 'custom'
+  bool _showAllUsersInCol4 = false;
+  bool _showAlertBottomLogs = true;
+
   void _syncStackCanvasState([Map<String, dynamic>? nextOverview]) {
     if (nextOverview != null) {
       _overview = nextOverview;
@@ -180,9 +209,27 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     );
     _stackCanvasScale =
         ((activeStack['map_scale'] as num?)?.toDouble() ?? 1.0).clamp(0.5, 2.0);
-    _stackBoxes = ((activeStack['canvas_boxes'] as List?) ?? [])
-        .map((b) => Map<String, dynamic>.from(b as Map))
-        .toList();
+    _stackBoxes = ((activeStack['canvas_boxes'] as List?) ?? []).map((raw) {
+      final b = Map<String, dynamic>.from(raw as Map);
+      final px = (b['pos_x'] as num?)?.toDouble() ??
+          (((b['x_px'] as num?)?.toDouble() ?? 40.0) / 1350.0);
+      final py = (b['pos_y'] as num?)?.toDouble() ??
+          (((b['y_px'] as num?)?.toDouble() ?? 40.0) / 680.0);
+      final wRel = (b['width_rel'] as num?)?.toDouble() ??
+          (((b['width_px'] as num?)?.toDouble() ?? 520.0) / 1350.0);
+      final hRel = (b['height_rel'] as num?)?.toDouble() ??
+          (((b['height_px'] as num?)?.toDouble() ?? 430.0) / 680.0);
+      b['id'] = '${b['id'] ?? 'box-${DateTime.now().microsecondsSinceEpoch}'}';
+      b['title'] = (b['title'] as String?) ?? 'ZONA / AGRUPACIÓN';
+      b['corner_data'] =
+          (b['corner_data'] as String?) ?? (b['subtitle'] as String?) ?? '';
+      b['pos_x'] = px.clamp(0.01, 0.90).toDouble();
+      b['pos_y'] = py.clamp(0.01, 0.88).toDouble();
+      b['width_rel'] = wRel.clamp(0.12, 0.95).toDouble();
+      b['height_rel'] = hRel.clamp(0.14, 0.95).toDouble();
+      b['color_hex'] = (b['color_hex'] as String?) ?? '#2563EB';
+      return b;
+    }).toList();
 
     final nodes = ((activeStack['nodes'] as List?) ?? [])
         .map((e) => Map<String, dynamic>.from(e as Map))
@@ -198,16 +245,19 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
           .clamp(0.02, 0.90);
       _stackNodePositions[nid] = Offset(px, py);
       final w =
-          ((sn['width_px'] as num?)?.toDouble() ?? 200.0).clamp(140.0, 380.0);
+          ((sn['width_px'] as num?)?.toDouble() ?? 220.0).clamp(160.0, 500.0);
       final h =
-          ((sn['height_px'] as num?)?.toDouble() ?? 110.0).clamp(82.0, 280.0);
+          ((sn['height_px'] as num?)?.toDouble() ?? 124.0).clamp(96.0, 340.0);
       _stackNodeSizes[nid] = Size(w, h);
       idx++;
     }
     if (_selectedStackNodeId != null &&
         !nodes.any((n) => n['id'] == _selectedStackNodeId)) {
-      _selectedStackNodeId = nodes.isNotEmpty ? (nodes.first['id'] as int) : null;
-    } else if (_selectedStackNodeId == null && nodes.isNotEmpty) {
+      _selectedStackNodeId =
+          nodes.isNotEmpty ? (nodes.first['id'] as int) : null;
+    } else if (_selectedStackNodeId == null &&
+        _selectedBoxId == null &&
+        nodes.isNotEmpty) {
       _selectedStackNodeId = nodes.first['id'] as int;
     }
   }
@@ -1061,14 +1111,6 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                     Expanded(
                       child: LayoutBuilder(
                         builder: (context, constraints) {
-                          final canvasW = math.max(
-                            constraints.maxWidth,
-                            1100.0,
-                          );
-                          final canvasH = math.max(
-                            constraints.maxHeight,
-                            640.0,
-                          );
                           return DragTarget<String>(
                             onWillAcceptWithDetails: (_) => widget.canEdit,
                             onAcceptWithDetails: (details) async {
@@ -1094,128 +1136,159 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                               );
                             },
                             builder: (context, candidateData, rejectedData) {
-                              return GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onTap: () {
-                                  if (_isLinkModeActive) {
+                              return MouseRegion(
+                                onHover: (event) {
+                                  if (_isLinkModeActive &&
+                                      _linkSourceNodeId != null) {
                                     setState(() {
-                                      _isLinkModeActive = false;
-                                      _linkSourceNodeId = null;
+                                      _linkLiveMousePos = event.localPosition;
                                     });
                                   }
                                 },
-                                child: Container(
-                                  key: _stackCanvasKey,
-                                  width: canvasW,
-                                  height: canvasH,
-                                  color: AppTheme.bgPrimary,
-                                  child: Stack(
-                                    clipBehavior: Clip.none,
-                                    children: [
-                                      // 0. Cuadrícula arquitectónica libre estilo Datacenter (sin columnas fijas)
-                                      Positioned.fill(
-                                        child: CustomPaint(
-                                          painter:
-                                              _StackArchitecturalGridPainter(
-                                                scale: _stackCanvasScale,
-                                              ),
-                                        ),
-                                      ),
-                                      // 1. Cajas / Zonas personalizables con texto técnico en esquina superior
-                                      for (final zBox in _stackBoxes)
-                                        _buildStackCanvasZoneBox(
-                                          zBox: zBox,
-                                          canvasWidth: constraints.maxWidth,
-                                          canvasHeight: constraints.maxHeight,
-                                        ),
-                                      // 2. Flechas de conexión multi-dirección + Píldoras interactivas
-                                      if (_showStackEdges)
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.translucent,
+                                  onTap: () {
+                                    setState(() {
+                                      if (_isLinkModeActive) {
+                                        _isLinkModeActive = false;
+                                        _linkSourceNodeId = null;
+                                        _linkSourceSide = null;
+                                        _linkLiveMousePos = null;
+                                      } else {
+                                        _selectedBoxId = null;
+                                      }
+                                    });
+                                  },
+                                  child: Container(
+                                    key: _stackCanvasKey,
+                                    width: constraints.maxWidth,
+                                    height: constraints.maxHeight,
+                                    color: AppTheme.bgPrimary,
+                                    child: Stack(
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        // 0. Cuadrícula arquitectónica libre estilo Datacenter (IgnorePointer para no bloquear eventos)
                                         Positioned.fill(
-                                          child: CustomPaint(
-                                            painter: _TechStackEdgesPainter(
-                                              nodes: nodes,
-                                              edges: edges,
-                                              nodePositions:
-                                                  _stackNodePositions,
-                                              nodeSizes: _stackNodeSizes,
-                                              canvasSize: Size(
-                                                constraints.maxWidth,
-                                                constraints.maxHeight,
-                                              ),
+                                          child: IgnorePointer(
+                                            child: CustomPaint(
+                                              painter:
+                                                  _StackArchitecturalGridPainter(
+                                                    scale: _stackCanvasScale,
+                                                  ),
                                             ),
                                           ),
                                         ),
-                                      if (_showStackEdges)
-                                        ..._buildEdgeInteractivePills(
-                                          nodes: nodes,
-                                          edges: edges,
-                                          canvasWidth: constraints.maxWidth,
-                                          canvasHeight: constraints.maxHeight,
-                                        ),
-                                      // 3. Elementos / Nodos libremente arrastrables y redimensionables
-                                      for (final sn in nodes)
-                                        _buildDraggableStackNodeCard(
-                                          sn: sn,
-                                          allNodes: nodes,
-                                          canvasWidth: constraints.maxWidth,
-                                          canvasHeight: constraints.maxHeight,
-                                        ),
-                                      // 4. Banner de ayuda cuando el Modo Enlazar está activo
-                                      if (_isLinkModeActive)
-                                        Positioned(
-                                          top: 10,
-                                          left: 16,
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 7,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: AppTheme.warning,
-                                              borderRadius:
-                                                  BorderRadius.circular(8),
-                                              boxShadow: const [
-                                                BoxShadow(
-                                                  color: Colors.black26,
-                                                  blurRadius: 8,
+                                        // 1. Cajas / Zonas seleccionables, redimensionables y arrastrables con el ratón + borrar en "X" superior izquierda
+                                        for (final zBox in _stackBoxes)
+                                          _buildStackCanvasZoneBox(
+                                            zBox: zBox,
+                                            canvasWidth: constraints.maxWidth,
+                                            canvasHeight: constraints.maxHeight,
+                                          ),
+                                        // 2. Flechas de unión multi-dirección + Flecha en vivo desde los cuadrados laterales (IgnorePointer para no tapar cajas)
+                                        if (_showStackEdges || _isLinkModeActive)
+                                          Positioned.fill(
+                                            child: IgnorePointer(
+                                              child: CustomPaint(
+                                                painter: _TechStackEdgesPainter(
+                                                  nodes: nodes,
+                                                  edges: _showStackEdges
+                                                      ? edges
+                                                      : const [],
+                                                  nodePositions:
+                                                      _stackNodePositions,
+                                                  nodeSizes: _stackNodeSizes,
+                                                  canvasSize: Size(
+                                                    constraints.maxWidth,
+                                                    constraints.maxHeight,
+                                                  ),
+                                                  liveSourceNodeId:
+                                                      _isLinkModeActive
+                                                      ? _linkSourceNodeId
+                                                      : null,
+                                                  liveSourceSide:
+                                                      _linkSourceSide,
+                                                  liveMousePos:
+                                                      _linkLiveMousePos,
                                                 ),
-                                              ],
+                                              ),
                                             ),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                const Icon(
-                                                  Icons.link_rounded,
-                                                  size: 16,
-                                                  color: Colors.black,
-                                                ),
-                                                const SizedBox(width: 6),
-                                                Text(
-                                                  _linkSourceNodeId == null
-                                                      ? 'MODO ENLAZAR: Haz clic en el elemento ORIGEN'
-                                                      : 'MODO ENLAZAR: Ahora haz clic en cualquier elemento DESTINO para conectarlos',
-                                                  style: const TextStyle(
-                                                    fontSize: 11,
-                                                    fontWeight: FontWeight.w900,
+                                          ),
+                                        if (_showStackEdges)
+                                          ..._buildEdgeInteractivePills(
+                                            nodes: nodes,
+                                            edges: edges,
+                                            canvasWidth: constraints.maxWidth,
+                                            canvasHeight: constraints.maxHeight,
+                                          ),
+                                        // 3. Elementos / Nodos libremente arrastrables (1:1 con ratón), redimensionables y con 4 cuadrados laterales de enlace
+                                        for (final sn in nodes)
+                                          _buildDraggableStackNodeCard(
+                                            sn: sn,
+                                            allNodes: nodes,
+                                            canvasWidth: constraints.maxWidth,
+                                            canvasHeight: constraints.maxHeight,
+                                          ),
+                                        // 4. Banner de ayuda cuando el Modo Enlazar o un cuadrado lateral está activo
+                                        if (_isLinkModeActive)
+                                          Positioned(
+                                            top: 10,
+                                            left: 16,
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 12,
+                                                    vertical: 7,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: AppTheme.warning,
+                                                borderRadius:
+                                                    BorderRadius.circular(8),
+                                                boxShadow: const [
+                                                  BoxShadow(
+                                                    color: Colors.black26,
+                                                    blurRadius: 8,
+                                                  ),
+                                                ],
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(
+                                                    Icons.link_rounded,
+                                                    size: 16,
                                                     color: Colors.black,
                                                   ),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                InkWell(
-                                                  onTap: () => setState(() {
-                                                    _isLinkModeActive = false;
-                                                    _linkSourceNodeId = null;
-                                                  }),
-                                                  child: const Icon(
-                                                    Icons.close,
-                                                    size: 15,
-                                                    color: Colors.black87,
+                                                  const SizedBox(width: 6),
+                                                  Text(
+                                                    _linkSourceNodeId == null
+                                                        ? 'MODO ENLAZAR: Haz clic en un cuadrado lateral (o elemento) ORIGEN'
+                                                        : 'FLECHA DE UNIÓN ACTIVA (${_linkSourceSide?.toUpperCase() ?? "AUTO"}): Haz clic o suelta en cualquier cuadrado lateral o elemento DESTINO',
+                                                    style: const TextStyle(
+                                                      fontSize: 11,
+                                                      fontWeight:
+                                                          FontWeight.w900,
+                                                      color: Colors.black,
+                                                    ),
                                                   ),
-                                                ),
-                                              ],
+                                                  const SizedBox(width: 8),
+                                                  InkWell(
+                                                    onTap: () => setState(() {
+                                                      _isLinkModeActive = false;
+                                                      _linkSourceNodeId = null;
+                                                      _linkSourceSide = null;
+                                                      _linkLiveMousePos = null;
+                                                    }),
+                                                    child: const Icon(
+                                                      Icons.close,
+                                                      size: 15,
+                                                      color: Colors.black87,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
                                             ),
                                           ),
-                                        ),
                                       // 5. Ventana Flotante Movible con Datos Técnicos, SSH y Gráficas Prometheus Afinadas
                                       if (_showFloatingTechWindow &&
                                           selectedNode.isNotEmpty)
@@ -1227,9 +1300,10 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                                     ],
                                   ),
                                 ),
-                              );
-                            },
-                          );
+                              ),
+                            );
+                          },
+                        );
                         },
                       ),
                     ),
@@ -1754,16 +1828,22 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     required double canvasHeight,
   }) {
     final boxId = '${zBox['id']}';
-    final px = ((zBox['pos_x'] as num?)?.toDouble() ?? 0.05).clamp(0.01, 0.92);
-    final py = ((zBox['pos_y'] as num?)?.toDouble() ?? 0.06).clamp(0.01, 0.90);
-    final wRel = ((zBox['width_rel'] as num?)?.toDouble() ?? 0.36).clamp(
-      0.12,
-      0.95,
-    );
-    final hRel = ((zBox['height_rel'] as num?)?.toDouble() ?? 0.45).clamp(
-      0.14,
-      0.95,
-    );
+    final px = ((zBox['pos_x'] as num?)?.toDouble() ??
+            (((zBox['x_px'] as num?)?.toDouble() ?? 40.0) / canvasWidth))
+        .clamp(0.01, 0.92)
+        .toDouble();
+    final py = ((zBox['pos_y'] as num?)?.toDouble() ??
+            (((zBox['y_px'] as num?)?.toDouble() ?? 40.0) / canvasHeight))
+        .clamp(0.01, 0.90)
+        .toDouble();
+    final wRel = ((zBox['width_rel'] as num?)?.toDouble() ??
+            (((zBox['width_px'] as num?)?.toDouble() ?? 520.0) / canvasWidth))
+        .clamp(0.12, 0.95)
+        .toDouble();
+    final hRel = ((zBox['height_rel'] as num?)?.toDouble() ??
+            (((zBox['height_px'] as num?)?.toDouble() ?? 430.0) / canvasHeight))
+        .clamp(0.14, 0.95)
+        .toDouble();
 
     final left = px * canvasWidth;
     final top = py * canvasHeight;
@@ -1771,6 +1851,21 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     final height = hRel * canvasHeight;
     final col = _parseBoxHexColor(zBox['color_hex'] as String?);
     final isSelected = _selectedBoxId == boxId;
+    final cornerText = ((zBox['corner_data'] as String?) ??
+            (zBox['subtitle'] as String?) ??
+            '')
+        .trim();
+
+    Future<void> deleteThisBox() async {
+      final updated = _stackBoxes.where((b) => '${b['id']}' != boxId).toList();
+      setState(() {
+        _stackBoxes = updated;
+        if (_selectedBoxId == boxId) {
+          _selectedBoxId = null;
+        }
+      });
+      await _persistStackBoxesAndScale(boxes: updated);
+    }
 
     return Positioned(
       left: left,
@@ -1778,187 +1873,393 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
       width: width,
       height: height,
       child: GestureDetector(
-        behavior: HitTestBehavior.deferToChild,
+        behavior: HitTestBehavior.opaque,
         onTap: () {
           setState(() {
             _selectedBoxId = boxId;
             _selectedStackNodeId = null;
           });
         },
+        onDoubleTap: widget.canEdit
+            ? () {
+                setState(() {
+                  _selectedBoxId = boxId;
+                  _selectedStackNodeId = null;
+                });
+                _showAddOrEditStackZoneBoxDialog(existingBox: zBox);
+              }
+            : null,
+        onPanStart: widget.canEdit
+            ? (details) {
+                setState(() {
+                  _selectedBoxId = boxId;
+                  _selectedStackNodeId = null;
+                  _boxDragStartGlobal = details.globalPosition;
+                  _boxDragStartPx = Offset(left, top);
+                });
+              }
+            : null,
         onPanUpdate: widget.canEdit
             ? (details) {
-                final nx = ((left + details.delta.dx) / canvasWidth).clamp(
-                  0.01,
-                  math.max(0.02, 0.98 - wRel),
+                if (_boxDragStartGlobal == null || _boxDragStartPx == null) {
+                  return;
+                }
+                final globalDelta =
+                    details.globalPosition - _boxDragStartGlobal!;
+                final newLeft = (_boxDragStartPx!.dx + globalDelta.dx).clamp(
+                  4.0,
+                  math.max(8.0, canvasWidth - width - 4.0),
                 );
-                final ny = ((top + details.delta.dy) / canvasHeight).clamp(
-                  0.01,
-                  math.max(0.02, 0.98 - hRel),
+                final newTop = (_boxDragStartPx!.dy + globalDelta.dy).clamp(
+                  4.0,
+                  math.max(8.0, canvasHeight - height - 4.0),
                 );
                 setState(() {
-                  zBox['pos_x'] = nx;
-                  zBox['pos_y'] = ny;
+                  zBox['pos_x'] = (newLeft / canvasWidth)
+                      .clamp(0.005, 0.96)
+                      .toDouble();
+                  zBox['pos_y'] = (newTop / canvasHeight)
+                      .clamp(0.005, 0.95)
+                      .toDouble();
                 });
               }
             : null,
         onPanEnd: widget.canEdit
-            ? (_) => _persistStackBoxesAndScale(boxes: _stackBoxes)
+            ? (_) {
+                _boxDragStartGlobal = null;
+                _boxDragStartPx = null;
+                _persistStackBoxesAndScale(boxes: _stackBoxes);
+              }
             : null,
-        child: Container(
-          decoration: BoxDecoration(
-            color: col.withValues(alpha: 0.045),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isSelected ? col : col.withValues(alpha: 0.38),
-              width: isSelected ? 2.0 : 1.3,
+        child: MouseRegion(
+          cursor: widget.canEdit
+              ? SystemMouseCursors.move
+              : SystemMouseCursors.basic,
+          child: Container(
+            decoration: BoxDecoration(
+              color: col.withValues(alpha: isSelected ? 0.08 : 0.045),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isSelected ? col : col.withValues(alpha: 0.45),
+                width: isSelected ? 2.4 : 1.4,
+              ),
+              boxShadow: isSelected
+                  ? [
+                      BoxShadow(
+                        color: col.withValues(alpha: 0.16),
+                        blurRadius: 10,
+                      ),
+                    ]
+                  : null,
             ),
-          ),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              // Etiqueta en la ESQUINA SUPERIOR IZQUIERDA con Título + Datos Técnicos
-              Positioned(
-                left: 8,
-                top: 8,
-                right: 28,
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 9,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppTheme.bgSecondary.withValues(alpha: 0.95),
-                        borderRadius: BorderRadius.circular(7),
-                        border: Border.all(color: col.withValues(alpha: 0.75)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.crop_free_rounded,
-                            size: 12,
-                            color: col,
-                          ),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(
-                              '${zBox['title'] ?? 'ZONA'}',
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w900,
-                                color: col,
-                                letterSpacing: 0.3,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if ((zBox['corner_data'] as String?)
-                                  ?.trim()
-                                  .isNotEmpty ==
-                              true) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 1.5,
-                              ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                // Cabecera en la ESQUINA SUPERIOR IZQUIERDA:
+                // [ Botón "X" Borrar ] + [ Título editable + Datos Técnicos + Botón Editar Nombre ]
+                Positioned(
+                  left: 8,
+                  top: 8,
+                  right: 24,
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      // Botón "X" en la esquina superior izquierda para borrar la caja
+                      if (widget.canEdit)
+                        Tooltip(
+                          message: 'Borrar esta caja / zona',
+                          child: InkWell(
+                            onTap: deleteThisBox,
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              width: 24,
+                              height: 24,
+                              alignment: Alignment.center,
                               decoration: BoxDecoration(
-                                color: col.withValues(alpha: 0.14),
-                                borderRadius: BorderRadius.circular(5),
-                              ),
-                              child: Text(
-                                '${zBox['corner_data']}',
-                                style: const TextStyle(
-                                  fontSize: 9.5,
-                                  fontFamily: 'monospace',
-                                  fontWeight: FontWeight.w700,
-                                  color: AppTheme.textPrimary,
+                                color: AppTheme.error.withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: AppTheme.error.withValues(alpha: 0.75),
                                 ),
                               ),
-                            ),
-                          ],
-                          if (widget.canEdit) ...[
-                            const SizedBox(width: 6),
-                            InkWell(
-                              onTap: () => _showAddOrEditStackZoneBoxDialog(
-                                existingBox: zBox,
-                              ),
-                              child: const Icon(
-                                Icons.edit_outlined,
-                                size: 12.5,
-                                color: AppTheme.textSecondary,
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            InkWell(
-                              onTap: () async {
-                                final updated = _stackBoxes
-                                    .where((b) => '${b['id']}' != boxId)
-                                    .toList();
-                                setState(() {
-                                  _stackBoxes = updated;
-                                  if (_selectedBoxId == boxId) {
-                                    _selectedBoxId = null;
-                                  }
-                                });
-                                await _persistStackBoxesAndScale(
-                                  boxes: updated,
-                                );
-                              },
                               child: const Icon(
                                 Icons.close_rounded,
-                                size: 13,
-                                color: AppTheme.textMuted,
+                                size: 14,
+                                color: AppTheme.error,
                               ),
                             ),
-                          ],
-                        ],
+                          ),
+                        ),
+                      // Etiqueta clicable para seleccionar o cambiar nombre/datos de la caja
+                      InkWell(
+                        onTap: () {
+                          setState(() {
+                            _selectedBoxId = boxId;
+                            _selectedStackNodeId = null;
+                          });
+                          if (widget.canEdit) {
+                            _showAddOrEditStackZoneBoxDialog(existingBox: zBox);
+                          }
+                        },
+                        borderRadius: BorderRadius.circular(7),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 9,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppTheme.bgSecondary.withValues(alpha: 0.96),
+                            borderRadius: BorderRadius.circular(7),
+                            border: Border.all(
+                              color: col.withValues(alpha: 0.8),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.crop_free_rounded,
+                                size: 12,
+                                color: col,
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  '${zBox['title'] ?? 'ZONA'}',
+                                  style: TextStyle(
+                                    fontSize: 10.8,
+                                    fontWeight: FontWeight.w900,
+                                    color: col,
+                                    letterSpacing: 0.3,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (cornerText.isNotEmpty) ...[
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 1.5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: col.withValues(alpha: 0.14),
+                                    borderRadius: BorderRadius.circular(5),
+                                  ),
+                                  child: Text(
+                                    cornerText,
+                                    style: const TextStyle(
+                                      fontSize: 9.5,
+                                      fontFamily: 'monospace',
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              if (widget.canEdit) ...[
+                                const SizedBox(width: 6),
+                                const Icon(
+                                  Icons.edit_outlined,
+                                  size: 13,
+                                  color: AppTheme.textSecondary,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              // Tirador de redimensionado en esquina inferior derecha (igual que Datacenter)
-              if (widget.canEdit)
-                Positioned(
-                  right: 0,
-                  bottom: 0,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onPanUpdate: (details) {
-                      final nw = ((width + details.delta.dx) / canvasWidth)
-                          .clamp(0.12, 0.96 - px);
-                      final nh = ((height + details.delta.dy) / canvasHeight)
-                          .clamp(0.14, 0.96 - py);
-                      setState(() {
-                        zBox['width_rel'] = nw;
-                        zBox['height_rel'] = nh;
-                      });
-                    },
-                    onPanEnd: (_) =>
-                        _persistStackBoxesAndScale(boxes: _stackBoxes),
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.resizeDownRight,
-                      child: Container(
-                        width: 20,
-                        height: 20,
-                        alignment: Alignment.bottomRight,
-                        padding: const EdgeInsets.all(3),
-                        child: Icon(
-                          Icons.south_east_rounded,
-                          size: 12,
-                          color: col.withValues(alpha: 0.8),
+
+                // Tirador de redimensionado DERECHO (ancho) 1:1 con el ratón
+                if (widget.canEdit)
+                  Positioned(
+                    right: -4,
+                    top: height * 0.25,
+                    bottom: height * 0.25,
+                    width: 12,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onPanStart: (details) {
+                        setState(() {
+                          _selectedBoxId = boxId;
+                          _boxResizeStartGlobal = details.globalPosition;
+                          _boxResizeStartRect = Rect.fromLTWH(
+                            left,
+                            top,
+                            width,
+                            height,
+                          );
+                        });
+                      },
+                      onPanUpdate: (details) {
+                        if (_boxResizeStartGlobal == null ||
+                            _boxResizeStartRect == null) {
+                          return;
+                        }
+                        final dx =
+                            details.globalPosition.dx -
+                            _boxResizeStartGlobal!.dx;
+                        final nw =
+                            ((_boxResizeStartRect!.width + dx) / canvasWidth)
+                                .clamp(0.10, 0.98 - px)
+                                .toDouble();
+                        setState(() => zBox['width_rel'] = nw);
+                      },
+                      onPanEnd: (_) {
+                        _boxResizeStartGlobal = null;
+                        _boxResizeStartRect = null;
+                        _persistStackBoxesAndScale(boxes: _stackBoxes);
+                      },
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.resizeLeftRight,
+                        child: Center(
+                          child: Container(
+                            width: 5,
+                            height: 28,
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? col
+                                  : col.withValues(alpha: 0.45),
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-            ],
+
+                // Tirador de redimensionado INFERIOR (alto) 1:1 con el ratón
+                if (widget.canEdit)
+                  Positioned(
+                    bottom: -4,
+                    left: width * 0.25,
+                    right: width * 0.25,
+                    height: 12,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onPanStart: (details) {
+                        setState(() {
+                          _selectedBoxId = boxId;
+                          _boxResizeStartGlobal = details.globalPosition;
+                          _boxResizeStartRect = Rect.fromLTWH(
+                            left,
+                            top,
+                            width,
+                            height,
+                          );
+                        });
+                      },
+                      onPanUpdate: (details) {
+                        if (_boxResizeStartGlobal == null ||
+                            _boxResizeStartRect == null) {
+                          return;
+                        }
+                        final dy =
+                            details.globalPosition.dy -
+                            _boxResizeStartGlobal!.dy;
+                        final nh =
+                            ((_boxResizeStartRect!.height + dy) / canvasHeight)
+                                .clamp(0.12, 0.98 - py)
+                                .toDouble();
+                        setState(() => zBox['height_rel'] = nh);
+                      },
+                      onPanEnd: (_) {
+                        _boxResizeStartGlobal = null;
+                        _boxResizeStartRect = null;
+                        _persistStackBoxesAndScale(boxes: _stackBoxes);
+                      },
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.resizeUpDown,
+                        child: Center(
+                          child: Container(
+                            width: 28,
+                            height: 5,
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? col
+                                  : col.withValues(alpha: 0.45),
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // Tirador de redimensionado ESQUINA INFERIOR DERECHA (ancho + alto 1:1 con ratón)
+                if (widget.canEdit)
+                  Positioned(
+                    right: -4,
+                    bottom: -4,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onPanStart: (details) {
+                        setState(() {
+                          _selectedBoxId = boxId;
+                          _boxResizeStartGlobal = details.globalPosition;
+                          _boxResizeStartRect = Rect.fromLTWH(
+                            left,
+                            top,
+                            width,
+                            height,
+                          );
+                        });
+                      },
+                      onPanUpdate: (details) {
+                        if (_boxResizeStartGlobal == null ||
+                            _boxResizeStartRect == null) {
+                          return;
+                        }
+                        final delta =
+                            details.globalPosition - _boxResizeStartGlobal!;
+                        final nw =
+                            ((_boxResizeStartRect!.width + delta.dx) /
+                                    canvasWidth)
+                                .clamp(0.10, 0.98 - px)
+                                .toDouble();
+                        final nh =
+                            ((_boxResizeStartRect!.height + delta.dy) /
+                                    canvasHeight)
+                                .clamp(0.12, 0.98 - py)
+                                .toDouble();
+                        setState(() {
+                          zBox['width_rel'] = nw;
+                          zBox['height_rel'] = nh;
+                        });
+                      },
+                      onPanEnd: (_) {
+                        _boxResizeStartGlobal = null;
+                        _boxResizeStartRect = null;
+                        _persistStackBoxesAndScale(boxes: _stackBoxes);
+                      },
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.resizeDownRight,
+                        child: Container(
+                          width: 22,
+                          height: 22,
+                          alignment: Alignment.bottomRight,
+                          padding: const EdgeInsets.all(3),
+                          decoration: BoxDecoration(
+                            color: AppTheme.bgSecondary.withValues(alpha: 0.9),
+                            borderRadius: BorderRadius.circular(5),
+                            border: Border.all(color: col),
+                          ),
+                          child: Icon(
+                            Icons.south_east_rounded,
+                            size: 13,
+                            color: col,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -2116,6 +2417,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
         src: src,
         dst: dst,
         canvasSize: Size(canvasWidth, canvasHeight),
+        edgeNotes: (e['notes'] as String?) ?? '',
       );
       final midX = (anchors.$1.dx + anchors.$2.dx) / 2;
       final midY = (anchors.$1.dy + anchors.$2.dy) / 2;
@@ -2170,10 +2472,26 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     return pills;
   }
 
+  Offset _sideAnchorPoint(Rect r, String? side) {
+    switch (side) {
+      case 'top':
+        return r.topCenter;
+      case 'bottom':
+        return r.bottomCenter;
+      case 'left':
+        return r.centerLeft;
+      case 'right':
+        return r.centerRight;
+      default:
+        return r.centerRight;
+    }
+  }
+
   (Offset, Offset) _computeSmartEdgeAnchors({
     required Map<String, dynamic> src,
     required Map<String, dynamic> dst,
     required Size canvasSize,
+    String edgeNotes = '',
   }) {
     final srcId = src['id'] as int;
     final dstId = dst['id'] as int;
@@ -2192,14 +2510,14 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     final sSize =
         _stackNodeSizes[srcId] ??
         Size(
-          (src['width_px'] as num?)?.toDouble() ?? 236.0,
-          (src['height_px'] as num?)?.toDouble() ?? 134.0,
+          (src['width_px'] as num?)?.toDouble() ?? 220.0,
+          (src['height_px'] as num?)?.toDouble() ?? 124.0,
         );
     final dSize =
         _stackNodeSizes[dstId] ??
         Size(
-          (dst['width_px'] as num?)?.toDouble() ?? 236.0,
-          (dst['height_px'] as num?)?.toDouble() ?? 134.0,
+          (dst['width_px'] as num?)?.toDouble() ?? 220.0,
+          (dst['height_px'] as num?)?.toDouble() ?? 124.0,
         );
 
     final sRect = Rect.fromLTWH(
@@ -2214,6 +2532,16 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
       dSize.width,
       dSize.height,
     );
+
+    if (edgeNotes.startsWith('side:') && edgeNotes.contains('->')) {
+      final parts = edgeNotes.substring(5).split('->');
+      if (parts.length == 2) {
+        return (
+          _sideAnchorPoint(sRect, parts[0].trim()),
+          _sideAnchorPoint(dRect, parts[1].trim()),
+        );
+      }
+    }
 
     final sCenters = [
       sRect.centerRight,
@@ -2350,7 +2678,8 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
   }
 
   // ===========================================================================
-  // TARJETA DE NODO ARRASTRABLE Y REDIMENSIONABLE EN EL LIENZO 2D LIBRE
+  // TARJETA DE NODO ARRASTRABLE (1:1 CON RATÓN), REDIMENSIONABLE Y CON
+  // 4 PEQUEÑOS CUADRADOS EN EL MEDIO DE LOS LADOS PARA LAS FLECHAS DE UNIÓN
   // ===========================================================================
 
   Widget _buildDraggableStackNodeCard({
@@ -2370,8 +2699,8 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     final nodeSize =
         _stackNodeSizes[nodeId] ??
         Size(
-          ((sn['width_px'] as num?)?.toDouble() ?? 236.0).clamp(185.0, 460.0),
-          ((sn['height_px'] as num?)?.toDouble() ?? 134.0).clamp(112.0, 320.0),
+          ((sn['width_px'] as num?)?.toDouble() ?? 220.0).clamp(160.0, 500.0),
+          ((sn['height_px'] as num?)?.toDouble() ?? 124.0).clamp(96.0, 340.0),
         );
 
     final left = (pos.dx * canvasWidth)
@@ -2408,16 +2737,26 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
             if (_linkSourceNodeId == null) {
               setState(() {
                 _linkSourceNodeId = nodeId;
+                _linkSourceSide = 'right';
                 _selectedStackNodeId = nodeId;
               });
             } else if (_linkSourceNodeId != nodeId) {
               final srcId = _linkSourceNodeId!;
+              final srcSide = _linkSourceSide;
               setState(() {
                 _isLinkModeActive = false;
                 _linkSourceNodeId = null;
+                _linkSourceSide = null;
+                _linkLiveMousePos = null;
                 _selectedStackNodeId = nodeId;
               });
-              await _quickCreateEdgeBetweenNodes(srcId, nodeId, allNodes);
+              await _instantConnectNodes(
+                srcId,
+                nodeId,
+                allNodes,
+                sourceSide: srcSide,
+                targetSide: null,
+              );
             }
             return;
           }
@@ -2441,25 +2780,36 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
             _loadHostTelemetry(host['id'] as int);
           }
         },
+        onPanStart: widget.canEdit
+            ? (details) {
+                setState(() {
+                  _selectedStackNodeId = nodeId;
+                  _selectedBoxId = null;
+                  _nodeDragStartGlobal = details.globalPosition;
+                  _nodeDragStartPx = Offset(left, top);
+                });
+              }
+            : null,
         onPanUpdate: widget.canEdit
             ? (details) {
-                final newPx = ((left + details.delta.dx) / canvasWidth)
-                    .clamp(
-                      0.01,
-                      math.max(
-                        0.02,
-                        (canvasWidth - nodeSize.width) / canvasWidth,
-                      ),
-                    )
+                if (_nodeDragStartGlobal == null || _nodeDragStartPx == null) {
+                  return;
+                }
+                final globalDelta =
+                    details.globalPosition - _nodeDragStartGlobal!;
+                final newLeft = (_nodeDragStartPx!.dx + globalDelta.dx).clamp(
+                  4.0,
+                  math.max(8.0, canvasWidth - nodeSize.width - 4.0),
+                );
+                final newTop = (_nodeDragStartPx!.dy + globalDelta.dy).clamp(
+                  4.0,
+                  math.max(8.0, canvasHeight - nodeSize.height - 4.0),
+                );
+                final newPx = (newLeft / canvasWidth)
+                    .clamp(0.005, 0.96)
                     .toDouble();
-                final newPy = ((top + details.delta.dy) / canvasHeight)
-                    .clamp(
-                      0.01,
-                      math.max(
-                        0.02,
-                        (canvasHeight - nodeSize.height) / canvasHeight,
-                      ),
-                    )
+                final newPy = (newTop / canvasHeight)
+                    .clamp(0.005, 0.95)
                     .toDouble();
                 setState(() {
                   _stackNodePositions[nodeId] = Offset(newPx, newPy);
@@ -2470,6 +2820,8 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
             : null,
         onPanEnd: widget.canEdit
             ? (_) async {
+                _nodeDragStartGlobal = null;
+                _nodeDragStartPx = null;
                 final finalPos = _stackNodePositions[nodeId];
                 final finalSize = _stackNodeSizes[nodeId] ?? nodeSize;
                 if (finalPos == null) return;
@@ -2509,12 +2861,13 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
             ],
           ),
           child: Stack(
+            clipBehavior: Clip.none,
             children: [
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // Cabecera del nodo: Estado + Código + Latencia + Acciones rápidas (Enlazar / Ventana Flotante / Eliminar)
+                  // Cabecera del nodo: Estado + Código + Latencia + Acciones rápidas
                   Row(
                     children: [
                       Container(
@@ -2558,34 +2911,6 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                           ),
                         ),
                       const SizedBox(width: 4),
-                      // Botón para iniciar enlace desde este elemento hacia cualquier otro
-                      if (widget.canEdit)
-                        InkWell(
-                          onTap: () {
-                            setState(() {
-                              _isLinkModeActive = true;
-                              _linkSourceNodeId = nodeId;
-                              _selectedStackNodeId = nodeId;
-                            });
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.all(2.5),
-                            decoration: BoxDecoration(
-                              color: isLinkSource
-                                  ? AppTheme.warning
-                                  : AppTheme.accentCyan.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Icon(
-                              Icons.link_rounded,
-                              size: 12,
-                              color: isLinkSource
-                                  ? Colors.black
-                                  : AppTheme.accentCyan,
-                            ),
-                          ),
-                        ),
-                      const SizedBox(width: 3),
                       // Botón para abrir la Ventana Flotante Movible de Datos Técnicos y Gráficas
                       InkWell(
                         onTap: () {
@@ -2801,22 +3126,113 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                   ),
                 ],
               ),
-              // Tirador de redimensionado en la esquina inferior derecha del nodo
+
+              // ===============================================================
+              // 4 PEQUEÑOS CUADRADOS EN EL MEDIO DE LOS LADOS (TOP, BOTTOM, LEFT, RIGHT)
+              // Al seleccionarlos o arrastrarlos aparecen las flechas de unión
+              // ===============================================================
+              if (widget.canEdit) ...[
+                // Lado SUPERIOR (medio)
+                Positioned(
+                  left: (nodeSize.width / 2) - 15,
+                  top: -14,
+                  child: _buildNodeSideConnectorSquare(
+                    nodeId: nodeId,
+                    side: 'top',
+                    allNodes: allNodes,
+                    nodeRectInCanvas: Rect.fromLTWH(
+                      left,
+                      top,
+                      nodeSize.width,
+                      nodeSize.height,
+                    ),
+                    canvasWidth: canvasWidth,
+                    canvasHeight: canvasHeight,
+                  ),
+                ),
+                // Lado INFERIOR (medio)
+                Positioned(
+                  left: (nodeSize.width / 2) - 15,
+                  bottom: -14,
+                  child: _buildNodeSideConnectorSquare(
+                    nodeId: nodeId,
+                    side: 'bottom',
+                    allNodes: allNodes,
+                    nodeRectInCanvas: Rect.fromLTWH(
+                      left,
+                      top,
+                      nodeSize.width,
+                      nodeSize.height,
+                    ),
+                    canvasWidth: canvasWidth,
+                    canvasHeight: canvasHeight,
+                  ),
+                ),
+                // Lado IZQUIERDO (medio)
+                Positioned(
+                  left: -14,
+                  top: (nodeSize.height / 2) - 15,
+                  child: _buildNodeSideConnectorSquare(
+                    nodeId: nodeId,
+                    side: 'left',
+                    allNodes: allNodes,
+                    nodeRectInCanvas: Rect.fromLTWH(
+                      left,
+                      top,
+                      nodeSize.width,
+                      nodeSize.height,
+                    ),
+                    canvasWidth: canvasWidth,
+                    canvasHeight: canvasHeight,
+                  ),
+                ),
+                // Lado DERECHO (medio)
+                Positioned(
+                  right: -14,
+                  top: (nodeSize.height / 2) - 15,
+                  child: _buildNodeSideConnectorSquare(
+                    nodeId: nodeId,
+                    side: 'right',
+                    allNodes: allNodes,
+                    nodeRectInCanvas: Rect.fromLTWH(
+                      left,
+                      top,
+                      nodeSize.width,
+                      nodeSize.height,
+                    ),
+                    canvasWidth: canvasWidth,
+                    canvasHeight: canvasHeight,
+                  ),
+                ),
+              ],
+
+              // Tirador de redimensionado en la esquina inferior derecha del nodo (1:1 con ratón)
               if (widget.canEdit)
                 Positioned(
                   right: -4,
                   bottom: -4,
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
+                    onPanStart: (details) {
+                      setState(() {
+                        _selectedStackNodeId = nodeId;
+                        _nodeResizeStartGlobal = details.globalPosition;
+                        _nodeResizeStartSize = nodeSize;
+                      });
+                    },
                     onPanUpdate: (details) {
-                      final nw = (nodeSize.width + details.delta.dx).clamp(
-                        185.0,
-                        460.0,
-                      );
-                      final nh = (nodeSize.height + details.delta.dy).clamp(
-                        112.0,
-                        320.0,
-                      );
+                      if (_nodeResizeStartGlobal == null ||
+                          _nodeResizeStartSize == null) {
+                        return;
+                      }
+                      final delta =
+                          details.globalPosition - _nodeResizeStartGlobal!;
+                      final nw = (_nodeResizeStartSize!.width + delta.dx)
+                          .clamp(160.0, 500.0)
+                          .toDouble();
+                      final nh = (_nodeResizeStartSize!.height + delta.dy)
+                          .clamp(96.0, 340.0)
+                          .toDouble();
                       setState(() {
                         _stackNodeSizes[nodeId] = Size(nw, nh);
                         sn['width_px'] = nw;
@@ -2824,6 +3240,8 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                       });
                     },
                     onPanEnd: (_) async {
+                      _nodeResizeStartGlobal = null;
+                      _nodeResizeStartSize = null;
                       final finalPos = _stackNodePositions[nodeId] ?? pos;
                       final finalSize = _stackNodeSizes[nodeId] ?? nodeSize;
                       final res = await widget.api.moveTechStackNode(nodeId, {
@@ -2861,96 +3279,282 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     );
   }
 
+  Widget _buildNodeSideConnectorSquare({
+    required int nodeId,
+    required String side,
+    required List<Map<String, dynamic>> allNodes,
+    required Rect nodeRectInCanvas,
+    required double canvasWidth,
+    required double canvasHeight,
+  }) {
+    final isOriginPort =
+        _isLinkModeActive &&
+        _linkSourceNodeId == nodeId &&
+        _linkSourceSide == side;
+    final isHovered =
+        _hoveredSideNodeId == nodeId && _hoveredSideName == side;
+
+    final anchorInCanvas = _sideAnchorPoint(nodeRectInCanvas, side);
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () async {
+        // Si aún no hay origen o se pulsa el mismo cuadrado: activar flecha en vivo desde este cuadrado lateral
+        if (!_isLinkModeActive || _linkSourceNodeId == null) {
+          setState(() {
+            _isLinkModeActive = true;
+            _linkSourceNodeId = nodeId;
+            _linkSourceSide = side;
+            _linkLiveMousePos = anchorInCanvas;
+            _selectedStackNodeId = nodeId;
+          });
+          return;
+        }
+        // Si se vuelve a pulsar el mismo nodo origen, cambia el lado de salida
+        if (_linkSourceNodeId == nodeId) {
+          if (_linkSourceSide == side) {
+            setState(() {
+              _isLinkModeActive = false;
+              _linkSourceNodeId = null;
+              _linkSourceSide = null;
+              _linkLiveMousePos = null;
+            });
+          } else {
+            setState(() {
+              _linkSourceSide = side;
+              _linkLiveMousePos = anchorInCanvas;
+            });
+          }
+          return;
+        }
+        // Si ya había un cuadrado lateral origen en otro nodo -> Conectar inmediatamente con flecha de unión
+        final srcId = _linkSourceNodeId!;
+        final srcSide = _linkSourceSide;
+        setState(() {
+          _isLinkModeActive = false;
+          _linkSourceNodeId = null;
+          _linkSourceSide = null;
+          _linkLiveMousePos = null;
+          _selectedStackNodeId = nodeId;
+        });
+        await _instantConnectNodes(
+          srcId,
+          nodeId,
+          allNodes,
+          sourceSide: srcSide,
+          targetSide: side,
+        );
+      },
+      onPanStart: (details) {
+        final box =
+            _stackCanvasKey.currentContext?.findRenderObject() as RenderBox?;
+        final local = box != null
+            ? box.globalToLocal(details.globalPosition)
+            : anchorInCanvas;
+        setState(() {
+          _isLinkModeActive = true;
+          _linkSourceNodeId = nodeId;
+          _linkSourceSide = side;
+          _linkLiveMousePos = local;
+          _selectedStackNodeId = nodeId;
+        });
+      },
+      onPanUpdate: (details) {
+        final box =
+            _stackCanvasKey.currentContext?.findRenderObject() as RenderBox?;
+        if (box != null) {
+          setState(() {
+            _linkLiveMousePos = box.globalToLocal(details.globalPosition);
+          });
+        }
+      },
+      onPanEnd: (_) async {
+        final dropPt = _linkLiveMousePos;
+        if (dropPt == null || _linkSourceNodeId == null) return;
+        // Buscar si hemos soltado la flecha sobre otro elemento o cerca de alguno de sus 4 cuadrados laterales
+        int? targetNodeId;
+        String? targetSide;
+        double bestDist = double.infinity;
+
+        for (final other in allNodes) {
+          final oid = other['id'] as int;
+          if (oid == nodeId) continue;
+          final oPos =
+              _stackNodePositions[oid] ??
+              Offset(
+                ((other['pos_x'] as num?)?.toDouble() ?? 0.2),
+                ((other['pos_y'] as num?)?.toDouble() ?? 0.3),
+              );
+          final oSize =
+              _stackNodeSizes[oid] ??
+              Size(
+                ((other['width_px'] as num?)?.toDouble() ?? 220.0),
+                ((other['height_px'] as num?)?.toDouble() ?? 124.0),
+              );
+          final oRect = Rect.fromLTWH(
+            oPos.dx * canvasWidth,
+            oPos.dy * canvasHeight,
+            oSize.width,
+            oSize.height,
+          );
+          if (oRect.inflate(18).contains(dropPt)) {
+            targetNodeId = oid;
+            for (final sName in ['left', 'right', 'top', 'bottom']) {
+              final sp = _sideAnchorPoint(oRect, sName);
+              final d = (sp - dropPt).distance;
+              if (d < bestDist) {
+                bestDist = d;
+                targetSide = sName;
+              }
+            }
+            break;
+          }
+        }
+
+        if (targetNodeId != null) {
+          final srcId = _linkSourceNodeId!;
+          final srcSide = _linkSourceSide;
+          setState(() {
+            _isLinkModeActive = false;
+            _linkSourceNodeId = null;
+            _linkSourceSide = null;
+            _linkLiveMousePos = null;
+            _selectedStackNodeId = targetNodeId;
+          });
+          await _instantConnectNodes(
+            srcId,
+            targetNodeId,
+            allNodes,
+            sourceSide: srcSide,
+            targetSide: targetSide,
+          );
+        }
+      },
+      child: MouseRegion(
+        cursor: SystemMouseCursors.precise,
+        onEnter: (_) => setState(() {
+          _hoveredSideNodeId = nodeId;
+          _hoveredSideName = side;
+        }),
+        onExit: (_) => setState(() {
+          if (_hoveredSideNodeId == nodeId && _hoveredSideName == side) {
+            _hoveredSideNodeId = null;
+            _hoveredSideName = null;
+          }
+        }),
+        child: Tooltip(
+          message:
+              'Cuadrado de unión ($side): Clic o arrastra a otro elemento para lanzar flecha de unión',
+          child: Container(
+            width: 22,
+            height: 22,
+            alignment: Alignment.center,
+            color: Colors.transparent,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 110),
+              width: (isOriginPort || isHovered) ? 12 : 9,
+              height: (isOriginPort || isHovered) ? 12 : 9,
+              decoration: BoxDecoration(
+                color: isOriginPort
+                    ? AppTheme.warning
+                    : (isHovered ? AppTheme.accentCyan : AppTheme.bgSecondary),
+                borderRadius: BorderRadius.circular(2.5),
+                border: Border.all(
+                  color: isOriginPort
+                      ? Colors.black
+                      : (isHovered
+                            ? AppTheme.accentBlue
+                            : AppTheme.accentCyan),
+                  width: (isOriginPort || isHovered) ? 2.0 : 1.5,
+                ),
+                boxShadow: (isOriginPort || isHovered)
+                    ? [
+                        BoxShadow(
+                          color:
+                              (isOriginPort
+                                      ? AppTheme.warning
+                                      : AppTheme.accentCyan)
+                                  .withValues(alpha: 0.45),
+                          blurRadius: 6,
+                        ),
+                      ]
+                    : null,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _instantConnectNodes(
+    int sourceNodeId,
+    int targetNodeId,
+    List<Map<String, dynamic>> nodes, {
+    String? sourceSide,
+    String? targetSide,
+  }) async {
+    final activeStack = _activeStack;
+    final stackId = activeStack['id'] as int?;
+    if (stackId == null || sourceNodeId == targetNodeId) return;
+    final dstNode = nodes.firstWhere(
+      (n) => n['id'] == targetNodeId,
+      orElse: () => <String, dynamic>{},
+    );
+    final dstHost = Map<String, dynamic>.from((dstNode['host'] as Map?) ?? {});
+    final dstCode = ('${dstHost['code'] ?? ''} ${dstHost['name'] ?? ''}')
+        .toUpperCase();
+
+    String proto = 'HTTPS / TCP :443';
+    int port = 443;
+    if (dstCode.contains('PGSQL') || dstCode.contains('POSTGRES')) {
+      proto = 'PostgreSQL :5432';
+      port = 5432;
+    } else if (dstCode.contains('REDIS')) {
+      proto = 'Redis :6379';
+      port = 6379;
+    } else if (dstCode.contains('MYSQL') || dstCode.contains('MARIADB')) {
+      proto = 'MySQL :3306';
+      port = 3306;
+    } else if (dstCode.contains('API') || dstCode.contains('BACKEND')) {
+      proto = 'HTTP/gRPC :8080';
+      port = 8080;
+    }
+
+    final sideNotes = (sourceSide != null || targetSide != null)
+        ? 'side:${sourceSide ?? "right"}->${targetSide ?? "left"}'
+        : '';
+
+    final res = await widget.api.createTechStackEdge({
+      'stack_id': stackId,
+      'source_node_id': sourceNodeId,
+      'target_node_id': targetNodeId,
+      'protocol_label': proto,
+      'port': port,
+      'target_port': port,
+      'notes': sideNotes,
+    });
+    if (mounted) {
+      setState(() {
+        _overview = res;
+        _syncStackCanvasState();
+      });
+      _showSnack(
+        'Flecha de unión creada ($proto). Haz clic en su etiqueta si quieres cambiar el puerto/protocolo.',
+      );
+    }
+  }
+
   Future<void> _quickCreateEdgeBetweenNodes(
     int sourceNodeId,
     int targetNodeId,
     List<Map<String, dynamic>> nodes,
   ) async {
-    final activeStack = _activeStack;
-    final stackId = activeStack['id'] as int?;
-    if (stackId == null) return;
-    final srcNode = nodes.firstWhere(
-      (n) => n['id'] == sourceNodeId,
-      orElse: () => <String, dynamic>{},
-    );
-    final dstNode = nodes.firstWhere(
-      (n) => n['id'] == targetNodeId,
-      orElse: () => <String, dynamic>{},
-    );
-
-    final protoCtrl = TextEditingController(text: 'HTTPS / TCP :443');
-    final portCtrl = TextEditingController(text: '443');
-
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.bgCard,
-        title: const Text(
-          'Conectar Elementos en el Lienzo',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
-        ),
-        content: SizedBox(
-          width: 400,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${(srcNode['host'] as Map?)?['code'] ?? srcNode['custom_label']}  ➔  ${(dstNode['host'] as Map?)?['code'] ?? dstNode['custom_label']}',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.accentCyan,
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: protoCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Protocolo / Descripción del Enlace',
-                  hintText: 'Ej: HTTPS :443 / PostgreSQL :5432 / Redis :6379',
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: portCtrl,
-                decoration: const InputDecoration(labelText: 'Puerto TCP/UDP'),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton.icon(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              final res = await widget.api.createTechStackEdge({
-                'stack_id': stackId,
-                'source_node_id': sourceNodeId,
-                'target_node_id': targetNodeId,
-                'protocol_label': protoCtrl.text.trim(),
-                'target_port': int.tryParse(portCtrl.text.trim()) ?? 443,
-              });
-              if (mounted) {
-                setState(() {
-                  _overview = res;
-                  _syncStackCanvasState();
-                });
-              }
-            },
-            icon: const Icon(Icons.add_link_rounded, size: 15),
-            label: const Text('Crear Enlace'),
-          ),
-        ],
-      ),
-    );
+    await _instantConnectNodes(sourceNodeId, targetNodeId, nodes);
   }
 
   // ===========================================================================
-  // VENTANA FLOTANTE MOVIBLE CON DATOS TÉCNICOS Y GRÁFICAS PROMETHEUS AFINADAS
+  // VENTANA FLOTANTE MOVIBLE (1:1 CON RATÓN) CON DATOS TÉCNICOS Y PROMETHEUS
   // ===========================================================================
 
   Widget _buildFloatingTechnicalAndChartsWindow({
@@ -3008,22 +3612,36 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Barra de título ARRASTRABLE para mover la ventana flotante a cualquier sitio
+              // Barra de título ARRASTRABLE 1:1 con el ratón para mover la ventana flotante
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
+                onPanStart: (details) {
+                  _floatWinDragStartGlobal = details.globalPosition;
+                  _floatWinDragStartPos = Offset(left, top);
+                },
                 onPanUpdate: (details) {
+                  if (_floatWinDragStartGlobal == null ||
+                      _floatWinDragStartPos == null) {
+                    return;
+                  }
+                  final delta =
+                      details.globalPosition - _floatWinDragStartGlobal!;
                   setState(() {
                     _floatingWinPos = Offset(
-                      (_floatingWinPos.dx + details.delta.dx).clamp(
+                      (_floatWinDragStartPos!.dx + delta.dx).clamp(
                         6.0,
                         math.max(12.0, canvasWidth - winWidth - 6),
                       ),
-                      (_floatingWinPos.dy + details.delta.dy).clamp(
+                      (_floatWinDragStartPos!.dy + delta.dy).clamp(
                         6.0,
                         math.max(12.0, canvasHeight - 60),
                       ),
                     );
                   });
+                },
+                onPanEnd: (_) {
+                  _floatWinDragStartGlobal = null;
+                  _floatWinDragStartPos = null;
                 },
                 child: Container(
                   padding: const EdgeInsets.symmetric(
@@ -3505,22 +4123,40 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     required List<Map<String, dynamic>> edges,
     required Map<String, dynamic> selectedNode,
   }) {
-    // Si hay una Caja/Zona seleccionada, mostramos sus ajustes rápidos
+    // Si hay una Caja/Zona seleccionada, mostramos sus ajustes editables en directo
     if (_selectedBoxId != null) {
       final box = _stackBoxes.firstWhere(
         (b) => '${b['id']}' == _selectedBoxId,
         orElse: () => <String, dynamic>{},
       );
       if (box.isNotEmpty) {
+        final boxId = '${box['id']}';
+        final wRel = ((box['width_rel'] as num?)?.toDouble() ?? 0.38).clamp(
+          0.10,
+          0.96,
+        );
+        final hRel = ((box['height_rel'] as num?)?.toDouble() ?? 0.45).clamp(
+          0.12,
+          0.96,
+        );
+        final colorHex = (box['color_hex'] as String?) ?? '#0EA5E9';
+        final colorChoices = [
+          ('#0EA5E9', 'Cyan'),
+          ('#2563EB', 'Azul'),
+          ('#7C3AED', 'Violeta'),
+          ('#0D9488', 'Teal'),
+          ('#F59E0B', 'Ámbar'),
+          ('#EC4899', 'Rosa'),
+        ];
+
         return Container(
-          width: 330,
+          width: 340,
           decoration: const BoxDecoration(
             color: AppTheme.bgCard,
             border: Border(left: BorderSide(color: AppTheme.border)),
           ),
           padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: ListView(
             children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -3540,28 +4176,129 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                 ],
               ),
               const SizedBox(height: 8),
+              TextFormField(
+                key: ValueKey('box-title-$boxId'),
+                initialValue: '${box['title'] ?? ''}',
+                enabled: widget.canEdit,
+                decoration: const InputDecoration(
+                  labelText: 'Nombre / Título de la Caja',
+                  isDense: true,
+                ),
+                onChanged: (v) {
+                  setState(() => box['title'] = v);
+                },
+                onFieldSubmitted: (_) =>
+                    _persistStackBoxesAndScale(boxes: _stackBoxes),
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                key: ValueKey('box-corner-$boxId'),
+                initialValue:
+                    '${box['corner_data'] ?? box['subtitle'] ?? ''}',
+                enabled: widget.canEdit,
+                decoration: const InputDecoration(
+                  labelText: 'Datos Técnicos (Esquina Superior)',
+                  isDense: true,
+                ),
+                onChanged: (v) {
+                  setState(() {
+                    box['corner_data'] = v;
+                    box['subtitle'] = v;
+                  });
+                },
+                onFieldSubmitted: (_) =>
+                    _persistStackBoxesAndScale(boxes: _stackBoxes),
+              ),
+              const SizedBox(height: 12),
               Text(
-                'Título: ${box['title']}',
+                'Ancho de la Caja: ${(wRel * 100).round()}% del lienzo',
                 style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
-              const SizedBox(height: 4),
+              Slider(
+                value: wRel.toDouble(),
+                min: 0.10,
+                max: 0.96,
+                onChanged: widget.canEdit
+                    ? (v) => setState(() => box['width_rel'] = v)
+                    : null,
+                onChangeEnd: widget.canEdit
+                    ? (_) => _persistStackBoxesAndScale(boxes: _stackBoxes)
+                    : null,
+              ),
               Text(
-                'Datos en esquina superior: ${box['corner_data']}',
+                'Alto de la Caja: ${(hRel * 100).round()}% del lienzo',
                 style: const TextStyle(
-                  fontSize: 11,
-                  color: AppTheme.textSecondary,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
                 ),
+              ),
+              Slider(
+                value: hRel.toDouble(),
+                min: 0.12,
+                max: 0.96,
+                onChanged: widget.canEdit
+                    ? (v) => setState(() => box['height_rel'] = v)
+                    : null,
+                onChangeEnd: widget.canEdit
+                    ? (_) => _persistStackBoxesAndScale(boxes: _stackBoxes)
+                    : null,
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Color de la Caja:',
+                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final c in colorChoices)
+                    ChoiceChip(
+                      label: Text(
+                        c.$2,
+                        style: const TextStyle(fontSize: 10),
+                      ),
+                      selected: colorHex.toUpperCase() == c.$1.toUpperCase(),
+                      onSelected: widget.canEdit
+                          ? (_) {
+                              setState(() => box['color_hex'] = c.$1);
+                              _persistStackBoxesAndScale(boxes: _stackBoxes);
+                            }
+                          : null,
+                    ),
+                ],
               ),
               const SizedBox(height: 14),
-              ElevatedButton.icon(
-                onPressed: () =>
-                    _showAddOrEditStackZoneBoxDialog(existingBox: box),
-                icon: const Icon(Icons.edit_outlined, size: 15),
-                label: const Text('Editar Texto y Color de la Caja'),
-              ),
+              if (widget.canEdit) ...[
+                ElevatedButton.icon(
+                  onPressed: () =>
+                      _persistStackBoxesAndScale(boxes: _stackBoxes),
+                  icon: const Icon(Icons.save_outlined, size: 15),
+                  label: const Text('Guardar Cambios de la Caja'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final updated = _stackBoxes
+                        .where((b) => '${b['id']}' != boxId)
+                        .toList();
+                    setState(() {
+                      _stackBoxes = updated;
+                      _selectedBoxId = null;
+                    });
+                    await _persistStackBoxesAndScale(boxes: updated);
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.error,
+                  ),
+                  icon: const Icon(Icons.close_rounded, size: 15),
+                  label: const Text('Borrar Caja / Zona'),
+                ),
+              ],
             ],
           ),
         );
@@ -5307,158 +6044,879 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
   }
 
   // ===========================================================================
-  // TAB 4: GRÁFICAS PROMETHEUS TSDB & QUÉ INSTALAR EN CADA HOST
+  // TAB 5: GRÁFICAS PROMETHEUS TSDB (COLUMNA IZQUIERDA: DATOS Y GRÁFICAS DEL
+  // ELEMENTO SELECCIONADO | COLUMNA DERECHA: LISTA ORGANIZADA DE ELEMENTOS)
+  // + BOTÓN PARA VER Y DESCARGAR QUÉ INSTALAR EN FORMATO MARKDOWN (.MD)
   // ===========================================================================
 
+  String _promHostSearch = '';
+  String _promCategoryFilter = 'all';
+
   Widget _buildPrometheusChartsAndAgentsTab() {
-    final pts = ((_telemetryData?['points'] as List?) ?? [])
+    final allHosts = _hosts;
+    if (_selectedHostId == null && allHosts.isNotEmpty) {
+      _selectedHostId = allHosts.first['id'] as int;
+    }
+    final selectedHost = allHosts.firstWhere(
+      (h) => h['id'] == _selectedHostId,
+      orElse: () => allHosts.isNotEmpty ? allHosts.first : <String, dynamic>{},
+    );
+
+    final rawPts = ((_telemetryData?['points'] as List?) ?? [])
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
+    final pts = rawPts.isNotEmpty
+        ? rawPts
+        : (selectedHost.isNotEmpty
+              ? _buildFallbackSeriesFromMini(selectedHost)
+              : <Map<String, dynamic>>[]);
+
     final promQueries = Map<String, dynamic>.from(
       (_telemetryData?['promql_examples'] as Map?) ?? {},
     );
+    final checks = ((selectedHost['service_checks'] as List?) ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
 
-    return ListView(
-      padding: const EdgeInsets.all(16),
+    // Filtrado y organización de la columna derecha de elementos
+    final filteredRightHosts = allHosts.where((h) {
+      if (_promCategoryFilter != 'all') {
+        final layer = '${h['logical_layer'] ?? ''}';
+        if (_promCategoryFilter == 'apps' && layer != 'services_apps') {
+          return false;
+        }
+        if (_promCategoryFilter == 'Compute' &&
+            layer != 'virtualization_compute' &&
+            layer != 'physical_rack') {
+          return false;
+        }
+        if (_promCategoryFilter == 'net' &&
+            layer != 'network_switching' &&
+            layer != 'perimeter_security') {
+          return false;
+        }
+      }
+      if (_promHostSearch.trim().isNotEmpty) {
+        final q = _promHostSearch.trim().toLowerCase();
+        final hay =
+            '${h['code']} ${h['name']} ${h['heartbeat_ip']} ${h['os_or_firmware']} ${h['asset_class_label']}'
+                .toLowerCase();
+        if (!hay.contains(q)) return false;
+      }
+      return true;
+    }).toList();
+
+    final hostState = (selectedHost['nagios_host_state'] as String?) ?? 'UP';
+    final hostStateCol = _nagiosStateColor(hostState);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Selector de Host y ventana temporal para Prometheus TSDB
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppTheme.bgSecondary,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.border),
-          ),
-          child: Wrap(
-            spacing: 14,
-            runSpacing: 10,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            alignment: WrapAlignment.spaceBetween,
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.local_fire_department_rounded,
-                    color: AppTheme.warning,
-                    size: 20,
+        // =====================================================================
+        // COLUMNA IZQUIERDA (EXPANDED): DATOS DEL ELEMENTO SELECCIONADO +
+        // GRÁFICAS PROMETHEUS EN CUADRÍCULA 2X2 + CHEQUEOS + BOTÓN MARKDOWN.MD
+        // =====================================================================
+        Expanded(
+          child: selectedHost.isEmpty
+              ? const Center(
+                  child: Text(
+                    'Selecciona un elemento en la columna de la derecha para ver sus datos y gráficas Prometheus.',
                   ),
-                  const SizedBox(width: 8),
-                  const Text(
-                    'SERIES TEMPORALES PROMETHEUS TSDB — HOST:',
-                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(width: 10),
-                  DropdownButton<int>(
-                    value: _selectedHostId,
-                    dropdownColor: AppTheme.bgElevated,
-                    underline: const SizedBox.shrink(),
-                    items: _hosts
-                        .map(
-                          (h) => DropdownMenuItem<int>(
-                            value: h['id'] as int,
-                            child: Text(
-                              '${h['code']} — ${h['name']} (${h['heartbeat_ip']})',
-                              style: const TextStyle(fontSize: 12),
-                            ),
+                )
+              : ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    // 1. Cabecera organizada con todos los datos clave del elemento + Botón Qué Instalar (.md)
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppTheme.bgSecondary,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppTheme.border),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Wrap(
+                            spacing: 10,
+                            runSpacing: 8,
+                            alignment: WrapAlignment.spaceBetween,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 3,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: hostStateCol.withValues(
+                                        alpha: 0.16,
+                                      ),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: hostStateCol),
+                                    ),
+                                    child: Text(
+                                      hostState,
+                                      style: TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w900,
+                                        color: hostStateCol,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '${selectedHost['code']} — ${selectedHost['name']}',
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w900,
+                                          color: AppTheme.textPrimary,
+                                        ),
+                                      ),
+                                      Text(
+                                        'IP: ${selectedHost['heartbeat_ip']} • ${selectedHost['asset_class_label']} • ${selectedHost['rack_location_badge']}',
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontFamily: 'monospace',
+                                          color: AppTheme.textSecondary,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 6,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  // Selector de ventana temporal (1h, 6h, 24h, 7d)
+                                  for (final hrs in [1, 6, 24, 168])
+                                    ChoiceChip(
+                                      label: Text(
+                                        hrs == 168 ? '7d' : '${hrs}h',
+                                        style: const TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                      selected: _telemetryRangeHours == hrs,
+                                      onSelected: (_) {
+                                        setState(
+                                          () => _telemetryRangeHours = hrs,
+                                        );
+                                        if (_selectedHostId != null) {
+                                          _loadHostTelemetry(_selectedHostId!);
+                                        }
+                                      },
+                                    ),
+                                  // BOTÓN PARA VER Y DESCARGAR EN MARKDOWN.MD QUÉ INSTALAR PARA MONITORIZAR
+                                  ElevatedButton.icon(
+                                    onPressed: () =>
+                                        _showWhatToInstallMarkdownDialog(
+                                          selectedHost,
+                                        ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: AppTheme.accentBlue,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 9,
+                                      ),
+                                    ),
+                                    icon: const Icon(
+                                      Icons.download_for_offline_rounded,
+                                      size: 16,
+                                    ),
+                                    label: const Text(
+                                      'Qué instalar para monitorizar (.md)',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
-                        )
-                        .toList(),
-                    onChanged: (v) {
-                      if (v == null) return;
-                      setState(() => _selectedHostId = v);
-                      _loadHostTelemetry(v);
-                    },
-                  ),
-                ],
-              ),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (final hrs in [1, 6, 24, 168])
-                    Padding(
-                      padding: const EdgeInsets.only(left: 6),
-                      child: ChoiceChip(
-                        label: Text(hrs == 168 ? '7d' : '${hrs}h'),
-                        selected: _telemetryRangeHours == hrs,
-                        onSelected: (_) {
-                          setState(() => _telemetryRangeHours = hrs);
-                          if (_selectedHostId != null) {
-                            _loadHostTelemetry(_selectedHostId!);
-                          }
-                        },
+                          const Divider(height: 18),
+                          // Píldoras de resumen técnico del elemento seleccionado
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: [
+                              _buildTechMetricBadge(
+                                'CPU Actual',
+                                '${selectedHost['cpu_pct'] ?? 0}%',
+                                AppTheme.accentBlue,
+                              ),
+                              _buildTechMetricBadge(
+                                'Memoria RAM',
+                                '${selectedHost['ram_pct'] ?? 0}%',
+                                AppTheme.accentPurple,
+                              ),
+                              _buildTechMetricBadge(
+                                'Uso Disco',
+                                '${selectedHost['disk_pct'] ?? 0}%',
+                                AppTheme.warning,
+                              ),
+                              _buildTechMetricBadge(
+                                'Latencia Ping',
+                                '${selectedHost['last_ping_ms'] ?? '-'} ms',
+                                AppTheme.accentTeal,
+                              ),
+                              _buildTechMetricBadge(
+                                'SO / Plataforma',
+                                '${selectedHost['os_or_firmware'] ?? '-'}',
+                                AppTheme.accentCyan,
+                              ),
+                              _buildTechMetricBadge(
+                                'Responsable / Equipo',
+                                '${selectedHost['owner_team'] ?? '-'}',
+                                AppTheme.textSecondary,
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
-                ],
+                    const SizedBox(height: 14),
+
+                    // 2. Cuadrícula 2x2 perfectamente alineada con las 4 Gráficas Prometheus del elemento
+                    if (_loadingTelemetry)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(36),
+                          child: CircularProgressIndicator(),
+                        ),
+                      )
+                    else ...[
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: _buildTelemetryChartCard(
+                              title: '1. USO DE CPU (%) & MEMORIA RAM (%)',
+                              promQl:
+                                  '${promQueries['cpu'] ?? 'node_cpu_seconds_total / node_memory_MemAvailable_bytes'}',
+                              points: pts,
+                              metricKeyA: 'cpu_pct',
+                              labelA: 'CPU %',
+                              colorA: AppTheme.accentBlue,
+                              metricKeyB: 'ram_pct',
+                              labelB: 'RAM %',
+                              colorB: AppTheme.accentPurple,
+                              unit: '%',
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _buildTelemetryChartCard(
+                              title: '2. LATENCIA DEL HEARTBEAT ICMP/HTTP (MS)',
+                              promQl:
+                                  '${promQueries['latency'] ?? 'probe_duration_seconds * 1000'}',
+                              points: pts,
+                              metricKeyA: 'latency_ms',
+                              labelA: 'RTT ms',
+                              colorA: AppTheme.accentTeal,
+                              unit: 'ms',
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: _buildTelemetryChartCard(
+                              title:
+                                  '3. TRÁFICO DE RED RX / TX (MBPS - IF-MIB / NODE_EXPORTER)',
+                              promQl:
+                                  '${promQueries['switch_traffic'] ?? 'rate(node_network_receive_bytes_total[5m])'}',
+                              points: pts,
+                              metricKeyA: 'rx_mbps',
+                              labelA: 'RX (Mbps)',
+                              colorA: AppTheme.accentCyan,
+                              metricKeyB: 'tx_mbps',
+                              labelB: 'TX (Mbps)',
+                              colorB: AppTheme.warning,
+                              unit: 'Mbps',
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _buildTelemetryChartCard(
+                              title:
+                                  '4. PETICIONES WEB (REQ/S) & OCUPACIÓN DE DISCO (%)',
+                              promQl: 'rackdoc_host_disk_usage_percent',
+                              points: pts,
+                              metricKeyA: 'web_req_per_sec',
+                              labelA: 'Web req/s',
+                              colorA: AppTheme.success,
+                              metricKeyB: 'disk_pct',
+                              labelB: 'Disco %',
+                              colorB: AppTheme.error,
+                              unit: '',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 14),
+
+                    // 3. Ficha de Servicios Monitorizados y Datos Técnicos del Elemento Seleccionado
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppTheme.bgSecondary,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppTheme.border),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'CHEQUEOS ACTIVOS Y SERVICIOS DEL ELEMENTO (${checks.length})',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppTheme.accentCyan,
+                                ),
+                              ),
+                              if (selectedHost['ssh_enabled'] != false &&
+                                  selectedHost['connect_enabled'] != false)
+                                OutlinedButton.icon(
+                                  onPressed: () => _showSshWebConsoleDialog(
+                                    {
+                                      'ssh_user':
+                                          selectedHost['ssh_user'] ?? 'root',
+                                      'ssh_port':
+                                          selectedHost['ssh_port'] ?? 22,
+                                    },
+                                    selectedHost,
+                                  ),
+                                  icon: const Icon(
+                                    Icons.terminal_rounded,
+                                    size: 14,
+                                  ),
+                                  label: Text(
+                                    'Conectar SSH (${selectedHost['ssh_user'] ?? 'root'}@${selectedHost['heartbeat_ip']})',
+                                    style: const TextStyle(fontSize: 10.5),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          if (checks.isEmpty)
+                            const Text(
+                              'Este elemento no tiene chequeos activos configurados.',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: AppTheme.textMuted,
+                              ),
+                            )
+                          else
+                            for (final chk in checks)
+                              Container(
+                                margin: const EdgeInsets.only(bottom: 6),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 7,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.bgCard,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: AppTheme.border),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.circle,
+                                      size: 9,
+                                      color: _nagiosStateColor(
+                                        (chk['nagios_state'] as String?) ??
+                                            'OK',
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        '${chk['service_name']} [${chk['check_type'].toString().toUpperCase()}] ➔ ${chk['target_ip_or_url']}',
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ),
+                                    Text(
+                                      '${chk['status_output']}',
+                                      style: const TextStyle(
+                                        fontSize: 10.5,
+                                        color: AppTheme.textSecondary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+
+        // =====================================================================
+        // COLUMNA DERECHA (FIJA 360PX): DIRECTORIO ORGANIZADO DE ELEMENTOS
+        // Al pulsar sobre cualquiera, sus datos y gráficas aparecen a la izquierda
+        // =====================================================================
+        Container(
+          width: 360,
+          decoration: const BoxDecoration(
+            color: AppTheme.bgCard,
+            border: Border(left: BorderSide(color: AppTheme.border)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'ELEMENTOS / HOSTS (${filteredRightHosts.length})',
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w900,
+                            color: AppTheme.textPrimary,
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                        const Text(
+                          'Pulsa para ver gráficas',
+                          style: TextStyle(
+                            fontSize: 9.8,
+                            color: AppTheme.accentBlue,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      onChanged: (v) => setState(() => _promHostSearch = v),
+                      style: const TextStyle(fontSize: 11.5),
+                      decoration: InputDecoration(
+                        hintText: 'Buscar por código, nombre o IP...',
+                        prefixIcon: const Icon(Icons.search, size: 16),
+                        isDense: true,
+                        filled: true,
+                        fillColor: AppTheme.bgSecondary,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: AppTheme.border),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          for (final cat in [
+                            ('all', 'Todos (${allHosts.length})'),
+                            ('apps', 'VMs / Apps / BBDD'),
+                            ('Compute', 'Físicos / Hiperv.'),
+                            ('net', 'Switches / Red'),
+                          ])
+                            Padding(
+                              padding: const EdgeInsets.only(right: 5),
+                              child: ChoiceChip(
+                                label: Text(
+                                  cat.$2,
+                                  style: const TextStyle(fontSize: 9.8),
+                                ),
+                                selected: _promCategoryFilter == cat.$1,
+                                onSelected: (_) => setState(
+                                  () => _promCategoryFilter = cat.$1,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.separated(
+                  padding: const EdgeInsets.all(10),
+                  itemCount: filteredRightHosts.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 6),
+                  itemBuilder: (context, idx) {
+                    final h = filteredRightHosts[idx];
+                    final hid = h['id'] as int;
+                    final isSel = hid == selectedHost['id'];
+                    final st = (h['nagios_host_state'] as String?) ?? 'UP';
+                    final stCol = _nagiosStateColor(st);
+
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(9),
+                      onTap: () {
+                        setState(() => _selectedHostId = hid);
+                        _loadHostTelemetry(hid);
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 120),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isSel
+                              ? AppTheme.accentBlue.withValues(alpha: 0.12)
+                              : AppTheme.bgSecondary,
+                          borderRadius: BorderRadius.circular(9),
+                          border: Border.all(
+                            color: isSel
+                                ? AppTheme.accentBlue
+                                : AppTheme.border,
+                            width: isSel ? 1.8 : 1.0,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: stCol,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    '${h['code']}',
+                                    style: TextStyle(
+                                      fontSize: 11.2,
+                                      fontWeight: FontWeight.w900,
+                                      color: isSel
+                                          ? AppTheme.accentBlue
+                                          : AppTheme.textPrimary,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                Text(
+                                  '${h['heartbeat_ip']}',
+                                  style: const TextStyle(
+                                    fontSize: 9.8,
+                                    fontFamily: 'monospace',
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.accentTeal,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${h['name']}',
+                              style: const TextStyle(
+                                fontSize: 10.2,
+                                color: AppTheme.textSecondary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'CPU ${h['cpu_pct'] ?? 0}% • RAM ${h['ram_pct'] ?? 0}%',
+                                  style: const TextStyle(
+                                    fontSize: 9.2,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.textMuted,
+                                  ),
+                                ),
+                                Text(
+                                  '${h['last_ping_ms'] ?? '-'} ms',
+                                  style: const TextStyle(
+                                    fontSize: 9.2,
+                                    fontFamily: 'monospace',
+                                    color: AppTheme.accentCyan,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 14),
-        if (_loadingTelemetry)
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(32),
-              child: CircularProgressIndicator(),
+      ],
+    );
+  }
+
+  Widget _buildTechMetricBadge(String label, String value, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$label: ',
+            style: const TextStyle(
+              fontSize: 10,
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w600,
             ),
-          )
-        else ...[
-          Wrap(
-            spacing: 14,
-            runSpacing: 14,
-            children: [
-              _buildTelemetryChartCard(
-                title: 'USO DE CPU (%) & MEMORIA RAM (%)',
-                promQl: '${promQueries['cpu'] ?? ''}',
-                points: pts,
-                metricKeyA: 'cpu_pct',
-                labelA: 'CPU %',
-                colorA: AppTheme.accentBlue,
-                metricKeyB: 'ram_pct',
-                labelB: 'RAM %',
-                colorB: AppTheme.accentPurple,
-                unit: '%',
-              ),
-              _buildTelemetryChartCard(
-                title: 'LATENCIA DEL HEARTBEAT (MS)',
-                promQl: '${promQueries['latency'] ?? ''}',
-                points: pts,
-                metricKeyA: 'latency_ms',
-                labelA: 'Ping / HTTP ms',
-                colorA: AppTheme.accentTeal,
-                unit: 'ms',
-              ),
-              _buildTelemetryChartCard(
-                title: 'TRÁFICO DE RED RX / TX (MBPS - IF-MIB / NODE_EXPORTER)',
-                promQl: '${promQueries['switch_traffic'] ?? ''}',
-                points: pts,
-                metricKeyA: 'rx_mbps',
-                labelA: 'Rx Entrante (Mbps)',
-                colorA: AppTheme.accentCyan,
-                metricKeyB: 'tx_mbps',
-                labelB: 'Tx Saliente (Mbps)',
-                colorB: AppTheme.warning,
-                unit: 'Mbps',
-              ),
-              _buildTelemetryChartCard(
-                title: 'PETICIONES WEB APACHE / NGINX (REQ/S) & DISCO (%)',
-                promQl: 'rackdoc_host_disk_usage_percent',
-                points: pts,
-                metricKeyA: 'web_req_per_sec',
-                labelA: 'Web req/s',
-                colorA: AppTheme.success,
-                metricKeyB: 'disk_pct',
-                labelB: 'Disco %',
-                colorB: AppTheme.error,
-                unit: '',
-              ),
-            ],
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w900,
+              color: color,
+            ),
           ),
         ],
-        const SizedBox(height: 20),
-        // Guía interactiva de Qué instalar en cada ordenador/host para monitorizarlo con Prometheus y RackDoc
-        _buildWhatToInstallInHostsSection(),
-      ],
+      ),
+    );
+  }
+
+  String _buildMonitoringInstallMarkdown(Map<String, dynamic> host) {
+    final code = '${host['code'] ?? 'HOST'}';
+    final name = '${host['name'] ?? 'Sistema'}';
+    final ip = '${host['heartbeat_ip'] ?? '10.0.0.10'}';
+    final os = '${host['os_or_firmware'] ?? 'Linux / Windows'}';
+    final cls = '${host['asset_class_label'] ?? 'Servidor / VM'}';
+
+    return '''# Guía de Instalación de Agentes y Exporters para Monitorización en Prometheus y RackDoc
+
+## 1. Ficha del Elemento Seleccionado
+- **Código CMDB / Host**: `$code`
+- **Nombre**: $name
+- **Dirección IP Principal**: `$ip`
+- **Tipo de Elemento**: $cls
+- **SO / Firmware**: $os
+- **Fichero de Service Discovery en RackDoc**: `/app/data/prometheus/targets_dynamic.json` (actualizado automáticamente cada vez que guardas un elemento en RackDoc).
+
+---
+
+## 2. Linux (Ubuntu / Debian / RHEL / Proxmox VE) — `prometheus-node-exporter (:9100)`
+Expone uso de CPU, Memoria RAM, Carga de sistema, Espacio e I/O de Discos, Tráfico de Interfaces de Red y estado de unidades `systemd`.
+
+```bash
+# En Ubuntu / Debian / Proxmox VE ($ip):
+sudo apt-get update && sudo apt-get install -y prometheus-node-exporter
+sudo systemctl enable --now prometheus-node-exporter
+
+# En RHEL / Rocky / AlmaLinux:
+sudo dnf install -y golang-github-prometheus-node-exporter
+sudo systemctl enable --now node_exporter
+
+# Verificar que responde métricas en el puerto 9100:
+curl -s http://$ip:9100/metrics | head -n 20
+```
+
+---
+
+## 3. Windows Server (Active Directory / IIS / SQL Server / Hyper-V) — `windows_exporter (:9182)`
+Expone CPU, Memoria RAM, Discos NTFS, Servicios de Windows, IIS y contadores de Hyper-V/AD.
+
+```powershell
+# Ejecutar en PowerShell como Administrador en $ip:
+Invoke-WebRequest -Uri "https://github.com/prometheus-community/windows_exporter/releases/latest/download/windows_exporter-0.27.3-amd64.msi" -OutFile C:\\windows_exporter.msi
+msiexec /i C:\\windows_exporter.msi ENABLED_COLLECTORS="cpu,cs,logical_disk,net,os,service,system,memory" LISTEN_PORT=9182 /qn
+
+# Verificar respuesta:
+Invoke-WebRequest -Uri "http://localhost:9182/metrics" -UseBasicParsing
+```
+
+---
+
+## 4. Switches, Routers y Firewalls (Cisco, Aruba, FortiGate, MikroTik) — `SNMPv2c/v3 + LLDP (:161/UDP)`
+Permite a RackDoc descubrir todas las bocas (`IF-MIB`) y vecinos (`LLDP-MIB`) de una sola vez sin alta manual.
+
+```text
+! Configuración en Switch Cisco IOS / Catalyst / Aruba ($ip):
+snmp-server community public RO
+snmp-server location "CPD Principal RackDoc"
+lldp run
+```
+
+---
+
+## 5. Servidores Web Apache HTTPd & Nginx
+Permite medir peticiones por segundo (`req/s`), workers activos y conexiones concurrentes.
+
+```nginx
+# En Nginx (/etc/nginx/conf.d/status.conf):
+location /nginx_status {
+    stub_status on;
+    allow 10.0.0.0/8;
+    allow 127.0.0.1;
+    deny all;
+}
+```
+
+```apache
+# En Apache (/etc/apache2/mods-enabled/status.conf):
+ExtendedStatus On
+<Location "/server-status">
+    SetHandler server-status
+    Require ip 10.0.0.0/8 127.0.0.1
+</Location>
+```
+
+---
+
+## 6. Bases de Datos (PostgreSQL / MySQL / Redis) y Docker Engine
+```bash
+# PostgreSQL Exporter (:9187):
+DATA_SOURCE_NAME="postgresql://postgres:password@$ip:5432/postgres?sslmode=disable" prometheus-postgres-exporter
+
+# Redis Exporter (:9121):
+prometheus-redis-exporter --redis.addr="redis://$ip:6379"
+
+# Docker Engine (/etc/docker/daemon.json -> puerto 9323):
+# { "metrics-addr": "0.0.0.0:9323", "experimental": true }
+```
+''';
+  }
+
+  Future<void> _downloadMarkdownGuide(
+    String markdownContent,
+    String filename,
+  ) async {
+    try {
+      await Clipboard.setData(ClipboardData(text: markdownContent));
+      final uri = Uri.dataFromString(
+        markdownContent,
+        mimeType: 'text/markdown',
+        encoding: utf8,
+      );
+      await launchUrl(uri, webOnlyWindowName: '_blank');
+      _showSnack(
+        'Descargando $filename (y copiado al portapapeles en formato Markdown .md)',
+      );
+    } catch (_) {
+      await Clipboard.setData(ClipboardData(text: markdownContent));
+      _showSnack(
+        'Contenido Markdown (.md) copiado al portapapeles listo para guardar como $filename',
+      );
+    }
+  }
+
+  Future<void> _showWhatToInstallMarkdownDialog(
+    Map<String, dynamic> host,
+  ) async {
+    final code = '${host['code'] ?? 'host'}'.toLowerCase();
+    final filename = 'guia_monitorizacion_$code.md';
+    final mdText = _buildMonitoringInstallMarkdown(host);
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.bgCard,
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Text(
+                '¿Qué instalar para monitorizar ${host['code'] ?? "un elemento"}? ($filename)',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close, size: 18),
+              onPressed: () => Navigator.pop(ctx),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 760,
+          height: 520,
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppTheme.bgPrimary,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppTheme.border),
+            ),
+            child: SingleChildScrollView(
+              child: SelectableText(
+                mdText,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontFamily: 'monospace',
+                  color: AppTheme.textPrimary,
+                  height: 1.45,
+                ),
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          OutlinedButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: mdText));
+              _showSnack('Documento Markdown copiado al portapapeles');
+            },
+            icon: const Icon(Icons.copy_rounded, size: 15),
+            label: const Text('Copiar Markdown'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => _downloadMarkdownGuide(mdText, filename),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.accentBlue,
+              foregroundColor: Colors.white,
+            ),
+            icon: const Icon(Icons.download_rounded, size: 16),
+            label: Text('Descargar $filename'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -5492,7 +6950,6 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     final lastB = valsB.isNotEmpty ? valsB.last : null;
 
     return Container(
-      width: 540,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppTheme.bgSecondary,
@@ -5508,9 +6965,10 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                 child: Text(
                   title,
                   style: const TextStyle(
-                    fontSize: 12,
+                    fontSize: 11.5,
                     fontWeight: FontWeight.w800,
                   ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               Container(
@@ -5522,7 +6980,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                 child: Text(
                   '$labelA: ${lastA.toStringAsFixed(1)} $unit',
                   style: TextStyle(
-                    fontSize: 10.5,
+                    fontSize: 10.2,
                     fontWeight: FontWeight.w800,
                     color: colorA,
                   ),
@@ -5542,7 +7000,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                   child: Text(
                     '$labelB: ${lastB.toStringAsFixed(1)} $unit',
                     style: TextStyle(
-                      fontSize: 10.5,
+                      fontSize: 10.2,
                       fontWeight: FontWeight.w800,
                       color: colorB,
                     ),
@@ -5559,7 +7017,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                 child: Text(
                   'PromQL: $promQl',
                   style: const TextStyle(
-                    fontSize: 9.8,
+                    fontSize: 9.5,
                     fontFamily: 'monospace',
                     color: AppTheme.textMuted,
                   ),
@@ -5569,7 +7027,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
               Text(
                 'Máx ${maxA.toStringAsFixed(1)}$unit • Media ${avgA.toStringAsFixed(1)}$unit • Mín ${minA.toStringAsFixed(1)}$unit',
                 style: const TextStyle(
-                  fontSize: 9.5,
+                  fontSize: 9.2,
                   fontWeight: FontWeight.w700,
                   color: AppTheme.textSecondary,
                 ),
@@ -5598,506 +7056,1879 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     );
   }
 
-  Widget _buildWhatToInstallInHostsSection() {
-    final guides = [
-      (
-        'Linux (Ubuntu / Debian / RHEL / Proxmox)',
-        'Prometheus Node Exporter (:9100)',
-        'Expone CPU, RAM, Carga, Discos, I/O, Interfaces de Red y estado de servicios systemd.',
-        '''# Ubuntu / Debian / Proxmox VE:
-sudo apt-get update && sudo apt-get install -y prometheus-node-exporter
-sudo systemctl enable --now prometheus-node-exporter
-# Verifica que responde en el puerto 9100:
-curl -s http://localhost:9100/metrics | head -n 20''',
-      ),
-      (
-        'Windows Server (AD / SQL / IIS / Hyper-V)',
-        'Prometheus Windows Exporter (:9182)',
-        'Expone CPU, Memoria, Discos NTFS, Servicios de Windows, IIS y contadores de Active Directory.',
-        '''# PowerShell (Administrador) en Windows Server:
-Invoke-WebRequest -Uri "https://github.com/prometheus-community/windows_exporter/releases/latest/download/windows_exporter-0.27.3-amd64.msi" -OutFile C:\\windows_exporter.msi
-msiexec /i C:\\windows_exporter.msi ENABLED_COLLECTORS="cpu,cs,logical_disk,net,os,service,system,memory" LISTEN_PORT=9182 /qn''',
-      ),
-      (
-        'Switches, Routers y Firewalls (Cisco, Aruba, FortiGate)',
-        'SNMPv2c / SNMPv3 + LLDP (:161/UDP)',
-        'Permite a RackDoc descubrir todas las bocas (IF-MIB) y vecinos (LLDP-MIB) de una sola vez sin alta manual.',
-        '''! Configuración en Switch Cisco IOS / Catalyst / Aruba:
-snmp-server community public RO
-snmp-server location "CPD Principal RackDoc"
-lldp run''',
-      ),
-      (
-        'Apache HTTPd & Nginx Web Servers',
-        'mod_status (/server-status?auto) & stub_status (/nginx_status)',
-        'Permite medir peticiones por segundo (req/s), workers ocupados/libres y conexiones activas.',
-        '''# En Nginx (/etc/nginx/conf.d/status.conf):
-location /nginx_status {
-    stub_status on;
-    allow 10.0.0.0/8;
-    deny all;
-}
-# En Apache (/etc/apache2/mods-enabled/status.conf):
-ExtendedStatus On
-<Location "/server-status">
-    SetHandler server-status
-    Require ip 10.0.0.0/8
-</Location>''',
-      ),
-      (
-        'Docker Engine / Contenedores',
-        'Docker Daemon Metrics (:9323/metrics)',
-        'Expone contenedores en ejecución, parados, unhealthy, CPU y memoria por contenedor.',
-        '''// En /etc/docker/daemon.json:
-{
-  "metrics-addr": "0.0.0.0:9323",
-  "experimental": true
-}
-// Reiniciar servicio: sudo systemctl restart docker''',
-      ),
-    ];
+  // ===========================================================================
+  // TAB 5: AVISOS DE ALARMAS (MATRIZ 4 COLUMNAS ESTILO ACTIVE DIRECTORY + DRAG & DROP + SMTP)
+  // ===========================================================================
 
+  Widget _buildAlertsContactsAndMaintenanceTab() {
+    if (_hostGroups.isNotEmpty &&
+        (_selectedAlertHostGroupId == null ||
+            !_hostGroups.any((hg) => hg['id'] == _selectedAlertHostGroupId))) {
+      _selectedAlertHostGroupId = _hostGroups.first['id'] as int;
+    }
+    if (_alertContactGroups.isNotEmpty &&
+        (_selectedAlertUserGroupId == null ||
+            !_alertContactGroups.any(
+              (cg) => cg['id'] == _selectedAlertUserGroupId,
+            ))) {
+      _selectedAlertUserGroupId = _alertContactGroups.first['id'] as int;
+    }
+    if (_alertContacts.isNotEmpty &&
+        (_selectedAlertContactId == null ||
+            !_alertContacts.any((c) => c['id'] == _selectedAlertContactId))) {
+      _selectedAlertContactId = _alertContacts.first['id'] as int;
+    }
+
+    final smtp = _smtpConfig;
+    final smtpHost = (smtp['smtp_host'] as String? ?? '').trim();
+    final smtpEnabled = smtp['enabled'] != false;
+    final smtpConfigured = smtpHost.isNotEmpty && smtpEnabled;
+
+    return Column(
+      children: [
+        // 1. Barra superior: Servidor SMTP + Sincronización Active Directory/Control de Acceso + Altas a Medida
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: const BoxDecoration(
+            color: AppTheme.bgSecondary,
+            border: Border(bottom: BorderSide(color: AppTheme.border)),
+          ),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              // Botón Principal: Dar de Alta / Configurar Servidor para Mandar Correos (SMTP)
+              ElevatedButton.icon(
+                onPressed: _showSmtpServerConfigDialog,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: smtpConfigured
+                      ? AppTheme.accentTeal
+                      : AppTheme.accentBlue,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 9,
+                  ),
+                ),
+                icon: const Icon(Icons.mark_email_unread_rounded, size: 16),
+                label: Text(
+                  smtpConfigured
+                      ? '✉️ Servidor Correo SMTP (${smtp['smtp_host']}:${smtp['smtp_port']}) • Activo'
+                      : '✉️ Dar de Alta Servidor Correo SMTP',
+                  style: const TextStyle(
+                    fontSize: 11.2,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  await _loadOverview();
+                  _showSnack(
+                    'Usuarios y Grupos sincronizados con Control de Acceso (Local + Active Directory).',
+                  );
+                },
+                icon: const Icon(
+                  Icons.sync_rounded,
+                  size: 15,
+                  color: AppTheme.accentPurple,
+                ),
+                label: const Text(
+                  'Sincronizar Control de Acceso & AD',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                ),
+              ),
+              if (widget.canEdit) ...[
+                OutlinedButton.icon(
+                  onPressed: () => _showCreateHostGroupDialog(),
+                  icon: const Icon(
+                    Icons.dns_rounded,
+                    size: 14,
+                    color: AppTheme.accentCyan,
+                  ),
+                  label: const Text(
+                    '+ Grupo de Host',
+                    style: TextStyle(fontSize: 11),
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => _showCreateContactGroupDialog(),
+                  icon: const Icon(
+                    Icons.groups_rounded,
+                    size: 15,
+                    color: AppTheme.accentBlue,
+                  ),
+                  label: const Text(
+                    '+ Grupo Usuarios (AD/Local/Medida)',
+                    style: TextStyle(fontSize: 11),
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => _showCreateContactDialog(),
+                  icon: const Icon(
+                    Icons.person_add_alt_1_rounded,
+                    size: 14,
+                    color: AppTheme.success,
+                  ),
+                  label: const Text(
+                    '+ Usuario / Contacto',
+                    style: TextStyle(fontSize: 11),
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _showCreateMaintenanceDialog,
+                  icon: const Icon(Icons.build_circle_rounded, size: 14),
+                  label: const Text(
+                    '+ Mantenimiento',
+                    style: TextStyle(fontSize: 11),
+                  ),
+                ),
+              ],
+              OutlinedButton.icon(
+                onPressed: () async {
+                  final res = await widget.api.triggerTestAlert(
+                    assetId: _selectedHostId,
+                  );
+                  setState(() => _overview = res);
+                  _showSnack(
+                    'Correo/Alerta de prueba disparado y registrado en la bitácora.',
+                  );
+                },
+                icon: const Icon(
+                  Icons.send_rounded,
+                  size: 14,
+                  color: AppTheme.warning,
+                ),
+                label: const Text(
+                  'Probar Envío Alarma',
+                  style: TextStyle(fontSize: 11),
+                ),
+              ),
+              IconButton(
+                tooltip: _showAlertBottomLogs
+                    ? 'Ocultar Bitácora Inferior'
+                    : 'Mostrar Bitácora y Mantenimientos',
+                onPressed: () => setState(
+                  () => _showAlertBottomLogs = !_showAlertBottomLogs,
+                ),
+                icon: Icon(
+                  _showAlertBottomLogs
+                      ? Icons.keyboard_arrow_down_rounded
+                      : Icons.keyboard_arrow_up_rounded,
+                  size: 18,
+                ),
+              ),
+            ],
+          ),
+        ),
+        // Banner explicativo del flujo izquierda -> derecha con Drag & Drop
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          decoration: BoxDecoration(
+            color: AppTheme.accentBlue.withValues(alpha: 0.07),
+            border: const Border(bottom: BorderSide(color: AppTheme.border)),
+          ),
+          child: const Row(
+            children: [
+              Icon(
+                Icons.drag_indicator_rounded,
+                size: 15,
+                color: AppTheme.accentBlue,
+              ),
+              SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Flujo Active Directory & Alarmas (Izquierda → Derecha):  [1. Grupo de Host]  ➔  [2. Hosts del Grupo]  ⬅(Arrastra y suelta)⬅  [3. Grupo de Usuarios (con su correo)]  ➔  [4. Usuario (con su correo, grupos MemberOf y hosts que le avisan)].',
+                  style: TextStyle(
+                    fontSize: 10.6,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textSecondary,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+        // 2. Matriz Principal de 4 Columnas (Izquierda a Derecha)
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // COLUMNA 1: GRUPOS DE HOST (DROP TARGET)
+                Expanded(
+                  flex: 24,
+                  child: _buildAlertsCol1HostGroups(),
+                ),
+                _buildAlertsFlowConnectorArrow('contiene\nhosts ➔'),
+                // COLUMNA 2: HOSTS DEL GRUPO SELECCIONADO (DROP TARGET)
+                Expanded(
+                  flex: 25,
+                  child: _buildAlertsCol2HostsInGroup(),
+                ),
+                _buildAlertsFlowConnectorArrow('⬅ arrastra\npara alarmar'),
+                // COLUMNA 3: GRUPOS DE USUARIOS (AD / LOCAL / A MEDIDA) — DRAGGABLE
+                Expanded(
+                  flex: 25,
+                  child: _buildAlertsCol3UserGroups(),
+                ),
+                _buildAlertsFlowConnectorArrow('miembros\n& AD ➔'),
+                // COLUMNA 4: USUARIOS + FICHA ACTIVE DIRECTORY (MEMBEROF & HOSTS QUE LE ENVÍAN ALARMAS)
+                Expanded(
+                  flex: 26,
+                  child: _buildAlertsCol4UsersAndAdCard(),
+                ),
+              ],
+            ),
+          ),
+        ),
+        // 3. Barra inferior plegable: Ventanas de Mantenimiento y Bitácora de Correos Enviados
+        if (_showAlertBottomLogs) _buildAlertsBottomMaintenanceAndLogsBar(),
+      ],
+    );
+  }
+
+  Widget _buildAlertsFlowConnectorArrow(String label) {
+    return SizedBox(
+      width: 44,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+              decoration: BoxDecoration(
+                color: AppTheme.bgCard,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: AppTheme.border),
+              ),
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 8.2,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.textMuted,
+                  height: 1.15,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // COLUMNA 1 (IZQUIERDA): GRUPOS DE HOST (DROP TARGET DE GRUPOS/USUARIOS)
+  // ---------------------------------------------------------------------------
+  Widget _buildAlertsCol1HostGroups() {
     return Container(
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppTheme.bgSecondary,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppTheme.border),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Row(
-            children: [
-              Icon(Icons.terminal_rounded, color: AppTheme.accentCyan, size: 20),
-              SizedBox(width: 8),
-              Text(
-                '¿QUÉ HAY QUE INSTALAR EN CADA HOST PARA QUE PROMETHEUS Y RACKDOC LO MONITORICEN?',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Cuando das de alta un Host desde este interfaz o mediante Ansible, RackDoc actualiza automáticamente /app/data/prometheus/targets_dynamic.json para que Prometheus lo raspee cada 15s.',
-            style: TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: guides.map((g) {
-              return Container(
-                width: 510,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppTheme.bgCard,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: AppTheme.border),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            decoration: const BoxDecoration(
+              color: AppTheme.bgCard,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(11)),
+              border: Border(bottom: BorderSide(color: AppTheme.border)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.accentCyan.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: const Text(
+                    '1',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w900,
+                      color: AppTheme.accentCyan,
+                    ),
+                  ),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            g.$1,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
-                              color: AppTheme.accentCyan,
-                            ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    'GRUPOS DE HOST (${_hostGroups.length})',
+                    style: const TextStyle(
+                      fontSize: 11.2,
+                      fontWeight: FontWeight.w900,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (widget.canEdit)
+                  IconButton(
+                    tooltip: 'Nuevo Grupo de Host',
+                    constraints: const BoxConstraints(),
+                    padding: EdgeInsets.zero,
+                    onPressed: () => _showCreateHostGroupDialog(),
+                    icon: const Icon(
+                      Icons.add_circle_outline_rounded,
+                      size: 16,
+                      color: AppTheme.accentCyan,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            color: AppTheme.accentCyan.withValues(alpha: 0.05),
+            child: const Text(
+              '💡 Suelta aquí un Grupo de Usuarios (Col 3) o Usuario (Col 4) para asignarle las alarmas de todo el grupo.',
+              style: TextStyle(fontSize: 9.5, color: AppTheme.textSecondary),
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(8),
+              itemCount: _hostGroups.length,
+              itemBuilder: (ctx, i) {
+                final hg = _hostGroups[i];
+                final hgId = hg['id'] as int;
+                final isSelected = hgId == _selectedAlertHostGroupId;
+                final memberCodes =
+                    ((hg['member_codes'] as List?) ?? []).cast<String>();
+
+                // Buscar regla de enrutamiento para este HostGroup
+                final hgRules = _notificationRules
+                    .where(
+                      (r) =>
+                          r['scope_type'] == 'host_group' &&
+                          r['host_group_id'] == hgId,
+                    )
+                    .toList();
+                final assignedCgIds = <int>{};
+                final assignedContactIds = <int>{};
+                for (final r in hgRules) {
+                  for (final id in ((r['contact_group_ids'] as List?) ?? [])) {
+                    assignedCgIds.add(id as int);
+                  }
+                  for (final id in ((r['contact_ids'] as List?) ?? [])) {
+                    assignedContactIds.add(id as int);
+                  }
+                }
+
+                return DragTarget<String>(
+                  onWillAcceptWithDetails: (details) =>
+                      widget.canEdit &&
+                      (details.data.startsWith('ug:') ||
+                          details.data.startsWith('u:')),
+                  onAcceptWithDetails: (details) => _handleDropRecipientOnTarget(
+                    dragToken: details.data,
+                    scopeType: 'host_group',
+                    hostGroupId: hgId,
+                    targetName: '${hg['name']} (${hg['code']})',
+                  ),
+                  builder: (ctx, candidateData, rejectedData) {
+                    final isHoveringDrop = candidateData.isNotEmpty;
+                    return GestureDetector(
+                      onTap: () =>
+                          setState(() => _selectedAlertHostGroupId = hgId),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 120),
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: isHoveringDrop
+                              ? AppTheme.accentTeal.withValues(alpha: 0.14)
+                              : (isSelected
+                                    ? AppTheme.accentCyan.withValues(
+                                        alpha: 0.09,
+                                      )
+                                    : AppTheme.bgPrimary),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isHoveringDrop
+                                ? AppTheme.accentTeal
+                                : (isSelected
+                                      ? AppTheme.accentCyan
+                                      : AppTheme.border),
+                            width: (isHoveringDrop || isSelected) ? 1.8 : 1.0,
                           ),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.copy_rounded, size: 15),
-                          tooltip: 'Copiar comandos',
-                          onPressed: () {
-                            Clipboard.setData(ClipboardData(text: g.$4));
-                            _showSnack('Comandos copiados al portapapeles');
-                          },
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.folder_special_rounded,
+                                  size: 16,
+                                  color: AppTheme.accentCyan,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    '${hg['name']}',
+                                    style: const TextStyle(
+                                      fontSize: 11.4,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                if (widget.canEdit)
+                                  IconButton(
+                                    tooltip: 'Editar HostGroup y sus Hosts',
+                                    constraints: const BoxConstraints(),
+                                    padding: const EdgeInsets.only(left: 4),
+                                    onPressed: () =>
+                                        _showCreateHostGroupDialog(existing: hg),
+                                    icon: const Icon(
+                                      Icons.edit_outlined,
+                                      size: 14,
+                                      color: AppTheme.textMuted,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 3),
+                            Row(
+                              children: [
+                                Text(
+                                  '${hg['code']}',
+                                  style: const TextStyle(
+                                    fontSize: 9.8,
+                                    fontFamily: 'monospace',
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.textMuted,
+                                  ),
+                                ),
+                                const Spacer(),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 1.5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.bgElevated,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    '${memberCodes.length} hosts',
+                                    style: const TextStyle(
+                                      fontSize: 9.2,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 7),
+                            // Destinatarios de Alarma asignados a este HostGroup
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: AppTheme.bgSecondary,
+                                borderRadius: BorderRadius.circular(7),
+                                border: Border.all(
+                                  color: isHoveringDrop
+                                      ? AppTheme.accentTeal
+                                      : AppTheme.border.withValues(alpha: 0.8),
+                                ),
+                              ),
+                              child: (assignedCgIds.isEmpty &&
+                                      assignedContactIds.isEmpty)
+                                  ? const Text(
+                                      '📥 Arrastra aquí un Grupo de Usuarios para asignar alarmas',
+                                      style: TextStyle(
+                                        fontSize: 9.4,
+                                        fontStyle: FontStyle.italic,
+                                        color: AppTheme.textMuted,
+                                      ),
+                                    )
+                                  : Wrap(
+                                      spacing: 4,
+                                      runSpacing: 4,
+                                      children: [
+                                        ...assignedCgIds.map((cgId) {
+                                          final cg = _alertContactGroups
+                                              .where((g) => g['id'] == cgId)
+                                              .firstOrNull;
+                                          if (cg == null) {
+                                            return const SizedBox.shrink();
+                                          }
+                                          return _buildAssignedRecipientPill(
+                                            label: '👥 ${cg['name']}',
+                                            email: '${cg['group_email'] ?? ''}',
+                                            color: AppTheme.accentTeal,
+                                            onRemove: widget.canEdit
+                                                ? () =>
+                                                      _removeRecipientFromTarget(
+                                                        scopeType: 'host_group',
+                                                        hostGroupId: hgId,
+                                                        removeCgId: cgId,
+                                                      )
+                                                : null,
+                                          );
+                                        }),
+                                        ...assignedContactIds.map((cId) {
+                                          final c = _alertContacts
+                                              .where((u) => u['id'] == cId)
+                                              .firstOrNull;
+                                          if (c == null) {
+                                            return const SizedBox.shrink();
+                                          }
+                                          return _buildAssignedRecipientPill(
+                                            label: '👤 ${c['full_name']}',
+                                            email: '${c['email'] ?? ''}',
+                                            color: AppTheme.accentPurple,
+                                            onRemove: widget.canEdit
+                                                ? () =>
+                                                      _removeRecipientFromTarget(
+                                                        scopeType: 'host_group',
+                                                        hostGroupId: hgId,
+                                                        removeContactId: cId,
+                                                      )
+                                                : null,
+                                          );
+                                        }),
+                                      ],
+                                    ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                    Text(
-                      g.$2,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      g.$3,
-                      style: const TextStyle(
-                        fontSize: 10.5,
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: AppTheme.bgPrimary,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: SelectableText(
-                        g.$4,
-                        style: const TextStyle(
-                          fontSize: 10.5,
-                          fontFamily: 'monospace',
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
+                    );
+                  },
+                );
+              },
+            ),
           ),
         ],
       ),
     );
   }
 
-  // ===========================================================================
-  // TAB 5: AVISOS DE ALARMAS (PERSONAS, GRUPOS, HOSTGROUPS) & MANTENIMIENTO
-  // ===========================================================================
+  // ---------------------------------------------------------------------------
+  // COLUMNA 2: HOSTS DEL GRUPO SELECCIONADO (DROP TARGET INDIVIDUAL POR HOST)
+  // ---------------------------------------------------------------------------
+  Widget _buildAlertsCol2HostsInGroup() {
+    final selectedHg = _hostGroups
+        .where((hg) => hg['id'] == _selectedAlertHostGroupId)
+        .firstOrNull;
+    final memberAssetIds =
+        ((selectedHg?['member_asset_ids'] as List?) ?? []).cast<int>().toSet();
+    final groupHosts = selectedHg == null
+        ? _hosts
+        : _hosts.where((h) => memberAssetIds.contains(h['id'] as int)).toList();
 
-  Widget _buildAlertsContactsAndMaintenanceTab() {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        // Barra de acciones rápidas de Alarmas y Mantenimiento
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            if (widget.canEdit) ...[
-              ElevatedButton.icon(
-                onPressed: _showCreateContactDialog,
-                icon: const Icon(Icons.person_add_alt_1_rounded, size: 15),
-                label: const Text('+ Nueva Persona (Contacto)'),
-              ),
-              ElevatedButton.icon(
-                onPressed: _showCreateContactGroupDialog,
-                icon: const Icon(Icons.groups_rounded, size: 15),
-                label: const Text('+ Nuevo Grupo de Personas'),
-              ),
-              ElevatedButton.icon(
-                onPressed: _showCreateHostGroupDialog,
-                icon: const Icon(Icons.folder_special_rounded, size: 15),
-                label: const Text('+ Nuevo Grupo de Hosts'),
-              ),
-              ElevatedButton.icon(
-                onPressed: _showCreateRoutingRuleDialog,
-                icon: const Icon(Icons.alt_route_rounded, size: 15),
-                label: const Text('+ Nueva Regla de Enrutamiento'),
-              ),
-              OutlinedButton.icon(
-                onPressed: _showCreateMaintenanceDialog,
-                icon: const Icon(Icons.build_circle_rounded, size: 15),
-                label: const Text('+ Ventana de Mantenimiento'),
-              ),
-            ],
-            OutlinedButton.icon(
-              onPressed: () async {
-                final res = await widget.api.triggerTestAlert(
-                  assetId: _selectedHostId,
+    // Grupos heredados del HostGroup padre
+    final inheritedCgIds = <int>{};
+    if (selectedHg != null) {
+      for (final r in _notificationRules.where(
+        (r) =>
+            r['scope_type'] == 'host_group' &&
+            r['host_group_id'] == selectedHg['id'],
+      )) {
+        for (final id in ((r['contact_group_ids'] as List?) ?? [])) {
+          inheritedCgIds.add(id as int);
+        }
+      }
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.bgSecondary,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            decoration: const BoxDecoration(
+              color: AppTheme.bgCard,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(11)),
+              border: Border(bottom: BorderSide(color: AppTheme.border)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.accentBlue.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: const Text(
+                    '2',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w900,
+                      color: AppTheme.accentBlue,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    selectedHg != null
+                        ? 'HOSTS EN ${selectedHg['code']} (${groupHosts.length})'
+                        : 'HOSTS (${groupHosts.length})',
+                    style: const TextStyle(
+                      fontSize: 11.2,
+                      fontWeight: FontWeight.w900,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            color: AppTheme.accentBlue.withValues(alpha: 0.05),
+            child: const Text(
+              '💡 Cada Host hereda las alarmas de su HostGroup y también admite arrastrarle un Grupo o Usuario directo.',
+              style: TextStyle(fontSize: 9.5, color: AppTheme.textSecondary),
+            ),
+          ),
+          Expanded(
+            child: groupHosts.isEmpty
+                ? const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text(
+                        'Este Grupo de Host aún no tiene máquinas asignadas.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.all(8),
+                    itemCount: groupHosts.length,
+                    itemBuilder: (ctx, i) {
+                      final h = groupHosts[i];
+                      final assetId = h['id'] as int;
+                      final nagiosState =
+                          (h['nagios_host_state'] as String?) ?? 'UP';
+                      final stateColor = nagiosState == 'UP'
+                          ? AppTheme.success
+                          : (nagiosState == 'DOWN'
+                                ? AppTheme.error
+                                : AppTheme.warning);
+
+                      // Reglas directas para este Host individual
+                      final hostRules = _notificationRules
+                          .where(
+                            (r) =>
+                                r['scope_type'] == 'single_host' &&
+                                r['asset_id'] == assetId,
+                          )
+                          .toList();
+                      final directCgIds = <int>{};
+                      final directContactIds = <int>{};
+                      for (final r in hostRules) {
+                        for (final id
+                            in ((r['contact_group_ids'] as List?) ?? [])) {
+                          directCgIds.add(id as int);
+                        }
+                        for (final id in ((r['contact_ids'] as List?) ?? [])) {
+                          directContactIds.add(id as int);
+                        }
+                      }
+
+                      return DragTarget<String>(
+                        onWillAcceptWithDetails: (details) =>
+                            widget.canEdit &&
+                            (details.data.startsWith('ug:') ||
+                                details.data.startsWith('u:')),
+                        onAcceptWithDetails: (details) =>
+                            _handleDropRecipientOnTarget(
+                              dragToken: details.data,
+                              scopeType: 'single_host',
+                              assetId: assetId,
+                              targetName: 'Host ${h['code']}',
+                            ),
+                        builder: (ctx, candidateData, rejectedData) {
+                          final isHoveringDrop = candidateData.isNotEmpty;
+                          return AnimatedContainer(
+                            duration: const Duration(milliseconds: 120),
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(9),
+                            decoration: BoxDecoration(
+                              color: isHoveringDrop
+                                  ? AppTheme.accentTeal.withValues(alpha: 0.14)
+                                  : AppTheme.bgPrimary,
+                              borderRadius: BorderRadius.circular(9),
+                              border: Border.all(
+                                color: isHoveringDrop
+                                    ? AppTheme.accentTeal
+                                    : AppTheme.border,
+                                width: isHoveringDrop ? 1.8 : 1.0,
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                        color: stateColor,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        '${h['code']} • ${h['name']}',
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    Text(
+                                      '${h['heartbeat_ip'] ?? ''}',
+                                      style: const TextStyle(
+                                        fontSize: 9.5,
+                                        fontFamily: 'monospace',
+                                        color: AppTheme.textMuted,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 5),
+                                Wrap(
+                                  spacing: 4,
+                                  runSpacing: 4,
+                                  children: [
+                                    ...inheritedCgIds.map((cgId) {
+                                      final cg = _alertContactGroups
+                                          .where((g) => g['id'] == cgId)
+                                          .firstOrNull;
+                                      if (cg == null) {
+                                        return const SizedBox.shrink();
+                                      }
+                                      return Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.accentCyan.withValues(
+                                            alpha: 0.10,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            4,
+                                          ),
+                                          border: Border.all(
+                                            color: AppTheme.accentCyan
+                                                .withValues(alpha: 0.35),
+                                          ),
+                                        ),
+                                        child: Text(
+                                          '↪ Hereda: ${cg['name']}',
+                                          style: const TextStyle(
+                                            fontSize: 8.9,
+                                            fontWeight: FontWeight.w700,
+                                            color: AppTheme.accentCyan,
+                                          ),
+                                        ),
+                                      );
+                                    }),
+                                    ...directCgIds.map((cgId) {
+                                      final cg = _alertContactGroups
+                                          .where((g) => g['id'] == cgId)
+                                          .firstOrNull;
+                                      if (cg == null) {
+                                        return const SizedBox.shrink();
+                                      }
+                                      return _buildAssignedRecipientPill(
+                                        label: '🎯 Directo: ${cg['name']}',
+                                        email: '${cg['group_email'] ?? ''}',
+                                        color: AppTheme.accentTeal,
+                                        onRemove: widget.canEdit
+                                            ? () => _removeRecipientFromTarget(
+                                                scopeType: 'single_host',
+                                                assetId: assetId,
+                                                removeCgId: cgId,
+                                              )
+                                            : null,
+                                      );
+                                    }),
+                                    ...directContactIds.map((cId) {
+                                      final c = _alertContacts
+                                          .where((u) => u['id'] == cId)
+                                          .firstOrNull;
+                                      if (c == null) {
+                                        return const SizedBox.shrink();
+                                      }
+                                      return _buildAssignedRecipientPill(
+                                        label: '👤 Directo: ${c['full_name']}',
+                                        email: '${c['email'] ?? ''}',
+                                        color: AppTheme.accentPurple,
+                                        onRemove: widget.canEdit
+                                            ? () => _removeRecipientFromTarget(
+                                                scopeType: 'single_host',
+                                                assetId: assetId,
+                                                removeContactId: cId,
+                                              )
+                                            : null,
+                                      );
+                                    }),
+                                    if (inheritedCgIds.isEmpty &&
+                                        directCgIds.isEmpty &&
+                                        directContactIds.isEmpty)
+                                      const Text(
+                                        'Arrastra aquí un grupo o usuario para alerta específica',
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          fontStyle: FontStyle.italic,
+                                          color: AppTheme.textMuted,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // COLUMNA 3: GRUPOS DE USUARIOS (AD / LOCAL / A MEDIDA) — DRAGGABLE
+  // ---------------------------------------------------------------------------
+  Widget _buildAlertsCol3UserGroups() {
+    final filteredGroups = _alertContactGroups.where((cg) {
+      if (_alertGroupSourceFilter == 'all') return true;
+      return (cg['source_type'] as String? ?? 'custom') ==
+          _alertGroupSourceFilter;
+    }).toList();
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.bgSecondary,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            decoration: const BoxDecoration(
+              color: AppTheme.bgCard,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(11)),
+              border: Border(bottom: BorderSide(color: AppTheme.border)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.accentPurple.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: const Text(
+                    '3',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w900,
+                      color: AppTheme.accentPurple,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    'GRUPOS DE USUARIOS (${filteredGroups.length})',
+                    style: const TextStyle(
+                      fontSize: 11.2,
+                      fontWeight: FontWeight.w900,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (widget.canEdit)
+                  IconButton(
+                    tooltip: 'Crear Grupo de Usuarios a Medida o AD',
+                    constraints: const BoxConstraints(),
+                    padding: EdgeInsets.zero,
+                    onPressed: () => _showCreateContactGroupDialog(),
+                    icon: const Icon(
+                      Icons.add_circle_outline_rounded,
+                      size: 16,
+                      color: AppTheme.accentPurple,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          // Filtros de origen: Todos | Active Directory | Locales | A Medida
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: AppTheme.border)),
+            ),
+            child: Wrap(
+              spacing: 5,
+              runSpacing: 4,
+              children: [
+                _buildSourceFilterChip('all', 'Todos'),
+                _buildSourceFilterChip('ad', 'Active Directory'),
+                _buildSourceFilterChip('local', 'Locales'),
+                _buildSourceFilterChip('custom', 'A Medida'),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(8),
+              itemCount: filteredGroups.length,
+              itemBuilder: (ctx, i) {
+                final cg = filteredGroups[i];
+                final cgId = cg['id'] as int;
+                final isSelected = cgId == _selectedAlertUserGroupId;
+                final srcType = (cg['source_type'] as String?) ?? 'custom';
+                final srcBadge = (cg['source_badge'] as String?) ?? 'A Medida';
+                final memberIds =
+                    ((cg['member_contact_ids'] as List?) ?? []).cast<int>();
+                final alertHgs =
+                    ((cg['alerting_host_group_codes'] as List?) ?? [])
+                        .cast<String>();
+
+                final cardBody = GestureDetector(
+                  onTap: () => setState(() {
+                    _selectedAlertUserGroupId = cgId;
+                    _showAllUsersInCol4 = false;
+                    if (memberIds.isNotEmpty &&
+                        !memberIds.contains(_selectedAlertContactId)) {
+                      _selectedAlertContactId = memberIds.first;
+                    }
+                  }),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 120),
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? AppTheme.accentPurple.withValues(alpha: 0.09)
+                          : AppTheme.bgPrimary,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isSelected
+                            ? AppTheme.accentPurple
+                            : AppTheme.border,
+                        width: isSelected ? 1.8 : 1.0,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.drag_indicator_rounded,
+                              size: 15,
+                              color: AppTheme.accentPurple,
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                '${cg['name']}',
+                                style: const TextStyle(
+                                  fontSize: 11.3,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            _buildOriginBadge(srcType, srcBadge),
+                            if (widget.canEdit) ...[
+                              const SizedBox(width: 4),
+                              InkWell(
+                                onTap: () => _showCreateContactGroupDialog(
+                                  existing: cg,
+                                ),
+                                child: const Icon(
+                                  Icons.edit_outlined,
+                                  size: 14,
+                                  color: AppTheme.textMuted,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 5),
+                        // Correo propio del Grupo de Usuarios
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppTheme.bgSecondary,
+                            borderRadius: BorderRadius.circular(5),
+                            border: Border.all(color: AppTheme.border),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.alternate_email_rounded,
+                                size: 12,
+                                color: AppTheme.accentCyan,
+                              ),
+                              const SizedBox(width: 5),
+                              Expanded(
+                                child: Text(
+                                  (cg['group_email'] as String? ?? '')
+                                          .isNotEmpty
+                                      ? 'Correo grupo: ${cg['group_email']}'
+                                      : 'Sin correo de lista (usa correo de cada miembro)',
+                                  style: const TextStyle(
+                                    fontSize: 9.8,
+                                    fontFamily: 'monospace',
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        Row(
+                          children: [
+                            Text(
+                              '👥 ${memberIds.length} miembros',
+                              style: const TextStyle(
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                            const Spacer(),
+                            if (alertHgs.isNotEmpty)
+                              Text(
+                                '🔔 Recibe de: ${alertHgs.join(", ")}',
+                                style: const TextStyle(
+                                  fontSize: 9.0,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.accentTeal,
+                                ),
+                              )
+                            else
+                              const Text(
+                                'Arrastra a Col 1 o Col 2',
+                                style: TextStyle(
+                                  fontSize: 9.0,
+                                  color: AppTheme.textMuted,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
                 );
-                setState(() => _overview = res);
-                _showSnack(
-                  'Alerta de prueba disparada y registrada en la bitácora.',
+
+                if (!widget.canEdit) return cardBody;
+                return Draggable<String>(
+                  data: 'ug:$cgId',
+                  feedback: Material(
+                    elevation: 8,
+                    borderRadius: BorderRadius.circular(10),
+                    color: AppTheme.accentPurple,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 9,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.groups_rounded,
+                            size: 16,
+                            color: Colors.white,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Asignar Grupo: ${cg['name']} (${cg['group_email']})',
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  childWhenDragging: Opacity(opacity: 0.45, child: cardBody),
+                  child: cardBody,
                 );
               },
-              icon: const Icon(
-                Icons.notification_important_rounded,
-                size: 15,
-                color: AppTheme.warning,
-              ),
-              label: const Text('Disparar Alerta de Prueba'),
             ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        // 1. Reglas de Enrutamiento (Host / HostGroup -> Persona / Grupo de Personas)
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppTheme.bgSecondary,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.border),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'MATRIZ DE REGLAS DE ENRUTAMIENTO DE ALARMAS (${_notificationRules.length})',
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.accentCyan,
+        ],
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // COLUMNA 4 (DERECHA): USUARIOS + FICHA ACTIVE DIRECTORY (MEMBEROF & HOSTS)
+  // ---------------------------------------------------------------------------
+  Widget _buildAlertsCol4UsersAndAdCard() {
+    final selectedCg = _alertContactGroups
+        .where((cg) => cg['id'] == _selectedAlertUserGroupId)
+        .firstOrNull;
+    final groupMemberIds =
+        ((selectedCg?['member_contact_ids'] as List?) ?? [])
+            .cast<int>()
+            .toSet();
+
+    final visibleUsers = (_showAllUsersInCol4 || selectedCg == null)
+        ? _alertContacts
+        : _alertContacts
+              .where((c) => groupMemberIds.contains(c['id'] as int))
+              .toList();
+
+    final selectedUser =
+        _alertContacts
+            .where((c) => c['id'] == _selectedAlertContactId)
+            .firstOrNull ??
+        (visibleUsers.isNotEmpty ? visibleUsers.first : null);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.bgSecondary,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            decoration: const BoxDecoration(
+              color: AppTheme.bgCard,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(11)),
+              border: Border(bottom: BorderSide(color: AppTheme.border)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.success.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: const Text(
+                    '4',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w900,
+                      color: AppTheme.success,
+                    ),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              ..._notificationRules.map(
-                (r) => ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(
-                    Icons.notifications_active_rounded,
-                    color: AppTheme.accentCyan,
-                    size: 18,
-                  ),
-                  title: Text(
-                    '${r['name']}  •  Origen: [${r['host_group_name']}]',
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    _showAllUsersInCol4
+                        ? 'TODOS LOS USUARIOS (${visibleUsers.length})'
+                        : 'USUARIOS DEL GRUPO (${visibleUsers.length})',
                     style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 11.2,
+                      fontWeight: FontWeight.w900,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                TextButton(
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: () => setState(
+                    () => _showAllUsersInCol4 = !_showAllUsersInCol4,
+                  ),
+                  child: Text(
+                    _showAllUsersInCol4 ? 'Ver solo grupo' : 'Ver todos',
+                    style: const TextStyle(
+                      fontSize: 9.8,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
-                  subtitle: Text(
-                    'Avisa a Grupos: ${(r['contact_group_names'] as List).join(", ")} | Personas: ${(r['contact_names'] as List).join(", ")}',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.textSecondary,
+                ),
+                if (widget.canEdit) ...[
+                  const SizedBox(width: 4),
+                  IconButton(
+                    tooltip: 'Nuevo Usuario / Contacto',
+                    constraints: const BoxConstraints(),
+                    padding: EdgeInsets.zero,
+                    onPressed: () => _showCreateContactDialog(),
+                    icon: const Icon(
+                      Icons.person_add_alt_1_rounded,
+                      size: 15,
+                      color: AppTheme.success,
                     ),
                   ),
-                  trailing: widget.canEdit
-                      ? IconButton(
-                          icon: const Icon(
-                            Icons.delete_outline,
-                            size: 16,
-                            color: AppTheme.error,
+                ],
+              ],
+            ),
+          ),
+          // Lista superior de usuarios (también arrastrables individualmente)
+          Expanded(
+            flex: 5,
+            child: visibleUsers.isEmpty
+                ? const Center(
+                    child: Text(
+                      'Sin usuarios en este grupo. Pulsa "Ver todos" o edita el grupo.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 10.5, color: AppTheme.textMuted),
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.all(8),
+                    itemCount: visibleUsers.length,
+                    itemBuilder: (ctx, i) {
+                      final c = visibleUsers[i];
+                      final cId = c['id'] as int;
+                      final isSelected = selectedUser?['id'] == cId;
+                      final srcType = (c['source_type'] as String?) ?? 'custom';
+                      final srcBadge =
+                          (c['source_badge'] as String?) ?? 'A Medida';
+                      final hostCodes =
+                          ((c['alerting_host_codes'] as List?) ?? [])
+                              .cast<String>();
+
+                      final userTile = GestureDetector(
+                        onTap: () =>
+                            setState(() => _selectedAlertContactId = cId),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 120),
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? AppTheme.success.withValues(alpha: 0.09)
+                                : AppTheme.bgPrimary,
+                            borderRadius: BorderRadius.circular(9),
+                            border: Border.all(
+                              color: isSelected
+                                  ? AppTheme.success
+                                  : AppTheme.border,
+                              width: isSelected ? 1.8 : 1.0,
+                            ),
                           ),
-                          onPressed: () async {
-                            final res = await widget.api.deleteNotificationRule(
-                              r['id'] as int,
-                            );
-                            setState(() => _overview = res);
-                          },
-                        )
-                      : null,
-                ),
-              ),
-            ],
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.person_rounded,
+                                    size: 15,
+                                    color: AppTheme.success,
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Expanded(
+                                    child: Text(
+                                      '${c['full_name']}',
+                                      style: const TextStyle(
+                                        fontSize: 11.0,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  _buildOriginBadge(srcType, srcBadge),
+                                  if (widget.canEdit) ...[
+                                    const SizedBox(width: 4),
+                                    InkWell(
+                                      onTap: () =>
+                                          _showCreateContactDialog(existing: c),
+                                      child: const Icon(
+                                        Icons.edit_outlined,
+                                        size: 13.5,
+                                        color: AppTheme.textMuted,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 3),
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.mail_outline_rounded,
+                                    size: 11,
+                                    color: AppTheme.accentCyan,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      '${c['email']}',
+                                      style: const TextStyle(
+                                        fontSize: 9.6,
+                                        fontFamily: 'monospace',
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  Text(
+                                    '🔔 ${hostCodes.length} hosts',
+                                    style: const TextStyle(
+                                      fontSize: 9.0,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppTheme.accentTeal,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+
+                      if (!widget.canEdit) return userTile;
+                      return Draggable<String>(
+                        data: 'u:$cId',
+                        feedback: Material(
+                          elevation: 8,
+                          borderRadius: BorderRadius.circular(9),
+                          color: AppTheme.success,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            child: Text(
+                              '👤 Asignar Usuario: ${c['full_name']} (${c['email']})',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                        childWhenDragging: Opacity(
+                          opacity: 0.45,
+                          child: userTile,
+                        ),
+                        child: userTile,
+                      );
+                    },
+                  ),
           ),
-        ),
-        const SizedBox(height: 14),
-        // 2. Personas, Grupos de Personas y Grupos de Hosts en 3 columnas
-        Wrap(
-          spacing: 14,
-          runSpacing: 14,
+          // Ficha Inferior estilo Active Directory ("MemberOf" y "Hosts que le envían alarmas")
+          if (selectedUser != null)
+            Expanded(
+              flex: 6,
+              child: _buildActiveDirectoryUserInspector(selectedUser),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActiveDirectoryUserInspector(Map<String, dynamic> user) {
+    final memberOfGroups =
+        ((user['member_of_groups'] as List?) ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+    final alertingHgs =
+        ((user['alerting_host_group_codes'] as List?) ?? []).cast<String>();
+    final alertingHosts =
+        ((user['alerting_host_codes'] as List?) ?? []).cast<String>();
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: const BoxDecoration(
+        color: AppTheme.bgCard,
+        borderRadius: BorderRadius.vertical(bottom: Radius.circular(11)),
+        border: Border(top: BorderSide(color: AppTheme.border, width: 1.2)),
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Personas
-            Container(
-              width: 340,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppTheme.bgSecondary,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.border),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'PERSONAS / CONTACTOS (${_alertContacts.length})',
+            Row(
+              children: [
+                const Icon(
+                  Icons.badge_rounded,
+                  size: 15,
+                  color: AppTheme.accentBlue,
+                ),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    'FICHA ACTIVE DIRECTORY: ${user['full_name']}',
                     style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
+                      fontSize: 10.6,
+                      fontWeight: FontWeight.w900,
+                      color: AppTheme.accentBlue,
                     ),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 8),
-                  ..._alertContacts.map(
-                    (c) => ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(
-                        '${c['full_name']} (${c['schedule_period']})',
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'DN / Origen: ${user['ad_dn'] ?? user['role_title'] ?? ''}',
+              style: const TextStyle(
+                fontSize: 9.0,
+                fontFamily: 'monospace',
+                color: AppTheme.textMuted,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            Text(
+              'Correo personal: ${user['email']} • Horario: ${user['schedule_period'] ?? '24x7'}',
+              style: const TextStyle(
+                fontSize: 9.5,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 7),
+            const Text(
+              '1. GRUPOS A LOS QUE PERTENECE (MemberOf):',
+              style: TextStyle(
+                fontSize: 9.5,
+                fontWeight: FontWeight.w900,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 4),
+            if (memberOfGroups.isEmpty)
+              const Text(
+                'No pertenece a ningún grupo todavía.',
+                style: TextStyle(fontSize: 9.2, color: AppTheme.textMuted),
+              )
+            else
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: memberOfGroups
+                    .map(
+                      (g) => Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2.5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.accentPurple.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(5),
+                          border: Border.all(
+                            color: AppTheme.accentPurple.withValues(alpha: 0.4),
+                          ),
+                        ),
+                        child: Text(
+                          '👥 ${g['name']} (${g['group_email']})',
+                          style: const TextStyle(
+                            fontSize: 8.8,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.accentPurple,
+                          ),
                         ),
                       ),
-                      subtitle: Text(
-                        '${c['email']}\n${c['role_title']}',
-                        style: const TextStyle(fontSize: 10.5),
+                    )
+                    .toList(),
+              ),
+            const SizedBox(height: 8),
+            const Text(
+              '2. HOSTS Y GRUPOS DE HOST QUE LE ENVÍAN ALARMAS:',
+              style: TextStyle(
+                fontSize: 9.5,
+                fontWeight: FontWeight.w900,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 4),
+            if (alertingHgs.isEmpty && alertingHosts.isEmpty)
+              const Text(
+                'Ningún Host asignado aún. Arrastra su Grupo (Col 3) o este Usuario (Col 4) hacia un Grupo de Host (Col 1) o Host (Col 2).',
+                style: TextStyle(fontSize: 9.0, color: AppTheme.textMuted),
+              )
+            else
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: [
+                  ...alertingHgs.map(
+                    (hgc) => Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.accentCyan.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        '📁 $hgc',
+                        style: const TextStyle(
+                          fontSize: 8.8,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.accentCyan,
+                        ),
+                      ),
+                    ),
+                  ),
+                  ...alertingHosts.map(
+                    (hc) => Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.accentTeal.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        '🖥️ $hc',
+                        style: const TextStyle(
+                          fontSize: 8.8,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.accentTeal,
+                        ),
                       ),
                     ),
                   ),
                 ],
               ),
-            ),
-            // Grupos de Personas
-            Container(
-              width: 340,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppTheme.bgSecondary,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.border),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'GRUPOS DE PERSONAS (${_alertContactGroups.length})',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ..._alertContactGroups.map(
-                    (cg) => ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(
-                        '${cg['name']} (${cg['code']})',
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      subtitle: Text(
-                        'Correo: ${cg['group_email']}\nMiembros: ${(cg['member_names'] as List).join(", ")}',
-                        style: const TextStyle(fontSize: 10.5),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // Grupos de Hosts
-            Container(
-              width: 340,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppTheme.bgSecondary,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.border),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'GRUPOS DE HOSTS / EQUIPOS (${_hostGroups.length})',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ..._hostGroups.map(
-                    (hg) => ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(
-                        '${hg['name']} (${hg['code']})',
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      subtitle: Text(
-                        'Equipos: ${(hg['member_codes'] as List).join(", ")}',
-                        style: const TextStyle(fontSize: 10.5),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
           ],
         ),
-        const SizedBox(height: 14),
-        // 3. Ventanas de Mantenimiento y Bitácora de Avisos
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppTheme.bgSecondary,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.border),
+      ),
+    );
+  }
+
+  Widget _buildSourceFilterChip(String key, String label) {
+    final selected = _alertGroupSourceFilter == key;
+    return InkWell(
+      onTap: () => setState(() => _alertGroupSourceFilter = key),
+      borderRadius: BorderRadius.circular(5),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppTheme.accentPurple.withValues(alpha: 0.15)
+              : AppTheme.bgPrimary,
+          borderRadius: BorderRadius.circular(5),
+          border: Border.all(
+            color: selected ? AppTheme.accentPurple : AppTheme.border,
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'VENTANAS DE MANTENIMIENTO ACTIVAS E HISTÓRICAS (${_maintenanceWindows.length}) & BITÁCORA DE AVISOS (${_alertLogs.length})',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.accentCyan,
-                ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 9.2,
+            fontWeight: FontWeight.w800,
+            color: selected ? AppTheme.accentPurple : AppTheme.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOriginBadge(String srcType, String srcBadge) {
+    final Color c = srcType == 'ad'
+        ? AppTheme.accentBlue
+        : (srcType == 'local' ? AppTheme.accentTeal : AppTheme.warning);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        srcBadge,
+        style: TextStyle(
+          fontSize: 8.4,
+          fontWeight: FontWeight.w800,
+          color: c,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAssignedRecipientPill({
+    required String label,
+    required String email,
+    required Color color,
+    VoidCallback? onRemove,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: color.withValues(alpha: 0.45)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              email.isNotEmpty ? '$label ($email)' : label,
+              style: TextStyle(
+                fontSize: 8.9,
+                fontWeight: FontWeight.w800,
+                color: color,
               ),
-              const SizedBox(height: 8),
-              ..._maintenanceWindows.map(
-                (w) => ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    Icons.build_circle_rounded,
-                    color: w['is_active'] == true
-                        ? AppTheme.accentCyan
-                        : AppTheme.textMuted,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (onRemove != null) ...[
+            const SizedBox(width: 4),
+            InkWell(
+              onTap: onRemove,
+              child: Icon(Icons.close_rounded, size: 12, color: color),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleDropRecipientOnTarget({
+    required String dragToken,
+    required String scopeType,
+    int? hostGroupId,
+    int? assetId,
+    required String targetName,
+  }) async {
+    final isGroup = dragToken.startsWith('ug:');
+    final id = int.tryParse(dragToken.split(':').last);
+    if (id == null) return;
+
+    final res = await widget.api.createNotificationRule({
+      'name': 'Enrutamiento AD/Alarma -> $targetName',
+      'description': 'Asignado arrastrando en Matriz Active Directory',
+      'enabled': true,
+      'scope_type': scopeType,
+      'host_group_id': hostGroupId,
+      'asset_id': assetId,
+      'contact_group_ids': isGroup ? [id] : <int>[],
+      'contact_ids': isGroup ? <int>[] : [id],
+      'send_email': true,
+      'send_webhook': true,
+      'only_on_hard_state': true,
+    });
+    setState(() => _overview = res);
+    _showSnack('Alarma asignada a $targetName.');
+  }
+
+  Future<void> _removeRecipientFromTarget({
+    required String scopeType,
+    int? hostGroupId,
+    int? assetId,
+    int? removeCgId,
+    int? removeContactId,
+  }) async {
+    final matchingRules = _notificationRules.where((r) {
+      if (scopeType == 'host_group') {
+        return r['scope_type'] == 'host_group' &&
+            r['host_group_id'] == hostGroupId;
+      }
+      return r['scope_type'] == 'single_host' && r['asset_id'] == assetId;
+    }).toList();
+
+    final currentCgIds = <int>{};
+    final currentContactIds = <int>{};
+    for (final r in matchingRules) {
+      for (final id in ((r['contact_group_ids'] as List?) ?? [])) {
+        currentCgIds.add(id as int);
+      }
+      for (final id in ((r['contact_ids'] as List?) ?? [])) {
+        currentContactIds.add(id as int);
+      }
+    }
+    if (removeCgId != null) currentCgIds.remove(removeCgId);
+    if (removeContactId != null) currentContactIds.remove(removeContactId);
+
+    final res = await widget.api.createNotificationRule({
+      'name': 'Enrutamiento Actualizado',
+      'description': '__REPLACE__',
+      'enabled': true,
+      'scope_type': scopeType,
+      'host_group_id': hostGroupId,
+      'asset_id': assetId,
+      'contact_group_ids': currentCgIds.toList(),
+      'contact_ids': currentContactIds.toList(),
+      'send_email': true,
+      'send_webhook': true,
+      'only_on_hard_state': true,
+    });
+    setState(() => _overview = res);
+  }
+
+  Widget _buildAlertsBottomMaintenanceAndLogsBar() {
+    return Container(
+      height: 125,
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: const BoxDecoration(
+        color: AppTheme.bgSecondary,
+        border: Border(top: BorderSide(color: AppTheme.border)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Ventanas de mantenimiento
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '🛠️ VENTANAS DE MANTENIMIENTO (${_maintenanceWindows.length})',
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w900,
+                    color: AppTheme.accentCyan,
                   ),
-                  title: Text(
-                    '${w['title']} (${w['is_active'] == true ? "ACTIVA" : "FINALIZADA"})',
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  subtitle: Text(
-                    'Creada por: ${w['created_by']} • Motivo: ${w['reason']} • Fin: ${w['ends_at']}',
-                    style: const TextStyle(fontSize: 10.5),
-                  ),
-                  trailing: (w['is_active'] == true && widget.canEdit)
-                      ? OutlinedButton(
-                          onPressed: () async {
-                            final res = await widget.api.stopMaintenanceWindow(
-                              w['id'] as int,
-                            );
-                            setState(() => _overview = res);
-                          },
-                          child: const Text(
-                            'Finalizar Mantenimiento',
-                            style: TextStyle(fontSize: 10.5),
+                ),
+                const SizedBox(height: 4),
+                Expanded(
+                  child: ListView(
+                    children: _maintenanceWindows
+                        .map(
+                          (w) => Padding(
+                            padding: const EdgeInsets.only(bottom: 3),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.build_circle_rounded,
+                                  size: 13,
+                                  color: w['is_active'] == true
+                                      ? AppTheme.accentCyan
+                                      : AppTheme.textMuted,
+                                ),
+                                const SizedBox(width: 5),
+                                Expanded(
+                                  child: Text(
+                                    '${w['title']} (${w['is_active'] == true ? "ACTIVA" : "FINALIZADA"}) • ${w['reason']}',
+                                    style: const TextStyle(fontSize: 10),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                if (w['is_active'] == true && widget.canEdit)
+                                  TextButton(
+                                    style: TextButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                      ),
+                                      minimumSize: Size.zero,
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                    onPressed: () async {
+                                      final res = await widget.api
+                                          .stopMaintenanceWindow(
+                                            w['id'] as int,
+                                          );
+                                      setState(() => _overview = res);
+                                    },
+                                    child: const Text(
+                                      'Finalizar',
+                                      style: TextStyle(fontSize: 9.5),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                         )
-                      : null,
+                        .toList(),
+                  ),
                 ),
-              ),
-              const Divider(height: 18),
-              ..._alertLogs.take(10).map(
-                (lg) => ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(
-                    Icons.mark_email_read_rounded,
-                    size: 16,
+              ],
+            ),
+          ),
+          const VerticalDivider(width: 20),
+          // Bitácora de envíos de correo / webhook
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '📨 BITÁCORA DE CORREOS Y AVISOS ENVIADOS (${_alertLogs.length})',
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w900,
                     color: AppTheme.warning,
                   ),
-                  title: Text(
-                    '[${lg['event_state']}] ${lg['asset_code']} — ${lg['service_name']}',
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  subtitle: Text(
-                    'Destinatarios: ${lg['recipients_summary']} (${lg['delivery_status']})\n${lg['detail']}',
-                    style: const TextStyle(fontSize: 10.5),
+                ),
+                const SizedBox(height: 4),
+                Expanded(
+                  child: ListView(
+                    children: _alertLogs
+                        .take(12)
+                        .map(
+                          (lg) => Padding(
+                            padding: const EdgeInsets.only(bottom: 3),
+                            child: Text(
+                              '• [${lg['event_state']}] ${lg['asset_code']} ➔ ${lg['recipients_summary']} (${lg['delivery_status']})',
+                              style: const TextStyle(fontSize: 9.8),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -7210,238 +10041,146 @@ ExtendedStatus On
     );
   }
 
-  Future<void> _showCreateContactDialog() async {
-    final codeCtrl = TextEditingController(text: 'USR-NUEVO-OPS');
-    final nameCtrl = TextEditingController(text: '');
-    final emailCtrl = TextEditingController(text: '');
-    final roleCtrl = TextEditingController(text: 'Ingeniero SRE / Guardia');
-
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Añadir Persona / Contacto de Alarma'),
-        content: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: codeCtrl,
-                decoration: const InputDecoration(labelText: 'Código Único'),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Nombre Completo'),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: emailCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Correo Electrónico de Alerta',
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: roleCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Rol / Departamento',
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              final res = await widget.api.upsertAlertContact({
-                'code': codeCtrl.text.trim(),
-                'full_name': nameCtrl.text.trim(),
-                'email': emailCtrl.text.trim(),
-                'role_title': roleCtrl.text.trim(),
-              });
-              setState(() => _overview = res);
-            },
-            child: const Text('Guardar Persona'),
-          ),
-        ],
-      ),
+  Future<void> _showSmtpServerConfigDialog() async {
+    final smtp = _smtpConfig;
+    final hostCtrl = TextEditingController(
+      text: (smtp['smtp_host'] as String?)?.isNotEmpty == true
+          ? '${smtp['smtp_host']}'
+          : 'smtp.corp.local',
     );
-  }
-
-  Future<void> _showCreateContactGroupDialog() async {
-    final codeCtrl = TextEditingController(text: 'CG-GUARDIA-24X7');
-    final nameCtrl = TextEditingController(text: 'Equipo Guardia 24x7');
-    final emailCtrl = TextEditingController(text: 'guardia24x7@empresa.local');
-
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Crear Grupo de Personas'),
-        content: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: codeCtrl,
-                decoration: const InputDecoration(labelText: 'Código del Grupo'),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Nombre del Grupo'),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: emailCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Correo de Lista de Distribución',
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              final res = await widget.api.upsertAlertContactGroup({
-                'code': codeCtrl.text.trim(),
-                'name': nameCtrl.text.trim(),
-                'group_email': emailCtrl.text.trim(),
-                'member_contact_ids': _alertContacts
-                    .map((c) => c['id'] as int)
-                    .toList(),
-              });
-              setState(() => _overview = res);
-            },
-            child: const Text('Guardar Grupo'),
-          ),
-        ],
-      ),
+    final portCtrl = TextEditingController(
+      text: '${smtp['smtp_port'] ?? 587}',
     );
-  }
-
-  Future<void> _showCreateHostGroupDialog() async {
-    final codeCtrl = TextEditingController(text: 'HG-PRODUCCION-CRITICA');
-    final nameCtrl = TextEditingController(text: 'Hosts Críticos Producción');
-
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Crear Grupo de Hosts (HostGroup)'),
-        content: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: codeCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Código del HostGroup',
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Nombre del HostGroup',
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              final res = await widget.api.upsertHostGroup({
-                'code': codeCtrl.text.trim(),
-                'name': nameCtrl.text.trim(),
-                'member_asset_ids': _selectedHostId != null
-                    ? [_selectedHostId]
-                    : [],
-              });
-              setState(() => _overview = res);
-            },
-            child: const Text('Guardar HostGroup'),
-          ),
-        ],
-      ),
+    final userCtrl = TextEditingController(
+      text: (smtp['smtp_username'] as String?) ?? 'alertas@corp.local',
     );
-  }
-
-  Future<void> _showCreateRoutingRuleDialog() async {
-    if (_hostGroups.isEmpty || _alertContactGroups.isEmpty) return;
-    int hgId = _hostGroups.first['id'] as int;
-    int cgId = _alertContactGroups.first['id'] as int;
-    final nameCtrl = TextEditingController(
-      text: 'Regla Personalizada de Aviso Crítico',
+    final passCtrl = TextEditingController(text: '');
+    final fromCtrl = TextEditingController(
+      text: (smtp['from_email'] as String?)?.isNotEmpty == true
+          ? '${smtp['from_email']}'
+          : 'RackDoc Monitor <alertas@corp.local>',
     );
+    final webhookCtrl = TextEditingController(
+      text: (smtp['global_webhook_url'] as String?) ?? '',
+    );
+    bool useTls = smtp['use_tls'] != false;
+    bool enabled = smtp['enabled'] != false;
 
     await showDialog<void>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModal) => AlertDialog(
-          title: const Text('Nueva Regla de Enrutamiento de Alarma'),
+          title: const Row(
+            children: [
+              Icon(Icons.mark_email_unread_rounded, color: AppTheme.accentBlue),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Alta y Configuración del Servidor de Correo SMTP',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
           content: SizedBox(
-            width: 440,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Nombre de la Regla',
+            width: 500,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SwitchListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(
+                      'Activar Envío de Correos SMTP en Alarmas',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    subtitle: const Text(
+                      'Envía al correo concreto del Grupo de Usuarios y/o al correo personal de cada Usuario asignado.',
+                      style: TextStyle(fontSize: 11),
+                    ),
+                    value: enabled,
+                    onChanged: (v) => setModal(() => enabled = v),
                   ),
-                ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<int>(
-                  initialValue: hgId,
-                  decoration: const InputDecoration(
-                    labelText: 'Grupo de Hosts (HostGroup)',
-                  ),
-                  items: _hostGroups
-                      .map(
-                        (hg) => DropdownMenuItem<int>(
-                          value: hg['id'] as int,
-                          child: Text('${hg['name']} (${hg['code']})'),
+                  const Divider(),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: TextField(
+                          controller: hostCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Servidor SMTP (Host / IP / Relay)',
+                            hintText: 'smtp.office365.com o mail.corp.local',
+                          ),
                         ),
-                      )
-                      .toList(),
-                  onChanged: (v) => setModal(() => hgId = v ?? hgId),
-                ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<int>(
-                  initialValue: cgId,
-                  decoration: const InputDecoration(
-                    labelText: 'Avisar al Grupo de Personas',
-                  ),
-                  items: _alertContactGroups
-                      .map(
-                        (cg) => DropdownMenuItem<int>(
-                          value: cg['id'] as int,
-                          child: Text('${cg['name']} (${cg['group_email']})'),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: portCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Puerto',
+                            hintText: '587 / 465 / 25',
+                          ),
                         ),
-                      )
-                      .toList(),
-                  onChanged: (v) => setModal(() => cgId = v ?? cgId),
-                ),
-              ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(
+                      'Usar STARTTLS / TLS Seguro',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    value: useTls,
+                    onChanged: (v) => setModal(() => useTls = v),
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: userCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Usuario SMTP',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: passCtrl,
+                          obscureText: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Contraseña / App Token',
+                            hintText: '(Dejar vacío para conservar)',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: fromCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Remitente (From Email)',
+                      hintText: 'RackDoc Noc <alertas@corp.local>',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: webhookCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Webhook Global Opcional (Teams / Slack / Telegram)',
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           actions: [
@@ -7449,18 +10188,598 @@ ExtendedStatus On
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Cancelar'),
             ),
+            OutlinedButton.icon(
+              onPressed: () async {
+                final res = await widget.api.updateSmtpAlertConfig({
+                  'smtp_host': hostCtrl.text.trim(),
+                  'smtp_port': int.tryParse(portCtrl.text.trim()) ?? 587,
+                  'use_tls': useTls,
+                  'smtp_username': userCtrl.text.trim(),
+                  'smtp_password': passCtrl.text,
+                  'from_email': fromCtrl.text.trim(),
+                  'global_webhook_url': webhookCtrl.text.trim(),
+                  'enabled': enabled,
+                });
+                final testRes = await widget.api.triggerTestAlert(
+                  assetId: _selectedHostId,
+                );
+                if (mounted) {
+                  setState(() => _overview = testRes.isNotEmpty ? testRes : res);
+                  _showSnack(
+                    'Servidor SMTP guardado y correo de prueba disparado.',
+                  );
+                }
+              },
+              icon: const Icon(Icons.send_rounded, size: 15),
+              label: const Text('Guardar y Enviar Prueba'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                final res = await widget.api.updateSmtpAlertConfig({
+                  'smtp_host': hostCtrl.text.trim(),
+                  'smtp_port': int.tryParse(portCtrl.text.trim()) ?? 587,
+                  'use_tls': useTls,
+                  'smtp_username': userCtrl.text.trim(),
+                  'smtp_password': passCtrl.text,
+                  'from_email': fromCtrl.text.trim(),
+                  'global_webhook_url': webhookCtrl.text.trim(),
+                  'enabled': enabled,
+                });
+                setState(() => _overview = res);
+                _showSnack('Servidor de correo SMTP configurado.');
+              },
+              icon: const Icon(Icons.save_rounded, size: 15),
+              label: const Text('Guardar Servidor SMTP'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showCreateContactDialog({Map<String, dynamic>? existing}) async {
+    String sourceOrigin = (existing?['source_type'] as String?) ?? 'custom';
+    final codeCtrl = TextEditingController(
+      text: (existing?['code'] as String?) ?? 'USR-NUEVO-OPS',
+    );
+    final nameCtrl = TextEditingController(
+      text: (existing?['full_name'] as String?) ?? '',
+    );
+    final emailCtrl = TextEditingController(
+      text: (existing?['email'] as String?) ?? '',
+    );
+    final roleCtrl = TextEditingController(
+      text: (existing?['role_title'] as String?) ?? 'Ingeniero SRE / Guardia',
+    );
+    final scheduleCtrl = TextEditingController(
+      text: (existing?['schedule_period'] as String?) ?? '24x7',
+    );
+    final selectedGroupIds = <int>{
+      ...(((existing?['member_of_group_ids'] as List?) ?? []).cast<int>()),
+      if (existing == null && _selectedAlertUserGroupId != null)
+        _selectedAlertUserGroupId!,
+    };
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => AlertDialog(
+          title: Text(
+            existing != null
+                ? 'Editar Usuario / Contacto (${existing['full_name']})'
+                : 'Añadir Usuario / Contacto de Alarma (AD / Local / A Medida)',
+          ),
+          content: SizedBox(
+            width: 480,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: sourceOrigin,
+                    decoration: const InputDecoration(
+                      labelText: 'Origen de la Cuenta (Control de Acceso / AD / Medida)',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'ad',
+                        child: Text('Active Directory (LDAP / corp.local)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'local',
+                        child: Text('Usuario Local (Control de Acceso)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'custom',
+                        child: Text('Contacto Externo / A Medida'),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      if (v == null) return;
+                      setModal(() {
+                        sourceOrigin = v;
+                        if (existing == null) {
+                          codeCtrl.text = v == 'ad'
+                              ? 'USR-AD-NUEVO'
+                              : (v == 'local'
+                                    ? 'USR-LOCAL-NUEVO'
+                                    : 'USR-CUSTOM-NUEVO');
+                        }
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: codeCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Código Único / sAMAccountName',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: scheduleCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Horario (24x7 / Laboral)',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Nombre Completo del Usuario',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: emailCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Correo Electrónico Concreto del Usuario',
+                      hintText: 'usuario@empresa.local',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: roleCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Rol / DN Active Directory / Departamento',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Pertenece a los Grupos de Usuarios (MemberOf):',
+                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: _alertContactGroups.map((cg) {
+                      final gid = cg['id'] as int;
+                      final isMember = selectedGroupIds.contains(gid);
+                      return FilterChip(
+                        visualDensity: VisualDensity.compact,
+                        label: Text(
+                          '${cg['name']} (${cg['group_email']})',
+                          style: const TextStyle(fontSize: 10.5),
+                        ),
+                        selected: isMember,
+                        onSelected: (val) => setModal(() {
+                          if (val) {
+                            selectedGroupIds.add(gid);
+                          } else {
+                            selectedGroupIds.remove(gid);
+                          }
+                        }),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            if (existing != null)
+              TextButton.icon(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  final res = await widget.api.deleteAlertContact(
+                    existing['id'] as int,
+                  );
+                  setState(() => _overview = res);
+                },
+                icon: const Icon(
+                  Icons.delete_outline,
+                  size: 15,
+                  color: AppTheme.error,
+                ),
+                label: const Text(
+                  'Eliminar',
+                  style: TextStyle(color: AppTheme.error),
+                ),
+              ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
             ElevatedButton(
               onPressed: () async {
                 Navigator.pop(ctx);
-                final res = await widget.api.createNotificationRule({
+                final prefix = sourceOrigin == 'ad'
+                    ? '[Active Directory] '
+                    : (sourceOrigin == 'local' ? '[Usuario Local] ' : '');
+                final rawRole = roleCtrl.text.trim();
+                final finalRole = rawRole.startsWith('[')
+                    ? rawRole
+                    : '$prefix$rawRole';
+
+                var res = await widget.api.upsertAlertContact({
+                  'code': codeCtrl.text.trim(),
+                  'full_name': nameCtrl.text.trim(),
+                  'email': emailCtrl.text.trim(),
+                  'role_title': finalRole,
+                  'schedule_period': scheduleCtrl.text.trim().isNotEmpty
+                      ? scheduleCtrl.text.trim()
+                      : '24x7',
+                });
+
+                // Actualizar membresía MemberOf en los grupos de usuarios
+                final updatedContacts =
+                    ((res['alert_contacts'] as List?) ?? [])
+                        .map((e) => Map<String, dynamic>.from(e as Map))
+                        .toList();
+                final savedUser = updatedContacts
+                    .where(
+                      (u) =>
+                          (u['code'] as String? ?? '').toUpperCase() ==
+                          codeCtrl.text.trim().toUpperCase(),
+                    )
+                    .firstOrNull;
+                if (savedUser != null) {
+                  final cid = savedUser['id'] as int;
+                  for (final cg in _alertContactGroups) {
+                    final gid = cg['id'] as int;
+                    final members =
+                        ((cg['member_contact_ids'] as List?) ?? [])
+                            .cast<int>()
+                            .toSet();
+                    final shouldHave = selectedGroupIds.contains(gid);
+                    if (shouldHave && !members.contains(cid)) {
+                      members.add(cid);
+                      res = await widget.api.upsertAlertContactGroup({
+                        'code': cg['code'],
+                        'name': cg['name'],
+                        'description': cg['description'] ?? '',
+                        'group_email': cg['group_email'] ?? '',
+                        'channel_webhook_url': cg['channel_webhook_url'] ?? '',
+                        'member_contact_ids': members.toList(),
+                      });
+                    } else if (!shouldHave && members.contains(cid)) {
+                      members.remove(cid);
+                      res = await widget.api.upsertAlertContactGroup({
+                        'code': cg['code'],
+                        'name': cg['name'],
+                        'description': cg['description'] ?? '',
+                        'group_email': cg['group_email'] ?? '',
+                        'channel_webhook_url': cg['channel_webhook_url'] ?? '',
+                        'member_contact_ids': members.toList(),
+                      });
+                    }
+                  }
+                }
+                setState(() => _overview = res);
+              },
+              child: const Text('Guardar Usuario'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showCreateContactGroupDialog({
+    Map<String, dynamic>? existing,
+  }) async {
+    String sourceOrigin = (existing?['source_type'] as String?) ?? 'custom';
+    final codeCtrl = TextEditingController(
+      text: (existing?['code'] as String?) ?? 'CG-GUARDIA-24X7',
+    );
+    final nameCtrl = TextEditingController(
+      text: (existing?['name'] as String?) ?? 'Equipo Guardia 24x7',
+    );
+    final emailCtrl = TextEditingController(
+      text: (existing?['group_email'] as String?) ?? 'guardia24x7@empresa.local',
+    );
+    final descCtrl = TextEditingController(
+      text: (existing?['description'] as String?) ?? '',
+    );
+    final selectedMemberIds = <int>{
+      ...(((existing?['member_contact_ids'] as List?) ?? []).cast<int>()),
+    };
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => AlertDialog(
+          title: Text(
+            existing != null
+                ? 'Editar Grupo de Usuarios (${existing['name']})'
+                : 'Crear Grupo de Usuarios (AD / Local / A Medida)',
+          ),
+          content: SizedBox(
+            width: 480,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: sourceOrigin,
+                    decoration: const InputDecoration(
+                      labelText: 'Origen del Grupo',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'ad',
+                        child: Text('Grupo Active Directory (OU=Groups,DC=corp,DC=local)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'local',
+                        child: Text('Grupo Local de Control de Acceso'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'custom',
+                        child: Text('Grupo de Guardia a Medida'),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      if (v == null) return;
+                      setModal(() {
+                        sourceOrigin = v;
+                        if (existing == null) {
+                          codeCtrl.text = v == 'ad'
+                              ? 'CG-AD-NUEVO'
+                              : (v == 'local'
+                                    ? 'CG-LOCAL-NUEVO'
+                                    : 'CG-CUSTOM-NUEVO');
+                        }
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: codeCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Código del Grupo',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Nombre del Grupo (AD / Local / Guardia)',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: emailCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Correo Concreto del Grupo (Lista de Distribución)',
+                      hintText: 'grupo-alertas@empresa.local',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: descCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Descripción / DN de Active Directory',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Usuarios Miembros de este Grupo:',
+                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: _alertContacts.map((c) {
+                      final cid = c['id'] as int;
+                      final isSel = selectedMemberIds.contains(cid);
+                      return FilterChip(
+                        visualDensity: VisualDensity.compact,
+                        label: Text(
+                          '${c['full_name']} (${c['email']})',
+                          style: const TextStyle(fontSize: 10.5),
+                        ),
+                        selected: isSel,
+                        onSelected: (v) => setModal(() {
+                          if (v) {
+                            selectedMemberIds.add(cid);
+                          } else {
+                            selectedMemberIds.remove(cid);
+                          }
+                        }),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            if (existing != null)
+              TextButton.icon(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  final res = await widget.api.deleteAlertContactGroup(
+                    existing['id'] as int,
+                  );
+                  setState(() => _overview = res);
+                },
+                icon: const Icon(
+                  Icons.delete_outline,
+                  size: 15,
+                  color: AppTheme.error,
+                ),
+                label: const Text(
+                  'Eliminar',
+                  style: TextStyle(color: AppTheme.error),
+                ),
+              ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                final prefix = sourceOrigin == 'ad'
+                    ? '[Active Directory] '
+                    : (sourceOrigin == 'local' ? '[Grupo Local] ' : '');
+                final rawDesc = descCtrl.text.trim();
+                final finalDesc = rawDesc.startsWith('[')
+                    ? rawDesc
+                    : '$prefix$rawDesc';
+
+                final res = await widget.api.upsertAlertContactGroup({
+                  'code': codeCtrl.text.trim(),
                   'name': nameCtrl.text.trim(),
-                  'scope_type': 'host_group',
-                  'host_group_id': hgId,
-                  'contact_group_ids': [cgId],
+                  'description': finalDesc,
+                  'group_email': emailCtrl.text.trim(),
+                  'member_contact_ids': selectedMemberIds.toList(),
                 });
                 setState(() => _overview = res);
               },
-              child: const Text('Crear Regla'),
+              child: const Text('Guardar Grupo'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showCreateHostGroupDialog({
+    Map<String, dynamic>? existing,
+  }) async {
+    final codeCtrl = TextEditingController(
+      text: (existing?['code'] as String?) ?? 'HG-PRODUCCION-CRITICA',
+    );
+    final nameCtrl = TextEditingController(
+      text: (existing?['name'] as String?) ?? 'Hosts Críticos Producción',
+    );
+    final selectedHostIds = <int>{
+      ...(((existing?['member_asset_ids'] as List?) ?? []).cast<int>()),
+      if (existing == null && _selectedHostId != null) _selectedHostId!,
+    };
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => AlertDialog(
+          title: Text(
+            existing != null
+                ? 'Editar Grupo de Host (${existing['name']})'
+                : 'Crear Grupo de Hosts (HostGroup)',
+          ),
+          content: SizedBox(
+            width: 480,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: codeCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Código del HostGroup',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Nombre del HostGroup',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Hosts / Sistemas incluidos en este Grupo:',
+                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: _hosts.map((h) {
+                      final hid = h['id'] as int;
+                      final isSel = selectedHostIds.contains(hid);
+                      return FilterChip(
+                        visualDensity: VisualDensity.compact,
+                        label: Text(
+                          '${h['code']} (${h['heartbeat_ip'] ?? ''})',
+                          style: const TextStyle(fontSize: 10.2),
+                        ),
+                        selected: isSel,
+                        onSelected: (v) => setModal(() {
+                          if (v) {
+                            selectedHostIds.add(hid);
+                          } else {
+                            selectedHostIds.remove(hid);
+                          }
+                        }),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            if (existing != null)
+              TextButton.icon(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  final res = await widget.api.deleteHostGroup(
+                    existing['id'] as int,
+                  );
+                  setState(() => _overview = res);
+                },
+                icon: const Icon(
+                  Icons.delete_outline,
+                  size: 15,
+                  color: AppTheme.error,
+                ),
+                label: const Text(
+                  'Eliminar',
+                  style: TextStyle(color: AppTheme.error),
+                ),
+              ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                final res = await widget.api.upsertHostGroup({
+                  'code': codeCtrl.text.trim(),
+                  'name': nameCtrl.text.trim(),
+                  'member_asset_ids': selectedHostIds.toList(),
+                });
+                setState(() => _overview = res);
+              },
+              child: const Text('Guardar HostGroup'),
             ),
           ],
         ),
@@ -9442,6 +12761,9 @@ class _TechStackEdgesPainter extends CustomPainter {
   final Map<int, Offset> nodePositions;
   final Map<int, Size> nodeSizes;
   final Size canvasSize;
+  final int? liveSourceNodeId;
+  final String? liveSourceSide;
+  final Offset? liveMousePos;
 
   _TechStackEdgesPainter({
     required this.nodes,
@@ -9449,7 +12771,87 @@ class _TechStackEdgesPainter extends CustomPainter {
     this.nodePositions = const {},
     this.nodeSizes = const {},
     required this.canvasSize,
+    this.liveSourceNodeId,
+    this.liveSourceSide,
+    this.liveMousePos,
   });
+
+  Offset _sidePoint(Rect r, String? side) {
+    switch (side) {
+      case 'top':
+        return r.topCenter;
+      case 'bottom':
+        return r.bottomCenter;
+      case 'left':
+        return r.centerLeft;
+      case 'right':
+        return r.centerRight;
+      default:
+        return r.centerRight;
+    }
+  }
+
+  void _drawCurvedArrow(
+    Canvas canvas,
+    Offset start,
+    Offset end,
+    Color color, {
+    double strokeWidth = 2.3,
+  }) {
+    final path = Path()..moveTo(start.dx, start.dy);
+    final dx = end.dx - start.dx;
+    final dy = end.dy - start.dy;
+    if (dx.abs() >= dy.abs()) {
+      path.cubicTo(
+        start.dx + dx * 0.45,
+        start.dy,
+        start.dx + dx * 0.55,
+        end.dy,
+        end.dx,
+        end.dy,
+      );
+    } else {
+      path.cubicTo(
+        start.dx,
+        start.dy + dy * 0.45,
+        end.dx,
+        start.dy + dy * 0.55,
+        end.dx,
+        end.dy,
+      );
+    }
+
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color
+        ..strokeWidth = strokeWidth
+        ..style = PaintingStyle.stroke,
+    );
+
+    final angle = math.atan2(dy, dx);
+    const arrowLen = 9.5;
+    const arrowAng = 0.48;
+    final p1 = Offset(
+      end.dx - arrowLen * math.cos(angle - arrowAng),
+      end.dy - arrowLen * math.sin(angle - arrowAng),
+    );
+    final p2 = Offset(
+      end.dx - arrowLen * math.cos(angle + arrowAng),
+      end.dy - arrowLen * math.sin(angle + arrowAng),
+    );
+    final arrowPath = Path()
+      ..moveTo(end.dx, end.dy)
+      ..lineTo(p1.dx, p1.dy)
+      ..lineTo(p2.dx, p2.dy)
+      ..close();
+    canvas.drawPath(
+      arrowPath,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.fill,
+    );
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -9480,14 +12882,14 @@ class _TechStackEdgesPainter extends CustomPainter {
       final sSize =
           nodeSizes[srcId] ??
           Size(
-            (src['width_px'] as num?)?.toDouble() ?? 236.0,
-            (src['height_px'] as num?)?.toDouble() ?? 134.0,
+            (src['width_px'] as num?)?.toDouble() ?? 220.0,
+            (src['height_px'] as num?)?.toDouble() ?? 124.0,
           );
       final dSize =
           nodeSizes[dstId] ??
           Size(
-            (dst['width_px'] as num?)?.toDouble() ?? 236.0,
-            (dst['height_px'] as num?)?.toDouble() ?? 134.0,
+            (dst['width_px'] as num?)?.toDouble() ?? 220.0,
+            (dst['height_px'] as num?)?.toDouble() ?? 124.0,
           );
 
       final sRect = Rect.fromLTWH(
@@ -9503,90 +12905,83 @@ class _TechStackEdgesPainter extends CustomPainter {
         dSize.height,
       );
 
-      final sCandidates = [
-        sRect.centerRight,
-        sRect.centerLeft,
-        sRect.bottomCenter,
-        sRect.topCenter,
-      ];
-      final dCandidates = [
-        dRect.centerLeft,
-        dRect.centerRight,
-        dRect.topCenter,
-        dRect.bottomCenter,
-      ];
-
       Offset start = sRect.centerRight;
       Offset end = dRect.centerLeft;
-      double bestDist = double.infinity;
-      for (final sc in sCandidates) {
-        for (final dc in dCandidates) {
-          final dist = (sc - dc).distanceSquared;
-          if (dist < bestDist) {
-            bestDist = dist;
-            start = sc;
-            end = dc;
+      final edgeNotes = (e['notes'] as String?) ?? '';
+      if (edgeNotes.startsWith('side:') && edgeNotes.contains('->')) {
+        final parts = edgeNotes.substring(5).split('->');
+        if (parts.length == 2) {
+          start = _sidePoint(sRect, parts[0].trim());
+          end = _sidePoint(dRect, parts[1].trim());
+        }
+      } else {
+        final sCandidates = [
+          sRect.centerRight,
+          sRect.centerLeft,
+          sRect.bottomCenter,
+          sRect.topCenter,
+        ];
+        final dCandidates = [
+          dRect.centerLeft,
+          dRect.centerRight,
+          dRect.topCenter,
+          dRect.bottomCenter,
+        ];
+
+        double bestDist = double.infinity;
+        for (final sc in sCandidates) {
+          for (final dc in dCandidates) {
+            final dist = (sc - dc).distanceSquared;
+            if (dist < bestDist) {
+              bestDist = dist;
+              start = sc;
+              end = dc;
+            }
           }
         }
       }
 
       final isDown = (e['status'] as String?) == 'DOWN';
       final color = isDown ? AppTheme.error : AppTheme.accentCyan;
+      _drawCurvedArrow(canvas, start, end, color);
+    }
 
-      final path = Path()..moveTo(start.dx, start.dy);
-      final dx = end.dx - start.dx;
-      final dy = end.dy - start.dy;
-      if (dx.abs() >= dy.abs()) {
-        path.cubicTo(
-          start.dx + dx * 0.45,
-          start.dy,
-          start.dx + dx * 0.55,
-          end.dy,
-          end.dx,
-          end.dy,
+    // Si hay un cuadrado lateral seleccionado, dibujamos la flecha de unión en vivo hacia el ratón
+    if (liveSourceNodeId != null && liveMousePos != null) {
+      final src = nodesById[liveSourceNodeId!];
+      if (src != null) {
+        final sPos =
+            nodePositions[liveSourceNodeId!] ??
+            Offset(
+              ((src['pos_x'] as num?)?.toDouble() ?? 0.2),
+              ((src['pos_y'] as num?)?.toDouble() ?? 0.3),
+            );
+        final sSize =
+            nodeSizes[liveSourceNodeId!] ??
+            Size(
+              (src['width_px'] as num?)?.toDouble() ?? 220.0,
+              (src['height_px'] as num?)?.toDouble() ?? 124.0,
+            );
+        final sRect = Rect.fromLTWH(
+          sPos.dx * canvasSize.width,
+          sPos.dy * canvasSize.height,
+          sSize.width,
+          sSize.height,
         );
-      } else {
-        path.cubicTo(
-          start.dx,
-          start.dy + dy * 0.45,
-          end.dx,
-          start.dy + dy * 0.55,
-          end.dx,
-          end.dy,
+        final start = _sidePoint(sRect, liveSourceSide);
+        _drawCurvedArrow(
+          canvas,
+          start,
+          liveMousePos!,
+          AppTheme.warning,
+          strokeWidth: 2.6,
+        );
+        canvas.drawCircle(
+          start,
+          4.5,
+          Paint()..color = AppTheme.warning,
         );
       }
-
-      canvas.drawPath(
-        path,
-        Paint()
-          ..color = color
-          ..strokeWidth = 2.3
-          ..style = PaintingStyle.stroke,
-      );
-
-      // Punta de flecha orientada según el ángulo de llegada
-      final angle = math.atan2(dy, dx);
-      const arrowLen = 9.0;
-      const arrowAng = 0.48;
-      final p1 = Offset(
-        end.dx - arrowLen * math.cos(angle - arrowAng),
-        end.dy - arrowLen * math.sin(angle - arrowAng),
-      );
-      final p2 = Offset(
-        end.dx - arrowLen * math.cos(angle + arrowAng),
-        end.dy - arrowLen * math.sin(angle + arrowAng),
-      );
-      final arrowPath = Path()
-        ..moveTo(end.dx, end.dy)
-        ..lineTo(p1.dx, p1.dy)
-        ..lineTo(p2.dx, p2.dy)
-        ..close();
-      canvas.drawPath(
-        arrowPath,
-        Paint()
-          ..color = color
-          ..style = PaintingStyle.fill,
-      );
     }
   }
 

@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session, joinedload
 
 from ..models import (
+    ADServer,
     AlertContact,
     AlertContactGroup,
     AlertNotificationLog,
@@ -41,6 +42,7 @@ from ..models import (
     TechStackDiagram,
     TechStackEdge,
     TechStackNode,
+    User,
 )
 from .cmdb_service import (
     ASSET_CLASS_LABELS,
@@ -2304,13 +2306,183 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
     ]
 
     # Contactos, Grupos de Personas, HostGroups, Reglas y Ventanas de Mantenimiento
+    # Sincronización bidireccional con Control de Acceso (Usuarios Locales, Usuarios AD y Grupos AD)
+    ad_servers = db.query(ADServer).order_by(ADServer.id).all()
+    ad_by_id = {s.id: s for s in ad_servers}
+    access_users = db.query(User).order_by(User.id).all()
     contacts = db.query(AlertContact).order_by(AlertContact.id).all()
-    contacts_by_id = {c.id: c for c in contacts}
     contact_groups = db.query(AlertContactGroup).order_by(AlertContactGroup.id).all()
+
+    contacts_by_email = {(c.email or "").strip().lower(): c for c in contacts if c.email}
+    contacts_by_code = {c.code.upper(): c for c in contacts if c.code}
+    cgroups_by_code = {cg.code.upper(): cg for cg in contact_groups if cg.code}
+
+    dirty_sync = False
+    for u in access_users:
+        u_email = (u.email or f"{u.username}@empresa.local").strip().lower()
+        u_code = f"USR-{'AD' if u.auth_source == 'ad' else 'LOCAL'}-{u.username.upper().replace('.', '-')}"[:48]
+        existing_c = contacts_by_email.get(u_email) or contacts_by_code.get(u_code)
+        ad_srv = ad_by_id.get(u.ad_server_id) if u.ad_server_id else None
+        origin_prefix = f"[AD {ad_srv.domain or ad_srv.name}]" if u.auth_source == "ad" and ad_srv else (
+            "[Active Directory]" if u.auth_source == "ad" else "[Usuario Local]"
+        )
+        role_desc = f"{origin_prefix} Rol RBAC: {u.role.upper()}" + (f" • {u.ad_dn}" if u.ad_dn else "")
+        if not existing_c:
+            new_c = AlertContact(
+                code=u_code,
+                full_name=u.full_name or u.username,
+                role_title=role_desc[:120],
+                email=u.email or u_email,
+                phone_or_telegram=f"@{u.username}",
+                schedule_period="24x7",
+                notify_on_down=True,
+                notify_on_critical=True,
+                notify_on_warning=True,
+                notify_on_unreachable=False,
+                notify_on_recovery=True,
+                active=bool(u.is_active),
+            )
+            db.add(new_c)
+            contacts.append(new_c)
+            contacts_by_email[u_email] = new_c
+            contacts_by_code[u_code] = new_c
+            dirty_sync = True
+        elif not (existing_c.role_title or "").startswith("["):
+            existing_c.role_title = f"{origin_prefix} {existing_c.role_title or u.role.upper()}"[:120]
+            dirty_sync = True
+
+    if dirty_sync:
+        db.flush()
+
+    # Asegurar que cada grupo mapeado en Active Directory y un grupo de Control de Acceso Local existan en AlertContactGroup
+    for srv in ad_servers:
+        dom = srv.domain or "corp.local"
+        for idx, gm in enumerate(srv.group_role_mapping or []):
+            gname = str(gm.get("group_name") or f"AD Group {idx+1}").strip()
+            gdn = str(gm.get("group_dn") or f"CN={gname},OU=Groups,{srv.base_dn or 'DC=corp,DC=local'}").strip()
+            grole = str(gm.get("role") or srv.default_role).upper()
+            slug = re.sub(r"[^A-Z0-9]+", "-", gname.upper()).strip("-")[:28]
+            gcode = f"CG-AD-{slug}"[:48]
+            if gcode not in cgroups_by_code:
+                mail_slug = re.sub(r"[^a-z0-9]+", "-", gname.lower()).strip("-")[:24] or f"ad-group-{idx+1}"
+                # Miembros AD cuyo rol coincide o que pertenecen al servidor AD
+                ad_member_ids = [
+                    c.id
+                    for c in contacts
+                    if c.id is not None and ("AD" in (c.code or "") or "[AD" in (c.role_title or ""))
+                ]
+                new_cg = AlertContactGroup(
+                    code=gcode,
+                    name=gname,
+                    description=f"[Active Directory: {dom}] {gdn} • Rol RBAC: {grole}",
+                    group_email=f"{mail_slug}@{dom}",
+                    channel_webhook_url="",
+                    member_contact_ids=ad_member_ids[:4] if ad_member_ids else [c.id for c in contacts[:2] if c.id],
+                )
+                db.add(new_cg)
+                contact_groups.append(new_cg)
+                cgroups_by_code[gcode] = new_cg
+                dirty_sync = True
+
+    if "CG-LOCAL-ADMINS" not in cgroups_by_code:
+        local_member_ids = [
+            c.id for c in contacts if c.id is not None and ("[Usuario Local]" in (c.role_title or "") or "LOCAL" in (c.code or ""))
+        ]
+        cg_loc = AlertContactGroup(
+            code="CG-LOCAL-ADMINS",
+            name="Administradores & Operadores Locales (RBAC)",
+            description="[Grupo Local] Usuarios locales registrados en Control de Acceso de RackDoc.",
+            group_email="admin-local@rackdoc.internal",
+            channel_webhook_url="",
+            member_contact_ids=local_member_ids if local_member_ids else [c.id for c in contacts[:2] if c.id],
+        )
+        db.add(cg_loc)
+        contact_groups.append(cg_loc)
+        cgroups_by_code["CG-LOCAL-ADMINS"] = cg_loc
+        dirty_sync = True
+
+    if dirty_sync:
+        db.commit()
+        contacts = db.query(AlertContact).order_by(AlertContact.id).all()
+        contact_groups = db.query(AlertContactGroup).order_by(AlertContactGroup.id).all()
+
+    contacts_by_id = {c.id: c for c in contacts}
     cgroups_by_id = {cg.id: cg for cg in contact_groups}
     routing_rules = db.query(NotificationRoutingRule).order_by(NotificationRoutingRule.id).all()
     alert_logs = db.query(AlertNotificationLog).order_by(AlertNotificationLog.id.desc()).limit(40).all()
     smtp_cfg = db.query(SmtpAlertConfig).first()
+
+    # Precalcular relaciones estilo Active Directory (MemberOf, HostGroups asignados y Hosts que envían alarmas)
+    users_by_email = {(u.email or "").strip().lower(): u for u in access_users if u.email}
+
+    def _classify_contact_source(c: AlertContact) -> Tuple[str, str, str]:
+        u = users_by_email.get((c.email or "").strip().lower())
+        rt = c.role_title or ""
+        if (u and u.auth_source == "ad") or rt.startswith("[AD") or rt.startswith("[Active Directory]") or c.code.startswith("USR-AD-"):
+            dn = u.ad_dn if (u and u.ad_dn) else f"CN={c.full_name},OU=Users,DC=corp,DC=local"
+            return ("ad", "Active Directory", dn)
+        if (u and u.auth_source == "local") or rt.startswith("[Usuario Local]") or c.code.startswith("USR-LOCAL-"):
+            return ("local", "Usuario Local", f"local://{u.username if u else c.code.lower()}")
+        return ("custom", "A Medida", f"custom://{c.code.lower()}")
+
+    def _classify_group_source(cg: AlertContactGroup) -> Tuple[str, str]:
+        desc = cg.description or ""
+        if desc.startswith("[Active Directory") or cg.code.startswith("CG-AD-"):
+            return ("ad", "Active Directory")
+        if desc.startswith("[Grupo Local]") or cg.code.startswith("CG-LOCAL-"):
+            return ("local", "Grupo Local")
+        return ("custom", "A Medida")
+
+    # Mapa: contact_id -> grupos a los que pertenece (MemberOf)
+    contact_member_of_ids: Dict[int, List[int]] = {c.id: [] for c in contacts}
+    for cg in contact_groups:
+        for cid in (cg.member_contact_ids or []):
+            if cid in contact_member_of_ids and cg.id not in contact_member_of_ids[cid]:
+                contact_member_of_ids[cid].append(cg.id)
+
+    # Mapa: qué HostGroups y qué Hosts individuales notifican a cada ContactGroup y a cada Contact
+    cg_alert_host_groups: Dict[int, List[str]] = {cg.id: [] for cg in contact_groups}
+    cg_alert_hosts: Dict[int, List[str]] = {cg.id: [] for cg in contact_groups}
+    c_alert_host_groups: Dict[int, List[str]] = {c.id: [] for c in contacts}
+    c_alert_hosts: Dict[int, List[str]] = {c.id: [] for c in contacts}
+
+    for r in routing_rules:
+        if not r.enabled:
+            continue
+        hg_obj = hg_by_id.get(r.host_group_id) if r.host_group_id else None
+        asset_obj = assets_by_id.get(r.asset_id) if r.asset_id else None
+
+        for cgid in (r.contact_group_ids or []):
+            if cgid not in cg_alert_host_groups:
+                continue
+            if hg_obj and hg_obj.code not in cg_alert_host_groups[cgid]:
+                cg_alert_host_groups[cgid].append(hg_obj.code)
+                for aid in (hg_obj.member_asset_ids or []):
+                    if aid in assets_by_id and assets_by_id[aid].code not in cg_alert_hosts[cgid]:
+                        cg_alert_hosts[cgid].append(assets_by_id[aid].code)
+            if asset_obj and asset_obj.code not in cg_alert_hosts[cgid]:
+                cg_alert_hosts[cgid].append(asset_obj.code)
+
+        for cid in (r.contact_ids or []):
+            if cid not in c_alert_host_groups:
+                continue
+            if hg_obj and hg_obj.code not in c_alert_host_groups[cid]:
+                c_alert_host_groups[cid].append(hg_obj.code)
+                for aid in (hg_obj.member_asset_ids or []):
+                    if aid in assets_by_id and assets_by_id[aid].code not in c_alert_hosts[cid]:
+                        c_alert_hosts[cid].append(assets_by_id[aid].code)
+            if asset_obj and asset_obj.code not in c_alert_hosts[cid]:
+                c_alert_hosts[cid].append(asset_obj.code)
+
+    # Propagar alarmas heredadas desde los Grupos de Usuarios (MemberOf) hacia cada Usuario
+    for cid, group_ids in contact_member_of_ids.items():
+        for gid in group_ids:
+            for hgc in cg_alert_host_groups.get(gid, []):
+                if hgc not in c_alert_host_groups[cid]:
+                    c_alert_host_groups[cid].append(hgc)
+            for hc in cg_alert_hosts.get(gid, []):
+                if hc not in c_alert_hosts[cid]:
+                    c_alert_hosts[cid].append(hc)
 
     services_ok = sum(1 for c in checks if c.nagios_state == "OK")
     services_warn = sum(1 for c in checks if c.nagios_state == "WARNING")
@@ -2369,6 +2541,24 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
                 "notify_on_unreachable": c.notify_on_unreachable,
                 "notify_on_recovery": c.notify_on_recovery,
                 "active": c.active,
+                "source_type": _classify_contact_source(c)[0],
+                "source_badge": _classify_contact_source(c)[1],
+                "ad_dn": _classify_contact_source(c)[2],
+                "member_of_group_ids": contact_member_of_ids.get(c.id, []),
+                "member_of_groups": [
+                    {
+                        "id": gid,
+                        "code": cgroups_by_id[gid].code,
+                        "name": cgroups_by_id[gid].name,
+                        "group_email": cgroups_by_id[gid].group_email,
+                        "source_type": _classify_group_source(cgroups_by_id[gid])[0],
+                        "source_badge": _classify_group_source(cgroups_by_id[gid])[1],
+                    }
+                    for gid in contact_member_of_ids.get(c.id, [])
+                    if gid in cgroups_by_id
+                ],
+                "alerting_host_group_codes": c_alert_host_groups.get(c.id, []),
+                "alerting_host_codes": c_alert_hosts.get(c.id, []),
             }
             for c in contacts
         ],
@@ -2386,8 +2576,23 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
                     for cid in (cg.member_contact_ids or [])
                     if cid in contacts_by_id
                 ],
+                "source_type": _classify_group_source(cg)[0],
+                "source_badge": _classify_group_source(cg)[1],
+                "alerting_host_group_codes": cg_alert_host_groups.get(cg.id, []),
+                "alerting_host_codes": cg_alert_hosts.get(cg.id, []),
             }
             for cg in contact_groups
+        ],
+        "ad_servers": [
+            {
+                "id": srv.id,
+                "name": srv.name,
+                "domain": srv.domain,
+                "ldap_url": srv.ldap_url,
+                "base_dn": srv.base_dn,
+                "enabled": srv.enabled,
+            }
+            for srv in ad_servers
         ],
         "notification_rules": [
             {
