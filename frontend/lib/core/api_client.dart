@@ -934,6 +934,17 @@ class RackDocApiClient {
     return Map<String, dynamic>.from(_decodeResponse(res) as Map);
   }
 
+  Future<Map<String, dynamic>> createNetworkHostWithServices(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/network-hosts/hosts'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
   Future<Map<String, dynamic>> createNetworkServiceCheck(
     Map<String, dynamic> payload,
   ) async {

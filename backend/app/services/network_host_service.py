@@ -2174,14 +2174,51 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
         rdev = db.query(RackDevice).filter(RackDevice.code == rack_dev_code).first()
         if rdev:
             asset.host_rack_device_id = rdev.id
+            if not asset.parent_asset_id:
+                parent_from_rack = (
+                    db.query(CmdbAsset)
+                    .filter(CmdbAsset.rack_device_id == rdev.id)
+                    .first()
+                )
+                if parent_from_rack:
+                    asset.parent_asset_id = parent_from_rack.id
 
     parent_code = str(payload.get("parent_asset_code") or "").strip()
     if parent_code:
         parent_ast = db.query(CmdbAsset).filter(CmdbAsset.code == parent_code).first()
         if parent_ast:
             asset.parent_asset_id = parent_ast.id
+            if not asset.host_rack_device_id and parent_ast.rack_device_id:
+                asset.host_rack_device_id = parent_ast.rack_device_id
 
     db.flush()
+
+    # Crear automáticamente el enlace en el Diagrama Lógico con su Hipervisor / Switch padre
+    if asset.parent_asset_id and asset.parent_asset_id != asset.id:
+        existing_link = (
+            db.query(LogicalTopologyLink)
+            .filter(
+                LogicalTopologyLink.source_asset_id == asset.parent_asset_id,
+                LogicalTopologyLink.target_asset_id == asset.id,
+            )
+            .first()
+        )
+        if not existing_link:
+            db.add(
+                LogicalTopologyLink(
+                    source_asset_id=asset.parent_asset_id,
+                    target_asset_id=asset.id,
+                    link_type="hypervisor_vm" if asset.asset_class in ("virtual_machine", "container") else "lldp_trunk",
+                    source_interface="vmbr0 / vSwitch0",
+                    target_interface="eth0",
+                    protocol_label=f"Alojamiento {asset.hypervisor_or_platform or 'Virtualización'}",
+                    vlan_id=20,
+                    bandwidth_mbps=10000,
+                    status="UP",
+                    auto_discovered=True,
+                    notes="Enlace lógico generado al dar de alta el Host/VM",
+                )
+            )
 
     # Sincronizar IP primaria y adicionales en CMDB
     subnets = db.query(CmdbSubnet).all()

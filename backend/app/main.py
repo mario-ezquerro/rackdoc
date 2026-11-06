@@ -4431,6 +4431,31 @@ def get_network_host_telemetry_endpoint(
 
 
 @api_router.post(
+    "/network-hosts/hosts",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Dar de alta desde la Web una nueva Máquina Virtual / Host / Contenedor con sus IPs, Hipervisor Padre y Servicios a Monitorizar",
+    description=(
+        "Asistente Todo-en-Uno: registra la nueva Máquina Virtual, Contenedor o Servidor en '4. Red & Host' y en '6. CMDB', "
+        "asigna su IP primaria de Heartbeat y sus IPs adicionales, la enlaza en el Diagrama Lógico a su Hipervisor/Servidor del Rack, "
+        "la añade a los HostGroups indicados, crea todos sus servicios/exporters (HTTPS+SSL, Apache, Nginx, Docker, PostgreSQL, SSH, "
+        "Node/Windows Exporter) y actualiza al instante Prometheus SD."
+    ),
+)
+def create_network_host_with_services_endpoint(
+    payload: AnsibleHostUpsertWebhook,
+    db: Session = Depends(get_db),
+):
+    try:
+        res = handle_ansible_host_upsert_webhook(db=db, payload=payload.model_dump())
+        return {
+            "created_host": res,
+            "overview": build_network_hosts_overview(db),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@api_router.post(
     "/network-hosts/service-checks",
     tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
     summary="Añadir un nuevo Heartbeat o Chequeo de Servicio (HTTP, HTTPS+SSL, ICMP, TCP, SSH, SNMP, Apache, Nginx, Docker, BBDD)",

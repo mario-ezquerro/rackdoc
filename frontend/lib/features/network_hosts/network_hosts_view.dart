@@ -421,15 +421,31 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                       style: TextStyle(fontSize: 11.5),
                     ),
                   ),
-                  if (widget.canEdit)
+                  if (widget.canEdit) ...[
                     ElevatedButton.icon(
+                      onPressed: _showCreateVirtualMachineWithServicesDialog,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.accentBlue,
+                        foregroundColor: Colors.white,
+                      ),
+                      icon: const Icon(Icons.add_to_queue_rounded, size: 15),
+                      label: const Text(
+                        '+ Nueva Máquina Virtual / Host',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    OutlinedButton.icon(
                       onPressed: _showCreateServiceCheckDialog,
                       icon: const Icon(Icons.monitor_heart_rounded, size: 15),
                       label: const Text(
-                        '+ Nuevo Heartbeat / Servicio',
+                        '+ Añadir Servicio a Host',
                         style: TextStyle(fontSize: 11.5),
                       ),
                     ),
+                  ],
                   OutlinedButton.icon(
                     onPressed: () => launchUrl(
                       Uri.parse(promUrl),
@@ -3165,6 +3181,571 @@ ExtendedStatus On
   // ===========================================================================
   // DIÁLOGOS MODALES DE CREACIÓN Y DESCUBRIMIENTO
   // ===========================================================================
+
+  Future<void> _showCreateVirtualMachineWithServicesDialog() async {
+    String assetClass = 'virtual_machine';
+    String hypervisorPlatform = 'VMware vSphere / Proxmox VE';
+    final codeCtrl = TextEditingController(text: 'VM-APP-NUEVA-01');
+    final nameCtrl = TextEditingController(
+      text: 'Servidor de Aplicaciones & Portal Web',
+    );
+    final hostnameCtrl = TextEditingController(text: 'vm-app-nueva-01');
+    final fqdnCtrl = TextEditingController(text: 'vm-app-nueva-01.hq.local');
+    final osCtrl = TextEditingController(text: 'Ubuntu Server 24.04 LTS');
+    final primaryIpCtrl = TextEditingController(text: '10.20.20.160');
+    final extraIpsCtrl = TextEditingController(text: '');
+    final cpuCtrl = TextEditingController(text: '4');
+    final ramCtrl = TextEditingController(text: '16');
+    final diskCtrl = TextEditingController(text: '120');
+
+    final hypervisorCandidates = _hosts
+        .where(
+          (h) =>
+              h['logical_layer'] == 'physical_hypervisor' ||
+              h['logical_layer'] == 'network_switch',
+        )
+        .toList();
+    String parentAssetCode = hypervisorCandidates.isNotEmpty
+        ? (hypervisorCandidates.first['code'] as String)
+        : '';
+
+    String selectedHostGroupCode = _hostGroups.isNotEmpty
+        ? (_hostGroups.first['code'] as String)
+        : 'HG-WEB-APACHE-NGINX';
+
+    bool enableNodeExporter = true;
+    bool enableWindowsExporter = false;
+    bool enableSshCheck = true;
+    bool enableHttpsCheck = true;
+    final httpsUrlCtrl = TextEditingController(
+      text: 'https://vm-app-nueva-01.hq.local/health',
+    );
+    bool enableNginxCheck = false;
+    bool enableApacheCheck = false;
+    bool enableDockerCheck = false;
+    bool enablePostgresCheck = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(
+                Icons.add_to_queue_rounded,
+                color: AppTheme.accentBlue,
+                size: 22,
+              ),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Alta de Máquina Virtual / Host + Servicios + Prometheus',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 640,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Crea la Máquina Virtual o Host, registra sus IPs en la 6. CMDB, la enlaza a su Hipervisor/Servidor del Rack en el Diagrama Lógico y activa sus chequeos y métricas en Prometheus en un solo paso.',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          initialValue: assetClass,
+                          decoration: const InputDecoration(
+                            labelText: 'Clase de Equipo / Máquina',
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'virtual_machine',
+                              child: Text(
+                                'Máquina Virtual (VMware / Proxmox / Hyper-V / KVM)',
+                              ),
+                            ),
+                            DropdownMenuItem(
+                              value: 'container',
+                              child: Text(
+                                'Contenedor / Pod (Docker / LXC / K8s)',
+                              ),
+                            ),
+                            DropdownMenuItem(
+                              value: 'physical_server',
+                              child: Text('Servidor Físico / Barebone'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'vip_cluster',
+                              child: Text('IP Virtual (VIP) / Balanceador HA'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'network_security',
+                              child: Text('Switch / Router / Firewall'),
+                            ),
+                          ],
+                          onChanged: (v) =>
+                              setModal(() => assetClass = v ?? assetClass),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          initialValue: hypervisorPlatform,
+                          decoration: const InputDecoration(
+                            labelText: 'Plataforma / Hipervisor',
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'VMware vSphere / Proxmox VE',
+                              child: Text('VMware vSphere / ESXi'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'Proxmox VE Cluster (KVM/LXC)',
+                              child: Text('Proxmox VE (QEMU / LXC)'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'Microsoft Hyper-V / KVM',
+                              child: Text('Microsoft Hyper-V / KVM'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'Docker Engine / Kubernetes',
+                              child: Text('Docker Engine / Portainer / K8s'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'Barebone / Cloud Externo',
+                              child: Text('Barebone Dedicado / Cloud'),
+                            ),
+                          ],
+                          onChanged: (v) => setModal(
+                            () => hypervisorPlatform = v ?? hypervisorPlatform,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: codeCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Código Único (ej. VM-ERP-02)',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: nameCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Nombre Descriptivo de la Máquina',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: hostnameCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Hostname',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: fqdnCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'FQDN DNS',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: osCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Sistema Operativo',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: primaryIpCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'IP Principal (Heartbeat / Gestión)',
+                            prefixIcon: Icon(Icons.favorite_rounded, size: 15),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: extraIpsCtrl,
+                          decoration: const InputDecoration(
+                            labelText:
+                                'IPs Adicionales Servicio/VIP (separadas por coma)',
+                            hintText: 'Ej: 172.16.30.50, 10.20.20.245',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: cpuCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'vCPU Cores',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: ramCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'RAM (GB)',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: diskCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Disco (GB)',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      if (hypervisorCandidates.isNotEmpty)
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            initialValue: parentAssetCode,
+                            decoration: const InputDecoration(
+                              labelText:
+                                  'Alojada en Servidor Físico del Rack / Padre',
+                            ),
+                            items: [
+                              const DropdownMenuItem(
+                                value: '',
+                                child: Text(
+                                  'Barebone Externo (Sin Rack Físico)',
+                                ),
+                              ),
+                              ...hypervisorCandidates.map(
+                                (h) => DropdownMenuItem<String>(
+                                  value: h['code'] as String,
+                                  child: Text(
+                                    '${h['code']} (${h['rack_location_badge']})',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                            ],
+                            onChanged: (v) =>
+                                setModal(() => parentAssetCode = v ?? ''),
+                          ),
+                        ),
+                      const SizedBox(width: 10),
+                      if (_hostGroups.isNotEmpty)
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            initialValue: selectedHostGroupCode,
+                            decoration: const InputDecoration(
+                              labelText: 'Grupo de Hosts (Alertas)',
+                            ),
+                            items: _hostGroups
+                                .map(
+                                  (hg) => DropdownMenuItem<String>(
+                                    value: hg['code'] as String,
+                                    child: Text(
+                                      '${hg['name']} (${hg['code']})',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (v) => setModal(
+                              () => selectedHostGroupCode =
+                                  v ?? selectedHostGroupCode,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const Divider(height: 22),
+                  const Text(
+                    'SERVICIOS, EXPORTERS PROMETHEUS Y HEARTBEATS A MONITORIZAR EN ESTA MÁQUINA:',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.accentCyan,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      FilterChip(
+                        label: const Text(
+                          'Linux Node Exporter (:9100)',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                        selected: enableNodeExporter,
+                        onSelected: (v) =>
+                            setModal(() => enableNodeExporter = v),
+                      ),
+                      FilterChip(
+                        label: const Text(
+                          'Windows Exporter (:9182)',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                        selected: enableWindowsExporter,
+                        onSelected: (v) =>
+                            setModal(() => enableWindowsExporter = v),
+                      ),
+                      FilterChip(
+                        label: const Text(
+                          'SSH (:22)',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                        selected: enableSshCheck,
+                        onSelected: (v) => setModal(() => enableSshCheck = v),
+                      ),
+                      FilterChip(
+                        label: const Text(
+                          'HTTPS + Validez SSL (:443)',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                        selected: enableHttpsCheck,
+                        onSelected: (v) => setModal(() => enableHttpsCheck = v),
+                      ),
+                      FilterChip(
+                        label: const Text(
+                          'Nginx stub_status (:8080)',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                        selected: enableNginxCheck,
+                        onSelected: (v) => setModal(() => enableNginxCheck = v),
+                      ),
+                      FilterChip(
+                        label: const Text(
+                          'Apache mod_status (:8080)',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                        selected: enableApacheCheck,
+                        onSelected: (v) =>
+                            setModal(() => enableApacheCheck = v),
+                      ),
+                      FilterChip(
+                        label: const Text(
+                          'Docker Engine (:9323)',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                        selected: enableDockerCheck,
+                        onSelected: (v) =>
+                            setModal(() => enableDockerCheck = v),
+                      ),
+                      FilterChip(
+                        label: const Text(
+                          'PostgreSQL (:5432)',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                        selected: enablePostgresCheck,
+                        onSelected: (v) =>
+                            setModal(() => enablePostgresCheck = v),
+                      ),
+                    ],
+                  ),
+                  if (enableHttpsCheck) ...[
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: httpsUrlCtrl,
+                      decoration: const InputDecoration(
+                        labelText:
+                            'URL del Endpoint HTTPS a monitorizar (con chequeo de días SSL)',
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () async {
+                final primaryIp = primaryIpCtrl.text.trim();
+                final hostname = hostnameCtrl.text.trim();
+                if (primaryIp.isEmpty || hostname.isEmpty) {
+                  _showSnack(
+                    'El Hostname y la IP Principal son obligatorios.',
+                    isError: true,
+                  );
+                  return;
+                }
+                Navigator.pop(ctx);
+
+                final extraIps = extraIpsCtrl.text
+                    .split(',')
+                    .map((s) => s.trim())
+                    .where((s) => s.isNotEmpty)
+                    .map(
+                      (ip) => {
+                        'ip_address': ip,
+                        'ip_role': 'primary_service',
+                        'interface_name': 'eth1',
+                      },
+                    )
+                    .toList();
+
+                final exporters = <Map<String, dynamic>>[];
+                if (enableNodeExporter) {
+                  exporters.add({'type': 'node_exporter', 'port': 9100});
+                }
+                if (enableWindowsExporter) {
+                  exporters.add({'type': 'windows_exporter', 'port': 9182});
+                }
+                if (enableNginxCheck) {
+                  exporters.add({
+                    'type': 'nginx',
+                    'port': 8080,
+                    'url': 'http://$primaryIp:8080/nginx_status',
+                  });
+                }
+                if (enableApacheCheck) {
+                  exporters.add({
+                    'type': 'apache',
+                    'port': 8080,
+                    'url': 'http://$primaryIp:8080/server-status?auto',
+                  });
+                }
+                if (enableDockerCheck) {
+                  exporters.add({
+                    'type': 'docker',
+                    'port': 9323,
+                    'url': 'http://$primaryIp:9323/metrics',
+                  });
+                }
+
+                final heartbeats = <Map<String, dynamic>>[];
+                if (enableSshCheck) {
+                  heartbeats.add({
+                    'name': 'Acceso SSH Gestión (:22)',
+                    'type': 'ssh',
+                    'port': 22,
+                    'url': primaryIp,
+                  });
+                }
+                if (enableHttpsCheck) {
+                  heartbeats.add({
+                    'name': 'Portal HTTPS & Certificado SSL',
+                    'type': 'https',
+                    'port': 443,
+                    'url': httpsUrlCtrl.text.trim().isNotEmpty
+                        ? httpsUrlCtrl.text.trim()
+                        : 'https://$primaryIp',
+                  });
+                }
+                if (enablePostgresCheck) {
+                  heartbeats.add({
+                    'name': 'Base de Datos PostgreSQL (:5432)',
+                    'type': 'postgres',
+                    'port': 5432,
+                    'url': primaryIp,
+                  });
+                }
+
+                try {
+                  final res = await widget.api.createNetworkHostWithServices({
+                    'code': codeCtrl.text.trim(),
+                    'name': nameCtrl.text.trim(),
+                    'hostname': hostname,
+                    'fqdn': fqdnCtrl.text.trim(),
+                    'asset_class': assetClass,
+                    'environment': 'production',
+                    'criticality': 'high',
+                    'os_or_firmware': osCtrl.text.trim(),
+                    'hypervisor_or_platform': hypervisorPlatform,
+                    'cpu_cores': int.tryParse(cpuCtrl.text.trim()) ?? 4,
+                    'ram_gb': double.tryParse(ramCtrl.text.trim()) ?? 16,
+                    'storage_gb': double.tryParse(diskCtrl.text.trim()) ?? 120,
+                    'primary_ip': primaryIp,
+                    'additional_ips': extraIps,
+                    'parent_asset_code': parentAssetCode,
+                    'host_groups': selectedHostGroupCode.isNotEmpty
+                        ? [selectedHostGroupCode]
+                        : [],
+                    'exporters': exporters,
+                    'heartbeats': heartbeats,
+                  });
+                  if (res['overview'] is Map) {
+                    final created = Map<String, dynamic>.from(
+                      (res['created_host'] as Map?) ?? {},
+                    );
+                    setState(() {
+                      _overview = Map<String, dynamic>.from(
+                        res['overview'] as Map,
+                      );
+                      if (created['asset_id'] is int) {
+                        _selectedHostId = created['asset_id'] as int;
+                      }
+                    });
+                    if (_selectedHostId != null) {
+                      _loadHostTelemetry(_selectedHostId!);
+                    }
+                  }
+                  _showSnack(
+                    'Máquina ${codeCtrl.text.trim()} creada en Red & Host, CMDB y Prometheus SD.',
+                  );
+                } catch (e) {
+                  _showSnack('Error al crear máquina: $e', isError: true);
+                }
+              },
+              icon: const Icon(Icons.check_circle_rounded, size: 16),
+              label: const Text(
+                'Crear Máquina, Sincronizar CMDB y Monitorizar',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Future<void> _showSnmpDiscoveryDialog() async {
     final ipCtrl = TextEditingController(text: '10.20.10.2');
