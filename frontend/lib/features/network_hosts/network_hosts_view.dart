@@ -4093,11 +4093,14 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     return List.generate(len, (i) {
       return {
         'label': '${i * 5}m',
+        'time_label': '${i * 5}m',
         'cpu_pct': i < cpu.length ? cpu[i] : 20.0,
         'ram_pct': i < ram.length ? ram[i] : 45.0,
         'latency_ms': i < lat.length ? lat[i] : 1.2,
         'rx_mbps': i < traf.length ? traf[i] : 30.0,
         'tx_mbps': i < traf.length ? (traf[i] * 0.62) : 18.0,
+        'web_req_per_sec': 160.0 + ((i % 7) * 18.5),
+        'disk_pct': (host['disk_pct'] as num?)?.toDouble() ?? 38.0,
       };
     });
   }
@@ -4163,16 +4166,18 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
           SizedBox(
             height: height,
             width: double.infinity,
-            child: CustomPaint(
-              painter: _PrometheusSeriesChartPainter(
-                points: points,
-                keyA: keyA,
-                colorA: colorA,
-                keyB: keyB,
-                colorB: colorB,
-                unit: unit,
-                warnThreshold: warnThreshold,
-                critThreshold: critThreshold,
+            child: ClipRect(
+              child: CustomPaint(
+                painter: _PrometheusSeriesChartPainter(
+                  points: points,
+                  keyA: keyA,
+                  colorA: colorA,
+                  keyB: keyB,
+                  colorB: colorB,
+                  unit: unit,
+                  warnThreshold: warnThreshold,
+                  critThreshold: critThreshold,
+                ),
               ),
             ),
           ),
@@ -6181,14 +6186,223 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // =====================================================================
-        // COLUMNA IZQUIERDA (EXPANDED): DATOS DEL ELEMENTO SELECCIONADO +
-        // GRÁFICAS PROMETHEUS EN CUADRÍCULA 2X2 + CHEQUEOS + BOTÓN MARKDOWN.MD
+        // COLUMNA IZQUIERDA (FIJA 350PX): DIRECTORIO ORGANIZADO DE ELEMENTOS
+        // Al pulsar sobre cualquiera, sus datos y gráficas aparecen a la derecha
+        // =====================================================================
+        Container(
+          width: 350,
+          decoration: const BoxDecoration(
+            color: AppTheme.bgCard,
+            border: Border(right: BorderSide(color: AppTheme.border)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'ELEMENTOS / HOSTS (${filteredRightHosts.length})',
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w900,
+                            color: AppTheme.textPrimary,
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                        const Text(
+                          'Pulsa para ver gráficas',
+                          style: TextStyle(
+                            fontSize: 9.8,
+                            color: AppTheme.accentBlue,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      onChanged: (v) => setState(() => _promHostSearch = v),
+                      style: const TextStyle(fontSize: 11.5),
+                      decoration: InputDecoration(
+                        hintText: 'Buscar por código, nombre o IP...',
+                        prefixIcon: const Icon(Icons.search, size: 16),
+                        isDense: true,
+                        filled: true,
+                        fillColor: AppTheme.bgSecondary,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: AppTheme.border),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          for (final cat in [
+                            ('all', 'Todos (${allHosts.length})'),
+                            ('apps', 'VMs / Apps / BBDD'),
+                            ('Compute', 'Físicos / Hiperv.'),
+                            ('net', 'Switches / Red'),
+                          ])
+                            Padding(
+                              padding: const EdgeInsets.only(right: 5),
+                              child: ChoiceChip(
+                                label: Text(
+                                  cat.$2,
+                                  style: const TextStyle(fontSize: 9.8),
+                                ),
+                                selected: _promCategoryFilter == cat.$1,
+                                onSelected: (_) => setState(
+                                  () => _promCategoryFilter = cat.$1,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.separated(
+                  padding: const EdgeInsets.all(10),
+                  itemCount: filteredRightHosts.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 6),
+                  itemBuilder: (context, idx) {
+                    final h = filteredRightHosts[idx];
+                    final hid = h['id'] as int;
+                    final isSel = hid == selectedHost['id'];
+                    final st = (h['nagios_host_state'] as String?) ?? 'UP';
+                    final stCol = _nagiosStateColor(st);
+
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(9),
+                      onTap: () {
+                        setState(() => _selectedHostId = hid);
+                        _loadHostTelemetry(hid);
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 120),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isSel
+                              ? AppTheme.accentBlue.withValues(alpha: 0.12)
+                              : AppTheme.bgSecondary,
+                          borderRadius: BorderRadius.circular(9),
+                          border: Border.all(
+                            color: isSel
+                                ? AppTheme.accentBlue
+                                : AppTheme.border,
+                            width: isSel ? 1.8 : 1.0,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: stCol,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    '${h['code']}',
+                                    style: TextStyle(
+                                      fontSize: 11.2,
+                                      fontWeight: FontWeight.w900,
+                                      color: isSel
+                                          ? AppTheme.accentBlue
+                                          : AppTheme.textPrimary,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                Text(
+                                  '${h['heartbeat_ip']}',
+                                  style: const TextStyle(
+                                    fontSize: 9.8,
+                                    fontFamily: 'monospace',
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.accentTeal,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${h['name']}',
+                              style: const TextStyle(
+                                fontSize: 10.2,
+                                color: AppTheme.textSecondary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'CPU ${h['cpu_pct'] ?? 0}% • RAM ${h['ram_pct'] ?? 0}%',
+                                  style: const TextStyle(
+                                    fontSize: 9.2,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.textMuted,
+                                  ),
+                                ),
+                                Text(
+                                  '${h['last_ping_ms'] ?? '-'} ms',
+                                  style: const TextStyle(
+                                    fontSize: 9.2,
+                                    fontFamily: 'monospace',
+                                    color: AppTheme.accentCyan,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // =====================================================================
+        // COLUMNA DERECHA (EXPANDED): DATOS DEL ELEMENTO SELECCIONADO +
+        // GRÁFICAS PROMETHEUS EN CUADRÍCULA 2X2 NIVELADA + CHEQUEOS + BOTÓN .MD
         // =====================================================================
         Expanded(
           child: selectedHost.isEmpty
               ? const Center(
                   child: Text(
-                    'Selecciona un elemento en la columna de la derecha para ver sus datos y gráficas Prometheus.',
+                    'Selecciona un elemento en la columna de la izquierda para ver sus datos y gráficas Prometheus.',
                   ),
                 )
               : ListView(
@@ -6544,215 +6758,6 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                   ],
                 ),
         ),
-
-        // =====================================================================
-        // COLUMNA DERECHA (FIJA 360PX): DIRECTORIO ORGANIZADO DE ELEMENTOS
-        // Al pulsar sobre cualquiera, sus datos y gráficas aparecen a la izquierda
-        // =====================================================================
-        Container(
-          width: 360,
-          decoration: const BoxDecoration(
-            color: AppTheme.bgCard,
-            border: Border(left: BorderSide(color: AppTheme.border)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'ELEMENTOS / HOSTS (${filteredRightHosts.length})',
-                          style: const TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w900,
-                            color: AppTheme.textPrimary,
-                            letterSpacing: 0.4,
-                          ),
-                        ),
-                        const Text(
-                          'Pulsa para ver gráficas',
-                          style: TextStyle(
-                            fontSize: 9.8,
-                            color: AppTheme.accentBlue,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      onChanged: (v) => setState(() => _promHostSearch = v),
-                      style: const TextStyle(fontSize: 11.5),
-                      decoration: InputDecoration(
-                        hintText: 'Buscar por código, nombre o IP...',
-                        prefixIcon: const Icon(Icons.search, size: 16),
-                        isDense: true,
-                        filled: true,
-                        fillColor: AppTheme.bgSecondary,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: AppTheme.border),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          for (final cat in [
-                            ('all', 'Todos (${allHosts.length})'),
-                            ('apps', 'VMs / Apps / BBDD'),
-                            ('Compute', 'Físicos / Hiperv.'),
-                            ('net', 'Switches / Red'),
-                          ])
-                            Padding(
-                              padding: const EdgeInsets.only(right: 5),
-                              child: ChoiceChip(
-                                label: Text(
-                                  cat.$2,
-                                  style: const TextStyle(fontSize: 9.8),
-                                ),
-                                selected: _promCategoryFilter == cat.$1,
-                                onSelected: (_) => setState(
-                                  () => _promCategoryFilter = cat.$1,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1),
-              Expanded(
-                child: ListView.separated(
-                  padding: const EdgeInsets.all(10),
-                  itemCount: filteredRightHosts.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 6),
-                  itemBuilder: (context, idx) {
-                    final h = filteredRightHosts[idx];
-                    final hid = h['id'] as int;
-                    final isSel = hid == selectedHost['id'];
-                    final st = (h['nagios_host_state'] as String?) ?? 'UP';
-                    final stCol = _nagiosStateColor(st);
-
-                    return InkWell(
-                      borderRadius: BorderRadius.circular(9),
-                      onTap: () {
-                        setState(() => _selectedHostId = hid);
-                        _loadHostTelemetry(hid);
-                      },
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 120),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isSel
-                              ? AppTheme.accentBlue.withValues(alpha: 0.12)
-                              : AppTheme.bgSecondary,
-                          borderRadius: BorderRadius.circular(9),
-                          border: Border.all(
-                            color: isSel
-                                ? AppTheme.accentBlue
-                                : AppTheme.border,
-                            width: isSel ? 1.8 : 1.0,
-                          ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    color: stCol,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    '${h['code']}',
-                                    style: TextStyle(
-                                      fontSize: 11.2,
-                                      fontWeight: FontWeight.w900,
-                                      color: isSel
-                                          ? AppTheme.accentBlue
-                                          : AppTheme.textPrimary,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                Text(
-                                  '${h['heartbeat_ip']}',
-                                  style: const TextStyle(
-                                    fontSize: 9.8,
-                                    fontFamily: 'monospace',
-                                    fontWeight: FontWeight.w700,
-                                    color: AppTheme.accentTeal,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              '${h['name']}',
-                              style: const TextStyle(
-                                fontSize: 10.2,
-                                color: AppTheme.textSecondary,
-                                fontWeight: FontWeight.w600,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 4),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  'CPU ${h['cpu_pct'] ?? 0}% • RAM ${h['ram_pct'] ?? 0}%',
-                                  style: const TextStyle(
-                                    fontSize: 9.2,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppTheme.textMuted,
-                                  ),
-                                ),
-                                Text(
-                                  '${h['last_ping_ms'] ?? '-'} ms',
-                                  style: const TextStyle(
-                                    fontSize: 9.2,
-                                    fontFamily: 'monospace',
-                                    color: AppTheme.accentCyan,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
       ],
     );
   }
@@ -7018,6 +7023,7 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
     final lastB = valsB.isNotEmpty ? valsB.last : null;
 
     return Container(
+      height: 242,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppTheme.bgSecondary,
@@ -7103,19 +7109,22 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
             ],
           ),
           const SizedBox(height: 10),
-          SizedBox(
-            height: 165,
-            width: double.infinity,
-            child: CustomPaint(
-              painter: _PrometheusSeriesChartPainter(
-                points: points,
-                keyA: metricKeyA,
-                colorA: colorA,
-                keyB: metricKeyB,
-                colorB: colorB,
-                unit: unit,
-                warnThreshold: unit == '%' ? 75.0 : null,
-                critThreshold: unit == '%' ? 90.0 : null,
+          Expanded(
+            child: SizedBox(
+              width: double.infinity,
+              child: ClipRect(
+                child: CustomPaint(
+                  painter: _PrometheusSeriesChartPainter(
+                    points: points,
+                    keyA: metricKeyA,
+                    colorA: colorA,
+                    keyB: metricKeyB,
+                    colorB: colorB,
+                    unit: unit,
+                    warnThreshold: unit == '%' ? 75.0 : null,
+                    critThreshold: unit == '%' ? 90.0 : null,
+                  ),
+                ),
               ),
             ),
           ),
@@ -12723,13 +12732,24 @@ class _PrometheusSeriesChartPainter extends CustomPainter {
     // Etiquetas de tiempo en el eje X (inicio, medio, ahora)
     final xIndices = [0, points.length ~/ 2, points.length - 1];
     for (final idx in xIndices) {
-      final rawTs =
-          (points[idx]['timestamp'] as String?) ??
-          (points[idx]['label'] as String?) ??
+      String shortTs =
+          points[idx]['time_label']?.toString() ??
+          points[idx]['label']?.toString() ??
           '';
-      final shortTs = rawTs.length >= 16
-          ? rawTs.substring(11, 16)
-          : (rawTs.isNotEmpty ? rawTs : (idx == points.length - 1 ? 'Ahora' : ''));
+      if (shortTs.isEmpty && points[idx]['timestamp'] != null) {
+        final tsVal = points[idx]['timestamp'];
+        if (tsVal is num) {
+          final dt = DateTime.fromMillisecondsSinceEpoch(tsVal.toInt() * 1000);
+          shortTs =
+              '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+        } else {
+          final rawStr = tsVal.toString();
+          shortTs = rawStr.length >= 16 ? rawStr.substring(11, 16) : rawStr;
+        }
+      }
+      if (shortTs.isEmpty && idx == points.length - 1) {
+        shortTs = 'Ahora';
+      }
       if (shortTs.isEmpty) continue;
       final x = leftPad + (idx / (points.length - 1)) * chartW;
       final tp = TextPainter(

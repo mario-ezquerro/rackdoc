@@ -66,6 +66,19 @@
   },
   {
     "targets": [
+      "10.20.20.160:9100"
+    ],
+    "labels": {
+      "asset_code": "ELEM-676",
+      "hostname": "elem-676",
+      "asset_class": "virtual_machine",
+      "environment": "production",
+      "exporter_type": "node_exporter",
+      "managed_by": "rackdoc_file_sd"
+    }
+  },
+  {
+    "targets": [
       "10.20.1.5:9182"
     ],
     "labels": {
