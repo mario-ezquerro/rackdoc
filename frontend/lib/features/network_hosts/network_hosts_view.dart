@@ -1210,6 +1210,10 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                                                       _linkSourceSide,
                                                   liveMousePos:
                                                       _linkLiveMousePos,
+                                                  hoveredTargetNodeId:
+                                                      _hoveredSideNodeId,
+                                                  hoveredTargetSide:
+                                                      _hoveredSideName,
                                                 ),
                                               ),
                                             ),
@@ -2725,525 +2729,120 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     final rackId = host['rack_id'] as int?;
     final targetRackDevId = host['target_rack_device_id'] as int?;
 
+    const double portPad = 8.0;
+
     return Positioned(
-      left: left,
-      top: top,
-      width: nodeSize.width,
-      height: nodeSize.height,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () async {
-          if (_isLinkModeActive) {
-            if (_linkSourceNodeId == null) {
-              setState(() {
-                _linkSourceNodeId = nodeId;
-                _linkSourceSide = 'right';
-                _selectedStackNodeId = nodeId;
-              });
-            } else if (_linkSourceNodeId != nodeId) {
-              final srcId = _linkSourceNodeId!;
-              final srcSide = _linkSourceSide;
-              setState(() {
-                _isLinkModeActive = false;
-                _linkSourceNodeId = null;
-                _linkSourceSide = null;
-                _linkLiveMousePos = null;
-                _selectedStackNodeId = nodeId;
-              });
-              await _instantConnectNodes(
-                srcId,
-                nodeId,
-                allNodes,
-                sourceSide: srcSide,
-                targetSide: null,
-              );
-            }
-            return;
-          }
-          setState(() {
-            _selectedStackNodeId = nodeId;
-            _selectedBoxId = null;
-            _selectedHostId = host['id'] as int?;
-          });
-          if (host['id'] != null) {
-            _loadHostTelemetry(host['id'] as int);
-          }
-        },
-        onDoubleTap: () {
-          setState(() {
-            _selectedStackNodeId = nodeId;
-            _selectedHostId = host['id'] as int?;
-            _showFloatingTechWindow = true;
-            _floatingWinMinimized = false;
-          });
-          if (host['id'] != null) {
-            _loadHostTelemetry(host['id'] as int);
-          }
-        },
-        onPanStart: widget.canEdit
-            ? (details) {
+      left: left - portPad,
+      top: top - portPad,
+      width: nodeSize.width + (portPad * 2),
+      height: nodeSize.height + (portPad * 2),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          // 1. Cuerpo de la tarjeta con su propio GestureDetector para selección y arrastre 1:1
+          Positioned(
+            left: portPad,
+            top: portPad,
+            width: nodeSize.width,
+            height: nodeSize.height,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () async {
+                if (_isLinkModeActive) {
+                  if (_linkSourceNodeId == null) {
+                    setState(() {
+                      _linkSourceNodeId = nodeId;
+                      _linkSourceSide = 'right';
+                      _selectedStackNodeId = nodeId;
+                    });
+                  } else if (_linkSourceNodeId != nodeId) {
+                    final srcId = _linkSourceNodeId!;
+                    final srcSide = _linkSourceSide;
+                    setState(() {
+                      _isLinkModeActive = false;
+                      _linkSourceNodeId = null;
+                      _linkSourceSide = null;
+                      _linkLiveMousePos = null;
+                      _selectedStackNodeId = nodeId;
+                    });
+                    await _instantConnectNodes(
+                      srcId,
+                      nodeId,
+                      allNodes,
+                      sourceSide: srcSide,
+                      targetSide: null,
+                    );
+                  }
+                  return;
+                }
                 setState(() {
                   _selectedStackNodeId = nodeId;
                   _selectedBoxId = null;
-                  _nodeDragStartGlobal = details.globalPosition;
-                  _nodeDragStartPx = Offset(left, top);
+                  _selectedHostId = host['id'] as int?;
                 });
-              }
-            : null,
-        onPanUpdate: widget.canEdit
-            ? (details) {
-                if (_nodeDragStartGlobal == null || _nodeDragStartPx == null) {
-                  return;
+                if (host['id'] != null) {
+                  _loadHostTelemetry(host['id'] as int);
                 }
-                final globalDelta =
-                    details.globalPosition - _nodeDragStartGlobal!;
-                final newLeft = (_nodeDragStartPx!.dx + globalDelta.dx).clamp(
-                  4.0,
-                  math.max(8.0, canvasWidth - nodeSize.width - 4.0),
-                );
-                final newTop = (_nodeDragStartPx!.dy + globalDelta.dy).clamp(
-                  4.0,
-                  math.max(8.0, canvasHeight - nodeSize.height - 4.0),
-                );
-                final newPx = (newLeft / canvasWidth)
-                    .clamp(0.005, 0.96)
-                    .toDouble();
-                final newPy = (newTop / canvasHeight)
-                    .clamp(0.005, 0.95)
-                    .toDouble();
+              },
+              onDoubleTap: () {
                 setState(() {
-                  _stackNodePositions[nodeId] = Offset(newPx, newPy);
-                  sn['pos_x'] = newPx;
-                  sn['pos_y'] = newPy;
+                  _selectedStackNodeId = nodeId;
+                  _selectedHostId = host['id'] as int?;
+                  _showFloatingTechWindow = true;
+                  _floatingWinMinimized = false;
                 });
-              }
-            : null,
-        onPanEnd: widget.canEdit
-            ? (_) async {
-                _nodeDragStartGlobal = null;
-                _nodeDragStartPx = null;
-                final finalPos = _stackNodePositions[nodeId];
-                final finalSize = _stackNodeSizes[nodeId] ?? nodeSize;
-                if (finalPos == null) return;
-                final res = await widget.api.moveTechStackNode(nodeId, {
-                  'pos_x': finalPos.dx,
-                  'pos_y': finalPos.dy,
-                  'width_px': finalSize.width,
-                  'height_px': finalSize.height,
-                });
-                if (mounted) {
-                  setState(() {
-                    _overview = res;
-                    _syncStackCanvasState();
-                  });
+                if (host['id'] != null) {
+                  _loadHostTelemetry(host['id'] as int);
                 }
-              }
-            : null,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(9, 7, 9, 6),
-          decoration: BoxDecoration(
-            color: AppTheme.bgSecondary,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: isLinkSource
-                  ? AppTheme.warning
-                  : (isSelected ? AppTheme.accentBlue : stateCol),
-              width: (isSelected || isLinkSource) ? 2.2 : 1.4,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: (isSelected ? AppTheme.accentBlue : stateCol).withValues(
-                  alpha: 0.18,
-                ),
-                blurRadius: isSelected ? 12 : 6,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  // Cabecera del nodo: Estado + Código + Latencia + Acciones rápidas
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 4.5,
-                          vertical: 1,
-                        ),
-                        decoration: BoxDecoration(
-                          color: stateCol.withValues(alpha: 0.16),
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: stateCol),
-                        ),
-                        child: Text(
-                          state,
-                          style: TextStyle(
-                            fontSize: 8.5,
-                            fontWeight: FontWeight.w900,
-                            color: stateCol,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      Expanded(
-                        child: Text(
-                          '${host['code']}',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.textPrimary,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (host['last_ping_ms'] != null)
-                        Text(
-                          '${host['last_ping_ms']}ms',
-                          style: const TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.accentTeal,
-                          ),
-                        ),
-                      const SizedBox(width: 4),
-                      // Botón para abrir la Ventana Flotante Movible de Datos Técnicos y Gráficas
-                      InkWell(
-                        onTap: () {
-                          setState(() {
-                            _selectedStackNodeId = nodeId;
-                            _selectedHostId = host['id'] as int?;
-                            _showFloatingTechWindow = true;
-                            _floatingWinMinimized = false;
-                          });
-                          if (host['id'] != null) {
-                            _loadHostTelemetry(host['id'] as int);
-                          }
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.all(2.5),
-                          decoration: BoxDecoration(
-                            color: AppTheme.accentBlue.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: const Icon(
-                            Icons.analytics_outlined,
-                            size: 12,
-                            color: AppTheme.accentBlue,
-                          ),
-                        ),
-                      ),
-                      if (widget.canEdit) ...[
-                        const SizedBox(width: 3),
-                        InkWell(
-                          onTap: () async {
-                            final res = await widget.api.deleteTechStackNode(
-                              nodeId,
-                            );
-                            if (mounted) {
-                              setState(() {
-                                _overview = res;
-                                if (_selectedStackNodeId == nodeId) {
-                                  _selectedStackNodeId = null;
-                                }
-                                _syncStackCanvasState();
-                              });
-                            }
-                          },
-                          child: const Icon(
-                            Icons.close,
-                            size: 12.5,
-                            color: AppTheme.textMuted,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  // Nombre/Rol y dirección IP + Alojamiento
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${sn['custom_label'] ?? host['name']}',
-                        style: const TextStyle(
-                          fontSize: 10.2,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.accentBlue,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        '${host['heartbeat_ip']} • ${host['rack_location_badge']}',
-                        style: const TextStyle(
-                          fontSize: 8.8,
-                          fontFamily: 'monospace',
-                          color: AppTheme.textSecondary,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                  // Sparkline Prometheus refinado con valores en vivo
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'CPU ${host['cpu_pct']}% • RAM ${host['ram_pct']}%',
-                            style: const TextStyle(
-                              fontSize: 8.8,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.textSecondary,
-                            ),
-                          ),
-                          Text(
-                            host['monitoring_enabled'] == false
-                                ? 'HB Off'
-                                : '${checks.length} chk',
-                            style: const TextStyle(
-                              fontSize: 8.5,
-                              color: AppTheme.textMuted,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      SizedBox(
-                        height: 18,
-                        width: double.infinity,
-                        child: CustomPaint(
-                          painter: _MiniSparklinePainter(
-                            values: cpuSeries,
-                            color: AppTheme.accentBlue,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  // Barra inferior de acciones rápidas (SSH, Gráficas Flotantes, Rack)
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      if (sn['ssh_enabled'] != false &&
-                          host['ssh_enabled'] != false &&
-                          host['connect_enabled'] != false)
-                        InkWell(
-                          onTap: () => _showSshWebConsoleDialog(sn, host),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF0F172A),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.terminal_rounded,
-                                  size: 10,
-                                  color: Color(0xFF38BDF8),
-                                ),
-                                SizedBox(width: 3),
-                                Text(
-                                  'SSH',
-                                  style: TextStyle(
-                                    fontSize: 8.8,
-                                    fontWeight: FontWeight.w800,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        )
-                      else
-                        const Text(
-                          'SSH Off',
-                          style: TextStyle(
-                            fontSize: 8.5,
-                            color: AppTheme.textMuted,
-                          ),
-                        ),
-                      InkWell(
-                        onTap: () {
-                          setState(() {
-                            _selectedStackNodeId = nodeId;
-                            _selectedHostId = host['id'] as int?;
-                            _showFloatingTechWindow = true;
-                            _floatingWinMinimized = false;
-                          });
-                          if (host['id'] != null) {
-                            _loadHostTelemetry(host['id'] as int);
-                          }
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 5,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppTheme.accentTeal.withValues(alpha: 0.14),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: const Text(
-                            '📊 Datos & Gráficas',
-                            style: TextStyle(
-                              fontSize: 8.8,
-                              fontWeight: FontWeight.w800,
-                              color: AppTheme.accentTeal,
-                            ),
-                          ),
-                        ),
-                      ),
-                      if (rackId != null &&
-                          widget.onNavigateToRackDevice != null)
-                        InkWell(
-                          onTap: () => widget.onNavigateToRackDevice!(
-                            rackId,
-                            targetRackDevId,
-                          ),
-                          child: const Text(
-                            'Rack ↗',
-                            style: TextStyle(
-                              fontSize: 8.8,
-                              fontWeight: FontWeight.w800,
-                              color: AppTheme.accentBlue,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-
-              // ===============================================================
-              // 4 PEQUEÑOS CUADRADOS EN EL MEDIO DE LOS LADOS (TOP, BOTTOM, LEFT, RIGHT)
-              // Al seleccionarlos o arrastrarlos aparecen las flechas de unión
-              // ===============================================================
-              if (widget.canEdit) ...[
-                // Lado SUPERIOR (medio)
-                Positioned(
-                  left: (nodeSize.width / 2) - 15,
-                  top: -14,
-                  child: _buildNodeSideConnectorSquare(
-                    nodeId: nodeId,
-                    side: 'top',
-                    allNodes: allNodes,
-                    nodeRectInCanvas: Rect.fromLTWH(
-                      left,
-                      top,
-                      nodeSize.width,
-                      nodeSize.height,
-                    ),
-                    canvasWidth: canvasWidth,
-                    canvasHeight: canvasHeight,
-                  ),
-                ),
-                // Lado INFERIOR (medio)
-                Positioned(
-                  left: (nodeSize.width / 2) - 15,
-                  bottom: -14,
-                  child: _buildNodeSideConnectorSquare(
-                    nodeId: nodeId,
-                    side: 'bottom',
-                    allNodes: allNodes,
-                    nodeRectInCanvas: Rect.fromLTWH(
-                      left,
-                      top,
-                      nodeSize.width,
-                      nodeSize.height,
-                    ),
-                    canvasWidth: canvasWidth,
-                    canvasHeight: canvasHeight,
-                  ),
-                ),
-                // Lado IZQUIERDO (medio)
-                Positioned(
-                  left: -14,
-                  top: (nodeSize.height / 2) - 15,
-                  child: _buildNodeSideConnectorSquare(
-                    nodeId: nodeId,
-                    side: 'left',
-                    allNodes: allNodes,
-                    nodeRectInCanvas: Rect.fromLTWH(
-                      left,
-                      top,
-                      nodeSize.width,
-                      nodeSize.height,
-                    ),
-                    canvasWidth: canvasWidth,
-                    canvasHeight: canvasHeight,
-                  ),
-                ),
-                // Lado DERECHO (medio)
-                Positioned(
-                  right: -14,
-                  top: (nodeSize.height / 2) - 15,
-                  child: _buildNodeSideConnectorSquare(
-                    nodeId: nodeId,
-                    side: 'right',
-                    allNodes: allNodes,
-                    nodeRectInCanvas: Rect.fromLTWH(
-                      left,
-                      top,
-                      nodeSize.width,
-                      nodeSize.height,
-                    ),
-                    canvasWidth: canvasWidth,
-                    canvasHeight: canvasHeight,
-                  ),
-                ),
-              ],
-
-              // Tirador de redimensionado en la esquina inferior derecha del nodo (1:1 con ratón)
-              if (widget.canEdit)
-                Positioned(
-                  right: -4,
-                  bottom: -4,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onPanStart: (details) {
+              },
+              onPanStart: widget.canEdit
+                  ? (details) {
                       setState(() {
                         _selectedStackNodeId = nodeId;
-                        _nodeResizeStartGlobal = details.globalPosition;
-                        _nodeResizeStartSize = nodeSize;
+                        _selectedBoxId = null;
+                        _nodeDragStartGlobal = details.globalPosition;
+                        _nodeDragStartPx = Offset(left, top);
                       });
-                    },
-                    onPanUpdate: (details) {
-                      if (_nodeResizeStartGlobal == null ||
-                          _nodeResizeStartSize == null) {
+                    }
+                  : null,
+              onPanUpdate: widget.canEdit
+                  ? (details) {
+                      if (_nodeDragStartGlobal == null ||
+                          _nodeDragStartPx == null) {
                         return;
                       }
-                      final delta =
-                          details.globalPosition - _nodeResizeStartGlobal!;
-                      final nw = (_nodeResizeStartSize!.width + delta.dx)
-                          .clamp(160.0, 500.0)
+                      final globalDelta =
+                          details.globalPosition - _nodeDragStartGlobal!;
+                      final newLeft =
+                          (_nodeDragStartPx!.dx + globalDelta.dx).clamp(
+                            4.0,
+                            math.max(8.0, canvasWidth - nodeSize.width - 4.0),
+                          );
+                      final newTop =
+                          (_nodeDragStartPx!.dy + globalDelta.dy).clamp(
+                            4.0,
+                            math.max(8.0, canvasHeight - nodeSize.height - 4.0),
+                          );
+                      final newPx = (newLeft / canvasWidth)
+                          .clamp(0.005, 0.96)
                           .toDouble();
-                      final nh = (_nodeResizeStartSize!.height + delta.dy)
-                          .clamp(96.0, 340.0)
+                      final newPy = (newTop / canvasHeight)
+                          .clamp(0.005, 0.95)
                           .toDouble();
                       setState(() {
-                        _stackNodeSizes[nodeId] = Size(nw, nh);
-                        sn['width_px'] = nw;
-                        sn['height_px'] = nh;
+                        _stackNodePositions[nodeId] = Offset(newPx, newPy);
+                        sn['pos_x'] = newPx;
+                        sn['pos_y'] = newPy;
                       });
-                    },
-                    onPanEnd: (_) async {
-                      _nodeResizeStartGlobal = null;
-                      _nodeResizeStartSize = null;
-                      final finalPos = _stackNodePositions[nodeId] ?? pos;
+                    }
+                  : null,
+              onPanEnd: widget.canEdit
+                  ? (_) async {
+                      _nodeDragStartGlobal = null;
+                      _nodeDragStartPx = null;
+                      final finalPos = _stackNodePositions[nodeId];
                       final finalSize = _stackNodeSizes[nodeId] ?? nodeSize;
+                      if (finalPos == null) return;
                       final res = await widget.api.moveTechStackNode(nodeId, {
                         'pos_x': finalPos.dx,
                         'pos_y': finalPos.dy,
@@ -3256,25 +2855,457 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                           _syncStackCanvasState();
                         });
                       }
-                    },
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.resizeDownRight,
-                      child: Container(
-                        width: 16,
-                        height: 16,
-                        alignment: Alignment.bottomRight,
-                        child: const Icon(
-                          Icons.south_east_rounded,
-                          size: 10,
-                          color: AppTheme.textMuted,
+                    }
+                  : null,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(9, 7, 9, 6),
+                decoration: BoxDecoration(
+                  color: AppTheme.bgSecondary,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isLinkSource
+                        ? AppTheme.warning
+                        : (isSelected ? AppTheme.accentBlue : stateCol),
+                    width: (isSelected || isLinkSource) ? 2.2 : 1.4,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: (isSelected ? AppTheme.accentBlue : stateCol)
+                          .withValues(alpha: 0.18),
+                      blurRadius: isSelected ? 12 : 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // Cabecera del nodo: Estado + Código + Latencia + Acciones rápidas
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4.5,
+                            vertical: 1,
+                          ),
+                          decoration: BoxDecoration(
+                            color: stateCol.withValues(alpha: 0.16),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: stateCol),
+                          ),
+                          child: Text(
+                            state,
+                            style: TextStyle(
+                              fontSize: 8.5,
+                              fontWeight: FontWeight.w900,
+                              color: stateCol,
+                            ),
+                          ),
                         ),
-                      ),
+                        const SizedBox(width: 5),
+                        Expanded(
+                          child: Text(
+                            '${host['code']}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: AppTheme.textPrimary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (host['last_ping_ms'] != null)
+                          Text(
+                            '${host['last_ping_ms']}ms',
+                            style: const TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.accentTeal,
+                            ),
+                          ),
+                        const SizedBox(width: 4),
+                        // Botón para abrir la Ventana Flotante Movible de Datos Técnicos y Gráficas
+                        InkWell(
+                          onTap: () {
+                            setState(() {
+                              _selectedStackNodeId = nodeId;
+                              _selectedHostId = host['id'] as int?;
+                              _showFloatingTechWindow = true;
+                              _floatingWinMinimized = false;
+                            });
+                            if (host['id'] != null) {
+                              _loadHostTelemetry(host['id'] as int);
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(2.5),
+                            decoration: BoxDecoration(
+                              color: AppTheme.accentBlue.withValues(
+                                alpha: 0.15,
+                              ),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Icon(
+                              Icons.analytics_outlined,
+                              size: 12,
+                              color: AppTheme.accentBlue,
+                            ),
+                          ),
+                        ),
+                        if (widget.canEdit) ...[
+                          const SizedBox(width: 3),
+                          InkWell(
+                            onTap: () async {
+                              final res = await widget.api.deleteTechStackNode(
+                                nodeId,
+                              );
+                              if (mounted) {
+                                setState(() {
+                                  _overview = res;
+                                  if (_selectedStackNodeId == nodeId) {
+                                    _selectedStackNodeId = null;
+                                  }
+                                  _syncStackCanvasState();
+                                });
+                              }
+                            },
+                            child: const Icon(
+                              Icons.close,
+                              size: 12.5,
+                              color: AppTheme.textMuted,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    // Nombre/Rol y dirección IP + Alojamiento
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${sn['custom_label'] ?? host['name']}',
+                          style: const TextStyle(
+                            fontSize: 10.2,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.accentBlue,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          '${host['heartbeat_ip']} • ${host['rack_location_badge']}',
+                          style: const TextStyle(
+                            fontSize: 8.8,
+                            fontFamily: 'monospace',
+                            color: AppTheme.textSecondary,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                    // Sparkline Prometheus refinado con valores en vivo
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'CPU ${host['cpu_pct']}% • RAM ${host['ram_pct']}%',
+                              style: const TextStyle(
+                                fontSize: 8.8,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                            Text(
+                              host['monitoring_enabled'] == false
+                                  ? 'HB Off'
+                                  : '${checks.length} chk',
+                              style: const TextStyle(
+                                fontSize: 8.5,
+                                color: AppTheme.textMuted,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        SizedBox(
+                          height: 18,
+                          width: double.infinity,
+                          child: CustomPaint(
+                            painter: _MiniSparklinePainter(
+                              values: cpuSeries,
+                              color: AppTheme.accentBlue,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    // Barra inferior de acciones rápidas (SSH, Gráficas Flotantes, Rack)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        if (sn['ssh_enabled'] != false &&
+                            host['ssh_enabled'] != false &&
+                            host['connect_enabled'] != false)
+                          InkWell(
+                            onTap: () => _showSshWebConsoleDialog(sn, host),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF0F172A),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.terminal_rounded,
+                                    size: 10,
+                                    color: Color(0xFF38BDF8),
+                                  ),
+                                  SizedBox(width: 3),
+                                  Text(
+                                    'SSH',
+                                    style: TextStyle(
+                                      fontSize: 8.8,
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        else
+                          const Text(
+                            'SSH Off',
+                            style: TextStyle(
+                              fontSize: 8.5,
+                              color: AppTheme.textMuted,
+                            ),
+                          ),
+                        InkWell(
+                          onTap: () {
+                            setState(() {
+                              _selectedStackNodeId = nodeId;
+                              _selectedHostId = host['id'] as int?;
+                              _showFloatingTechWindow = true;
+                              _floatingWinMinimized = false;
+                            });
+                            if (host['id'] != null) {
+                              _loadHostTelemetry(host['id'] as int);
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppTheme.accentTeal.withValues(
+                                alpha: 0.14,
+                              ),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text(
+                              '📊 Datos & Gráficas',
+                              style: TextStyle(
+                                fontSize: 8.8,
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.accentTeal,
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (rackId != null &&
+                            widget.onNavigateToRackDevice != null)
+                          InkWell(
+                            onTap: () => widget.onNavigateToRackDevice!(
+                              rackId,
+                              targetRackDevId,
+                            ),
+                            child: const Text(
+                              'Rack ↗',
+                              style: TextStyle(
+                                fontSize: 8.8,
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.accentBlue,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // ===================================================================
+          // 2. LOS 4 CUADRADITOS DE UNIÓN EXACTAMENTE CENTRADOS EN EL BORDE DE CADA LADO
+          // Gracias al margen 'portPad = 8.0' del Positioned padre, el cuadradito
+          // completo (16x16 px) está 100% dentro de los límites de hit-test de Flutter.
+          // ===================================================================
+          if (widget.canEdit) ...[
+            // Lado SUPERIOR (centro exacto del borde superior: y = portPad)
+            Positioned(
+              left: portPad + (nodeSize.width / 2) - 8,
+              top: portPad - 8,
+              width: 16,
+              height: 16,
+              child: _buildNodeSideConnectorSquare(
+                nodeId: nodeId,
+                side: 'top',
+                allNodes: allNodes,
+                nodeRectInCanvas: Rect.fromLTWH(
+                  left,
+                  top,
+                  nodeSize.width,
+                  nodeSize.height,
+                ),
+                canvasWidth: canvasWidth,
+                canvasHeight: canvasHeight,
+              ),
+            ),
+            // Lado INFERIOR (centro exacto del borde inferior: y = portPad + height)
+            Positioned(
+              left: portPad + (nodeSize.width / 2) - 8,
+              top: portPad + nodeSize.height - 8,
+              width: 16,
+              height: 16,
+              child: _buildNodeSideConnectorSquare(
+                nodeId: nodeId,
+                side: 'bottom',
+                allNodes: allNodes,
+                nodeRectInCanvas: Rect.fromLTWH(
+                  left,
+                  top,
+                  nodeSize.width,
+                  nodeSize.height,
+                ),
+                canvasWidth: canvasWidth,
+                canvasHeight: canvasHeight,
+              ),
+            ),
+            // Lado IZQUIERDO (centro exacto del borde izquierdo: x = portPad)
+            Positioned(
+              left: portPad - 8,
+              top: portPad + (nodeSize.height / 2) - 8,
+              width: 16,
+              height: 16,
+              child: _buildNodeSideConnectorSquare(
+                nodeId: nodeId,
+                side: 'left',
+                allNodes: allNodes,
+                nodeRectInCanvas: Rect.fromLTWH(
+                  left,
+                  top,
+                  nodeSize.width,
+                  nodeSize.height,
+                ),
+                canvasWidth: canvasWidth,
+                canvasHeight: canvasHeight,
+              ),
+            ),
+            // Lado DERECHO (centro exacto del borde derecho: x = portPad + width)
+            Positioned(
+              left: portPad + nodeSize.width - 8,
+              top: portPad + (nodeSize.height / 2) - 8,
+              width: 16,
+              height: 16,
+              child: _buildNodeSideConnectorSquare(
+                nodeId: nodeId,
+                side: 'right',
+                allNodes: allNodes,
+                nodeRectInCanvas: Rect.fromLTWH(
+                  left,
+                  top,
+                  nodeSize.width,
+                  nodeSize.height,
+                ),
+                canvasWidth: canvasWidth,
+                canvasHeight: canvasHeight,
+              ),
+            ),
+          ],
+
+          // 3. Tirador de redimensionado en la esquina inferior derecha del nodo (1:1 con ratón)
+          if (widget.canEdit)
+            Positioned(
+              left: portPad + nodeSize.width - 14,
+              top: portPad + nodeSize.height - 14,
+              width: 18,
+              height: 18,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onPanStart: (details) {
+                  setState(() {
+                    _selectedStackNodeId = nodeId;
+                    _nodeResizeStartGlobal = details.globalPosition;
+                    _nodeResizeStartSize = nodeSize;
+                  });
+                },
+                onPanUpdate: (details) {
+                  if (_nodeResizeStartGlobal == null ||
+                      _nodeResizeStartSize == null) {
+                    return;
+                  }
+                  final delta =
+                      details.globalPosition - _nodeResizeStartGlobal!;
+                  final nw = (_nodeResizeStartSize!.width + delta.dx)
+                      .clamp(160.0, 500.0)
+                      .toDouble();
+                  final nh = (_nodeResizeStartSize!.height + delta.dy)
+                      .clamp(96.0, 340.0)
+                      .toDouble();
+                  setState(() {
+                    _stackNodeSizes[nodeId] = Size(nw, nh);
+                    sn['width_px'] = nw;
+                    sn['height_px'] = nh;
+                  });
+                },
+                onPanEnd: (_) async {
+                  _nodeResizeStartGlobal = null;
+                  _nodeResizeStartSize = null;
+                  final finalPos = _stackNodePositions[nodeId] ?? pos;
+                  final finalSize = _stackNodeSizes[nodeId] ?? nodeSize;
+                  final res = await widget.api.moveTechStackNode(nodeId, {
+                    'pos_x': finalPos.dx,
+                    'pos_y': finalPos.dy,
+                    'width_px': finalSize.width,
+                    'height_px': finalSize.height,
+                  });
+                  if (mounted) {
+                    setState(() {
+                      _overview = res;
+                      _syncStackCanvasState();
+                    });
+                  }
+                },
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.resizeDownRight,
+                  child: Container(
+                    width: 18,
+                    height: 18,
+                    alignment: Alignment.bottomRight,
+                    padding: const EdgeInsets.all(2),
+                    child: const Icon(
+                      Icons.south_east_rounded,
+                      size: 10,
+                      color: AppTheme.textMuted,
                     ),
                   ),
                 ),
-            ],
-          ),
-        ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -3298,19 +3329,25 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () async {
-        // Si aún no hay origen o se pulsa el mismo cuadrado: activar flecha en vivo desde este cuadrado lateral
+      onTapDown: (details) async {
+        final box =
+            _stackCanvasKey.currentContext?.findRenderObject() as RenderBox?;
+        final localPt = box != null
+            ? box.globalToLocal(details.globalPosition)
+            : anchorInCanvas;
+
+        // Si aún no hay origen: activar flecha en vivo inmediatamente al pulsar sobre cualquier punto del cuadradito
         if (!_isLinkModeActive || _linkSourceNodeId == null) {
           setState(() {
             _isLinkModeActive = true;
             _linkSourceNodeId = nodeId;
             _linkSourceSide = side;
-            _linkLiveMousePos = anchorInCanvas;
+            _linkLiveMousePos = localPt;
             _selectedStackNodeId = nodeId;
           });
           return;
         }
-        // Si se vuelve a pulsar el mismo nodo origen, cambia el lado de salida
+        // Si se vuelve a pulsar el mismo nodo origen, cambia el lado de salida o cancela si es el mismo
         if (_linkSourceNodeId == nodeId) {
           if (_linkSourceSide == side) {
             setState(() {
@@ -3322,7 +3359,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
           } else {
             setState(() {
               _linkSourceSide = side;
-              _linkLiveMousePos = anchorInCanvas;
+              _linkLiveMousePos = localPt;
             });
           }
           return;
@@ -3363,8 +3400,45 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
         final box =
             _stackCanvasKey.currentContext?.findRenderObject() as RenderBox?;
         if (box != null) {
+          final local = box.globalToLocal(details.globalPosition);
+          int? snapNodeId;
+          String? snapSide;
+          double bestDist = 26.0;
+          for (final other in allNodes) {
+            final oid = other['id'] as int;
+            if (oid == nodeId) continue;
+            final oPos =
+                _stackNodePositions[oid] ??
+                Offset(
+                  ((other['pos_x'] as num?)?.toDouble() ?? 0.2),
+                  ((other['pos_y'] as num?)?.toDouble() ?? 0.3),
+                );
+            final oSize =
+                _stackNodeSizes[oid] ??
+                Size(
+                  ((other['width_px'] as num?)?.toDouble() ?? 220.0),
+                  ((other['height_px'] as num?)?.toDouble() ?? 124.0),
+                );
+            final oRect = Rect.fromLTWH(
+              oPos.dx * canvasWidth,
+              oPos.dy * canvasHeight,
+              oSize.width,
+              oSize.height,
+            );
+            for (final sName in ['left', 'right', 'top', 'bottom']) {
+              final sp = _sideAnchorPoint(oRect, sName);
+              final d = (sp - local).distance;
+              if (d < bestDist) {
+                bestDist = d;
+                snapNodeId = oid;
+                snapSide = sName;
+              }
+            }
+          }
           setState(() {
-            _linkLiveMousePos = box.globalToLocal(details.globalPosition);
+            _linkLiveMousePos = local;
+            _hoveredSideNodeId = snapNodeId;
+            _hoveredSideName = snapSide;
           });
         }
       },
@@ -3397,7 +3471,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
             oSize.width,
             oSize.height,
           );
-          if (oRect.inflate(18).contains(dropPt)) {
+          if (oRect.inflate(22).contains(dropPt)) {
             targetNodeId = oid;
             for (final sName in ['left', 'right', 'top', 'bottom']) {
               final sp = _sideAnchorPoint(oRect, sName);
@@ -3431,7 +3505,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
         }
       },
       child: MouseRegion(
-        cursor: SystemMouseCursors.precise,
+        cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() {
           _hoveredSideNodeId = nodeId;
           _hoveredSideName = side;
@@ -3442,44 +3516,38 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
             _hoveredSideName = null;
           }
         }),
-        child: Tooltip(
-          message:
-              'Cuadrado de unión ($side): Clic o arrastra a otro elemento para lanzar flecha de unión',
-          child: Container(
-            width: 22,
-            height: 22,
-            alignment: Alignment.center,
-            color: Colors.transparent,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 110),
-              width: (isOriginPort || isHovered) ? 12 : 9,
-              height: (isOriginPort || isHovered) ? 12 : 9,
-              decoration: BoxDecoration(
+        child: Container(
+          width: 16,
+          height: 16,
+          alignment: Alignment.center,
+          color: Colors.transparent,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 90),
+            width: (isOriginPort || isHovered) ? 14 : 12,
+            height: (isOriginPort || isHovered) ? 14 : 12,
+            decoration: BoxDecoration(
+              color: isOriginPort
+                  ? AppTheme.warning
+                  : (isHovered ? AppTheme.accentCyan : AppTheme.bgSecondary),
+              borderRadius: BorderRadius.circular(3),
+              border: Border.all(
                 color: isOriginPort
-                    ? AppTheme.warning
-                    : (isHovered ? AppTheme.accentCyan : AppTheme.bgSecondary),
-                borderRadius: BorderRadius.circular(2.5),
-                border: Border.all(
-                  color: isOriginPort
-                      ? Colors.black
-                      : (isHovered
-                            ? AppTheme.accentBlue
-                            : AppTheme.accentCyan),
-                  width: (isOriginPort || isHovered) ? 2.0 : 1.5,
-                ),
-                boxShadow: (isOriginPort || isHovered)
-                    ? [
-                        BoxShadow(
-                          color:
-                              (isOriginPort
-                                      ? AppTheme.warning
-                                      : AppTheme.accentCyan)
-                                  .withValues(alpha: 0.45),
-                          blurRadius: 6,
-                        ),
-                      ]
-                    : null,
+                    ? Colors.black
+                    : (isHovered ? AppTheme.accentBlue : AppTheme.accentCyan),
+                width: (isOriginPort || isHovered) ? 2.2 : 1.8,
               ),
+              boxShadow: (isOriginPort || isHovered)
+                  ? [
+                      BoxShadow(
+                        color:
+                            (isOriginPort
+                                    ? AppTheme.warning
+                                    : AppTheme.accentCyan)
+                                .withValues(alpha: 0.55),
+                        blurRadius: 6,
+                      ),
+                    ]
+                  : null,
             ),
           ),
         ),
@@ -12764,6 +12832,8 @@ class _TechStackEdgesPainter extends CustomPainter {
   final int? liveSourceNodeId;
   final String? liveSourceSide;
   final Offset? liveMousePos;
+  final int? hoveredTargetNodeId;
+  final String? hoveredTargetSide;
 
   _TechStackEdgesPainter({
     required this.nodes,
@@ -12774,6 +12844,8 @@ class _TechStackEdgesPainter extends CustomPainter {
     this.liveSourceNodeId,
     this.liveSourceSide,
     this.liveMousePos,
+    this.hoveredTargetNodeId,
+    this.hoveredTargetSide,
   });
 
   Offset _sidePoint(Rect r, String? side) {
@@ -12969,16 +13041,48 @@ class _TechStackEdgesPainter extends CustomPainter {
           sSize.height,
         );
         final start = _sidePoint(sRect, liveSourceSide);
+        Offset end = liveMousePos!;
+        if (hoveredTargetNodeId != null &&
+            hoveredTargetNodeId != liveSourceNodeId &&
+            hoveredTargetSide != null) {
+          final dst = nodesById[hoveredTargetNodeId!];
+          if (dst != null) {
+            final dPos =
+                nodePositions[hoveredTargetNodeId!] ??
+                Offset(
+                  ((dst['pos_x'] as num?)?.toDouble() ?? 0.5),
+                  ((dst['pos_y'] as num?)?.toDouble() ?? 0.3),
+                );
+            final dSize =
+                nodeSizes[hoveredTargetNodeId!] ??
+                Size(
+                  (dst['width_px'] as num?)?.toDouble() ?? 220.0,
+                  (dst['height_px'] as num?)?.toDouble() ?? 124.0,
+                );
+            final dRect = Rect.fromLTWH(
+              dPos.dx * canvasSize.width,
+              dPos.dy * canvasSize.height,
+              dSize.width,
+              dSize.height,
+            );
+            end = _sidePoint(dRect, hoveredTargetSide);
+          }
+        }
         _drawCurvedArrow(
           canvas,
           start,
-          liveMousePos!,
+          end,
           AppTheme.warning,
           strokeWidth: 2.6,
         );
         canvas.drawCircle(
           start,
           4.5,
+          Paint()..color = AppTheme.warning,
+        );
+        canvas.drawCircle(
+          end,
+          3.5,
           Paint()..color = AppTheme.warning,
         );
       }
