@@ -1017,31 +1017,53 @@ def ensure_network_hosts_seeded(db: Session) -> None:
         db.commit()
 
     # 7. Seed Stacks Tecnológicos / Esquemas de Lógica de Negocio Interactivos
-    if db.query(TechStackDiagram).count() == 0:
-        assets_by_code = {a.code: a for a in db.query(CmdbAsset).all()}
-        st1 = TechStackDiagram(
-            code="STACK-PORTAL-ERP",
-            name="Stack 1: Portal Web Ecommerce, Microservicios & Clúster BBDD ERP",
-            description="Flujo completo de lógica de negocio: Entrada VIP Keepalived -> Frontal Nginx Reverse Proxy -> Backend Apache/Docker ERP -> Clúster PostgreSQL Master/Réplica.",
-            business_service="Ecommerce & Core ERP Transaccional",
-            environment="production",
-            owner_team="DevOps Web & DBA",
-            criticality="critical",
-        )
-        st2 = TechStackDiagram(
-            code="STACK-IDENTIDAD-INFRA",
-            name="Stack 2: Seguridad Perimetral, Switching Core & Directorio Activo",
-            description="Esquema lógico de Perímetro Firewall -> Switch Core SNMP -> Hipervisor VMware ESXi -> Controlador de Dominio Active Directory & DNS.",
-            business_service="Autenticación Corporativa, DNS & Virtualización",
-            environment="production",
-            owner_team="Redes & Sistemas",
-            criticality="critical",
-        )
-        db.add_all([st1, st2])
+    if db.query(TechStackDiagram).count() == 0 or db.query(TechStackNode).count() < 5:
+        db.query(TechStackEdge).delete()
+        db.query(TechStackNode).delete()
+        db.flush()
+        all_assets = db.query(CmdbAsset).all()
+        assets_by_code = {a.code: a for a in all_assets}
+
+        def _find_ast(*candidates: str) -> Optional[CmdbAsset]:
+            for c in candidates:
+                if c in assets_by_code:
+                    return assets_by_code[c]
+            for c in candidates:
+                c_up = c.upper()
+                for k, v in assets_by_code.items():
+                    if c_up in k.upper():
+                        return v
+            return all_assets[0] if all_assets else None
+
+        st1 = db.query(TechStackDiagram).filter(TechStackDiagram.code == "STACK-PORTAL-ERP").first()
+        if not st1:
+            st1 = TechStackDiagram(
+                code="STACK-PORTAL-ERP",
+                name="Stack 1: Portal Web Ecommerce, Microservicios & Clúster BBDD ERP",
+                description="Flujo completo de lógica de negocio: Entrada VIP Keepalived -> Frontal Nginx Reverse Proxy -> Backend Apache/Docker ERP -> Clúster PostgreSQL Master/Réplica.",
+                business_service="Ecommerce & Core ERP Transaccional",
+                environment="production",
+                owner_team="DevOps Web & DBA",
+                criticality="critical",
+            )
+            db.add(st1)
+
+        st2 = db.query(TechStackDiagram).filter(TechStackDiagram.code == "STACK-IDENTIDAD-INFRA").first()
+        if not st2:
+            st2 = TechStackDiagram(
+                code="STACK-IDENTIDAD-INFRA",
+                name="Stack 2: Seguridad Perimetral, Switching Core & Directorio Activo",
+                description="Esquema lógico de Perímetro Firewall -> Switch Core SNMP -> Hipervisor VMware ESXi -> Controlador de Dominio Active Directory & DNS.",
+                business_service="Autenticación Corporativa, DNS & Virtualización",
+                environment="production",
+                owner_team="Redes & Sistemas",
+                criticality="critical",
+            )
+            db.add(st2)
         db.flush()
 
-        def _add_node(stack_id: int, code: str, role: str, label: str, px: float, py: float, ssh_user: str = "root", ssh_port: int = 22) -> Optional[TechStackNode]:
-            ast = assets_by_code.get(code)
+        def _add_node(stack_id: int, candidates: Tuple[str, ...], role: str, label: str, px: float, py: float, ssh_user: str = "root", ssh_port: int = 22) -> Optional[TechStackNode]:
+            ast = _find_ast(*candidates)
             if not ast:
                 return None
             n = TechStackNode(
@@ -1060,13 +1082,13 @@ def ensure_network_hosts_seeded(db: Session) -> None:
             return n
 
         # Nodos del Stack 1 (Ecommerce & ERP)
-        n_vip = _add_node(st1.id, "VIP-K8S-INGRESS", "ingress_vip", "VIP Balanceador HA (:443)", 0.05, 0.34)
-        n_web = _add_node(st1.id, "VM-WEB-FRONT-01", "web_frontend", "Frontal Web Nginx + WAF", 0.31, 0.14)
-        n_sw = _add_node(st1.id, "SW-CORE-01", "infra_backing", "Switch Core VLAN 20/30", 0.31, 0.58, ssh_user="admin")
-        n_erp = _add_node(st1.id, "VM-ERP-PROD-01", "app_middleware", "Backend Apache + Docker ERP", 0.58, 0.16)
-        n_pve = _add_node(st1.id, "SRV-PVE-01", "infra_backing", "Hipervisor Proxmox VE", 0.58, 0.58)
-        n_pg1 = _add_node(st1.id, "VM-DB-PG-01", "database_cache", "PostgreSQL 16 Master (RW)", 0.84, 0.14, ssh_user="postgres")
-        n_pg2 = _add_node(st1.id, "VM-DB-PG-02", "database_cache", "PostgreSQL 16 Standby (RO)", 0.84, 0.58, ssh_user="postgres")
+        n_vip = _add_node(st1.id, ("CLU-PGSQL-VIP", "VIP-K8S-INGRESS", "RK001_M-RT01"), "ingress_vip", "VIP Balanceador HA (:443)", 0.04, 0.34)
+        n_web = _add_node(st1.id, ("CT-WAF-PROXY01", "VM-WEB-FRONT-01"), "web_frontend", "Frontal Web Nginx + WAF", 0.29, 0.14)
+        n_sw = _add_node(st1.id, ("RK001_M-SW01", "SW-CORE-01"), "infra_backing", "Switch Core VLAN 20/30", 0.29, 0.56, ssh_user="admin")
+        n_erp = _add_node(st1.id, ("VM-ERP-APP01", "VM-ERP-PROD-01"), "app_middleware", "Backend Apache + Docker ERP", 0.55, 0.16)
+        n_pve = _add_node(st1.id, ("RK001_M-SRV02", "SRV-PVE-01"), "infra_backing", "Hipervisor Proxmox VE", 0.55, 0.56)
+        n_pg1 = _add_node(st1.id, ("VM-DB-PG01", "VM-DB-PG-01"), "database_cache", "PostgreSQL 16 Master (RW)", 0.79, 0.14, ssh_user="postgres")
+        n_pg2 = _add_node(st1.id, ("VM-DB-PG02", "VM-DB-PG-02"), "database_cache", "PostgreSQL 16 Standby (RO)", 0.79, 0.56, ssh_user="postgres")
 
         edges_s1 = [
             (n_vip, n_web, "HTTPS :443 (Balanceo L7)", 443),
@@ -1089,10 +1111,10 @@ def ensure_network_hosts_seeded(db: Session) -> None:
                 )
 
         # Nodos del Stack 2 (Identidad & Core)
-        n2_fw = _add_node(st2.id, "FW-EDGE-01", "ingress_vip", "Firewall Perimetral HA", 0.06, 0.34, ssh_user="admin")
-        n2_sw = _add_node(st2.id, "SW-CORE-01", "infra_backing", "Switch Core Catalyst", 0.34, 0.34, ssh_user="admin")
-        n2_esx = _add_node(st2.id, "SRV-ESXI-01", "app_middleware", "Cluster VMware ESXi 8", 0.60, 0.18, ssh_user="root")
-        n2_ad = _add_node(st2.id, "VM-AD-DC01", "database_cache", "Active Directory & DNS (:389/:53)", 0.84, 0.34, ssh_user="Administrator", ssh_port=22)
+        n2_fw = _add_node(st2.id, ("RK001_M-FW01", "FW-EDGE-01"), "ingress_vip", "Firewall Perimetral HA", 0.05, 0.34, ssh_user="admin")
+        n2_sw = _add_node(st2.id, ("RK001_M-SW01", "SW-CORE-01"), "infra_backing", "Switch Core Catalyst", 0.31, 0.34, ssh_user="admin")
+        n2_esx = _add_node(st2.id, ("RK001_M-SRV01", "SRV-ESXI-01"), "app_middleware", "Cluster VMware ESXi 8", 0.56, 0.20, ssh_user="root")
+        n2_ad = _add_node(st2.id, ("VM-AD-DC01", "CLOUD-DR-VPS01"), "database_cache", "Active Directory & DNS (:389/:53)", 0.79, 0.34, ssh_user="Administrator", ssh_port=22)
 
         for src_n, dst_n, lbl, prt in [
             (n2_fw, n2_sw, "Uplink Trunk 10GbE", 443),

@@ -271,13 +271,13 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     switch (layer) {
       case 'edge_security':
         return Icons.security_rounded;
-      case 'network_switch':
+      case 'network_switching':
         return Icons.router_rounded;
-      case 'physical_hypervisor':
+      case 'hypervisors_phys':
         return Icons.dns_rounded;
-      case 'virtual_container':
+      case 'vms_containers':
         return Icons.cloud_queue_rounded;
-      case 'application_service':
+      case 'services_apps':
         return Icons.hub_rounded;
       default:
         return Icons.devices_other_rounded;
@@ -1534,22 +1534,22 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
         AppTheme.error,
       ),
       (
-        'network_switch',
+        'network_switching',
         'CAPA 2 • SWITCHING CORE / ACCESO & VLANs (SNMP + LLDP)',
         AppTheme.accentCyan,
       ),
       (
-        'physical_hypervisor',
+        'hypervisors_phys',
         'CAPA 3 • SERVIDORES FÍSICOS DEL RACK / HIPERVISORES VMWARE & PROXMOX / BAREBONE',
         AppTheme.accentBlue,
       ),
       (
-        'virtual_container',
+        'vms_containers',
         'CAPA 4 • MÁQUINAS VIRTUALES (VMs), DOCKER, LXC & VIPs DE CLÚSTER',
         AppTheme.accentPurple,
       ),
       (
-        'application_service',
+        'services_apps',
         'CAPA 5 • SERVICIOS DE APLICACIÓN Y BASES DE DATOS',
         AppTheme.accentTeal,
       ),
@@ -1605,15 +1605,15 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                           child: Text('Capa 1: Edge / Firewalls'),
                         ),
                         DropdownMenuItem(
-                          value: 'network_switch',
+                          value: 'network_switching',
                           child: Text('Capa 2: Switches SNMP / VLANs'),
                         ),
                         DropdownMenuItem(
-                          value: 'physical_hypervisor',
+                          value: 'hypervisors_phys',
                           child: Text('Capa 3: Físicos Rack / Hipervisores'),
                         ),
                         DropdownMenuItem(
-                          value: 'virtual_container',
+                          value: 'vms_containers',
                           child: Text('Capa 4: VMs / Contenedores / VIPs'),
                         ),
                       ],
@@ -2794,7 +2794,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     final swHosts = _hosts
         .where(
           (h) =>
-              h['logical_layer'] == 'network_switch' ||
+              h['logical_layer'] == 'network_switching' ||
               ((h['snmp_ports_count'] as num?) ?? 0) > 0,
         )
         .toList();
@@ -4088,8 +4088,8 @@ ExtendedStatus On
     final hypervisorCandidates = _hosts
         .where(
           (h) =>
-              h['logical_layer'] == 'physical_hypervisor' ||
-              h['logical_layer'] == 'network_switch',
+              h['logical_layer'] == 'hypervisors_phys' ||
+              h['logical_layer'] == 'network_switching',
         )
         .toList();
     String parentAssetCode = hypervisorCandidates.isNotEmpty
