@@ -774,6 +774,54 @@ class AnsibleContactsRoutingWebhook(BaseModel):
     routing_rules: List[Dict[str, Any]] = []
 
 
+class TechStackDiagramInput(BaseModel):
+    code: str
+    name: str
+    description: str = ""
+    business_service: str = "Plataforma Digital & Negocio"
+    environment: str = "production"
+    owner_team: str = "DevOps & Arquitectura"
+    criticality: str = "critical"
+
+
+class TechStackNodeInput(BaseModel):
+    stack_id: int
+    asset_id: int
+    role_layer: str = "web_frontend"
+    custom_label: str = ""
+    pos_x: float = 0.25
+    pos_y: float = 0.35
+    ssh_enabled: bool = True
+    ssh_user: str = "root"
+    ssh_port: int = 22
+
+
+class TechStackNodeMoveInput(BaseModel):
+    pos_x: float
+    pos_y: float
+    role_layer: Optional[str] = None
+    custom_label: Optional[str] = None
+    ssh_user: Optional[str] = None
+    ssh_port: Optional[int] = None
+
+
+class TechStackEdgeInput(BaseModel):
+    stack_id: int
+    source_node_id: int
+    target_node_id: int
+    protocol_label: str = "HTTPS :443"
+    port: int = 443
+    notes: str = ""
+
+
+class HostSshCommandInput(BaseModel):
+    asset_id: int
+    command: str = "uptime && df -h / && free -m"
+    ssh_user: str = "root"
+    ssh_port: int = 22
+
+
+
 
 
 

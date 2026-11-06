@@ -653,5 +653,63 @@ class SmtpAlertConfig(Base):
     enabled = Column(Boolean, default=True)
 
 
+class TechStackDiagram(Base):
+    """
+    Esquema visual de Lógica de Negocio / Stack Tecnológico (ej. 'Stack Portal Ecommerce & ERP',
+    'Stack Clúster Microservicios & Pagos', 'Stack Identidad & Correo').
+    Permite tener múltiples esquemas independientes donde se dibujan los frontales web,
+    balanceadores, contenedores, middlewares y bases de datos con coordenadas 2D,
+    telemetría Prometheus al pasar el ratón y acceso SSH directo.
+    """
+    __tablename__ = "tech_stack_diagrams"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(80), unique=True, index=True, nullable=False)
+    name = Column(String(180), nullable=False)
+    description = Column(Text, default="")
+    business_service = Column(String(140), default="Plataforma Digital & Negocio")
+    environment = Column(String(32), default="production")
+    owner_team = Column(String(120), default="DevOps & Arquitectura")
+    criticality = Column(String(24), default="critical")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TechStackNode(Base):
+    """
+    Nodo posicionado dentro del lienzo 2D de un Stack Tecnológico, vinculado a un Host/VM/VIP/BBDD
+    real de Red & Host / CMDB / Prometheus.
+    """
+    __tablename__ = "tech_stack_nodes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    stack_id = Column(Integer, ForeignKey("tech_stack_diagrams.id", ondelete="CASCADE"), nullable=False, index=True)
+    asset_id = Column(Integer, ForeignKey("cmdb_assets.id", ondelete="CASCADE"), nullable=False, index=True)
+    # role_layer: ingress_vip | web_frontend | app_middleware | database_cache | infra_backing
+    role_layer = Column(String(48), default="web_frontend")
+    custom_label = Column(String(140), default="")
+    pos_x = Column(Float, default=0.25)  # Coordenada normalizada X (0.04 .. 0.92) en el lienzo
+    pos_y = Column(Float, default=0.35)  # Coordenada normalizada Y (0.06 .. 0.88) en el lienzo
+    ssh_enabled = Column(Boolean, default=True)
+    ssh_user = Column(String(64), default="root")
+    ssh_port = Column(Integer, default=22)
+
+
+class TechStackEdge(Base):
+    """
+    Flecha / conexión de flujo de lógica de negocio entre dos nodos de un Stack Tecnológico
+    (ej. Balanceador VIP -> Frontal Web Nginx 01 -> App ERP -> PostgreSQL Master).
+    """
+    __tablename__ = "tech_stack_edges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    stack_id = Column(Integer, ForeignKey("tech_stack_diagrams.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_node_id = Column(Integer, ForeignKey("tech_stack_nodes.id", ondelete="CASCADE"), nullable=False)
+    target_node_id = Column(Integer, ForeignKey("tech_stack_nodes.id", ondelete="CASCADE"), nullable=False)
+    protocol_label = Column(String(120), default="HTTPS :443")
+    port = Column(Integer, default=443)
+    notes = Column(Text, default="")
+
+
+
 
 

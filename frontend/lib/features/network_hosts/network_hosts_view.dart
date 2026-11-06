@@ -51,6 +51,8 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
   String? _error;
 
   Map<String, dynamic> _overview = {};
+  int? _selectedStackId;
+  Map<String, dynamic>? _hoveredStackNode;
   int? _selectedHostId;
   int? _selectedSwitchAssetId;
   int _telemetryRangeHours = 6;
@@ -66,12 +68,12 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(length: 7, vsync: this);
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging && mounted) {
-        if (_tabController.index == 3 && _selectedHostId != null) {
+        if (_tabController.index == 4 && _selectedHostId != null) {
           _loadHostTelemetry(_selectedHostId!);
-        } else if (_tabController.index == 5 && _aiContextManifest == null) {
+        } else if (_tabController.index == 6 && _aiContextManifest == null) {
           _loadAiContextManifest();
         }
         setState(() {});
@@ -85,6 +87,11 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     _tabController.dispose();
     super.dispose();
   }
+
+  List<Map<String, dynamic>> get _techStacks =>
+      ((_overview['tech_stacks'] as List?) ?? [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
 
   List<Map<String, dynamic>> get _hosts =>
       ((_overview['hosts'] as List?) ?? [])
@@ -147,6 +154,12 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
       setState(() {
         _overview = data;
         _loading = false;
+        final stacks = _techStacks;
+        if (stacks.isNotEmpty &&
+            (_selectedStackId == null ||
+                !stacks.any((st) => st['id'] == _selectedStackId))) {
+          _selectedStackId = stacks.first['id'] as int;
+        }
         final hosts = _hosts;
         if (hosts.isNotEmpty) {
           if (_selectedHostId == null ||
@@ -306,6 +319,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
           child: TabBarView(
             controller: _tabController,
             children: [
+              _buildTechStacksCanvasTab(),
               _buildLogicalTopologyTab(),
               _buildNagiosServiceMonitorTab(),
               _buildSnmpSwitchesAndConnectorsTab(),
@@ -597,28 +611,32 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
         labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
         tabs: const [
           Tab(
+            icon: Icon(Icons.layers_rounded, size: 16),
+            text: '1. Stacks Tecnológicos & Lógica de Negocio (Lienzo 2D + SSH)',
+          ),
+          Tab(
             icon: Icon(Icons.schema_rounded, size: 16),
-            text: '1. Diagrama Lógico & Monitorización en Vivo',
+            text: '2. Topología de Capas (Red / Rack / VMs)',
           ),
           Tab(
             icon: Icon(Icons.monitor_heart_rounded, size: 16),
-            text: '2. Estados Nagios & Heartbeats (HTTP/HTTPS/SSL/TCP)',
+            text: '3. Estados Nagios & Heartbeats (HTTP/HTTPS/SSL/TCP)',
           ),
           Tab(
             icon: Icon(Icons.settings_ethernet_rounded, size: 16),
-            text: '3. Switches SNMP (LLDP) & Conectores (Proxmox/VMware/Docker/Web)',
+            text: '4. Switches SNMP (LLDP) & Conectores (Proxmox/VMware/Docker/Web)',
           ),
           Tab(
             icon: Icon(Icons.multiline_chart_rounded, size: 16),
-            text: '4. Gráficas Prometheus TSDB & Agentes a Instalar',
+            text: '5. Gráficas Prometheus TSDB & Agentes a Instalar',
           ),
           Tab(
             icon: Icon(Icons.notifications_active_rounded, size: 16),
-            text: '5. Avisos de Alarmas (Personas/Grupos/HostGroups) & Mantenimiento',
+            text: '6. Avisos de Alarmas (Personas/Grupos/HostGroups) & Mantenimiento',
           ),
           Tab(
             icon: Icon(Icons.smart_toy_rounded, size: 16),
-            text: '6. Automatización Ansible, Webhooks & Guía Agentes IA',
+            text: '7. Automatización Ansible, Webhooks & Guía Agentes IA',
           ),
         ],
       ),
@@ -626,7 +644,863 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
   }
 
   // ===========================================================================
-  // TAB 1: DIAGRAMA LÓGICO DE CONEXIÓN CON MONITORIZACIÓN INTEGRADA (5 CAPAS)
+  // TAB 1: STACKS TECNOLÓGICOS & ESQUEMAS DE LÓGICA DE NEGOCIO (LIENZO 2D + HOVER PROMETHEUS + SSH)
+  // ===========================================================================
+
+  Widget _buildTechStacksCanvasTab() {
+    final stacks = _techStacks;
+    final activeStack = stacks.firstWhere(
+      (s) => s['id'] == _selectedStackId,
+      orElse: () => stacks.isNotEmpty ? stacks.first : <String, dynamic>{},
+    );
+    final nodes = ((activeStack['nodes'] as List?) ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final edges = ((activeStack['edges'] as List?) ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+
+    return Column(
+      children: [
+        // Barra de control de Stacks Tecnológicos / Esquemas de Negocio
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: const BoxDecoration(
+            color: AppTheme.bgCard,
+            border: Border(bottom: BorderSide(color: AppTheme.border)),
+          ),
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            alignment: WrapAlignment.spaceBetween,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.layers_rounded,
+                    size: 18,
+                    color: AppTheme.accentCyan,
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'STACK TECNOLÓGICO:',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  if (stacks.isNotEmpty)
+                    DropdownButton<int>(
+                      value: activeStack['id'] as int?,
+                      dropdownColor: AppTheme.bgElevated,
+                      underline: const SizedBox.shrink(),
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.accentBlue,
+                      ),
+                      items: stacks
+                          .map(
+                            (st) => DropdownMenuItem<int>(
+                              value: st['id'] as int,
+                              child: Text(
+                                '${st['name']} (${st['nodes_count']} nodos)',
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) => setState(() {
+                        _selectedStackId = v;
+                        _hoveredStackNode = null;
+                      }),
+                    ),
+                ],
+              ),
+              if (widget.canEdit)
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _showCreateTechStackDialog,
+                      icon: const Icon(Icons.create_new_folder_rounded, size: 15),
+                      label: const Text(
+                        '+ Nuevo Stack Tecnológico',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                    ),
+                    if (activeStack.isNotEmpty) ...[
+                      OutlinedButton.icon(
+                        onPressed: () =>
+                            _showAddNodeToStackDialog(activeStack['id'] as int),
+                        icon: const Icon(Icons.add_box_rounded, size: 15),
+                        label: const Text(
+                          '+ Añadir Host Existente al Lienzo',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                      ),
+                      ElevatedButton.icon(
+                        onPressed: () =>
+                            _showCreateVirtualMachineWithServicesDialog(
+                              attachToCurrentStack: true,
+                            ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.accentBlue,
+                          foregroundColor: Colors.white,
+                        ),
+                        icon: const Icon(Icons.add_to_queue_rounded, size: 15),
+                        label: const Text(
+                          '+ Crear Nueva VM / BBDD en este Stack',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: nodes.length >= 2
+                            ? () => _showCreateTechStackEdgeDialog(
+                                activeStack['id'] as int,
+                                nodes,
+                              )
+                            : null,
+                        icon: const Icon(Icons.trending_flat_rounded, size: 16),
+                        label: const Text(
+                          '+ Conectar Nodos (Dibujar Flecha ➔)',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+            ],
+          ),
+        ),
+        // Lienzo 2D Interactivo con Drag & Drop + Hover de Gráficas Prometheus + SSH
+        Expanded(
+          child: activeStack.isEmpty
+              ? const Center(
+                  child: Text('Crea un Stack Tecnológico para empezar'),
+                )
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final cw = math.max(constraints.maxWidth, 980.0);
+                    final ch = math.max(constraints.maxHeight, 560.0);
+                    return SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: SingleChildScrollView(
+                        child: SizedBox(
+                          width: cw,
+                          height: ch,
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              // 1. Columnas guía de Lógica de Negocio (Swimlanes)
+                              Row(
+                                children: [
+                                  _buildSwimlaneColumn(
+                                    '1. ENTRADA / VIP / WAF / PERÍMETRO',
+                                    AppTheme.accentCyan,
+                                  ),
+                                  _buildSwimlaneColumn(
+                                    '2. FRONTALES WEB BALANCEADOS (NGINX / APACHE)',
+                                    AppTheme.accentBlue,
+                                  ),
+                                  _buildSwimlaneColumn(
+                                    '3. LÓGICA DE NEGOCIO / MICROSERVICIOS / DOCKER',
+                                    AppTheme.accentPurple,
+                                  ),
+                                  _buildSwimlaneColumn(
+                                    '4. BASES DE DATOS / CACHÉ / INFRAESTRUCTURA',
+                                    AppTheme.accentTeal,
+                                  ),
+                                ],
+                              ),
+                              // 2. Pintor de Flechas Curvas de Lógica de Negocio con Estado en Vivo
+                              Positioned.fill(
+                                child: CustomPaint(
+                                  painter: _TechStackEdgesPainter(
+                                    nodes: nodes,
+                                    edges: edges,
+                                    canvasSize: Size(cw, ch),
+                                  ),
+                                ),
+                              ),
+                              // 3. Nodos Arrastrables (Drag & Drop) con Hover de Gráficas Prometheus y Botón SSH
+                              for (final sn in nodes)
+                                _buildDraggableStackNodeCard(
+                                  sn: sn,
+                                  canvasWidth: cw,
+                                  canvasHeight: ch,
+                                ),
+                              // 4. Leyenda e instrucciones en esquina inferior izquierda
+                              Positioned(
+                                left: 12,
+                                bottom: 10,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.bgSecondary.withValues(
+                                      alpha: 0.94,
+                                    ),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: AppTheme.border),
+                                  ),
+                                  child: Text(
+                                    '💡 Arrastra cualquier nodo para diseñar tu esquema • Posa el ratón encima para ver Gráficas Prometheus y Estado en Vivo • Pulsa "SSH" para abrir consola remota (${edges.length} conexiones activas)',
+                                    style: const TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.textSecondary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              // 5. Panel Flotante en Vivo al posar el ratón (Hover) con Gráficas Prometheus TSDB y SSH
+                              if (_hoveredStackNode != null)
+                                Positioned(
+                                  right: 16,
+                                  bottom: 14,
+                                  child: _buildStackNodePrometheusHoverPanel(
+                                    _hoveredStackNode!,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSwimlaneColumn(String title, Color color) {
+    return Expanded(
+      child: Container(
+        margin: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.035),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.22)),
+        ),
+        child: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.10),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(11),
+                ),
+              ),
+              child: Text(
+                title,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w800,
+                  color: color,
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDraggableStackNodeCard({
+    required Map<String, dynamic> sn,
+    required double canvasWidth,
+    required double canvasHeight,
+  }) {
+    final host = Map<String, dynamic>.from((sn['host'] as Map?) ?? {});
+    final px = ((sn['pos_x'] as num?)?.toDouble() ?? 0.2).clamp(0.02, 0.84);
+    final py = ((sn['pos_y'] as num?)?.toDouble() ?? 0.3).clamp(0.07, 0.78);
+    final left = px * canvasWidth;
+    final top = py * canvasHeight;
+
+    final state = (host['nagios_host_state'] as String?) ?? 'UP';
+    final stateCol = _nagiosStateColor(state);
+    final mini = Map<String, dynamic>.from((host['mini_series'] as Map?) ?? {});
+    final cpuSeries = ((mini['cpu'] as List?) ?? [])
+        .map((e) => (e as num).toDouble())
+        .toList();
+    final checks = ((host['service_checks'] as List?) ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final isHovered =
+        _hoveredStackNode != null && _hoveredStackNode!['id'] == sn['id'];
+    final rackId = host['rack_id'] as int?;
+    final targetRackDevId = host['target_rack_device_id'] as int?;
+
+    return Positioned(
+      left: left,
+      top: top,
+      child: MouseRegion(
+        onEnter: (_) => setState(() {
+          _hoveredStackNode = sn;
+          _selectedHostId = host['id'] as int?;
+        }),
+        child: GestureDetector(
+          onTap: () {
+            setState(() {
+              _hoveredStackNode = sn;
+              _selectedHostId = host['id'] as int?;
+            });
+          },
+          onPanUpdate: widget.canEdit
+              ? (details) {
+                  final newPx = ((left + details.delta.dx) / canvasWidth).clamp(
+                    0.02,
+                    0.84,
+                  );
+                  final newPy = ((top + details.delta.dy) / canvasHeight).clamp(
+                    0.07,
+                    0.78,
+                  );
+                  setState(() {
+                    sn['pos_x'] = newPx;
+                    sn['pos_y'] = newPy;
+                  });
+                }
+              : null,
+          onPanEnd: widget.canEdit
+              ? (_) async {
+                  final res = await widget.api.moveTechStackNode(
+                    sn['id'] as int,
+                    {
+                      'pos_x': sn['pos_x'],
+                      'pos_y': sn['pos_y'],
+                    },
+                  );
+                  if (mounted) setState(() => _overview = res);
+                }
+              : null,
+          child: Container(
+            width: 232,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppTheme.bgSecondary,
+              borderRadius: BorderRadius.circular(11),
+              border: Border.all(
+                color: isHovered ? AppTheme.accentBlue : stateCol,
+                width: isHovered ? 2.2 : 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: (isHovered ? AppTheme.accentBlue : stateCol).withValues(
+                    alpha: 0.18,
+                  ),
+                  blurRadius: isHovered ? 14 : 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Fila 1: Badge Nagios + Código + Latencia + Quitar del lienzo
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 1.5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: stateCol.withValues(alpha: 0.16),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: stateCol),
+                      ),
+                      child: Text(
+                        state,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          color: stateCol,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '${host['code']}',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.textPrimary,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (host['last_ping_ms'] != null)
+                      Text(
+                        '${host['last_ping_ms']}ms',
+                        style: const TextStyle(
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.accentTeal,
+                        ),
+                      ),
+                    if (widget.canEdit) ...[
+                      const SizedBox(width: 4),
+                      InkWell(
+                        onTap: () async {
+                          final res = await widget.api.deleteTechStackNode(
+                            sn['id'] as int,
+                          );
+                          setState(() {
+                            _overview = res;
+                            if (_hoveredStackNode?['id'] == sn['id']) {
+                              _hoveredStackNode = null;
+                            }
+                          });
+                        },
+                        child: const Icon(
+                          Icons.close,
+                          size: 13,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 3),
+                // Etiqueta de Rol en el Stack Tecnológico
+                Text(
+                  '${sn['custom_label']}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.accentBlue,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${host['heartbeat_ip']} • ${host['rack_location_badge']}',
+                  style: const TextStyle(
+                    fontSize: 9.5,
+                    fontFamily: 'monospace',
+                    color: AppTheme.textSecondary,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 6),
+                // Mini-Gráfica Sparkline Prometheus en vivo integrada en la tarjeta
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'CPU ${host['cpu_pct']}% • RAM ${host['ram_pct']}%',
+                            style: const TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          SizedBox(
+                            height: 20,
+                            width: double.infinity,
+                            child: CustomPaint(
+                              painter: _MiniSparklinePainter(
+                                values: cpuSeries,
+                                color: AppTheme.accentBlue,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                // Barra de acciones rápidas del nodo: SSH / Gráficas Prometheus / Rack / Servicios
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    InkWell(
+                      onTap: () => _showSshWebConsoleDialog(sn, host),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2.5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0F172A),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.terminal_rounded,
+                              size: 11,
+                              color: Color(0xFF38BDF8),
+                            ),
+                            SizedBox(width: 4),
+                            Text(
+                              'SSH',
+                              style: TextStyle(
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    InkWell(
+                      onTap: () {
+                        setState(() => _selectedHostId = host['id'] as int);
+                        _tabController.animateTo(4);
+                        _loadHostTelemetry(host['id'] as int);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2.5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.warning.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.show_chart_rounded,
+                              size: 11,
+                              color: AppTheme.warning,
+                            ),
+                            SizedBox(width: 3),
+                            Text(
+                              'Prometheus',
+                              style: TextStyle(
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.warning,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (rackId != null && widget.onNavigateToRackDevice != null)
+                      InkWell(
+                        onTap: () => widget.onNavigateToRackDevice!(
+                          rackId,
+                          targetRackDevId,
+                        ),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 2.5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppTheme.accentBlue.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          child: const Text(
+                            'Rack',
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w800,
+                              color: AppTheme.accentBlue,
+                            ),
+                          ),
+                        ),
+                      ),
+                    Text(
+                      '${checks.length} chk',
+                      style: const TextStyle(
+                        fontSize: 9.5,
+                        color: AppTheme.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStackNodePrometheusHoverPanel(Map<String, dynamic> sn) {
+    final host = Map<String, dynamic>.from((sn['host'] as Map?) ?? {});
+    final mini = Map<String, dynamic>.from((host['mini_series'] as Map?) ?? {});
+    final cpuList = ((mini['cpu'] as List?) ?? [])
+        .map((e) => (e as num).toDouble())
+        .toList();
+    final ramList = ((mini['ram'] as List?) ?? [])
+        .map((e) => (e as num).toDouble())
+        .toList();
+    final latList = ((mini['latency'] as List?) ?? [])
+        .map((e) => (e as num).toDouble())
+        .toList();
+    final trafList = ((mini['traffic'] as List?) ?? [])
+        .map((e) => (e as num).toDouble())
+        .toList();
+    final checks = ((host['service_checks'] as List?) ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final state = (host['nagios_host_state'] as String?) ?? 'UP';
+    final stateCol = _nagiosStateColor(state);
+
+    return Material(
+      elevation: 10,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: 420,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppTheme.bgSecondary,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.accentBlue, width: 1.8),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: stateCol.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(color: stateCol),
+                  ),
+                  child: Text(
+                    state,
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      color: stateCol,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${host['code']} — ${sn['custom_label']}',
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.textPrimary,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 15),
+                  constraints: const BoxConstraints(),
+                  padding: EdgeInsets.zero,
+                  onPressed: () => setState(() => _hoveredStackNode = null),
+                ),
+              ],
+            ),
+            const SizedBox(height: 3),
+            Text(
+              'IPs: ${(host['all_ips'] as List?)?.join(", ") ?? host['heartbeat_ip']} • ${host['rack_location_badge']}',
+              style: const TextStyle(
+                fontSize: 10.5,
+                fontFamily: 'monospace',
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            const Divider(height: 16),
+            const Text(
+              'TELEMETRÍA EN VIVO ALMACENADA EN PROMETHEUS TSDB:',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.accentCyan,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildHoverMiniChartBox(
+                    'CPU (${host['cpu_pct']}%)',
+                    cpuList,
+                    AppTheme.accentBlue,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildHoverMiniChartBox(
+                    'RAM (${host['ram_pct']}%)',
+                    ramList,
+                    AppTheme.accentPurple,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildHoverMiniChartBox(
+                    'Latencia (${host['last_ping_ms'] ?? 1.2} ms)',
+                    latList,
+                    AppTheme.accentTeal,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildHoverMiniChartBox(
+                    'Tráfico Red (Mbps)',
+                    trafList,
+                    AppTheme.warning,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'ESTADOS NAGIOS DE SERVICIOS (${checks.length}):',
+              style: const TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 4),
+            ...checks.take(4).map((c) {
+              final cst = (c['nagios_state'] as String?) ?? 'OK';
+              final ccol = _nagiosStateColor(cst);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 3),
+                child: Row(
+                  children: [
+                    Icon(Icons.circle, size: 7, color: ccol),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        '${c['service_name']}: ${c['status_output']}',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: AppTheme.textSecondary,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                ElevatedButton.icon(
+                  onPressed: () => _showSshWebConsoleDialog(sn, host),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0F172A),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                  ),
+                  icon: const Icon(
+                    Icons.terminal_rounded,
+                    size: 14,
+                    color: Color(0xFF38BDF8),
+                  ),
+                  label: Text(
+                    'Conectar SSH (${sn['ssh_user']}@${host['heartbeat_ip']})',
+                    style: const TextStyle(fontSize: 10.5),
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    setState(() => _selectedHostId = host['id'] as int);
+                    _tabController.animateTo(4);
+                    _loadHostTelemetry(host['id'] as int);
+                  },
+                  icon: const Icon(Icons.multiline_chart_rounded, size: 14),
+                  label: const Text(
+                    'Abrir Gráficas Prometheus',
+                    style: TextStyle(fontSize: 10.5),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHoverMiniChartBox(
+    String label,
+    List<double> values,
+    Color color,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: AppTheme.bgCard,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 9.5,
+              fontWeight: FontWeight.w800,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 4),
+          SizedBox(
+            height: 26,
+            width: double.infinity,
+            child: CustomPaint(
+              painter: _MiniSparklinePainter(values: values, color: color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ===========================================================================
+  // TAB 2: DIAGRAMA LÓGICO DE CONEXIÓN CON MONITORIZACIÓN INTEGRADA (5 CAPAS)
   // ===========================================================================
 
   Widget _buildLogicalTopologyTab() {
@@ -1436,12 +2310,23 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
               ),
             OutlinedButton.icon(
               onPressed: () {
-                _tabController.animateTo(3);
+                _tabController.animateTo(4);
                 _loadHostTelemetry(host['id'] as int);
               },
               icon: const Icon(Icons.show_chart_rounded, size: 15),
               label: const Text(
                 'Ver Gráficas Prometheus',
+                style: TextStyle(fontSize: 11),
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: () => _showSshWebConsoleDialog(
+                {'ssh_user': 'root', 'ssh_port': 22},
+                host,
+              ),
+              icon: const Icon(Icons.terminal_rounded, size: 15),
+              label: const Text(
+                'Consola SSH',
                 style: TextStyle(fontSize: 11),
               ),
             ),
@@ -3182,7 +4067,9 @@ ExtendedStatus On
   // DIÁLOGOS MODALES DE CREACIÓN Y DESCUBRIMIENTO
   // ===========================================================================
 
-  Future<void> _showCreateVirtualMachineWithServicesDialog() async {
+  Future<void> _showCreateVirtualMachineWithServicesDialog({
+    bool attachToCurrentStack = false,
+  }) async {
     String assetClass = 'virtual_machine';
     String hypervisorPlatform = 'VMware vSphere / Proxmox VE';
     final codeCtrl = TextEditingController(text: 'VM-APP-NUEVA-01');
@@ -3717,14 +4604,34 @@ ExtendedStatus On
                     final created = Map<String, dynamic>.from(
                       (res['created_host'] as Map?) ?? {},
                     );
-                    setState(() {
-                      _overview = Map<String, dynamic>.from(
-                        res['overview'] as Map,
+                    final newAssetId = created['asset_id'] as int?;
+                    if (attachToCurrentStack &&
+                        _selectedStackId != null &&
+                        newAssetId != null) {
+                      final stackUpdated = await widget.api.createTechStackNode(
+                        {
+                          'stack_id': _selectedStackId,
+                          'asset_id': newAssetId,
+                          'role_layer': 'web_frontend',
+                          'custom_label': nameCtrl.text.trim(),
+                          'pos_x': 0.34,
+                          'pos_y': 0.36,
+                        },
                       );
-                      if (created['asset_id'] is int) {
-                        _selectedHostId = created['asset_id'] as int;
-                      }
-                    });
+                      setState(() {
+                        _overview = stackUpdated;
+                        _selectedHostId = newAssetId;
+                      });
+                    } else {
+                      setState(() {
+                        _overview = Map<String, dynamic>.from(
+                          res['overview'] as Map,
+                        );
+                        if (newAssetId != null) {
+                          _selectedHostId = newAssetId;
+                        }
+                      });
+                    }
                     if (_selectedHostId != null) {
                       _loadHostTelemetry(_selectedHostId!);
                     }
@@ -3743,6 +4650,492 @@ ExtendedStatus On
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Future<void> _showCreateTechStackDialog() async {
+    final codeCtrl = TextEditingController(text: 'STACK-WEB-MICROSERVICIOS');
+    final nameCtrl = TextEditingController(
+      text: 'Stack 3: Frontales Web, API Gateway & Base de Datos',
+    );
+    final serviceCtrl = TextEditingController(
+      text: 'Plataforma Digital & APIs',
+    );
+    final descCtrl = TextEditingController(
+      text: 'Esquema lógico de balanceo, frontales web y clúster de datos.',
+    );
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Crear Nuevo Stack Tecnológico / Esquema de Negocio'),
+        content: SizedBox(
+          width: 460,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: codeCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Código del Stack (ej. STACK-PORTAL-B2B)',
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Nombre del Stack Tecnológico',
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: serviceCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Servicio de Negocio',
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: descCtrl,
+                decoration: const InputDecoration(labelText: 'Descripción'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final res = await widget.api.upsertTechStackDiagram({
+                'code': codeCtrl.text.trim(),
+                'name': nameCtrl.text.trim(),
+                'business_service': serviceCtrl.text.trim(),
+                'description': descCtrl.text.trim(),
+              });
+              setState(() {
+                _overview = res;
+                final stacks = _techStacks;
+                if (stacks.isNotEmpty) {
+                  _selectedStackId = stacks.last['id'] as int;
+                }
+              });
+              _showSnack('Stack Tecnológico creado.');
+            },
+            child: const Text('Crear Stack'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showAddNodeToStackDialog(int stackId) async {
+    if (_hosts.isEmpty) return;
+    int assetId = _selectedHostId ?? (_hosts.first['id'] as int);
+    String roleLayer = 'web_frontend';
+    final labelCtrl = TextEditingController(text: 'Frontal Web / Nodo Stack');
+    final sshUserCtrl = TextEditingController(text: 'root');
+    final sshPortCtrl = TextEditingController(text: '22');
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => AlertDialog(
+          title: const Text('Añadir Host / VM / BBDD al Lienzo del Stack'),
+          content: SizedBox(
+            width: 460,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<int>(
+                  initialValue: assetId,
+                  decoration: const InputDecoration(
+                    labelText: 'Host / VM / Frontal / Base de Datos',
+                  ),
+                  items: _hosts
+                      .map(
+                        (h) => DropdownMenuItem<int>(
+                          value: h['id'] as int,
+                          child: Text(
+                            '${h['code']} — ${h['name']} (${h['heartbeat_ip']})',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) => setModal(() => assetId = v ?? assetId),
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  initialValue: roleLayer,
+                  decoration: const InputDecoration(
+                    labelText: 'Columna / Rol en el Stack Tecnológico',
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'ingress_vip',
+                      child: Text('Columna 1: Entrada / VIP / Firewall / WAF'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'web_frontend',
+                      child: Text(
+                        'Columna 2: Frontal Web Balanceado (Nginx / Apache)',
+                      ),
+                    ),
+                    DropdownMenuItem(
+                      value: 'app_middleware',
+                      child: Text(
+                        'Columna 3: Lógica de Negocio / App / Docker',
+                      ),
+                    ),
+                    DropdownMenuItem(
+                      value: 'database_cache',
+                      child: Text('Columna 4: Base de Datos / Caché / AD'),
+                    ),
+                  ],
+                  onChanged: (v) => setModal(() => roleLayer = v ?? roleLayer),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: labelCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Etiqueta Funcional en el Diagrama',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: sshUserCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Usuario SSH',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: sshPortCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Puerto SSH',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                final pxMap = {
+                  'ingress_vip': 0.06,
+                  'web_frontend': 0.32,
+                  'app_middleware': 0.58,
+                  'database_cache': 0.82,
+                };
+                final res = await widget.api.createTechStackNode({
+                  'stack_id': stackId,
+                  'asset_id': assetId,
+                  'role_layer': roleLayer,
+                  'custom_label': labelCtrl.text.trim(),
+                  'pos_x': pxMap[roleLayer] ?? 0.32,
+                  'pos_y': 0.35,
+                  'ssh_user': sshUserCtrl.text.trim(),
+                  'ssh_port': int.tryParse(sshPortCtrl.text.trim()) ?? 22,
+                });
+                setState(() => _overview = res);
+                _showSnack('Nodo añadido al lienzo del Stack.');
+              },
+              child: const Text('Colocar en Lienzo'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showCreateTechStackEdgeDialog(
+    int stackId,
+    List<Map<String, dynamic>> nodes,
+  ) async {
+    int srcNodeId = nodes.first['id'] as int;
+    int dstNodeId = nodes[1]['id'] as int;
+    final protoCtrl = TextEditingController(
+      text: 'HTTPS :443 / Proxy Pass :8080',
+    );
+    final portCtrl = TextEditingController(text: '443');
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => AlertDialog(
+          title: const Text(
+            'Conectar Nodos en el Stack (Dibujar Flecha de Negocio ➔)',
+          ),
+          content: SizedBox(
+            width: 440,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<int>(
+                  initialValue: srcNodeId,
+                  decoration: const InputDecoration(
+                    labelText: 'Nodo Origen (Quién inicia la petición)',
+                  ),
+                  items: nodes.map((n) {
+                    final h = Map<String, dynamic>.from(
+                      (n['host'] as Map?) ?? {},
+                    );
+                    return DropdownMenuItem<int>(
+                      value: n['id'] as int,
+                      child: Text('${h['code']} — ${n['custom_label']}'),
+                    );
+                  }).toList(),
+                  onChanged: (v) => setModal(() => srcNodeId = v ?? srcNodeId),
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<int>(
+                  initialValue: dstNodeId,
+                  decoration: const InputDecoration(
+                    labelText: 'Nodo Destino (Quién recibe el tráfico)',
+                  ),
+                  items: nodes.map((n) {
+                    final h = Map<String, dynamic>.from(
+                      (n['host'] as Map?) ?? {},
+                    );
+                    return DropdownMenuItem<int>(
+                      value: n['id'] as int,
+                      child: Text('${h['code']} — ${n['custom_label']}'),
+                    );
+                  }).toList(),
+                  onChanged: (v) => setModal(() => dstNodeId = v ?? dstNodeId),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: TextField(
+                        controller: protoCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Protocolo / Flujo de Negocio',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: portCtrl,
+                        decoration: const InputDecoration(labelText: 'Puerto'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                final res = await widget.api.createTechStackEdge({
+                  'stack_id': stackId,
+                  'source_node_id': srcNodeId,
+                  'target_node_id': dstNodeId,
+                  'protocol_label': protoCtrl.text.trim(),
+                  'port': int.tryParse(portCtrl.text.trim()) ?? 443,
+                });
+                setState(() => _overview = res);
+                _showSnack('Flecha añadida al Stack Tecnológico.');
+              },
+              child: const Text('Dibujar Flecha ➔'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showSshWebConsoleDialog(
+    Map<String, dynamic> sn,
+    Map<String, dynamic> host,
+  ) async {
+    final assetId = host['id'] as int;
+    final ip = (host['heartbeat_ip'] as String?) ?? '127.0.0.1';
+    final sshUser = (sn['ssh_user'] as String?) ?? 'root';
+    final sshPort = (sn['ssh_port'] as int?) ?? 22;
+    final sshCmd = sshPort == 22
+        ? 'ssh $sshUser@$ip'
+        : 'ssh -p $sshPort $sshUser@$ip';
+    final sshUri = 'ssh://$sshUser@$ip:$sshPort';
+    final cmdCtrl = TextEditingController(
+      text: 'uptime && df -h / && free -m && ss -tulpn',
+    );
+    String consoleOutput =
+        'Conectando a $sshUser@$ip:$sshPort (${host['code']})...';
+    bool runningCmd = true;
+
+    // Ejecutar diagnóstico inicial
+    widget.api
+        .executeHostSshConsole({
+          'asset_id': assetId,
+          'command': cmdCtrl.text,
+          'ssh_user': sshUser,
+          'ssh_port': sshPort,
+        })
+        .then((res) {
+          consoleOutput = (res['output'] as String?) ?? '';
+          runningCmd = false;
+        });
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) {
+          if (runningCmd) {
+            Future<void>.delayed(const Duration(milliseconds: 350), () {
+              if (ctx.mounted) setModal(() => runningCmd = false);
+            });
+          }
+          return AlertDialog(
+            title: Row(
+              children: [
+                const Icon(
+                  Icons.terminal_rounded,
+                  color: AppTheme.accentCyan,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Consola Remota SSH — ${host['code']} ($sshCmd)',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: 680,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          launchUrl(
+                            Uri.parse(sshUri),
+                            mode: LaunchMode.externalApplication,
+                          );
+                        },
+                        icon: const Icon(Icons.open_in_new_rounded, size: 15),
+                        label: Text(
+                          'Abrir Cliente SSH del Sistema ($sshUri)',
+                          style: const TextStyle(fontSize: 11.5),
+                        ),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: sshCmd));
+                          _showSnack('Comando "$sshCmd" copiado');
+                        },
+                        icon: const Icon(Icons.copy_rounded, size: 14),
+                        label: Text(
+                          'Copiar "$sshCmd"',
+                          style: const TextStyle(fontSize: 11.5),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: cmdCtrl,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontFamily: 'monospace',
+                          ),
+                          decoration: const InputDecoration(
+                            labelText:
+                                'Comando Remoto SSH a Ejecutar en el Host',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton.icon(
+                        onPressed: () async {
+                          final res = await widget.api.executeHostSshConsole({
+                            'asset_id': assetId,
+                            'command': cmdCtrl.text.trim(),
+                            'ssh_user': sshUser,
+                            'ssh_port': sshPort,
+                          });
+                          setModal(() {
+                            consoleOutput = (res['output'] as String?) ?? '';
+                          });
+                        },
+                        icon: const Icon(Icons.play_arrow_rounded, size: 16),
+                        label: const Text('Ejecutar'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    height: 260,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0F172A),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: SingleChildScrollView(
+                      child: SelectableText(
+                        consoleOutput,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                          color: Color(0xFF4ADE80),
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cerrar Consola'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -4601,3 +5994,160 @@ class _PrometheusSeriesChartPainter extends CustomPainter {
   bool shouldRepaint(covariant _PrometheusSeriesChartPainter oldDelegate) =>
       true;
 }
+
+class _TechStackEdgesPainter extends CustomPainter {
+  final List<Map<String, dynamic>> nodes;
+  final List<Map<String, dynamic>> edges;
+  final Size canvasSize;
+
+  _TechStackEdgesPainter({
+    required this.nodes,
+    required this.edges,
+    required this.canvasSize,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final nodesById = <int, Map<String, dynamic>>{};
+    for (final n in nodes) {
+      nodesById[n['id'] as int] = n;
+    }
+
+    for (final e in edges) {
+      final src = nodesById[e['source_node_id'] as int];
+      final dst = nodesById[e['target_node_id'] as int];
+      if (src == null || dst == null) continue;
+
+      final sx =
+          ((src['pos_x'] as num?)?.toDouble() ?? 0.2).clamp(0.02, 0.84) *
+              canvasSize.width +
+          232.0;
+      final sy =
+          ((src['pos_y'] as num?)?.toDouble() ?? 0.3).clamp(0.07, 0.78) *
+              canvasSize.height +
+          62.0;
+      final dx =
+          ((dst['pos_x'] as num?)?.toDouble() ?? 0.5).clamp(0.02, 0.84) *
+          canvasSize.width;
+      final dy =
+          ((dst['pos_y'] as num?)?.toDouble() ?? 0.3).clamp(0.07, 0.78) *
+              canvasSize.height +
+          62.0;
+
+      final isDown = (e['status'] as String?) == 'DOWN';
+      final color = isDown ? AppTheme.error : AppTheme.accentCyan;
+
+      final path = Path()..moveTo(sx, sy);
+      final ctrlX1 = sx + (dx - sx) * 0.45;
+      final ctrlX2 = sx + (dx - sx) * 0.55;
+      path.cubicTo(ctrlX1, sy, ctrlX2, dy, dx, dy);
+
+      final paint = Paint()
+        ..color = color
+        ..strokeWidth = 2.4
+        ..style = PaintingStyle.stroke;
+      canvas.drawPath(path, paint);
+
+      // Punta de flecha en el destino
+      final arrowPath = Path()
+        ..moveTo(dx, dy)
+        ..lineTo(dx - 9, dy - 5)
+        ..lineTo(dx - 9, dy + 5)
+        ..close();
+      canvas.drawPath(
+        arrowPath,
+        Paint()
+          ..color = color
+          ..style = PaintingStyle.fill,
+      );
+
+      // Píldora con etiqueta de protocolo en el punto medio
+      final midX = (sx + dx) / 2;
+      final midY = (sy + dy) / 2 - 10;
+      final label = '${e['protocol_label']}';
+      final tp = TextPainter(
+        text: TextSpan(
+          text: label,
+          style: TextStyle(
+            fontSize: 9.5,
+            fontWeight: FontWeight.w800,
+            color: color,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+
+      final bgRect = RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: Offset(midX, midY),
+          width: tp.width + 12,
+          height: tp.height + 6,
+        ),
+        const Radius.circular(6),
+      );
+      canvas.drawRRect(bgRect, Paint()..color = AppTheme.bgSecondary);
+      canvas.drawRRect(
+        bgRect,
+        Paint()
+          ..color = color.withValues(alpha: 0.55)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1,
+      );
+      tp.paint(canvas, Offset(midX - tp.width / 2, midY - tp.height / 2));
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _TechStackEdgesPainter oldDelegate) => true;
+}
+
+class _MiniSparklinePainter extends CustomPainter {
+  final List<double> values;
+  final Color color;
+
+  _MiniSparklinePainter({required this.values, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (values.length < 2) return;
+    double maxV = 1.0;
+    for (final v in values) {
+      if (v > maxV) maxV = v;
+    }
+    maxV = math.max(maxV * 1.15, 10.0);
+
+    final path = Path();
+    final fillPath = Path();
+    for (int i = 0; i < values.length; i++) {
+      final x = (i / (values.length - 1)) * size.width;
+      final y =
+          size.height - ((values[i] / maxV).clamp(0.0, 1.0) * size.height);
+      if (i == 0) {
+        path.moveTo(x, y);
+        fillPath.moveTo(x, size.height);
+        fillPath.lineTo(x, y);
+      } else {
+        path.lineTo(x, y);
+        fillPath.lineTo(x, y);
+      }
+    }
+    fillPath.lineTo(size.width, size.height);
+    fillPath.close();
+
+    canvas.drawPath(
+      fillPath,
+      Paint()..color = color.withValues(alpha: 0.16),
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color
+        ..strokeWidth = 1.8
+        ..style = PaintingStyle.stroke,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _MiniSparklinePainter oldDelegate) => true;
+}
+

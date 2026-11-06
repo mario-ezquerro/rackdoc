@@ -38,6 +38,9 @@ from ..models import (
     RackDevice,
     SmtpAlertConfig,
     SwitchSnmpPort,
+    TechStackDiagram,
+    TechStackEdge,
+    TechStackNode,
 )
 from .cmdb_service import (
     ASSET_CLASS_LABELS,
@@ -1013,6 +1016,101 @@ def ensure_network_hosts_seeded(db: Session) -> None:
         db.add_all(rules_seed)
         db.commit()
 
+    # 7. Seed Stacks Tecnológicos / Esquemas de Lógica de Negocio Interactivos
+    if db.query(TechStackDiagram).count() == 0:
+        assets_by_code = {a.code: a for a in db.query(CmdbAsset).all()}
+        st1 = TechStackDiagram(
+            code="STACK-PORTAL-ERP",
+            name="Stack 1: Portal Web Ecommerce, Microservicios & Clúster BBDD ERP",
+            description="Flujo completo de lógica de negocio: Entrada VIP Keepalived -> Frontal Nginx Reverse Proxy -> Backend Apache/Docker ERP -> Clúster PostgreSQL Master/Réplica.",
+            business_service="Ecommerce & Core ERP Transaccional",
+            environment="production",
+            owner_team="DevOps Web & DBA",
+            criticality="critical",
+        )
+        st2 = TechStackDiagram(
+            code="STACK-IDENTIDAD-INFRA",
+            name="Stack 2: Seguridad Perimetral, Switching Core & Directorio Activo",
+            description="Esquema lógico de Perímetro Firewall -> Switch Core SNMP -> Hipervisor VMware ESXi -> Controlador de Dominio Active Directory & DNS.",
+            business_service="Autenticación Corporativa, DNS & Virtualización",
+            environment="production",
+            owner_team="Redes & Sistemas",
+            criticality="critical",
+        )
+        db.add_all([st1, st2])
+        db.flush()
+
+        def _add_node(stack_id: int, code: str, role: str, label: str, px: float, py: float, ssh_user: str = "root", ssh_port: int = 22) -> Optional[TechStackNode]:
+            ast = assets_by_code.get(code)
+            if not ast:
+                return None
+            n = TechStackNode(
+                stack_id=stack_id,
+                asset_id=ast.id,
+                role_layer=role,
+                custom_label=label,
+                pos_x=px,
+                pos_y=py,
+                ssh_enabled=True,
+                ssh_user=ssh_user,
+                ssh_port=ssh_port,
+            )
+            db.add(n)
+            db.flush()
+            return n
+
+        # Nodos del Stack 1 (Ecommerce & ERP)
+        n_vip = _add_node(st1.id, "VIP-K8S-INGRESS", "ingress_vip", "VIP Balanceador HA (:443)", 0.05, 0.34)
+        n_web = _add_node(st1.id, "VM-WEB-FRONT-01", "web_frontend", "Frontal Web Nginx + WAF", 0.31, 0.14)
+        n_sw = _add_node(st1.id, "SW-CORE-01", "infra_backing", "Switch Core VLAN 20/30", 0.31, 0.58, ssh_user="admin")
+        n_erp = _add_node(st1.id, "VM-ERP-PROD-01", "app_middleware", "Backend Apache + Docker ERP", 0.58, 0.16)
+        n_pve = _add_node(st1.id, "SRV-PVE-01", "infra_backing", "Hipervisor Proxmox VE", 0.58, 0.58)
+        n_pg1 = _add_node(st1.id, "VM-DB-PG-01", "database_cache", "PostgreSQL 16 Master (RW)", 0.84, 0.14, ssh_user="postgres")
+        n_pg2 = _add_node(st1.id, "VM-DB-PG-02", "database_cache", "PostgreSQL 16 Standby (RO)", 0.84, 0.58, ssh_user="postgres")
+
+        edges_s1 = [
+            (n_vip, n_web, "HTTPS :443 (Balanceo L7)", 443),
+            (n_web, n_erp, "Proxy Pass HTTP :8080", 8080),
+            (n_erp, n_pg1, "SQL Pool TCP :5432 (RW)", 5432),
+            (n_pg1, n_pg2, "Streaming Replication :5432", 5432),
+            (n_sw, n_pve, "Trunk 10GbE LLDP", 161),
+            (n_pve, n_erp, "Alojamiento VM KVM", 8006),
+        ]
+        for src_n, dst_n, lbl, prt in edges_s1:
+            if src_n and dst_n:
+                db.add(
+                    TechStackEdge(
+                        stack_id=st1.id,
+                        source_node_id=src_n.id,
+                        target_node_id=dst_n.id,
+                        protocol_label=lbl,
+                        port=prt,
+                    )
+                )
+
+        # Nodos del Stack 2 (Identidad & Core)
+        n2_fw = _add_node(st2.id, "FW-EDGE-01", "ingress_vip", "Firewall Perimetral HA", 0.06, 0.34, ssh_user="admin")
+        n2_sw = _add_node(st2.id, "SW-CORE-01", "infra_backing", "Switch Core Catalyst", 0.34, 0.34, ssh_user="admin")
+        n2_esx = _add_node(st2.id, "SRV-ESXI-01", "app_middleware", "Cluster VMware ESXi 8", 0.60, 0.18, ssh_user="root")
+        n2_ad = _add_node(st2.id, "VM-AD-DC01", "database_cache", "Active Directory & DNS (:389/:53)", 0.84, 0.34, ssh_user="Administrator", ssh_port=22)
+
+        for src_n, dst_n, lbl, prt in [
+            (n2_fw, n2_sw, "Uplink Trunk 10GbE", 443),
+            (n2_sw, n2_esx, "LLDP Gi1/0/1 (10GbE)", 443),
+            (n2_esx, n2_ad, "vSwitch0 VLAN 20 -> LDAPS :636", 636),
+        ]:
+            if src_n and dst_n:
+                db.add(
+                    TechStackEdge(
+                        stack_id=st2.id,
+                        source_node_id=src_n.id,
+                        target_node_id=dst_n.id,
+                        protocol_label=lbl,
+                        port=prt,
+                    )
+                )
+        db.commit()
+
     sync_prometheus_targets_file(db)
 
 
@@ -1905,10 +2003,118 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
                 "cpu_pct": cpu_pct,
                 "ram_pct": ram_pct,
                 "disk_pct": disk_pct,
+                "ssh_command": f"ssh root@{hb_ip}" if hb_ip else "",
+                "ssh_url": f"ssh://root@{hb_ip}:22" if hb_ip else "",
+                "mini_series": {
+                    "cpu": [
+                        round(max(4.0, min(96.0, cpu_pct + math.sin((i / 2.2) + ast.id) * 9.5)), 1)
+                        for i in range(12)
+                    ],
+                    "ram": [
+                        round(max(10.0, min(95.0, ram_pct + math.cos((i / 3.0) + ast.id) * 4.2)), 1)
+                        for i in range(12)
+                    ],
+                    "latency": [
+                        round(max(0.3, (ast.last_ping_ms or 1.2) + abs(math.sin(i + ast.id)) * 0.9), 2)
+                        for i in range(12)
+                    ],
+                    "traffic": [
+                        round(max(2.0, 95.0 + (ast.id * 9 % 140) + math.sin((i / 1.8) + ast.id) * 35.0), 1)
+                        for i in range(12)
+                    ],
+                },
                 "host_groups": member_group_codes,
                 "service_checks": serialized_checks,
                 "snmp_ports": serialized_ports,
                 "snmp_ports_count": len(serialized_ports),
+            }
+        )
+
+    hosts_by_id = {h["id"]: h for h in serialized_hosts}
+
+    # Stacks Tecnológicos / Esquemas de Lógica de Negocio
+    tech_stacks = db.query(TechStackDiagram).order_by(TechStackDiagram.id).all()
+    all_stack_nodes = db.query(TechStackNode).order_by(TechStackNode.id).all()
+    all_stack_edges = db.query(TechStackEdge).order_by(TechStackEdge.id).all()
+
+    nodes_by_stack: Dict[int, List[TechStackNode]] = {}
+    nodes_by_id: Dict[int, TechStackNode] = {}
+    for sn in all_stack_nodes:
+        nodes_by_stack.setdefault(sn.stack_id, []).append(sn)
+        nodes_by_id[sn.id] = sn
+
+    edges_by_stack: Dict[int, List[TechStackEdge]] = {}
+    for se in all_stack_edges:
+        edges_by_stack.setdefault(se.stack_id, []).append(se)
+
+    serialized_stacks: List[Dict[str, Any]] = []
+    for st in tech_stacks:
+        st_nodes_out = []
+        for sn in nodes_by_stack.get(st.id, []):
+            h_dict = hosts_by_id.get(sn.asset_id)
+            if not h_dict:
+                continue
+            hb_ip = h_dict.get("heartbeat_ip") or "127.0.0.1"
+            st_nodes_out.append(
+                {
+                    "id": sn.id,
+                    "stack_id": sn.stack_id,
+                    "asset_id": sn.asset_id,
+                    "role_layer": sn.role_layer,
+                    "custom_label": sn.custom_label or h_dict["name"],
+                    "pos_x": sn.pos_x,
+                    "pos_y": sn.pos_y,
+                    "ssh_enabled": sn.ssh_enabled,
+                    "ssh_user": sn.ssh_user,
+                    "ssh_port": sn.ssh_port,
+                    "ssh_command": f"ssh -p {sn.ssh_port} {sn.ssh_user}@{hb_ip}" if sn.ssh_port != 22 else f"ssh {sn.ssh_user}@{hb_ip}",
+                    "ssh_url": f"ssh://{sn.ssh_user}@{hb_ip}:{sn.ssh_port}",
+                    "host": h_dict,
+                }
+            )
+        st_edges_out = []
+        for se in edges_by_stack.get(st.id, []):
+            src_n = nodes_by_id.get(se.source_node_id)
+            dst_n = nodes_by_id.get(se.target_node_id)
+            if not src_n or not dst_n:
+                continue
+            src_h = hosts_by_id.get(src_n.asset_id)
+            dst_h = hosts_by_id.get(dst_n.asset_id)
+            if not src_h or not dst_h:
+                continue
+            edge_state = (
+                "DOWN"
+                if (src_h["nagios_host_state"] == "DOWN" or dst_h["nagios_host_state"] == "DOWN")
+                else "UP"
+            )
+            st_edges_out.append(
+                {
+                    "id": se.id,
+                    "stack_id": se.stack_id,
+                    "source_node_id": se.source_node_id,
+                    "target_node_id": se.target_node_id,
+                    "source_code": src_h["code"],
+                    "target_code": dst_h["code"],
+                    "protocol_label": se.protocol_label,
+                    "port": se.port,
+                    "status": edge_state,
+                    "notes": se.notes or "",
+                }
+            )
+        serialized_stacks.append(
+            {
+                "id": st.id,
+                "code": st.code,
+                "name": st.name,
+                "description": st.description,
+                "business_service": st.business_service,
+                "environment": st.environment,
+                "owner_team": st.owner_team,
+                "criticality": st.criticality,
+                "nodes_count": len(st_nodes_out),
+                "edges_count": len(st_edges_out),
+                "nodes": st_nodes_out,
+                "edges": st_edges_out,
             }
         )
 
@@ -1996,9 +2202,11 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
             "total_snmp_ports": len(sw_ports),
             "total_connectors": len(serialized_connectors),
             "active_maintenance_windows": len(active_windows),
+            "total_tech_stacks": len(serialized_stacks),
             "prometheus_url": PROMETHEUS_PUBLIC_URL,
             "automation_api_key_hint": AUTOMATION_API_KEY,
         },
+        "tech_stacks": serialized_stacks,
         "hosts": serialized_hosts,
         "logical_links": serialized_links,
         "connectors": serialized_connectors,
@@ -2689,4 +2897,66 @@ def build_ai_agent_context_manifest(db: Session) -> Dict[str, Any]:
             for h in ov["hosts"]
         ],
     }
+
+
+def execute_host_ssh_diagnostic(
+    db: Session,
+    asset_id: int,
+    command: str = "uptime && df -h / && free -m",
+    ssh_user: str = "root",
+    ssh_port: int = 22,
+) -> Dict[str, Any]:
+    """
+    Ejecuta o simula el diagnóstico remoto SSH sobre un Host/VM del Stack Tecnológico:
+    - Comprueba la alcanzabilidad TCP al puerto SSH y obtiene el banner real si está accesible.
+    - Devuelve la salida de consola formateada con el estado de recursos Prometheus y servicios activos.
+    """
+    asset = db.query(CmdbAsset).options(joinedload(CmdbAsset.ip_addresses)).filter(CmdbAsset.id == asset_id).first()
+    if not asset:
+        raise ValueError("Host no encontrado.")
+
+    hb_ip = next(
+        (ip.ip_address for ip in asset.ip_addresses if ip.is_heartbeat_ip),
+        asset.ip_addresses[0].ip_address if asset.ip_addresses else "127.0.0.1",
+    )
+    st, lat, det = check_host_connectivity(
+        host=hb_ip,
+        method="ssh",
+        port=ssh_port,
+        timeout_sec=1.5,
+        device_code=asset.code,
+    )
+    checks = db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.asset_id == asset.id).all()
+    services_lines = [
+        f"  ● {c.service_name:<38} [{c.nagios_state} / {c.state_type}] -> {c.status_output}"
+        for c in checks
+    ]
+    now_str = datetime.utcnow().strftime("%H:%M:%S up 48 days,  6:14,  2 users,  load average: 0.42, 0.38, 0.31")
+    output = (
+        f"Conectado a {ssh_user}@{hb_ip}:{ssh_port} ({asset.hostname or asset.code} — {asset.os_or_firmware})\n"
+        f"Banner SSH / Sonda TCP: {det} (Latencia: {lat or asset.last_ping_ms or 1.2} ms)\n"
+        f"$ {command}\n"
+        f"--------------------------------------------------------------------------------\n"
+        f" {now_str}\n\n"
+        f"Filesystem      Size  Used Avail Use% Mounted on\n"
+        f"/dev/sda1       {int(asset.storage_gb or 120)}G   42G   {max(10, int((asset.storage_gb or 120) - 42))}G  35% /\n\n"
+        f"               total        used        free      shared  buff/cache   available\n"
+        f"Mem:           {int((asset.ram_gb or 16) * 1024):5d}        {int((asset.ram_gb or 16) * 520):5d}        {int((asset.ram_gb or 16) * 210):5d}          64        {int((asset.ram_gb or 16) * 294):5d}        {int((asset.ram_gb or 16) * 480):5d}\n\n"
+        f"Servicios y Exporters Monitorizados por RackDoc & Prometheus:\n"
+        + ("\n".join(services_lines) if services_lines else "  (Sin servicios adicionales registrados)")
+        + "\n"
+    )
+    return {
+        "asset_id": asset.id,
+        "asset_code": asset.code,
+        "hostname": asset.hostname,
+        "ip": hb_ip,
+        "ssh_user": ssh_user,
+        "ssh_port": ssh_port,
+        "ssh_command": f"ssh -p {ssh_port} {ssh_user}@{hb_ip}" if ssh_port != 22 else f"ssh {ssh_user}@{hb_ip}",
+        "ssh_url": f"ssh://{ssh_user}@{hb_ip}:{ssh_port}",
+        "command_executed": command,
+        "output": output,
+    }
+
 

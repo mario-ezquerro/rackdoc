@@ -43,6 +43,9 @@ from .models import (
     MaintenanceWindow,
     AlertNotificationLog,
     SmtpAlertConfig,
+    TechStackDiagram,
+    TechStackNode,
+    TechStackEdge,
 )
 from .schemas import (
     DeviceTemplateSchema,
@@ -100,6 +103,11 @@ from .schemas import (
     AnsibleHostDecommissionWebhook,
     AnsibleMaintenanceWebhook,
     AnsibleContactsRoutingWebhook,
+    TechStackDiagramInput,
+    TechStackNodeInput,
+    TechStackNodeMoveInput,
+    TechStackEdgeInput,
+    HostSshCommandInput,
 )
 from .seed import (
     seed_initial_data,
@@ -139,6 +147,7 @@ from .services.network_host_service import (
     handle_ansible_maintenance_webhook,
     handle_ansible_contacts_routing_webhook,
     build_ai_agent_context_manifest,
+    execute_host_ssh_diagnostic,
     _dispatch_alert_notification,
 )
 from .services.excel_export import (
@@ -4908,6 +4917,162 @@ def trigger_test_alert_endpoint(asset_id: Optional[int] = None, db: Session = De
         detail=f"Simulación manual de alerta sobre {asset.code} ({asset.name}) para verificar destinatarios.",
     )
     return build_network_hosts_overview(db)
+
+
+@api_router.post(
+    "/network-hosts/tech-stacks",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Crear o actualizar un Esquema de Lógica de Negocio / Stack Tecnológico",
+)
+def upsert_tech_stack_diagram_endpoint(payload: TechStackDiagramInput, db: Session = Depends(get_db)):
+    code = payload.code.strip().upper()
+    st = db.query(TechStackDiagram).filter(TechStackDiagram.code == code).first()
+    if not st:
+        st = TechStackDiagram(code=code)
+        db.add(st)
+    st.name = payload.name.strip()
+    st.description = payload.description.strip()
+    st.business_service = payload.business_service.strip()
+    st.environment = payload.environment.strip()
+    st.owner_team = payload.owner_team.strip()
+    st.criticality = payload.criticality.strip()
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.delete(
+    "/network-hosts/tech-stacks/{stack_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Eliminar un Stack Tecnológico",
+)
+def delete_tech_stack_diagram_endpoint(stack_id: int, db: Session = Depends(get_db)):
+    st = db.query(TechStackDiagram).filter(TechStackDiagram.id == stack_id).first()
+    if not st:
+        raise HTTPException(status_code=404, detail="Stack Tecnológico no encontrado.")
+    db.query(TechStackEdge).filter(TechStackEdge.stack_id == stack_id).delete()
+    db.query(TechStackNode).filter(TechStackNode.stack_id == stack_id).delete()
+    db.delete(st)
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.post(
+    "/network-hosts/tech-stacks/nodes",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Añadir un Host / VM / Frontal Web / BBDD al lienzo de un Stack Tecnológico",
+)
+def create_tech_stack_node_endpoint(payload: TechStackNodeInput, db: Session = Depends(get_db)):
+    sn = TechStackNode(
+        stack_id=payload.stack_id,
+        asset_id=payload.asset_id,
+        role_layer=payload.role_layer,
+        custom_label=payload.custom_label.strip(),
+        pos_x=max(0.02, min(0.92, payload.pos_x)),
+        pos_y=max(0.04, min(0.88, payload.pos_y)),
+        ssh_enabled=payload.ssh_enabled,
+        ssh_user=payload.ssh_user.strip() or "root",
+        ssh_port=payload.ssh_port or 22,
+    )
+    db.add(sn)
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.put(
+    "/network-hosts/tech-stacks/nodes/{node_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Mover (Drag & Drop X/Y) o editar un nodo dentro del lienzo del Stack Tecnológico",
+)
+def move_tech_stack_node_endpoint(
+    node_id: int,
+    payload: TechStackNodeMoveInput,
+    db: Session = Depends(get_db),
+):
+    sn = db.query(TechStackNode).filter(TechStackNode.id == node_id).first()
+    if not sn:
+        raise HTTPException(status_code=404, detail="Nodo del stack no encontrado.")
+    sn.pos_x = max(0.02, min(0.92, payload.pos_x))
+    sn.pos_y = max(0.04, min(0.88, payload.pos_y))
+    if payload.role_layer is not None:
+        sn.role_layer = payload.role_layer
+    if payload.custom_label is not None:
+        sn.custom_label = payload.custom_label.strip()
+    if payload.ssh_user is not None:
+        sn.ssh_user = payload.ssh_user.strip()
+    if payload.ssh_port is not None:
+        sn.ssh_port = payload.ssh_port
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.delete(
+    "/network-hosts/tech-stacks/nodes/{node_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Quitar un nodo del lienzo del Stack Tecnológico",
+)
+def delete_tech_stack_node_endpoint(node_id: int, db: Session = Depends(get_db)):
+    sn = db.query(TechStackNode).filter(TechStackNode.id == node_id).first()
+    if not sn:
+        raise HTTPException(status_code=404, detail="Nodo del stack no encontrado.")
+    db.query(TechStackEdge).filter(
+        (TechStackEdge.source_node_id == node_id) | (TechStackEdge.target_node_id == node_id)
+    ).delete()
+    db.delete(sn)
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.post(
+    "/network-hosts/tech-stacks/edges",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Dibujar una flecha / flujo de lógica de negocio entre dos nodos de un Stack Tecnológico",
+)
+def create_tech_stack_edge_endpoint(payload: TechStackEdgeInput, db: Session = Depends(get_db)):
+    if payload.source_node_id == payload.target_node_id:
+        raise HTTPException(status_code=400, detail="El nodo origen y destino deben ser distintos.")
+    se = TechStackEdge(
+        stack_id=payload.stack_id,
+        source_node_id=payload.source_node_id,
+        target_node_id=payload.target_node_id,
+        protocol_label=payload.protocol_label.strip(),
+        port=payload.port,
+        notes=payload.notes,
+    )
+    db.add(se)
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.delete(
+    "/network-hosts/tech-stacks/edges/{edge_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Eliminar una flecha del Stack Tecnológico",
+)
+def delete_tech_stack_edge_endpoint(edge_id: int, db: Session = Depends(get_db)):
+    se = db.query(TechStackEdge).filter(TechStackEdge.id == edge_id).first()
+    if not se:
+        raise HTTPException(status_code=404, detail="Conexión no encontrada.")
+    db.delete(se)
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.post(
+    "/network-hosts/ssh-console",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Ejecutar comando de diagnóstico remoto / consola SSH sobre un Host o VM del Stack",
+)
+def execute_host_ssh_console_endpoint(payload: HostSshCommandInput, db: Session = Depends(get_db)):
+    try:
+        return execute_host_ssh_diagnostic(
+            db=db,
+            asset_id=payload.asset_id,
+            command=payload.command,
+            ssh_user=payload.ssh_user,
+            ssh_port=payload.ssh_port,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 # ==============================================================================

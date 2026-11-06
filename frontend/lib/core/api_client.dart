@@ -1158,4 +1158,84 @@ class RackDocApiClient {
     );
     return Map<String, dynamic>.from(_decodeResponse(res) as Map);
   }
+
+  Future<Map<String, dynamic>> upsertTechStackDiagram(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/network-hosts/tech-stacks'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> deleteTechStackDiagram(int stackId) async {
+    final res = await http.delete(
+      Uri.parse('$baseUrl/network-hosts/tech-stacks/$stackId'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> createTechStackNode(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/network-hosts/tech-stacks/nodes'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> moveTechStackNode(
+    int nodeId,
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/network-hosts/tech-stacks/nodes/$nodeId'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> deleteTechStackNode(int nodeId) async {
+    final res = await http.delete(
+      Uri.parse('$baseUrl/network-hosts/tech-stacks/nodes/$nodeId'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> createTechStackEdge(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/network-hosts/tech-stacks/edges'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> deleteTechStackEdge(int edgeId) async {
+    final res = await http.delete(
+      Uri.parse('$baseUrl/network-hosts/tech-stacks/edges/$edgeId'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> executeHostSshConsole(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/network-hosts/ssh-console'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
 }
