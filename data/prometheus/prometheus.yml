@@ -1,0 +1,24 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: "rackdoc-dcim-cmdb"
+
+scrape_configs:
+  # 1. Métricas nativas agregadas por el motor Background de RackDoc (Heartbeats HTTP/HTTPS/ICMP/TCP/SNMP,
+  #    Estados Nagios SOFT/HARD, Bocas de Switch IF-MIB/LLDP, Proxmox, VMware, Docker, Apache, Nginx y BBDD)
+  - job_name: "rackdoc_backend_collector"
+    scrape_interval: 15s
+    metrics_path: "/api/v1/metrics"
+    static_configs:
+      - targets: ["rackdoc-backend:8000"]
+        labels:
+          collector: "rackdoc-background-engine"
+
+  # 2. Descubrimiento Dinámico en Caliente (File Service Discovery) generado automáticamente por RackDoc
+  #    al dar de alta o editar un Host por la interfaz web o vía Playbook de Ansible
+  - job_name: "rackdoc_dynamic_host_exporters"
+    file_sd_configs:
+      - files:
+          - "/etc/prometheus/dynamic/targets_*.json"
+        refresh_interval: 15s

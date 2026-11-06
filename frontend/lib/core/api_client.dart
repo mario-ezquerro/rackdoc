@@ -908,4 +908,243 @@ class RackDocApiClient {
     );
     return Map<String, dynamic>.from(_decodeResponse(res) as Map);
   }
+
+  // ---------------------------------------------------------------------------
+  // 4. RED & HOST (TOPOLOGÍA LÓGICA, NAGIOS, SNMP, CONECTORES Y PROMETHEUS)
+  // ---------------------------------------------------------------------------
+
+  Future<Map<String, dynamic>> getNetworkHostsOverview() async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/network-hosts/overview'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> getNetworkHostTelemetry(
+    int assetId, {
+    int rangeHours = 6,
+  }) async {
+    final res = await http.get(
+      Uri.parse(
+        '$baseUrl/network-hosts/telemetry/$assetId?range_hours=$rangeHours',
+      ),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> createNetworkServiceCheck(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/network-hosts/service-checks'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> deleteNetworkServiceCheck(int checkId) async {
+    final res = await http.delete(
+      Uri.parse('$baseUrl/network-hosts/service-checks/$checkId'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> runSingleNetworkServiceCheck(int checkId) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/network-hosts/service-checks/$checkId/run'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> runAllNetworkServiceChecks() async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/network-hosts/run-all-checks'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> runSnmpSwitchDiscovery(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/network-hosts/snmp-discover'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> createLogicalLink(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/network-hosts/logical-links'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> deleteLogicalLink(int linkId) async {
+    final res = await http.delete(
+      Uri.parse('$baseUrl/network-hosts/logical-links/$linkId'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> createInfraConnector(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/network-hosts/connectors'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> syncInfraConnector(int connectorId) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/network-hosts/connectors/$connectorId/sync'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> deleteInfraConnector(int connectorId) async {
+    final res = await http.delete(
+      Uri.parse('$baseUrl/network-hosts/connectors/$connectorId'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> upsertHostGroup(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/network-hosts/host-groups'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> deleteHostGroup(int groupId) async {
+    final res = await http.delete(
+      Uri.parse('$baseUrl/network-hosts/host-groups/$groupId'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> upsertAlertContact(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/network-hosts/alert-contacts'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> deleteAlertContact(int contactId) async {
+    final res = await http.delete(
+      Uri.parse('$baseUrl/network-hosts/alert-contacts/$contactId'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> upsertAlertContactGroup(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/network-hosts/alert-contact-groups'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> deleteAlertContactGroup(int groupId) async {
+    final res = await http.delete(
+      Uri.parse('$baseUrl/network-hosts/alert-contact-groups/$groupId'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> createNotificationRule(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/network-hosts/notification-rules'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> deleteNotificationRule(int ruleId) async {
+    final res = await http.delete(
+      Uri.parse('$baseUrl/network-hosts/notification-rules/$ruleId'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> createMaintenanceWindow(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/network-hosts/maintenance-windows'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> stopMaintenanceWindow(int windowId) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/network-hosts/maintenance-windows/$windowId/stop'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> updateSmtpAlertConfig(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/network-hosts/smtp-config'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> triggerTestAlert({int? assetId}) async {
+    final uri = assetId != null
+        ? Uri.parse('$baseUrl/network-hosts/test-alert?asset_id=$assetId')
+        : Uri.parse('$baseUrl/network-hosts/test-alert');
+    final res = await http.post(uri, headers: _headers);
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> getAiAgentContextManifest() async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/automation/ai-context'),
+      headers: _headers,
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
 }

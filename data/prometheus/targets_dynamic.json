@@ -1,0 +1,78 @@
+[
+  {
+    "targets": [
+      "10.20.1.140:80"
+    ],
+    "labels": {
+      "asset_code": "CT-WAF-PROXY01",
+      "hostname": "ct-waf-proxy01",
+      "asset_class": "container_lxc",
+      "environment": "production",
+      "exporter_type": "nginx",
+      "managed_by": "rackdoc_file_sd"
+    }
+  },
+  {
+    "targets": [
+      "10.20.20.110:8080"
+    ],
+    "labels": {
+      "asset_code": "VM-ERP-APP01",
+      "hostname": "vm-erp-app01",
+      "asset_class": "virtual_machine",
+      "environment": "production",
+      "exporter_type": "apache",
+      "managed_by": "rackdoc_file_sd"
+    }
+  },
+  {
+    "targets": [
+      "10.20.1.110:9323"
+    ],
+    "labels": {
+      "asset_code": "VM-ERP-APP01",
+      "hostname": "vm-erp-app01",
+      "asset_class": "virtual_machine",
+      "environment": "production",
+      "exporter_type": "docker",
+      "managed_by": "rackdoc_file_sd"
+    }
+  },
+  {
+    "targets": [
+      "10.20.1.110:9100"
+    ],
+    "labels": {
+      "asset_code": "VM-ERP-APP01",
+      "hostname": "vm-erp-app01",
+      "asset_class": "virtual_machine",
+      "environment": "production",
+      "exporter_type": "node_exporter",
+      "managed_by": "rackdoc_file_sd"
+    }
+  },
+  {
+    "targets": [
+      "10.20.20.120:5432"
+    ],
+    "labels": {
+      "asset_code": "VM-DB-PG01",
+      "hostname": "vm-db-pg01",
+      "asset_class": "virtual_machine",
+      "environment": "production",
+      "exporter_type": "postgres",
+      "managed_by": "rackdoc_file_sd"
+    }
+  },
+  {
+    "targets": [
+      "10.20.1.5:9182"
+    ],
+    "labels": {
+      "asset_code": "VM-AD-DC01",
+      "hostname": "dc01",
+      "exporter_type": "windows_exporter",
+      "managed_by": "rackdoc_file_sd"
+    }
+  }
+]

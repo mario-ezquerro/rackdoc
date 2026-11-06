@@ -15,11 +15,32 @@ services:
       - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/rackdoc.db}
       - JWT_SECRET=${JWT_SECRET:-rackdoc-super-secret-jwt-key}
       - PING_INTERVAL_SECONDS=${PING_INTERVAL_SECONDS:-60}
+      - PROMETHEUS_URL=${PROMETHEUS_URL:-http://rackdoc-prometheus:9090}
+      - PROMETHEUS_PUBLIC_URL=${PROMETHEUS_PUBLIC_URL:-http://localhost:9090}
+      - AUTOMATION_API_KEY=${AUTOMATION_API_KEY:-rackdoc-ansible-automation-token-2026}
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@rackdoc.local}
     ports:
       - "${BACKEND_PORT:-8180}:8000"
+
+  rackdoc-prometheus:
+    image: prom/prometheus:latest
+    container_name: rackdoc-prometheus
+    hostname: rackdoc-prometheus
+    restart: unless-stopped
+    user: "0:0"
+    command:
+      - "--config.file=/etc/prometheus/dynamic/prometheus.yml"
+      - "--storage.tsdb.path=/etc/prometheus/dynamic/tsdb"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./data/prometheus:/etc/prometheus/dynamic
+    depends_on:
+      - rackdoc-backend
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
 
   rackdoc-frontend:
     build:
@@ -31,5 +52,7 @@ services:
     restart: unless-stopped
     depends_on:
       - rackdoc-backend
+      - rackdoc-prometheus
     ports:
       - "${FRONTEND_PORT:-8181}:80"
+

@@ -595,6 +595,186 @@ class CmdbImportDiscoveredRequest(BaseModel):
     items: List[CmdbDiscoveredHostItem] = []
 
 
+# ==============================================================================
+# ESQUEMAS DE '4. RED & HOST', CONECTORES, ALERTAS MATRICIALES Y WEBHOOKS ANSIBLE
+# ==============================================================================
+
+class HostGroupInput(BaseModel):
+    code: str
+    name: str
+    category: str = "infrastructure"
+    environment: str = "production"
+    color_hex: str = "#1E3A8A"
+    member_asset_ids: List[int] = []
+    description: str = ""
+
+
+class ServiceCheckInput(BaseModel):
+    asset_id: int
+    service_name: str
+    check_type: str = "https"  # icmp | http | https | tcp | udp | ssh | dns | snmp | apache | nginx | haproxy | docker | proxmox | vmware | postgres | mysql | redis | node_exporter | windows_exporter
+    target_ip_or_url: str = ""
+    port: int = 443
+    expected_status_code: int = 200
+    expected_string: str = ""
+    max_check_attempts: int = 3
+    is_primary_heartbeat: bool = False
+    enabled: bool = True
+    check_config: Dict[str, Any] = {}
+
+
+class LogicalLinkInput(BaseModel):
+    source_asset_id: int
+    target_asset_id: int
+    link_type: str = "custom_logical"
+    source_interface: str = ""
+    target_interface: str = ""
+    protocol_label: str = "TCP/IP"
+    vlan_id: Optional[int] = None
+    bandwidth_mbps: float = 0.0
+    notes: str = ""
+
+
+class InfraConnectorInput(BaseModel):
+    name: str
+    connector_type: str  # snmp_switch | proxmox_ve | vmware_vsphere | hyperv | kvm_libvirt | xcpng | docker_engine | portainer | kubernetes | apache_status | nginx_status | haproxy_stats | postgresql | mysql_mariadb | redis | node_exporter | windows_exporter
+    endpoint_host: str
+    endpoint_port: int = 161
+    auth_username_or_community: str = "public"
+    auth_secret: str = ""
+    linked_asset_id: Optional[int] = None
+    linked_rack_device_id: Optional[int] = None
+    extra_settings: Dict[str, Any] = {}
+    enabled: bool = True
+
+
+class SnmpWalkDiscoveryRequest(BaseModel):
+    target_ip: str
+    community: str = "public"
+    snmp_version: str = "v2c"
+    port: int = 161
+    asset_id: Optional[int] = None
+    rack_device_id: Optional[int] = None
+    sync_ports_to_rack_device: bool = True
+
+
+class AlertContactInput(BaseModel):
+    code: str
+    full_name: str
+    role_title: str = "Ingeniero de Sistemas"
+    email: str
+    phone_or_telegram: str = ""
+    personal_webhook_url: str = ""
+    schedule_period: str = "24x7"
+    notify_on_down: bool = True
+    notify_on_critical: bool = True
+    notify_on_warning: bool = True
+    notify_on_unreachable: bool = False
+    notify_on_recovery: bool = True
+    active: bool = True
+    notes: str = ""
+
+
+class AlertContactGroupInput(BaseModel):
+    code: str
+    name: str
+    description: str = ""
+    group_email: str = ""
+    channel_webhook_url: str = ""
+    member_contact_ids: List[int] = []
+
+
+class NotificationRoutingRuleInput(BaseModel):
+    name: str
+    description: str = ""
+    enabled: bool = True
+    scope_type: str = "host_group"  # all | host_group | single_host | asset_class | service_type
+    host_group_id: Optional[int] = None
+    asset_id: Optional[int] = None
+    asset_class_filter: str = ""
+    service_type_filter: str = ""
+    contact_group_ids: List[int] = []
+    contact_ids: List[int] = []
+    send_email: bool = True
+    send_webhook: bool = True
+    only_on_hard_state: bool = True
+
+
+class MaintenanceWindowInput(BaseModel):
+    title: str
+    reason: str = "Mantenimiento programado"
+    created_by: str = "admin"
+    scope_type: str = "single_host"  # single_host | host_group | ip_or_hostname_list
+    asset_id: Optional[int] = None
+    host_group_id: Optional[int] = None
+    target_matches: List[str] = []
+    duration_minutes: int = 60
+    suppress_notifications: bool = True
+
+
+class SmtpAlertConfigInput(BaseModel):
+    smtp_host: str = "smtp.empresa.local"
+    smtp_port: int = 587
+    use_tls: bool = True
+    smtp_username: str = "alertas-rackdoc@empresa.local"
+    smtp_password: str = ""
+    from_email: str = "RackDoc Monitor & CMDB <alertas-rackdoc@empresa.local>"
+    global_webhook_url: str = ""
+    enabled: bool = True
+
+
+# Webhooks Idempotentes para Ansible y Agentes IA
+class AnsibleHostUpsertWebhook(BaseModel):
+    code: Optional[str] = None
+    name: Optional[str] = None
+    hostname: str
+    fqdn: str = ""
+    asset_class: str = "virtual_machine"  # physical_server | virtual_machine | container_lxc | network_security | storage_san_nas | cluster_vip
+    environment: str = "production"
+    criticality: str = "high"
+    os_or_firmware: str = ""
+    cpu_cores: int = 0
+    ram_gb: float = 0.0
+    storage_gb: float = 0.0
+    hypervisor_or_platform: str = ""
+    host_rack_device_code: Optional[str] = None
+    parent_asset_code: Optional[str] = None
+    owner_team: str = "Sistemas & DevOps"
+    responsible_person: str = "Alex Geng"
+    primary_ip: str
+    additional_ips: List[Dict[str, Any]] = []
+    host_groups: List[str] = []  # Lista de códigos de HostGroup (se crean si no existen)
+    exporters: List[Dict[str, Any]] = []  # Ej: [{"type": "node_exporter", "port": 9100}, {"type": "nginx", "port": 80, "url": "http://.../nginx_status"}]
+    heartbeats: List[Dict[str, Any]] = []  # Ej: [{"name": "HTTPS Web", "type": "https", "url": "https://...", "port": 443}]
+    notes: str = "Registrado/actualizado vía Ansible Webhook"
+
+
+class AnsibleHostDecommissionWebhook(BaseModel):
+    code: Optional[str] = None
+    hostname: Optional[str] = None
+    ip_address: Optional[str] = None
+    delete_permanently: bool = False
+    reason: str = "Baja ejecutada desde Playbook Ansible"
+
+
+class AnsibleMaintenanceWebhook(BaseModel):
+    action: str = "start"  # start | stop
+    title: str = "Mantenimiento Automático Ansible"
+    reason: str = "Despliegue / Parcheo automatizado con Ansible"
+    created_by: str = "ansible-playbook"
+    duration_minutes: int = 45
+    host_group_code: Optional[str] = None
+    targets: List[str] = []  # Hostnames, códigos CMDB o direcciones IP
+
+
+class AnsibleContactsRoutingWebhook(BaseModel):
+    contacts: List[AlertContactInput] = []
+    contact_groups: List[Dict[str, Any]] = []
+    host_groups: List[Dict[str, Any]] = []
+    routing_rules: List[Dict[str, Any]] = []
+
+
+
 
 
 

@@ -414,4 +414,244 @@ class CmdbIpAddress(Base):
     subnet = relationship("CmdbSubnet", back_populates="ip_addresses")
 
 
+# ==============================================================================
+# MÓDULO 4: RED & HOST (Topología Lógica, Autodescubrimiento SNMP/LLDP,
+# Conectores Hipervisores/Docker/Web/BBDD, Estados Nagios, Prometheus y Avisos)
+# ==============================================================================
+
+class HostGroup(Base):
+    __tablename__ = "network_host_groups"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(64), unique=True, index=True, nullable=False)  # Ej: HG-SWITCHES-CORE, HG-PROXMOX-PROD
+    name = Column(String(160), nullable=False)
+    category = Column(String(48), default="infrastructure")  # network | virtualization | web_middleware | database | containers | custom
+    environment = Column(String(32), default="production")
+    color_hex = Column(String(16), default="#1E3A8A")
+    member_asset_ids = Column(JSON, default=list)  # Lista de CmdbAsset.id pertenecientes al grupo
+    description = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class MonitoredServiceCheck(Base):
+    __tablename__ = "network_service_checks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_id = Column(Integer, ForeignKey("cmdb_assets.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    service_name = Column(String(140), nullable=False)  # Ej: "PING Heartbeat", "HTTPS Portal SSL", "Apache mod_status"
+    # check_type:
+    # icmp | http | https | tcp | udp | ssh | dns | snmp |
+    # apache | nginx | haproxy | docker | portainer | kubernetes |
+    # proxmox | vmware | hyperv | kvm |
+    # postgres | mysql | mssql | redis | mongodb |
+    # node_exporter | windows_exporter
+    check_type = Column(String(40), default="icmp", nullable=False)
+    target_ip_or_url = Column(String(255), default="")  # IP, FQDN o URL completa (ej. https://portal.hq.local/health)
+    port = Column(Integer, default=0)
+    expected_status_code = Column(Integer, default=200)
+    expected_string = Column(String(160), default="")
+    check_config = Column(JSON, default=dict)  # Comunidad SNMP, path status, credenciales API, umbrales warning/critical
+
+    # Máquina de Estados estilo Nagios Core (OK / WARNING / CRITICAL / UNKNOWN + SOFT / HARD)
+    nagios_state = Column(String(24), default="OK")  # OK | WARNING | CRITICAL | UNKNOWN | PENDING
+    state_type = Column(String(16), default="HARD")  # HARD | SOFT
+    current_attempt = Column(Integer, default=1)
+    max_check_attempts = Column(Integer, default=3)
+
+    latency_ms = Column(Float, nullable=True)
+    ssl_days_remaining = Column(Integer, nullable=True)  # Calculado automáticamente en chequeos HTTPS
+    metrics_snapshot = Column(JSON, default=dict)  # Últimas métricas recolectadas (CPU%, RAM%, req/s, bocas UP, etc.)
+    status_output = Column(Text, default="")  # Salida estilo plugin Nagios
+    enabled = Column(Boolean, default=True)
+    is_primary_heartbeat = Column(Boolean, default=False)
+    last_checked_at = Column(DateTime, nullable=True)
+    last_state_change_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SwitchSnmpPort(Base):
+    __tablename__ = "network_switch_snmp_ports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_id = Column(Integer, ForeignKey("cmdb_assets.id", ondelete="CASCADE"), nullable=False, index=True)
+    rack_device_id = Column(Integer, ForeignKey("rack_devices.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    if_index = Column(Integer, default=1)
+    if_name = Column(String(64), nullable=False)  # Ej: Gi1/0/1, Te1/1/1, eth0, Vlan20
+    if_alias = Column(String(160), default="")  # Descripción SNMP configurada en la boca del switch
+    if_type = Column(String(64), default="ethernetCsmacd")
+    admin_status = Column(String(16), default="up")  # up | down
+    oper_status = Column(String(16), default="up")  # up | down | dormant
+    speed_mbps = Column(Integer, default=1000)
+    mac_address = Column(String(64), default="")
+    vlan_id = Column(Integer, nullable=True)
+    vlan_mode = Column(String(24), default="access")  # access | trunk | routed
+
+    in_mbps = Column(Float, default=0.0)
+    out_mbps = Column(Float, default=0.0)
+    in_errors = Column(Integer, default=0)
+    out_errors = Column(Integer, default=0)
+
+    # Descubrimiento de Vecinos LLDP-MIB / CDP-MIB en esta boca
+    lldp_neighbor_sysname = Column(String(140), default="")
+    lldp_neighbor_port = Column(String(64), default="")
+    lldp_neighbor_ip = Column(String(64), default="")
+    lldp_neighbor_asset_id = Column(Integer, ForeignKey("cmdb_assets.id", ondelete="SET NULL"), nullable=True)
+    synced_rack_port_id = Column(Integer, ForeignKey("ports.id", ondelete="SET NULL"), nullable=True)
+    last_polled_at = Column(DateTime, default=datetime.utcnow)
+
+
+class LogicalTopologyLink(Base):
+    __tablename__ = "network_logical_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_asset_id = Column(Integer, ForeignKey("cmdb_assets.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_asset_id = Column(Integer, ForeignKey("cmdb_assets.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # link_type:
+    # lldp_trunk | switch_uplink | hypervisor_vm | docker_host |
+    # reverse_proxy_upstream | app_to_db | storage_san_nfs | ha_cluster_sync | custom_logical
+    link_type = Column(String(48), default="custom_logical")
+    source_interface = Column(String(64), default="")
+    target_interface = Column(String(64), default="")
+    protocol_label = Column(String(80), default="TCP/IP")  # Ej: "10GbE Trunk LLDP", "HTTPS Upstream :8443", "PostgreSQL :5432"
+    vlan_id = Column(Integer, nullable=True)
+    bandwidth_mbps = Column(Float, default=0.0)
+    status = Column(String(24), default="UP")  # UP | WARNING | DOWN | MAINTENANCE
+    auto_discovered = Column(Boolean, default=False)
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class InfraConnector(Base):
+    __tablename__ = "network_infra_connectors"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(160), nullable=False)
+    # connector_type:
+    # snmp_switch | proxmox_ve | vmware_vsphere | hyperv | kvm_libvirt | xcpng |
+    # docker_engine | portainer | kubernetes |
+    # apache_status | nginx_status | haproxy_stats |
+    # postgresql | mysql_mariadb | mssql | redis | mongodb |
+    # node_exporter | windows_exporter
+    connector_type = Column(String(48), nullable=False)
+    endpoint_host = Column(String(255), nullable=False)
+    endpoint_port = Column(Integer, default=161)
+    auth_username_or_community = Column(String(160), default="public")
+    auth_secret = Column(String(255), default="")
+    linked_asset_id = Column(Integer, ForeignKey("cmdb_assets.id", ondelete="SET NULL"), nullable=True)
+    linked_rack_device_id = Column(Integer, ForeignKey("rack_devices.id", ondelete="SET NULL"), nullable=True)
+    extra_settings = Column(JSON, default=dict)
+    enabled = Column(Boolean, default=True)
+    last_sync_status = Column(String(32), default="ok")  # ok | warning | error | never
+    last_sync_at = Column(DateTime, nullable=True)
+    last_sync_summary = Column(Text, default="")
+    discovered_items_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AlertContact(Base):
+    __tablename__ = "network_alert_contacts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(64), unique=True, index=True, nullable=False)
+    full_name = Column(String(140), nullable=False)
+    role_title = Column(String(120), default="Ingeniero de Sistemas")
+    email = Column(String(180), nullable=False)
+    phone_or_telegram = Column(String(80), default="")
+    personal_webhook_url = Column(String(255), default="")
+    schedule_period = Column(String(32), default="24x7")  # 24x7 | workhours | oncall
+    notify_on_down = Column(Boolean, default=True)
+    notify_on_critical = Column(Boolean, default=True)
+    notify_on_warning = Column(Boolean, default=True)
+    notify_on_unreachable = Column(Boolean, default=False)
+    notify_on_recovery = Column(Boolean, default=True)
+    active = Column(Boolean, default=True)
+    notes = Column(Text, default="")
+
+
+class AlertContactGroup(Base):
+    __tablename__ = "network_alert_contact_groups"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(64), unique=True, index=True, nullable=False)
+    name = Column(String(160), nullable=False)
+    description = Column(Text, default="")
+    group_email = Column(String(180), default="")
+    channel_webhook_url = Column(String(255), default="")  # Teams / Slack / Telegram / Discord
+    member_contact_ids = Column(JSON, default=list)  # Lista de AlertContact.id
+
+
+class NotificationRoutingRule(Base):
+    __tablename__ = "network_notification_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(160), nullable=False)
+    description = Column(Text, default="")
+    enabled = Column(Boolean, default=True)
+
+    # Qué ámbito de máquinas dispara la regla:
+    # all | host_group | single_host | asset_class | service_type
+    scope_type = Column(String(32), default="host_group")
+    host_group_id = Column(Integer, ForeignKey("network_host_groups.id", ondelete="SET NULL"), nullable=True)
+    asset_id = Column(Integer, ForeignKey("cmdb_assets.id", ondelete="SET NULL"), nullable=True)
+    asset_class_filter = Column(String(48), default="")
+    service_type_filter = Column(String(48), default="")
+
+    # A quién se avisa (Personas y/o Grupos de Personas):
+    contact_group_ids = Column(JSON, default=list)
+    contact_ids = Column(JSON, default=list)
+    send_email = Column(Boolean, default=True)
+    send_webhook = Column(Boolean, default=True)
+    only_on_hard_state = Column(Boolean, default=True)
+
+
+class MaintenanceWindow(Base):
+    __tablename__ = "network_maintenance_windows"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(160), nullable=False)
+    reason = Column(Text, default="")
+    created_by = Column(String(80), default="admin")  # Ej: "ansible-playbook" o "admin"
+    # scope_type: single_host | host_group | ip_or_hostname_list
+    scope_type = Column(String(32), default="single_host")
+    asset_id = Column(Integer, ForeignKey("cmdb_assets.id", ondelete="SET NULL"), nullable=True)
+    host_group_id = Column(Integer, ForeignKey("network_host_groups.id", ondelete="SET NULL"), nullable=True)
+    target_matches = Column(JSON, default=list)  # Lista de códigos, hostnames o IPs incluidos en mantenimiento
+    starts_at = Column(DateTime, default=datetime.utcnow)
+    ends_at = Column(DateTime, nullable=False)
+    is_active = Column(Boolean, default=True)
+    suppress_notifications = Column(Boolean, default=True)
+
+
+class AlertNotificationLog(Base):
+    __tablename__ = "network_alert_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    asset_code = Column(String(80), default="")
+    service_name = Column(String(120), default="")
+    event_state = Column(String(40), default="HARD CRITICAL")
+    matched_rule_name = Column(String(160), default="")
+    recipients_summary = Column(Text, default="")
+    delivery_channel = Column(String(48), default="smtp+webhook")
+    delivery_status = Column(String(32), default="sent")  # sent | simulated_ready | suppressed_maintenance | suppressed_unreachable | error
+    detail = Column(Text, default="")
+
+
+class SmtpAlertConfig(Base):
+    __tablename__ = "network_smtp_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    smtp_host = Column(String(180), default="smtp.empresa.local")
+    smtp_port = Column(Integer, default=587)
+    use_tls = Column(Boolean, default=True)
+    smtp_username = Column(String(160), default="alertas-rackdoc@empresa.local")
+    smtp_password = Column(String(255), default="")
+    from_email = Column(String(180), default="RackDoc Monitor & CMDB <alertas-rackdoc@empresa.local>")
+    global_webhook_url = Column(String(255), default="")
+    enabled = Column(Boolean, default=True)
+
+
+
 

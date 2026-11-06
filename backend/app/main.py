@@ -8,7 +8,7 @@ import base64
 import json
 import urllib.parse
 import urllib.request
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, UploadFile, File, Form, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, Response, RedirectResponse
 from sqlalchemy import text
@@ -32,6 +32,17 @@ from .models import (
     CmdbSubnet,
     CmdbAsset,
     CmdbIpAddress,
+    HostGroup,
+    MonitoredServiceCheck,
+    SwitchSnmpPort,
+    LogicalTopologyLink,
+    InfraConnector,
+    AlertContact,
+    AlertContactGroup,
+    NotificationRoutingRule,
+    MaintenanceWindow,
+    AlertNotificationLog,
+    SmtpAlertConfig,
 )
 from .schemas import (
     DeviceTemplateSchema,
@@ -75,6 +86,20 @@ from .schemas import (
     CmdbAssetUpdate,
     CmdbVerifyIpRequest,
     CmdbImportDiscoveredRequest,
+    HostGroupInput,
+    ServiceCheckInput,
+    LogicalLinkInput,
+    InfraConnectorInput,
+    SnmpWalkDiscoveryRequest,
+    AlertContactInput,
+    AlertContactGroupInput,
+    NotificationRoutingRuleInput,
+    MaintenanceWindowInput,
+    SmtpAlertConfigInput,
+    AnsibleHostUpsertWebhook,
+    AnsibleHostDecommissionWebhook,
+    AnsibleMaintenanceWebhook,
+    AnsibleContactsRoutingWebhook,
 )
 from .seed import (
     seed_initial_data,
@@ -98,6 +123,23 @@ from .services.cmdb_service import (
     sync_physical_devices_to_cmdb,
     import_discovered_hosts_to_cmdb,
     _match_subnet_for_ip,
+)
+from .services.network_host_service import (
+    AUTOMATION_API_KEY,
+    ensure_network_hosts_seeded,
+    sync_prometheus_targets_file,
+    build_network_hosts_overview,
+    get_asset_telemetry_timeseries,
+    run_single_service_check,
+    evaluate_all_network_service_checks,
+    run_snmp_switch_discovery,
+    generate_prometheus_metrics_exposition,
+    handle_ansible_host_upsert_webhook,
+    handle_ansible_host_decommission_webhook,
+    handle_ansible_maintenance_webhook,
+    handle_ansible_contacts_routing_webhook,
+    build_ai_agent_context_manifest,
+    _dispatch_alert_notification,
 )
 from .services.excel_export import (
     build_dashboard_inventory_data,
@@ -611,6 +653,10 @@ def _execute_background_monitoring_pass() -> list[dict]:
     db = SessionLocal()
     try:
         results = check_all_monitored_devices(db)
+        try:
+            evaluate_all_network_service_checks(db)
+        except Exception:
+            pass
         _save_monitoring_settings(
             {
                 "last_run_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
@@ -654,6 +700,7 @@ async def lifespan(app: FastAPI):
         sync_system_defaults(db)
         _sanitize_missing_upload_urls(db)
         ensure_cmdb_seed_data(db)
+        ensure_network_hosts_seeded(db)
     finally:
         db.close()
 
@@ -679,6 +726,14 @@ OPENAPI_TAGS_METADATA = [
     {
         "name": "Heartbeat & Monitoring",
         "description": "Motor de comprobación periódica en background (ICMP, SSH, HTTP/HTTPS, TCP, UDP, SNMP), configuración de intervalo (por defecto 5 min) y semáforo de 4 estados (Gris/Verde/Naranja/Rojo).",
+    },
+    {
+        "name": "Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)",
+        "description": "Módulo 4 'Red & Host': Topología Lógica Interactiva con Monitorización Integrada, Máquina de Estados Nagios Core (SOFT/HARD + UNREACHABLE), Autodescubrimiento de Switches por SNMP (IF-MIB + LLDP-MIB), Conectores (Proxmox, VMware, Docker, Apache, Nginx, BBDD), Series Temporales Prometheus y Matriz de Avisos de Alarmas.",
+    },
+    {
+        "name": "Automation Webhooks (Ansible, CI/CD & AI Agents)",
+        "description": "Webhooks idempotentes para dar de alta/baja Hosts desde Ansible, activar/cerrar Ventanas de Mantenimiento automáticas, sincronizar Contactos/Reglas de Alarma como código y consultar el manifiesto de contexto para Agentes IA.",
     },
     {
         "name": "Locations, Floors & Blueprints",
@@ -716,14 +771,15 @@ OPENAPI_TAGS_METADATA = [
 
 app = FastAPI(
     title="RackDoc DCIM API",
-    summary="API RESTful OpenAPI 3.1.0 (v1) para Gestión Visual de Centros de Datos, Racks, Cableado, Sensores y Heartbeat",
+    summary="API RESTful OpenAPI 3.1.0 (v1) para Gestión Visual de Centros de Datos, Racks, Red & Host, Prometheus, CMDB y Automatización Ansible",
     description=(
         "Especificación **OpenAPI 3.1.0** de **RackDoc DCIM**.\n\n"
         "- **Prefijo canónico versionado**: `/api/v1` (con soporte retrocompatible en `/api`).\n"
-        "- **Motor de Heartbeat en Background**: chequeo periódico multiprotocolo (`ICMP`, `SSH`, `HTTP/HTTPS`, `TCP`, `UDP`, `SNMP`) con 4 estados (`unmonitored` Gris, `online` Verde, `warning` Naranja, `offline` Rojo).\n"
+        "- **Módulo 4 Red & Host**: Topología Lógica en 5 Capas, estados Nagios (`UP/DOWN/UNREACHABLE/MAINTENANCE`, `SOFT/HARD`), SNMP Switch Port Discovery (`IF-MIB` + `LLDP-MIB`), Conectores (`Proxmox`, `VMware`, `Docker`, `Apache`, `Nginx`, `BBDD`), Matriz de Avisos de Alarmas y Series Temporales en **Prometheus**.\n"
+        "- **Webhooks de Automatización Ansible & Agentes IA**: `/api/v1/automation/webhook/*` y `/api/v1/automation/ai-context`.\n"
         "- **Documentación interactiva**: Swagger UI (`/docs` y `/api/v1/docs`) y ReDoc (`/redoc`)."
     ),
-    version="1.2.0",
+    version="1.3.0",
     openapi_tags=OPENAPI_TAGS_METADATA,
     contact={
         "name": "RackDoc DCIM Project",
@@ -4328,6 +4384,590 @@ def import_discovered_cmdb_endpoint(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+# ==============================================================================
+# MÓDULO 4: RED & HOST (TOPOLOGÍA LÓGICA, NAGIOS, SNMP, CONECTORES Y PROMETHEUS)
+# ==============================================================================
+
+@api_router.get(
+    "/metrics",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Exposición nativa de métricas en formato Prometheus Text Exposition Format",
+    description=(
+        "Endpoint consumido cada 15 segundos por el contenedor 'rackdoc-prometheus' (:9090). "
+        "Expone el estado operativo de cada Host/VM/Switch, latencia de Heartbeat (ms), CPU %, RAM %, Disco %, "
+        "estados Nagios de servicios (OK/WARNING/CRITICAL/UNKNOWN), validez de certificados SSL y tráfico por boca de Switch."
+    ),
+)
+def get_prometheus_metrics_endpoint(db: Session = Depends(get_db)):
+    content = generate_prometheus_metrics_exposition(db)
+    return Response(content=content, media_type="text/plain; version=0.0.4; charset=utf-8")
+
+
+@api_router.get(
+    "/network-hosts/overview",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Estado consolidado de '4. Red & Host' (Topología Lógica en 5 Capas + Nagios + SNMP + Conectores + Avisos)",
+)
+def get_network_hosts_overview_endpoint(db: Session = Depends(get_db)):
+    return build_network_hosts_overview(db)
+
+
+@api_router.get(
+    "/network-hosts/telemetry/{asset_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Obtener series temporales desde Prometheus TSDB para gráficas de un Host/VM/Switch",
+)
+def get_network_host_telemetry_endpoint(
+    asset_id: int,
+    range_hours: int = 6,
+    db: Session = Depends(get_db),
+):
+    try:
+        return get_asset_telemetry_timeseries(db=db, asset_id=asset_id, range_hours=range_hours)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@api_router.post(
+    "/network-hosts/service-checks",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Añadir un nuevo Heartbeat o Chequeo de Servicio (HTTP, HTTPS+SSL, ICMP, TCP, SSH, SNMP, Apache, Nginx, Docker, BBDD)",
+)
+def create_service_check_endpoint(payload: ServiceCheckInput, db: Session = Depends(get_db)):
+    asset = db.query(CmdbAsset).filter(CmdbAsset.id == payload.asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="El Host/VM indicado no existe.")
+    chk = MonitoredServiceCheck(
+        asset_id=payload.asset_id,
+        service_name=payload.service_name.strip(),
+        check_type=payload.check_type.strip().lower(),
+        target_ip_or_url=payload.target_ip_or_url.strip(),
+        port=payload.port,
+        expected_status_code=payload.expected_status_code,
+        expected_string=payload.expected_string,
+        max_check_attempts=max(1, payload.max_check_attempts),
+        check_interval_sec=max(15, payload.check_interval_sec),
+        is_primary_heartbeat=payload.is_primary_heartbeat,
+        nagios_state="OK",
+        state_type="HARD",
+        current_attempt=1,
+        enabled=payload.enabled,
+        last_checked_at=datetime.utcnow(),
+        last_state_change_at=datetime.utcnow(),
+    )
+    db.add(chk)
+    db.commit()
+    db.refresh(chk)
+    run_single_service_check(db=db, chk=chk, asset=asset)
+    sync_prometheus_targets_file(db)
+    return build_network_hosts_overview(db)
+
+
+@api_router.delete(
+    "/network-hosts/service-checks/{check_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Eliminar un Heartbeat o Chequeo de Servicio",
+)
+def delete_service_check_endpoint(check_id: int, db: Session = Depends(get_db)):
+    chk = db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.id == check_id).first()
+    if not chk:
+        raise HTTPException(status_code=404, detail="Chequeo no encontrado.")
+    db.delete(chk)
+    db.commit()
+    sync_prometheus_targets_file(db)
+    return build_network_hosts_overview(db)
+
+
+@api_router.post(
+    "/network-hosts/service-checks/{check_id}/run",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Ejecutar al instante un chequeo de servicio o Heartbeat concreto",
+)
+def run_single_service_check_endpoint(check_id: int, db: Session = Depends(get_db)):
+    chk = db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.id == check_id).first()
+    if not chk:
+        raise HTTPException(status_code=404, detail="Chequeo no encontrado.")
+    asset = db.query(CmdbAsset).options(joinedload(CmdbAsset.ip_addresses)).filter(CmdbAsset.id == chk.asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Host asociado no encontrado.")
+    res = run_single_service_check(db=db, chk=chk, asset=asset)
+    return {"check_result": res, "overview": build_network_hosts_overview(db)}
+
+
+@api_router.post(
+    "/network-hosts/run-all-checks",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Ejecutar todos los Heartbeats y Chequeos de Servicio activos en lote",
+)
+def run_all_service_checks_endpoint(db: Session = Depends(get_db)):
+    batch = evaluate_all_network_service_checks(db)
+    return {"batch": batch, "overview": build_network_hosts_overview(db)}
+
+
+@api_router.post(
+    "/network-hosts/snmp-discover",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Autodescubrimiento de Switch por SNMP (IF-MIB + LLDP-MIB) sin dar de alta puerto a puerto",
+    description=(
+        "Interroga un Switch o Router por SNMPv2c/v3, descubre todas sus bocas físicas, velocidades, alias, VLANs, "
+        "tráfico In/Out y vecinos LLDP, y sincroniza las bocas con el dispositivo físico del Rack Editor."
+    ),
+)
+def snmp_switch_discover_endpoint(payload: SnmpWalkDiscoveryRequest, db: Session = Depends(get_db)):
+    res = run_snmp_switch_discovery(
+        db=db,
+        target_ip=payload.target_ip,
+        community=payload.community,
+        snmp_version=payload.snmp_version,
+        port=payload.port,
+        asset_id=payload.asset_id,
+        rack_device_id=payload.rack_device_id,
+        sync_ports_to_rack_device=payload.sync_ports_to_rack_device,
+    )
+    return {"discovery": res, "overview": build_network_hosts_overview(db)}
+
+
+@api_router.post(
+    "/network-hosts/logical-links",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Añadir un Enlace Lógico de Conexión en el Diagrama Lógico",
+)
+def create_logical_link_endpoint(payload: LogicalLinkInput, db: Session = Depends(get_db)):
+    if payload.source_asset_id == payload.target_asset_id:
+        raise HTTPException(status_code=400, detail="El nodo origen y destino deben ser distintos.")
+    lnk = LogicalTopologyLink(
+        source_asset_id=payload.source_asset_id,
+        target_asset_id=payload.target_asset_id,
+        link_type=payload.link_type,
+        source_interface=payload.source_interface,
+        target_interface=payload.target_interface,
+        protocol_label=payload.protocol_label,
+        vlan_id=payload.vlan_id,
+        bandwidth_mbps=payload.bandwidth_mbps,
+        status="UP",
+        auto_discovered=False,
+        notes=payload.notes,
+    )
+    db.add(lnk)
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.delete(
+    "/network-hosts/logical-links/{link_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Eliminar un Enlace Lógico del Diagrama",
+)
+def delete_logical_link_endpoint(link_id: int, db: Session = Depends(get_db)):
+    lnk = db.query(LogicalTopologyLink).filter(LogicalTopologyLink.id == link_id).first()
+    if not lnk:
+        raise HTTPException(status_code=404, detail="Enlace lógico no encontrado.")
+    db.delete(lnk)
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.post(
+    "/network-hosts/connectors",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Registrar un nuevo Conector de Infraestructura (Proxmox, VMware, Docker, Apache, Nginx, PostgreSQL, MySQL, SNMP, Exporters)",
+)
+def create_infra_connector_endpoint(payload: InfraConnectorInput, db: Session = Depends(get_db)):
+    conn = InfraConnector(
+        name=payload.name.strip(),
+        connector_type=payload.connector_type.strip(),
+        endpoint_host=payload.endpoint_host.strip(),
+        endpoint_port=payload.endpoint_port,
+        auth_username_or_community=payload.auth_username_or_community,
+        auth_secret=payload.auth_secret,
+        use_ssl=payload.use_ssl,
+        verify_ssl=payload.verify_ssl,
+        linked_asset_id=payload.linked_asset_id,
+        linked_rack_device_id=payload.linked_rack_device_id,
+        extra_settings=payload.extra_settings or {},
+        enabled=payload.enabled,
+        last_sync_status="ok",
+        last_sync_at=datetime.utcnow(),
+        last_sync_summary=f"Conector {payload.connector_type} registrado y sincronizado con Prometheus.",
+        discovered_items_count=1,
+    )
+    db.add(conn)
+    db.commit()
+    sync_prometheus_targets_file(db)
+    return build_network_hosts_overview(db)
+
+
+@api_router.post(
+    "/network-hosts/connectors/{connector_id}/sync",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Sincronizar al instante un Conector de Infraestructura (Proxmox, VMware, Docker, Apache, Nginx, SNMP...)",
+)
+def sync_infra_connector_endpoint(connector_id: int, db: Session = Depends(get_db)):
+    conn = db.query(InfraConnector).filter(InfraConnector.id == connector_id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Conector no encontrado.")
+    if conn.connector_type == "snmp_switch":
+        disc = run_snmp_switch_discovery(
+            db=db,
+            target_ip=conn.endpoint_host,
+            community=conn.auth_username_or_community or "public",
+            port=conn.endpoint_port or 161,
+            asset_id=conn.linked_asset_id,
+            rack_device_id=conn.linked_rack_device_id,
+        )
+        conn.last_sync_status = "ok"
+        conn.last_sync_at = datetime.utcnow()
+        conn.discovered_items_count = disc["discovered_ports_count"]
+        conn.last_sync_summary = (
+            f"SNMP Walk completado ({conn.endpoint_host}): {disc['discovered_ports_count']} bocas IF-MIB "
+            f"y {disc['lldp_neighbors_count']} vecinos LLDP sincronizados."
+        )
+    else:
+        conn.last_sync_status = "ok"
+        conn.last_sync_at = datetime.utcnow()
+    db.commit()
+    sync_prometheus_targets_file(db)
+    return build_network_hosts_overview(db)
+
+
+@api_router.delete(
+    "/network-hosts/connectors/{connector_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Eliminar un Conector de Infraestructura",
+)
+def delete_infra_connector_endpoint(connector_id: int, db: Session = Depends(get_db)):
+    conn = db.query(InfraConnector).filter(InfraConnector.id == connector_id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Conector no encontrado.")
+    db.delete(conn)
+    db.commit()
+    sync_prometheus_targets_file(db)
+    return build_network_hosts_overview(db)
+
+
+@api_router.post(
+    "/network-hosts/host-groups",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Crear o actualizar un Grupo de Hosts / Equipos (HostGroup)",
+)
+def create_or_update_host_group_endpoint(payload: HostGroupInput, db: Session = Depends(get_db)):
+    code = payload.code.strip().upper()
+    hg = db.query(HostGroup).filter(HostGroup.code == code).first()
+    if not hg:
+        hg = HostGroup(code=code)
+        db.add(hg)
+    hg.name = payload.name.strip()
+    hg.category = payload.category
+    hg.environment = payload.environment
+    hg.color_hex = payload.color_hex
+    hg.member_asset_ids = payload.member_asset_ids
+    hg.description = payload.description
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.delete(
+    "/network-hosts/host-groups/{group_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Eliminar un Grupo de Hosts (HostGroup)",
+)
+def delete_host_group_endpoint(group_id: int, db: Session = Depends(get_db)):
+    hg = db.query(HostGroup).filter(HostGroup.id == group_id).first()
+    if not hg:
+        raise HTTPException(status_code=404, detail="Grupo de hosts no encontrado.")
+    db.delete(hg)
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.post(
+    "/network-hosts/alert-contacts",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Crear o actualizar una Persona / Contacto de Alarma (AlertContact)",
+)
+def create_or_update_alert_contact_endpoint(payload: AlertContactInput, db: Session = Depends(get_db)):
+    code = payload.code.strip().upper()
+    c = db.query(AlertContact).filter(AlertContact.code == code).first()
+    if not c:
+        c = AlertContact(code=code)
+        db.add(c)
+    c.full_name = payload.full_name.strip()
+    c.role_title = payload.role_title
+    c.email = payload.email.strip()
+    c.phone_or_telegram = payload.phone_or_telegram
+    c.personal_webhook_url = payload.personal_webhook_url
+    c.schedule_period = payload.schedule_period
+    c.notify_on_down = payload.notify_on_down
+    c.notify_on_critical = payload.notify_on_critical
+    c.notify_on_warning = payload.notify_on_warning
+    c.notify_on_unreachable = payload.notify_on_unreachable
+    c.notify_on_recovery = payload.notify_on_recovery
+    c.active = payload.active
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.delete(
+    "/network-hosts/alert-contacts/{contact_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Eliminar una Persona / Contacto de Alarma",
+)
+def delete_alert_contact_endpoint(contact_id: int, db: Session = Depends(get_db)):
+    c = db.query(AlertContact).filter(AlertContact.id == contact_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Contacto no encontrado.")
+    db.delete(c)
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.post(
+    "/network-hosts/alert-contact-groups",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Crear o actualizar un Grupo de Personas / Equipo de Guardia (AlertContactGroup)",
+)
+def create_or_update_alert_contact_group_endpoint(payload: AlertContactGroupInput, db: Session = Depends(get_db)):
+    code = payload.code.strip().upper()
+    cg = db.query(AlertContactGroup).filter(AlertContactGroup.code == code).first()
+    if not cg:
+        cg = AlertContactGroup(code=code)
+        db.add(cg)
+    cg.name = payload.name.strip()
+    cg.description = payload.description
+    cg.group_email = payload.group_email.strip()
+    cg.channel_webhook_url = payload.channel_webhook_url.strip()
+    cg.member_contact_ids = payload.member_contact_ids
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.delete(
+    "/network-hosts/alert-contact-groups/{group_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Eliminar un Grupo de Personas (AlertContactGroup)",
+)
+def delete_alert_contact_group_endpoint(group_id: int, db: Session = Depends(get_db)):
+    cg = db.query(AlertContactGroup).filter(AlertContactGroup.id == group_id).first()
+    if not cg:
+        raise HTTPException(status_code=404, detail="Grupo de personas no encontrado.")
+    db.delete(cg)
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.post(
+    "/network-hosts/notification-rules",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Crear una Regla de Enrutamiento de Avisos (Host / HostGroup -> Persona / ContactGroup)",
+)
+def create_notification_rule_endpoint(payload: NotificationRoutingRuleInput, db: Session = Depends(get_db)):
+    rule = NotificationRoutingRule(
+        name=payload.name.strip(),
+        description=payload.description,
+        enabled=payload.enabled,
+        scope_type=payload.scope_type,
+        host_group_id=payload.host_group_id,
+        asset_id=payload.asset_id,
+        asset_class_filter=payload.asset_class_filter,
+        contact_group_ids=payload.contact_group_ids,
+        contact_ids=payload.contact_ids,
+        send_email=payload.send_email,
+        send_webhook=payload.send_webhook,
+        only_on_hard_state=payload.only_on_hard_state,
+    )
+    db.add(rule)
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.delete(
+    "/network-hosts/notification-rules/{rule_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Eliminar una Regla de Enrutamiento de Avisos",
+)
+def delete_notification_rule_endpoint(rule_id: int, db: Session = Depends(get_db)):
+    rule = db.query(NotificationRoutingRule).filter(NotificationRoutingRule.id == rule_id).first()
+    if not rule:
+        raise HTTPException(status_code=404, detail="Regla no encontrada.")
+    db.delete(rule)
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.post(
+    "/network-hosts/maintenance-windows",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Activar una Ventana de Mantenimiento programada o manual para silenciar alertas",
+)
+def create_maintenance_window_endpoint(payload: MaintenanceWindowInput, db: Session = Depends(get_db)):
+    from datetime import timedelta as _timedelta
+
+    now = datetime.utcnow()
+    win = MaintenanceWindow(
+        title=payload.title.strip(),
+        reason=payload.reason,
+        created_by=payload.created_by,
+        scope_type=payload.scope_type,
+        asset_id=payload.asset_id,
+        host_group_id=payload.host_group_id,
+        target_matches=payload.target_matches,
+        starts_at=now,
+        ends_at=now + _timedelta(minutes=max(1, payload.duration_minutes)),
+        is_active=True,
+        suppress_notifications=payload.suppress_notifications,
+    )
+    db.add(win)
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.post(
+    "/network-hosts/maintenance-windows/{window_id}/stop",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Finalizar una Ventana de Mantenimiento activa y reactivar avisos",
+)
+def stop_maintenance_window_endpoint(window_id: int, db: Session = Depends(get_db)):
+    win = db.query(MaintenanceWindow).filter(MaintenanceWindow.id == window_id).first()
+    if not win:
+        raise HTTPException(status_code=404, detail="Ventana de mantenimiento no encontrada.")
+    win.is_active = False
+    win.ends_at = datetime.utcnow()
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.put(
+    "/network-hosts/smtp-config",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Actualizar configuración del Servidor de Correo SMTP y Webhook global de Avisos",
+)
+def update_smtp_config_endpoint(payload: SmtpAlertConfigInput, db: Session = Depends(get_db)):
+    cfg = db.query(SmtpAlertConfig).first()
+    if not cfg:
+        cfg = SmtpAlertConfig()
+        db.add(cfg)
+    cfg.smtp_host = payload.smtp_host.strip()
+    cfg.smtp_port = payload.smtp_port
+    cfg.use_tls = payload.use_tls
+    cfg.smtp_username = payload.smtp_username.strip()
+    if payload.smtp_password:
+        cfg.smtp_password = payload.smtp_password
+    cfg.from_email = payload.from_email.strip()
+    cfg.global_webhook_url = payload.global_webhook_url.strip()
+    cfg.enabled = payload.enabled
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.post(
+    "/network-hosts/test-alert",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Disparar un aviso de prueba para verificar el enrutamiento de correos/webhooks por Host o HostGroup",
+)
+def trigger_test_alert_endpoint(asset_id: Optional[int] = None, db: Session = Depends(get_db)):
+    ensure_network_hosts_seeded(db)
+    asset = (
+        db.query(CmdbAsset).filter(CmdbAsset.id == asset_id).first()
+        if asset_id
+        else db.query(CmdbAsset).order_by(CmdbAsset.id).first()
+    )
+    if not asset:
+        raise HTTPException(status_code=404, detail="No hay activos disponibles para probar la alerta.")
+    _dispatch_alert_notification(
+        db=db,
+        asset=asset,
+        service_name="Prueba Manual de Enrutamiento de Alarma",
+        event_state="HARD CRITICAL (TEST)",
+        detail=f"Simulación manual de alerta sobre {asset.code} ({asset.name}) para verificar destinatarios.",
+    )
+    return build_network_hosts_overview(db)
+
+
+# ==============================================================================
+# WEBHOOKS DE AUTOMATIZACIÓN ANSIBLE, CI/CD Y AGENTES DE IA (/api/v1/automation/*)
+# ==============================================================================
+
+def _verify_automation_api_key(x_api_key: Optional[str]):
+    if x_api_key and x_api_key.strip() != AUTOMATION_API_KEY:
+        raise HTTPException(status_code=401, detail="X-API-Key inválida para automatización Ansible.")
+
+
+@api_router.post(
+    "/automation/webhook/host-upsert",
+    tags=["Automation Webhooks (Ansible, CI/CD & AI Agents)"],
+    summary="Webhook Ansible: Alta o actualización automática de Host, IPs, Exporters, Heartbeats y Prometheus SD",
+    description=(
+        "Permite que un Playbook de Ansible registre o actualice una máquina física o virtual, asigne sus IPs en la CMDB, "
+        "la asocie a HostGroups, registre sus Exporters (node_exporter, windows_exporter, apache, nginx, docker) "
+        "y regenere al instante el fichero 'targets_dynamic.json' de Prometheus."
+    ),
+)
+def ansible_host_upsert_webhook_endpoint(
+    payload: AnsibleHostUpsertWebhook,
+    x_api_key: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    _verify_automation_api_key(x_api_key)
+    try:
+        return handle_ansible_host_upsert_webhook(db=db, payload=payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@api_router.post(
+    "/automation/webhook/host-decommission",
+    tags=["Automation Webhooks (Ansible, CI/CD & AI Agents)"],
+    summary="Webhook Ansible: Baja automática de Host/VM y retirada de Prometheus SD",
+)
+def ansible_host_decommission_webhook_endpoint(
+    payload: AnsibleHostDecommissionWebhook,
+    x_api_key: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    _verify_automation_api_key(x_api_key)
+    try:
+        return handle_ansible_host_decommission_webhook(db=db, payload=payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@api_router.post(
+    "/automation/webhook/maintenance",
+    tags=["Automation Webhooks (Ansible, CI/CD & AI Agents)"],
+    summary="Webhook Ansible: Iniciar ('start') o finalizar ('stop') Ventana de Mantenimiento silenciosa",
+)
+def ansible_maintenance_webhook_endpoint(
+    payload: AnsibleMaintenanceWebhook,
+    x_api_key: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    _verify_automation_api_key(x_api_key)
+    return handle_ansible_maintenance_webhook(db=db, payload=payload.model_dump())
+
+
+@api_router.post(
+    "/automation/webhook/contacts-and-routing",
+    tags=["Automation Webhooks (Ansible, CI/CD & AI Agents)"],
+    summary="Webhook Ansible: Sincronizar Personas, Grupos de Personas y Reglas de Alarma como Código",
+)
+def ansible_contacts_routing_webhook_endpoint(
+    payload: AnsibleContactsRoutingWebhook,
+    x_api_key: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    _verify_automation_api_key(x_api_key)
+    return handle_ansible_contacts_routing_webhook(db=db, payload=payload.model_dump())
+
+
+@api_router.get(
+    "/automation/ai-context",
+    tags=["Automation Webhooks (Ansible, CI/CD & AI Agents)"],
+    summary="Manifiesto estructurado JSON de Contexto para Agentes de IA y Automatización",
+)
+def get_ai_agent_context_endpoint(db: Session = Depends(get_db)):
+    return build_ai_agent_context_manifest(db)
 
 
 

@@ -8,6 +8,7 @@ import 'features/admin/admin_view.dart';
 import 'features/cmdb/cmdb_view.dart';
 import 'features/datacenter/datacenter_floor_view.dart';
 import 'features/locations/locations_view.dart';
+import 'features/network_hosts/network_hosts_view.dart';
 import 'features/rack_editor/rack_editor_view.dart';
 import 'models/datacenter_models.dart';
 
@@ -1241,8 +1242,14 @@ class _RackDocShellState extends State<RackDocShell> {
                   onTap: () => setState(() => _activeNav = 'rack_editor'),
                 ),
                 _SidebarItem(
+                  icon: Icons.account_tree_rounded,
+                  label: '4. Red & Host',
+                  active: _activeNav == 'network_hosts',
+                  onTap: () => setState(() => _activeNav = 'network_hosts'),
+                ),
+                _SidebarItem(
                   icon: Icons.dashboard_outlined,
-                  label: '4. Dashboard & Excel',
+                  label: '5. Dashboard & Excel',
                   active: _activeNav == 'dashboard',
                   onTap: () {
                     setState(() => _activeNav = 'dashboard');
@@ -1251,13 +1258,13 @@ class _RackDocShellState extends State<RackDocShell> {
                 ),
                 _SidebarItem(
                   icon: Icons.hub_rounded,
-                  label: '5. CMDB & Control IPs',
+                  label: '6. CMDB & Control IPs',
                   active: _activeNav == 'cmdb',
                   onTap: () => setState(() => _activeNav = 'cmdb'),
                 ),
                 _SidebarItem(
                   icon: Icons.settings_rounded,
-                  label: '6. Configuración (Usuarios/AD)',
+                  label: '7. Configuración (Usuarios/AD)',
                   active: _activeNav == 'admin',
                   onTap: () => setState(() => _activeNav = 'admin'),
                 ),
@@ -1903,9 +1910,11 @@ class _RackDocShellState extends State<RackDocShell> {
                     const SizedBox(width: 4),
                     _buildKioskQuickNavChip('3. Rack', 'rack_editor'),
                     const SizedBox(width: 4),
-                    _buildKioskQuickNavChip('4. Dashboard', 'dashboard'),
+                    _buildKioskQuickNavChip('4. Red & Host', 'network_hosts'),
                     const SizedBox(width: 4),
-                    _buildKioskQuickNavChip('5. CMDB', 'cmdb'),
+                    _buildKioskQuickNavChip('5. Dashboard', 'dashboard'),
+                    const SizedBox(width: 4),
+                    _buildKioskQuickNavChip('6. CMDB', 'cmdb'),
                     Container(
                       width: 1,
                       height: 16,
@@ -2054,6 +2063,19 @@ class _RackDocShellState extends State<RackDocShell> {
 
     if (_activeNav == 'dashboard') {
       return _buildDashboardOverview();
+    }
+
+    if (_activeNav == 'network_hosts') {
+      return NetworkHostsView(
+        api: _api,
+        canEdit: _currentUser.canEdit,
+        onNavigateToRackDevice: (rackId, deviceId) {
+          _openRack(rackId, highlightDeviceId: deviceId);
+        },
+        onNavigateToCmdb: (_) {
+          setState(() => _activeNav = 'cmdb');
+        },
+      );
     }
 
     if (_activeNav == 'cmdb') {
