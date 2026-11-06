@@ -803,25 +803,43 @@ class TechStackDiagramInput(BaseModel):
     environment: str = "production"
     owner_team: str = "DevOps & Arquitectura"
     criticality: str = "critical"
+    map_scale: float = 1.0
+    canvas_boxes: Optional[List[Dict[str, Any]]] = None
+
+
+class TechStackDiagramUpdateInput(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    business_service: Optional[str] = None
+    environment: Optional[str] = None
+    owner_team: Optional[str] = None
+    criticality: Optional[str] = None
+    map_scale: Optional[float] = None
+    canvas_boxes: Optional[List[Dict[str, Any]]] = None
 
 
 class TechStackNodeInput(BaseModel):
     stack_id: int
     asset_id: int
-    role_layer: str = "web_frontend"
+    role_layer: str = "general"
     custom_label: str = ""
     pos_x: float = 0.25
     pos_y: float = 0.35
+    width_px: float = 200.0
+    height_px: float = 110.0
     ssh_enabled: bool = True
     ssh_user: str = "root"
     ssh_port: int = 22
 
 
 class TechStackNodeMoveInput(BaseModel):
-    pos_x: float
-    pos_y: float
+    pos_x: Optional[float] = None
+    pos_y: Optional[float] = None
+    width_px: Optional[float] = None
+    height_px: Optional[float] = None
     role_layer: Optional[str] = None
     custom_label: Optional[str] = None
+    ssh_enabled: Optional[bool] = None
     ssh_user: Optional[str] = None
     ssh_port: Optional[int] = None
 
@@ -833,6 +851,12 @@ class TechStackEdgeInput(BaseModel):
     protocol_label: str = "HTTPS :443"
     port: int = 443
     notes: str = ""
+
+
+class TechStackEdgeUpdateInput(BaseModel):
+    protocol_label: Optional[str] = None
+    port: Optional[int] = None
+    notes: Optional[str] = None
 
 
 class HostSshCommandInput(BaseModel):

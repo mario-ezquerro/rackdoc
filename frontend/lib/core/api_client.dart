@@ -1170,6 +1170,18 @@ class RackDocApiClient {
     return Map<String, dynamic>.from(_decodeResponse(res) as Map);
   }
 
+  Future<Map<String, dynamic>> updateTechStackDiagram(
+    int stackId,
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/network-hosts/tech-stacks/$stackId'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
   Future<Map<String, dynamic>> deleteTechStackDiagram(int stackId) async {
     final res = await http.delete(
       Uri.parse('$baseUrl/network-hosts/tech-stacks/$stackId'),
@@ -1214,6 +1226,18 @@ class RackDocApiClient {
   ) async {
     final res = await http.post(
       Uri.parse('$baseUrl/network-hosts/tech-stacks/edges'),
+      headers: _headers,
+      body: jsonEncode(payload),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> updateTechStackEdge(
+    int edgeId,
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/network-hosts/tech-stacks/edges/$edgeId'),
       headers: _headers,
       body: jsonEncode(payload),
     );

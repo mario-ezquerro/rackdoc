@@ -2155,6 +2155,8 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
                     "custom_label": sn.custom_label or h_dict["name"],
                     "pos_x": sn.pos_x,
                     "pos_y": sn.pos_y,
+                    "width_px": float(getattr(sn, "width_px", None) or 200.0),
+                    "height_px": float(getattr(sn, "height_px", None) or 110.0),
                     "ssh_enabled": eff_ssh_enabled,
                     "ssh_user": eff_ssh_user,
                     "ssh_port": eff_ssh_port,
@@ -2196,6 +2198,36 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
                     "notes": se.notes or "",
                 }
             )
+        raw_boxes = getattr(st, "canvas_boxes", None)
+        if raw_boxes is None:
+            if st.code == "STACK-PORTAL-ERP":
+                raw_boxes = [
+                    {
+                        "id": "BOX-DMZ-WEB",
+                        "title": "ZONA DMZ / FRONTALES WEB",
+                        "corner_data": "VLAN 20 • 10.28.20.0/24 • VIP .99",
+                        "pos_x": 0.02,
+                        "pos_y": 0.05,
+                        "width_px": 510.0,
+                        "height_px": 430.0,
+                        "color_hex": "#2563EB",
+                    },
+                    {
+                        "id": "BOX-CORE-ERP",
+                        "title": "CLÚSTER BACKEND ERP & BBDD HA",
+                        "corner_data": "VMware vSphere HA/DRS • PostgreSQL 16 Master/Replica",
+                        "pos_x": 0.50,
+                        "pos_y": 0.05,
+                        "width_px": 520.0,
+                        "height_px": 460.0,
+                        "color_hex": "#0D9488",
+                    },
+                ]
+            else:
+                raw_boxes = []
+            st.canvas_boxes = raw_boxes
+            db.commit()
+
         serialized_stacks.append(
             {
                 "id": st.id,
@@ -2206,6 +2238,8 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
                 "environment": st.environment,
                 "owner_team": st.owner_team,
                 "criticality": st.criticality,
+                "map_scale": float(getattr(st, "map_scale", None) or 1.0),
+                "canvas_boxes": list(raw_boxes or []),
                 "nodes_count": len(st_nodes_out),
                 "edges_count": len(st_edges_out),
                 "nodes": st_nodes_out,

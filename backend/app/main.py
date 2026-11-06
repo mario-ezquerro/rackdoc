@@ -104,9 +104,11 @@ from .schemas import (
     AnsibleMaintenanceWebhook,
     AnsibleContactsRoutingWebhook,
     TechStackDiagramInput,
+    TechStackDiagramUpdateInput,
     TechStackNodeInput,
     TechStackNodeMoveInput,
     TechStackEdgeInput,
+    TechStackEdgeUpdateInput,
     HostSshCommandInput,
 )
 from .seed import (
@@ -191,6 +193,10 @@ def _ensure_db_migrations():
         "ALTER TABLE floor_devices ADD COLUMN last_ping_ms FLOAT",
         "ALTER TABLE floor_devices ADD COLUMN last_checked_at DATETIME",
         "ALTER TABLE floor_devices ADD COLUMN custom_fields JSON DEFAULT '{}'",
+        "ALTER TABLE tech_stack_diagrams ADD COLUMN map_scale FLOAT DEFAULT 1.0",
+        "ALTER TABLE tech_stack_diagrams ADD COLUMN canvas_boxes JSON DEFAULT '[]'",
+        "ALTER TABLE tech_stack_nodes ADD COLUMN width_px FLOAT DEFAULT 200.0",
+        "ALTER TABLE tech_stack_nodes ADD COLUMN height_px FLOAT DEFAULT 110.0",
     ]
     with engine.begin() as conn:
         for stmt in alter_statements:
@@ -4928,7 +4934,7 @@ def upsert_tech_stack_diagram_endpoint(payload: TechStackDiagramInput, db: Sessi
     code = payload.code.strip().upper()
     st = db.query(TechStackDiagram).filter(TechStackDiagram.code == code).first()
     if not st:
-        st = TechStackDiagram(code=code)
+        st = TechStackDiagram(code=code, canvas_boxes=payload.canvas_boxes or [])
         db.add(st)
     st.name = payload.name.strip()
     st.description = payload.description.strip()
@@ -4936,6 +4942,42 @@ def upsert_tech_stack_diagram_endpoint(payload: TechStackDiagramInput, db: Sessi
     st.environment = payload.environment.strip()
     st.owner_team = payload.owner_team.strip()
     st.criticality = payload.criticality.strip()
+    st.map_scale = payload.map_scale or 1.0
+    if payload.canvas_boxes is not None:
+        st.canvas_boxes = payload.canvas_boxes
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.put(
+    "/network-hosts/tech-stacks/{stack_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Actualizar Cajas/Zonas delimitadoras, escala o metadatos de un Stack Tecnológico",
+)
+def update_tech_stack_diagram_endpoint(
+    stack_id: int,
+    payload: TechStackDiagramUpdateInput,
+    db: Session = Depends(get_db),
+):
+    st = db.query(TechStackDiagram).filter(TechStackDiagram.id == stack_id).first()
+    if not st:
+        raise HTTPException(status_code=404, detail="Stack Tecnológico no encontrado.")
+    if payload.name is not None:
+        st.name = payload.name.strip()
+    if payload.description is not None:
+        st.description = payload.description.strip()
+    if payload.business_service is not None:
+        st.business_service = payload.business_service.strip()
+    if payload.environment is not None:
+        st.environment = payload.environment.strip()
+    if payload.owner_team is not None:
+        st.owner_team = payload.owner_team.strip()
+    if payload.criticality is not None:
+        st.criticality = payload.criticality.strip()
+    if payload.map_scale is not None:
+        st.map_scale = max(0.4, min(2.5, payload.map_scale))
+    if payload.canvas_boxes is not None:
+        st.canvas_boxes = list(payload.canvas_boxes)
     db.commit()
     return build_network_hosts_overview(db)
 
@@ -4967,8 +5009,10 @@ def create_tech_stack_node_endpoint(payload: TechStackNodeInput, db: Session = D
         asset_id=payload.asset_id,
         role_layer=payload.role_layer,
         custom_label=payload.custom_label.strip(),
-        pos_x=max(0.02, min(0.92, payload.pos_x)),
-        pos_y=max(0.04, min(0.88, payload.pos_y)),
+        pos_x=max(0.01, min(0.95, payload.pos_x)),
+        pos_y=max(0.01, min(0.94, payload.pos_y)),
+        width_px=max(140.0, min(380.0, payload.width_px or 200.0)),
+        height_px=max(82.0, min(280.0, payload.height_px or 110.0)),
         ssh_enabled=payload.ssh_enabled,
         ssh_user=payload.ssh_user.strip() or "root",
         ssh_port=payload.ssh_port or 22,
@@ -4981,7 +5025,7 @@ def create_tech_stack_node_endpoint(payload: TechStackNodeInput, db: Session = D
 @api_router.put(
     "/network-hosts/tech-stacks/nodes/{node_id}",
     tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
-    summary="Mover (Drag & Drop X/Y) o editar un nodo dentro del lienzo del Stack Tecnológico",
+    summary="Mover (Drag & Drop X/Y), redimensionar o editar un nodo dentro del lienzo del Stack Tecnológico",
 )
 def move_tech_stack_node_endpoint(
     node_id: int,
@@ -4991,12 +5035,20 @@ def move_tech_stack_node_endpoint(
     sn = db.query(TechStackNode).filter(TechStackNode.id == node_id).first()
     if not sn:
         raise HTTPException(status_code=404, detail="Nodo del stack no encontrado.")
-    sn.pos_x = max(0.02, min(0.92, payload.pos_x))
-    sn.pos_y = max(0.04, min(0.88, payload.pos_y))
+    if payload.pos_x is not None:
+        sn.pos_x = max(0.01, min(0.95, payload.pos_x))
+    if payload.pos_y is not None:
+        sn.pos_y = max(0.01, min(0.94, payload.pos_y))
+    if payload.width_px is not None:
+        sn.width_px = max(140.0, min(380.0, payload.width_px))
+    if payload.height_px is not None:
+        sn.height_px = max(82.0, min(280.0, payload.height_px))
     if payload.role_layer is not None:
         sn.role_layer = payload.role_layer
     if payload.custom_label is not None:
         sn.custom_label = payload.custom_label.strip()
+    if payload.ssh_enabled is not None:
+        sn.ssh_enabled = payload.ssh_enabled
     if payload.ssh_user is not None:
         sn.ssh_user = payload.ssh_user.strip()
     if payload.ssh_port is not None:
@@ -5030,15 +5082,52 @@ def delete_tech_stack_node_endpoint(node_id: int, db: Session = Depends(get_db))
 def create_tech_stack_edge_endpoint(payload: TechStackEdgeInput, db: Session = Depends(get_db)):
     if payload.source_node_id == payload.target_node_id:
         raise HTTPException(status_code=400, detail="El nodo origen y destino deben ser distintos.")
-    se = TechStackEdge(
-        stack_id=payload.stack_id,
-        source_node_id=payload.source_node_id,
-        target_node_id=payload.target_node_id,
-        protocol_label=payload.protocol_label.strip(),
-        port=payload.port,
-        notes=payload.notes,
+    existing = (
+        db.query(TechStackEdge)
+        .filter(
+            TechStackEdge.stack_id == payload.stack_id,
+            TechStackEdge.source_node_id == payload.source_node_id,
+            TechStackEdge.target_node_id == payload.target_node_id,
+        )
+        .first()
     )
-    db.add(se)
+    if existing:
+        existing.protocol_label = payload.protocol_label.strip()
+        existing.port = payload.port
+        existing.notes = payload.notes
+    else:
+        se = TechStackEdge(
+            stack_id=payload.stack_id,
+            source_node_id=payload.source_node_id,
+            target_node_id=payload.target_node_id,
+            protocol_label=payload.protocol_label.strip(),
+            port=payload.port,
+            notes=payload.notes,
+        )
+        db.add(se)
+    db.commit()
+    return build_network_hosts_overview(db)
+
+
+@api_router.put(
+    "/network-hosts/tech-stacks/edges/{edge_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Editar protocolo, puerto o notas de una flecha del Stack Tecnológico",
+)
+def update_tech_stack_edge_endpoint(
+    edge_id: int,
+    payload: TechStackEdgeUpdateInput,
+    db: Session = Depends(get_db),
+):
+    se = db.query(TechStackEdge).filter(TechStackEdge.id == edge_id).first()
+    if not se:
+        raise HTTPException(status_code=404, detail="Conexión no encontrada.")
+    if payload.protocol_label is not None:
+        se.protocol_label = payload.protocol_label.strip()
+    if payload.port is not None:
+        se.port = payload.port
+    if payload.notes is not None:
+        se.notes = payload.notes
     db.commit()
     return build_network_hosts_overview(db)
 
