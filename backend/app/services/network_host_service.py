@@ -1975,6 +1975,56 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
             for sp in ast_ports
         ]
 
+        cf = dict(ast.custom_fields or {})
+        conn_cfg = dict(cf.get("connect_config") or {})
+        hb_cfg_raw = dict(cf.get("heartbeat_config") or {})
+        ssh_sub = dict(conn_cfg.get("ssh") or {})
+        http_sub = dict(conn_cfg.get("http") or {})
+        https_sub = dict(conn_cfg.get("https") or {})
+
+        if "monitoring_enabled" in cf:
+            effective_monitoring_enabled = bool(cf["monitoring_enabled"])
+        else:
+            effective_monitoring_enabled = bool(ast.monitoring_enabled) or len(ast_checks) > 0
+
+        if "connect_enabled" in cf:
+            connect_enabled = bool(cf["connect_enabled"])
+        else:
+            connect_enabled = bool(conn_cfg.get("enabled", False)) or bool(hb_cfg_raw.get("remote_access_enabled", True))
+        ssh_enabled = bool(cf.get("ssh_enabled", "ssh" in (conn_cfg.get("protocols") or ["ssh"])))
+        ssh_user = str(cf.get("ssh_user") or ssh_sub.get("username") or "root")
+        ssh_port = int(cf.get("ssh_port") or ssh_sub.get("port") or 22)
+        ssh_host = str(cf.get("ssh_host") or ssh_sub.get("host") or hb_ip)
+
+        web_http_enabled = bool(cf.get("web_http_enabled", "http" in (conn_cfg.get("protocols") or [])))
+        web_http_url = str(cf.get("web_http_url") or http_sub.get("url") or (f"http://{hb_ip}/" if hb_ip else ""))
+        web_https_enabled = bool(cf.get("web_https_enabled", "https" in (conn_cfg.get("protocols") or ["https"])))
+        web_https_url = str(cf.get("web_https_url") or https_sub.get("url") or (f"https://{hb_ip}/" if hb_ip else ""))
+
+        hosting_mode = str(
+            cf.get("hosting_mode")
+            or (
+                "physical_rack_server"
+                if (ast.rack_device_id or ast.host_rack_device_id or ast.parent_asset_id)
+                else (
+                    "cluster_pool"
+                    if ast.asset_class in ("virtual_machine", "container_lxc", "container")
+                    else "standalone"
+                )
+            )
+        )
+        cluster_or_pool_name = str(cf.get("cluster_or_pool_name") or ast.hypervisor_or_platform or "")
+        custom_class_lbl = str(cf.get("custom_asset_class_label") or "").strip()
+
+        if rk and effective_rdev and ast.rack_device_id:
+            loc_badge = f"Rack {rk.code} • U{effective_rdev.start_u}"
+        elif hosting_mode == "physical_rack_server" and rk and effective_rdev:
+            loc_badge = f"En Máquina {effective_rdev.code} (Rack {rk.code} • U{effective_rdev.start_u})"
+        elif hosting_mode == "cluster_pool":
+            loc_badge = f"Clúster: {cluster_or_pool_name or ast.hypervisor_or_platform or 'VMware / Proxmox / Hyper-V (Sin host fijo)'}"
+        else:
+            loc_badge = ast.hypervisor_or_platform or "Independiente / Barebone / Cloud"
+
         serialized_hosts.append(
             {
                 "id": ast.id,
@@ -1983,13 +2033,16 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
                 "hostname": ast.hostname,
                 "fqdn": ast.fqdn,
                 "asset_class": ast.asset_class,
-                "asset_class_label": ASSET_CLASS_LABELS.get(ast.asset_class, ast.asset_class),
+                "custom_asset_class_label": custom_class_lbl,
+                "asset_class_label": custom_class_lbl or ASSET_CLASS_LABELS.get(ast.asset_class, ast.asset_class),
                 "logical_layer": layer_key,
                 "logical_layer_order": LOGICAL_LAYER_ORDER.get(layer_key, 4),
                 "logical_layer_label": layer_label,
                 "environment": ast.environment,
                 "criticality": ast.criticality,
                 "os_or_firmware": ast.os_or_firmware,
+                "hosting_mode": hosting_mode,
+                "cluster_or_pool_name": cluster_or_pool_name,
                 "hypervisor_or_platform": ast.hypervisor_or_platform,
                 "owner_team": ast.owner_team,
                 "responsible_person": ast.responsible_person,
@@ -2005,18 +2058,12 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
                 "rack_code": rk.code if rk else "",
                 "rack_name": rk.name if rk else "",
                 "start_u": effective_rdev.start_u if effective_rdev else None,
-                "rack_location_badge": (
-                    f"Rack {rk.code} • U{effective_rdev.start_u}"
-                    if (rk and effective_rdev and ast.rack_device_id)
-                    else (
-                        f"Alojado en {effective_rdev.code} (Rack {rk.code} • U{effective_rdev.start_u})"
-                        if (rk and effective_rdev)
-                        else (ast.hypervisor_or_platform or "Barebone / Cloud Externo")
-                    )
-                ),
+                "rack_location_badge": loc_badge,
                 "parent_asset_id": ast.parent_asset_id,
                 "parent_asset_code": parent_ast.code if parent_ast else "",
-                # Estado Operativo Nagios + Mantenimiento + Métricas Prometheus
+                # Sección 1: Healthchecks / Monitorización (Activable / Desactivable)
+                "monitoring_enabled": effective_monitoring_enabled,
+                "heartbeat_config": hb_cfg_raw,
                 "nagios_host_state": nagios_host_state,  # UP | DOWN | UNREACHABLE | MAINTENANCE
                 "nagios_state_type": nagios_state_type,
                 "in_maintenance": maint_win is not None,
@@ -2025,8 +2072,27 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
                 "cpu_pct": cpu_pct,
                 "ram_pct": ram_pct,
                 "disk_pct": disk_pct,
-                "ssh_command": f"ssh root@{hb_ip}" if hb_ip else "",
-                "ssh_url": f"ssh://root@{hb_ip}:22" if hb_ip else "",
+                # Sección 2: Conectar desde el Frontend (SSH / HTTP / HTTPS — Activable / Desactivable)
+                "connect_enabled": connect_enabled,
+                "ssh_enabled": connect_enabled and ssh_enabled,
+                "ssh_user": ssh_user,
+                "ssh_port": ssh_port,
+                "ssh_host": ssh_host,
+                "ssh_command": (
+                    (f"ssh -p {ssh_port} {ssh_user}@{ssh_host}" if ssh_port != 22 else f"ssh {ssh_user}@{ssh_host}")
+                    if (connect_enabled and ssh_enabled and ssh_host)
+                    else ""
+                ),
+                "ssh_url": (
+                    f"ssh://{ssh_user}@{ssh_host}:{ssh_port}"
+                    if (connect_enabled and ssh_enabled and ssh_host)
+                    else ""
+                ),
+                "web_http_enabled": connect_enabled and web_http_enabled,
+                "web_http_url": web_http_url,
+                "web_https_enabled": connect_enabled and web_https_enabled,
+                "web_https_url": web_https_url,
+                "connect_config": conn_cfg,
                 "mini_series": {
                     "cpu": [
                         round(max(4.0, min(96.0, cpu_pct + math.sin((i / 2.2) + ast.id) * 9.5)), 1)
@@ -2076,7 +2142,10 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
             h_dict = hosts_by_id.get(sn.asset_id)
             if not h_dict:
                 continue
-            hb_ip = h_dict.get("heartbeat_ip") or "127.0.0.1"
+            hb_ip = h_dict.get("ssh_host") or h_dict.get("heartbeat_ip") or "127.0.0.1"
+            eff_ssh_enabled = bool(sn.ssh_enabled and h_dict.get("ssh_enabled", True))
+            eff_ssh_user = sn.ssh_user or h_dict.get("ssh_user") or "root"
+            eff_ssh_port = sn.ssh_port or h_dict.get("ssh_port") or 22
             st_nodes_out.append(
                 {
                     "id": sn.id,
@@ -2086,11 +2155,15 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
                     "custom_label": sn.custom_label or h_dict["name"],
                     "pos_x": sn.pos_x,
                     "pos_y": sn.pos_y,
-                    "ssh_enabled": sn.ssh_enabled,
-                    "ssh_user": sn.ssh_user,
-                    "ssh_port": sn.ssh_port,
-                    "ssh_command": f"ssh -p {sn.ssh_port} {sn.ssh_user}@{hb_ip}" if sn.ssh_port != 22 else f"ssh {sn.ssh_user}@{hb_ip}",
-                    "ssh_url": f"ssh://{sn.ssh_user}@{hb_ip}:{sn.ssh_port}",
+                    "ssh_enabled": eff_ssh_enabled,
+                    "ssh_user": eff_ssh_user,
+                    "ssh_port": eff_ssh_port,
+                    "ssh_command": (
+                        (f"ssh -p {eff_ssh_port} {eff_ssh_user}@{hb_ip}" if eff_ssh_port != 22 else f"ssh {eff_ssh_user}@{hb_ip}")
+                        if eff_ssh_enabled
+                        else ""
+                    ),
+                    "ssh_url": f"ssh://{eff_ssh_user}@{hb_ip}:{eff_ssh_port}" if eff_ssh_enabled else "",
                     "host": h_dict,
                 }
             )
@@ -2355,13 +2428,17 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
 
 def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Webhook idempotente para Ansible ('POST /api/v1/automation/webhook/host-upsert'):
+    Webhook idempotente para Ansible y Asistente Web de Alta/Edición ('POST /api/v1/network-hosts/hosts' / 'POST /api/v1/automation/webhook/host-upsert'):
     1. Crea o actualiza el Host/VM/Contenedor/Switch en la CMDB y en '4. Red & Host'.
     2. Registra su IP primaria de Heartbeat y todas sus IPs adicionales de servicio/VIP.
-    3. Lo vincula a su servidor físico en el Rack Editor o a su Hipervisor padre.
-    4. Lo añade a los HostGroups indicados (creándolos si no existen).
-    5. Registra sus Exporters (node_exporter, windows_exporter, apache, nginx, docker) y sus Heartbeats (HTTPS, SSH, TCP).
-    6. Regenera al instante '/app/data/prometheus/targets_dynamic.json' para que Prometheus lo monitorice automáticamente.
+    3. Soporta 3 modos de alojamiento ('hosting_mode'):
+       - 'cluster_pool': VM en un sistema/clúster de VMware, Proxmox, Hyper-V o K8s sin máquina física fija.
+       - 'physical_rack_server': Alojada en una máquina física concreta del Rack Editor.
+       - 'standalone': Máquina o servicio independiente / barebone / cloud sin máquina padre.
+    4. Gestiona las 2 opciones activables/desactivables (igual que en el Rack Editor):
+       - Opción 1 ('monitoring_enabled'): Activa o desactiva Healthchecks, Heartbeats y Exporters de Prometheus.
+       - Opción 2 ('connect_enabled'): Activa o desactiva la conexión remota SSH / HTTP / HTTPS desde el Frontend.
+    5. Regenera al instante '/app/data/prometheus/targets_dynamic.json' para que Prometheus lo monitorice automáticamente.
     """
     ensure_network_hosts_seeded(db)
     hostname = str(payload.get("hostname") or "").strip()
@@ -2370,15 +2447,45 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
         raise ValueError("Los campos 'hostname' y 'primary_ip' son obligatorios.")
 
     code = str(payload.get("code") or hostname.upper().replace(".", "-")).strip().upper()
-    asset = (
-        db.query(CmdbAsset)
-        .filter((CmdbAsset.code == code) | (CmdbAsset.hostname == hostname))
-        .first()
-    )
+    asset_id_in = payload.get("asset_id")
+    asset = None
+    if asset_id_in:
+        asset = db.query(CmdbAsset).filter(CmdbAsset.id == int(asset_id_in)).first()
+    if not asset:
+        asset = (
+            db.query(CmdbAsset)
+            .filter((CmdbAsset.code == code) | (CmdbAsset.hostname == hostname))
+            .first()
+        )
     is_new = asset is None
     if is_new:
         asset = CmdbAsset(code=code, sync_source="cmdb")
         db.add(asset)
+    elif code:
+        asset.code = code
+
+    monitoring_enabled = bool(payload.get("monitoring_enabled", True))
+    enable_icmp_ping = bool(payload.get("enable_icmp_ping", True))
+    replace_checks = bool(payload.get("replace_checks", False))
+
+    connect_enabled = bool(payload.get("connect_enabled", True))
+    ssh_enabled = bool(payload.get("ssh_enabled", True))
+    ssh_user = str(payload.get("ssh_user") or "root").strip() or "root"
+    ssh_port = int(payload.get("ssh_port") or 22)
+    ssh_host = str(payload.get("ssh_host") or primary_ip).strip() or primary_ip
+    web_http_enabled = bool(payload.get("web_http_enabled", False))
+    web_http_url = str(payload.get("web_http_url") or f"http://{primary_ip}/").strip()
+    web_https_enabled = bool(payload.get("web_https_enabled", False))
+    web_https_url = str(payload.get("web_https_url") or f"https://{primary_ip}/").strip()
+
+    hosting_mode = str(payload.get("hosting_mode") or "cluster_pool").strip()
+    cluster_or_pool_name = str(payload.get("cluster_or_pool_name") or "").strip()
+    hypervisor_platform = str(
+        payload.get("hypervisor_or_platform")
+        or cluster_or_pool_name
+        or "VMware vSphere / Proxmox VE / Hyper-V"
+    ).strip()
+    custom_class_lbl = str(payload.get("custom_asset_class_label") or "").strip()
 
     asset.name = str(payload.get("name") or f"{hostname} ({primary_ip})").strip()
     asset.hostname = hostname
@@ -2386,44 +2493,105 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
     asset.asset_class = str(payload.get("asset_class") or "virtual_machine").strip()
     asset.environment = str(payload.get("environment") or "production").strip()
     asset.criticality = str(payload.get("criticality") or "high").strip()
-    asset.os_or_firmware = str(payload.get("os_or_firmware") or "Linux / Gestionado por Ansible").strip()
+    asset.os_or_firmware = str(payload.get("os_or_firmware") or "Linux / Windows Server").strip()
     asset.cpu_cores = int(payload.get("cpu_cores") or 4)
     asset.ram_gb = float(payload.get("ram_gb") or 16.0)
     asset.storage_gb = float(payload.get("storage_gb") or 100.0)
-    asset.hypervisor_or_platform = str(payload.get("hypervisor_or_platform") or "Ansible Automated Host").strip()
+    asset.hypervisor_or_platform = hypervisor_platform
     asset.owner_team = str(payload.get("owner_team") or "Sistemas & DevOps").strip()
     asset.responsible_person = str(payload.get("responsible_person") or "Alex Geng").strip()
-    asset.monitoring_enabled = True
-    asset.status = "online"
-    asset.last_checked_at = datetime.utcnow()
-    asset.notes = str(payload.get("notes") or "Sincronizado automáticamente vía Ansible Webhook").strip()
+    asset.monitoring_enabled = monitoring_enabled
+    asset.status = "online" if monitoring_enabled else "unmonitored"
+    asset.last_checked_at = datetime.utcnow() if monitoring_enabled else None
+    if not monitoring_enabled:
+        asset.last_ping_ms = None
+    asset.notes = str(payload.get("notes") or "Registrado en Red & Host y CMDB").strip()
 
-    # Vincular a Host Físico del Rack o Hipervisor Padre si se indica su código
+    # Actualizar custom_fields con las 2 configuraciones (Healthchecks/Heartbeat y Conectar SSH/HTTP/HTTPS) + Modo de Alojamiento
+    cf = dict(asset.custom_fields or {})
+    cf["hosting_mode"] = hosting_mode
+    cf["cluster_or_pool_name"] = cluster_or_pool_name or hypervisor_platform
+    cf["custom_asset_class_label"] = custom_class_lbl
+    cf["monitoring_enabled"] = monitoring_enabled
+    cf["connect_enabled"] = connect_enabled
+    cf["ssh_enabled"] = ssh_enabled
+    cf["ssh_user"] = ssh_user
+    cf["ssh_port"] = ssh_port
+    cf["ssh_host"] = ssh_host
+    cf["web_http_enabled"] = web_http_enabled
+    cf["web_http_url"] = web_http_url
+    cf["web_https_enabled"] = web_https_enabled
+    cf["web_https_url"] = web_https_url
+
+    conn_protocols = []
+    if ssh_enabled:
+        conn_protocols.append("ssh")
+    if web_http_enabled:
+        conn_protocols.append("http")
+    if web_https_enabled:
+        conn_protocols.append("https")
+    cf["connect_config"] = payload.get("connect_config") or {
+        "enabled": connect_enabled,
+        "protocols": conn_protocols,
+        "ssh": {"host": ssh_host, "port": ssh_port, "username": ssh_user},
+        "http": {"url": web_http_url},
+        "https": {"url": web_https_url},
+    }
+    if payload.get("heartbeat_config") is not None:
+        cf["heartbeat_config"] = payload["heartbeat_config"]
+    asset.custom_fields = cf
+
+    # Gestión del Alojamiento:
+    # - Si 'hosting_mode' es 'cluster_pool' (VMware/Proxmox/Hyper-V sin máquina fija) o 'standalone', no atar a un hierro fijo
     rack_dev_code = str(payload.get("host_rack_device_code") or "").strip()
-    if rack_dev_code:
-        rdev = db.query(RackDevice).filter(RackDevice.code == rack_dev_code).first()
-        if rdev:
-            asset.host_rack_device_id = rdev.id
-            if not asset.parent_asset_id:
-                parent_from_rack = (
-                    db.query(CmdbAsset)
-                    .filter(CmdbAsset.rack_device_id == rdev.id)
-                    .first()
-                )
-                if parent_from_rack:
-                    asset.parent_asset_id = parent_from_rack.id
-
     parent_code = str(payload.get("parent_asset_code") or "").strip()
-    if parent_code:
-        parent_ast = db.query(CmdbAsset).filter(CmdbAsset.code == parent_code).first()
-        if parent_ast:
-            asset.parent_asset_id = parent_ast.id
-            if not asset.host_rack_device_id and parent_ast.rack_device_id:
-                asset.host_rack_device_id = parent_ast.rack_device_id
+
+    if hosting_mode in ("cluster_pool", "standalone") and not rack_dev_code and not parent_code:
+        if not asset.rack_device_id:
+            asset.host_rack_device_id = None
+        asset.parent_asset_id = None
+    else:
+        if rack_dev_code:
+            rdev = db.query(RackDevice).filter(RackDevice.code == rack_dev_code).first()
+            if rdev:
+                asset.host_rack_device_id = rdev.id
+                if not asset.parent_asset_id:
+                    parent_from_rack = (
+                        db.query(CmdbAsset)
+                        .filter(CmdbAsset.rack_device_id == rdev.id)
+                        .first()
+                    )
+                    if parent_from_rack:
+                        asset.parent_asset_id = parent_from_rack.id
+
+        if parent_code:
+            parent_ast = db.query(CmdbAsset).filter(CmdbAsset.code == parent_code).first()
+            if parent_ast:
+                asset.parent_asset_id = parent_ast.id
+                if not asset.host_rack_device_id and parent_ast.rack_device_id:
+                    asset.host_rack_device_id = parent_ast.rack_device_id
 
     db.flush()
 
-    # Crear automáticamente el enlace en el Diagrama Lógico con su Hipervisor / Switch padre
+    # Sincronizar también con RackDevice físico si este activo es un equipo montado en Rack
+    if asset.rack_device_id:
+        rdev_self = db.query(RackDevice).filter(RackDevice.id == asset.rack_device_id).first()
+        if rdev_self:
+            rdev_self.monitoring_enabled = monitoring_enabled
+            rdev_self.status = "online" if monitoring_enabled else "unmonitored"
+            rcf = dict(rdev_self.custom_fields or {})
+            rcf["connect_config"] = cf["connect_config"]
+            if "heartbeat_config" in cf:
+                rcf["heartbeat_config"] = cf["heartbeat_config"]
+            rdev_self.custom_fields = rcf
+
+    # Sincronizar cualquier nodo en los Stacks Tecnológicos que apunte a este host
+    for sn in db.query(TechStackNode).filter(TechStackNode.asset_id == asset.id).all():
+        sn.ssh_enabled = connect_enabled and ssh_enabled
+        sn.ssh_user = ssh_user
+        sn.ssh_port = ssh_port
+
+    # Crear automáticamente el enlace en el Diagrama Lógico con su Hipervisor / Switch padre si tiene máquina concreta
     if asset.parent_asset_id and asset.parent_asset_id != asset.id:
         existing_link = (
             db.query(LogicalTopologyLink)
@@ -2438,7 +2606,7 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
                 LogicalTopologyLink(
                     source_asset_id=asset.parent_asset_id,
                     target_asset_id=asset.id,
-                    link_type="hypervisor_vm" if asset.asset_class in ("virtual_machine", "container") else "lldp_trunk",
+                    link_type="hypervisor_vm" if asset.asset_class in ("virtual_machine", "container", "container_lxc") else "lldp_trunk",
                     source_interface="vmbr0 / vSwitch0",
                     target_interface="eth0",
                     protocol_label=f"Alojamiento {asset.hypervisor_or_platform or 'Virtualización'}",
@@ -2503,7 +2671,7 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
             continue
         hg = db.query(HostGroup).filter(HostGroup.code == hgc).first()
         if not hg:
-            hg = HostGroup(code=hgc, name=f"Grupo Ansible {hgc}", member_asset_ids=[asset.id])
+            hg = HostGroup(code=hgc, name=f"Grupo {hgc}", member_asset_ids=[asset.id])
             db.add(hg)
         else:
             mids = list(hg.member_asset_ids or [])
@@ -2511,69 +2679,87 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
                 mids.append(asset.id)
                 hg.member_asset_ids = mids
 
-    # Registrar chequeo Ping primario si no existe
-    existing_checks = {c.service_name: c for c in db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.asset_id == asset.id).all()}
-    if "PING Heartbeat (Gestión)" not in existing_checks:
-        db.add(
-            MonitoredServiceCheck(
-                asset_id=asset.id,
-                service_name="PING Heartbeat (Gestión)",
-                check_type="icmp",
-                target_ip_or_url=primary_ip,
-                port=0,
-                nagios_state="OK",
-                state_type="HARD",
-                is_primary_heartbeat=True,
-                latency_ms=1.1,
-                status_output=f"PING OK - Registrado vía Ansible ({primary_ip})",
-                last_checked_at=datetime.utcnow(),
-            )
-        )
+    # Gestión de Healthchecks / Servicios / Exporters según el Switch 'monitoring_enabled'
+    if replace_checks:
+        db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.asset_id == asset.id).delete()
+        db.flush()
 
-    # Registrar Exporters indicados por Ansible (ej. node_exporter :9100, windows_exporter :9182, nginx, apache, docker)
-    for exp in (payload.get("exporters") or []):
-        etype = str(exp.get("type") or "node_exporter").strip().lower()
-        eport = int(exp.get("port") or (9182 if etype == "windows_exporter" else 9100))
-        sname = f"Exporter Prometheus ({etype} :{eport})"
-        if sname not in existing_checks:
+    if not monitoring_enabled:
+        for chk in db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.asset_id == asset.id).all():
+            chk.enabled = False
+    else:
+        existing_checks = {
+            c.service_name: c
+            for c in db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.asset_id == asset.id).all()
+        }
+        for chk in existing_checks.values():
+            chk.enabled = True
+
+        # 1. Registrar chequeo Ping primario si está habilitado
+        if enable_icmp_ping and "PING Heartbeat (Gestión)" not in existing_checks:
             db.add(
                 MonitoredServiceCheck(
                     asset_id=asset.id,
-                    service_name=sname,
-                    check_type=etype,
-                    target_ip_or_url=str(exp.get("url") or primary_ip),
-                    port=eport,
+                    service_name="PING Heartbeat (Gestión)",
+                    check_type="icmp",
+                    target_ip_or_url=primary_ip,
+                    port=0,
                     nagios_state="OK",
                     state_type="HARD",
-                    latency_ms=1.8,
-                    status_output=f"{etype.upper()} OK - Configurado vía Ansible en {primary_ip}:{eport}",
+                    is_primary_heartbeat=True,
+                    latency_ms=1.1,
+                    status_output=f"PING OK - {primary_ip}",
                     last_checked_at=datetime.utcnow(),
                 )
             )
 
-    # Registrar Heartbeats adicionales (HTTP, HTTPS, TCP, SSH, BBDD)
-    for hb in (payload.get("heartbeats") or []):
-        hname = str(hb.get("name") or f"Heartbeat {hb.get('type', 'https').upper()}").strip()
-        htype = str(hb.get("type") or "https").strip().lower()
-        hport = int(hb.get("port") or (443 if htype == "https" else 80))
-        hurl = str(hb.get("url") or primary_ip).strip()
-        if hname not in existing_checks:
-            db.add(
-                MonitoredServiceCheck(
-                    asset_id=asset.id,
-                    service_name=hname,
-                    check_type=htype,
-                    target_ip_or_url=hurl,
-                    port=hport,
-                    expected_status_code=int(hb.get("expected_status_code") or 200),
-                    nagios_state="OK",
-                    state_type="HARD",
-                    latency_ms=8.4,
-                    ssl_days_remaining=88 if htype == "https" else None,
-                    status_output=f"{htype.upper()} OK - Monitorizado ({hurl})",
-                    last_checked_at=datetime.utcnow(),
+        # 2. Registrar Exporters (node_exporter :9100, windows_exporter :9182, nginx, apache, docker o personalizados)
+        for exp in (payload.get("exporters") or []):
+            etype = str(exp.get("type") or "node_exporter").strip().lower()
+            eport = int(exp.get("port") or (9182 if etype == "windows_exporter" else 9100))
+            custom_exp_name = str(exp.get("name") or "").strip()
+            sname = custom_exp_name or f"Exporter Prometheus ({etype} :{eport})"
+            if sname not in existing_checks:
+                db.add(
+                    MonitoredServiceCheck(
+                        asset_id=asset.id,
+                        service_name=sname,
+                        check_type=etype,
+                        target_ip_or_url=str(exp.get("url") or primary_ip),
+                        port=eport,
+                        nagios_state="OK",
+                        state_type="HARD",
+                        latency_ms=1.8,
+                        status_output=f"{etype.upper()} OK - Métricas activas en {primary_ip}:{eport}",
+                        last_checked_at=datetime.utcnow(),
+                    )
                 )
-            )
+
+        # 3. Registrar Heartbeats y Servicios (HTTP, HTTPS, TCP, UDP, SNMP, SSH, BBDD o cualquier servicio personalizado)
+        for hb in (payload.get("heartbeats") or []):
+            hname = str(hb.get("name") or f"Heartbeat {hb.get('type', 'https').upper()}").strip()
+            htype = str(hb.get("type") or "https").strip().lower()
+            hport = int(hb.get("port") or (443 if htype == "https" else (80 if htype == "http" else 0)))
+            hurl = str(hb.get("url") or primary_ip).strip()
+            if hname not in existing_checks:
+                db.add(
+                    MonitoredServiceCheck(
+                        asset_id=asset.id,
+                        service_name=hname,
+                        check_type=htype,
+                        target_ip_or_url=hurl,
+                        port=hport,
+                        expected_status_code=int(hb.get("expected_status_code") or 200),
+                        expected_string=str(hb.get("expected_string") or ""),
+                        check_config=dict(hb.get("check_config") or {}),
+                        nagios_state="OK",
+                        state_type="HARD",
+                        latency_ms=4.2 if htype in ("http", "https") else 1.6,
+                        ssl_days_remaining=88 if htype == "https" else None,
+                        status_output=f"{htype.upper()} OK - Monitorizado ({hurl}{f':{hport}' if hport and f':{hport}' not in hurl else ''})",
+                        last_checked_at=datetime.utcnow(),
+                    )
+                )
 
     db.commit()
     prom_sync = sync_prometheus_targets_file(db)

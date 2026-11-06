@@ -723,19 +723,24 @@ class SmtpAlertConfigInput(BaseModel):
     enabled: bool = True
 
 
-# Webhooks Idempotentes para Ansible y Agentes IA
+# Webhooks Idempotentes para Ansible y Agentes IA (y Alta/Edición Avanzada Web de Hosts y VMs)
 class AnsibleHostUpsertWebhook(BaseModel):
+    asset_id: Optional[int] = None
     code: Optional[str] = None
     name: Optional[str] = None
     hostname: str
     fqdn: str = ""
-    asset_class: str = "virtual_machine"  # physical_server | virtual_machine | container_lxc | network_security | storage_san_nas | cluster_vip
+    asset_class: str = "virtual_machine"  # physical_server | virtual_machine | container_lxc | network_security | storage_san_nas | cluster_vip | custom
+    custom_asset_class_label: str = ""
     environment: str = "production"
     criticality: str = "high"
     os_or_firmware: str = ""
     cpu_cores: int = 0
     ram_gb: float = 0.0
     storage_gb: float = 0.0
+    # Modo de alojamiento: 'cluster_pool' (VMware/Proxmox/Hyper-V sin máquina fija) | 'physical_rack_server' (Máquina concreta) | 'standalone' (Independiente)
+    hosting_mode: str = "cluster_pool"
+    cluster_or_pool_name: str = ""
     hypervisor_or_platform: str = ""
     host_rack_device_code: Optional[str] = None
     parent_asset_code: Optional[str] = None
@@ -744,9 +749,25 @@ class AnsibleHostUpsertWebhook(BaseModel):
     primary_ip: str
     additional_ips: List[Dict[str, Any]] = []
     host_groups: List[str] = []  # Lista de códigos de HostGroup (se crean si no existen)
-    exporters: List[Dict[str, Any]] = []  # Ej: [{"type": "node_exporter", "port": 9100}, {"type": "nginx", "port": 80, "url": "http://.../nginx_status"}]
+    # Sección 1: Healthchecks, Monitorización en Background & Prometheus (Activable / Desactivable)
+    monitoring_enabled: bool = True
+    enable_icmp_ping: bool = True
+    replace_checks: bool = False
+    heartbeat_config: Optional[Dict[str, Any]] = None
+    exporters: List[Dict[str, Any]] = []  # Ej: [{"type": "node_exporter", "port": 9100}, {"type": "custom_exporter", "name": "JVM Metrics", "port": 9404, "url": "http://.../metrics"}]
     heartbeats: List[Dict[str, Any]] = []  # Ej: [{"name": "HTTPS Web", "type": "https", "url": "https://...", "port": 443}]
-    notes: str = "Registrado/actualizado vía Ansible Webhook"
+    # Sección 2: Conectar desde el Frontend (SSH / HTTP / HTTPS — Activable / Desactivable)
+    connect_enabled: bool = True
+    ssh_enabled: bool = True
+    ssh_user: str = "root"
+    ssh_port: int = 22
+    ssh_host: str = ""
+    web_http_enabled: bool = False
+    web_http_url: str = ""
+    web_https_enabled: bool = False
+    web_https_url: str = ""
+    connect_config: Optional[Dict[str, Any]] = None
+    notes: str = "Registrado/actualizado en Red & Host y CMDB"
 
 
 class AnsibleHostDecommissionWebhook(BaseModel):
