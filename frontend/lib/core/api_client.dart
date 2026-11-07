@@ -894,6 +894,7 @@ class RackDocApiClient {
     String? registerSubnetCidr,
     String? subnetName,
     int? vlanId,
+    int? locationId,
     required List<Map<String, dynamic>> items,
   }) async {
     final res = await http.post(
@@ -903,8 +904,43 @@ class RackDocApiClient {
         'register_subnet_cidr': registerSubnetCidr,
         'subnet_name': subnetName,
         'vlan_id': vlanId,
+        'location_id': locationId,
         'items': items,
       }),
+    );
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> checkCmdbIpOwner({
+    required String ip,
+    int? excludeAssetId,
+    int? excludeRackDeviceId,
+    int? excludeFloorDeviceId,
+  }) async {
+    final params = <String, String>{'ip': ip.trim()};
+    if (excludeAssetId != null) {
+      params['exclude_asset_id'] = excludeAssetId.toString();
+    }
+    if (excludeRackDeviceId != null) {
+      params['exclude_rack_device_id'] = excludeRackDeviceId.toString();
+    }
+    if (excludeFloorDeviceId != null) {
+      params['exclude_floor_device_id'] = excludeFloorDeviceId.toString();
+    }
+    final uri = Uri.parse(
+      '$baseUrl/cmdb/check-ip-owner',
+    ).replace(queryParameters: params);
+    final res = await http.get(uri, headers: _headers);
+    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+  }
+
+  Future<Map<String, dynamic>> resolveCmdbIpCollision(
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/cmdb/resolve-ip-collision'),
+      headers: _headers,
+      body: jsonEncode(payload),
     );
     return Map<String, dynamic>.from(_decodeResponse(res) as Map);
   }

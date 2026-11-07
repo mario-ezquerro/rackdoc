@@ -676,15 +676,155 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
     }
   }
 
+  Future<String?> _promptIpCollisionResolution({
+    required String ip,
+    required Map<String, dynamic> owner,
+  }) async {
+    String selectedAction = 'merge';
+    final ownerCode = '${owner['asset_code'] ?? ''}';
+    final ownerName = '${owner['name'] ?? ''}';
+    final ownerHost = '${owner['hostname'] ?? ''}';
+    final ownerRack = '${owner['rack_code'] ?? ''}';
+    final ownerU = owner['start_u'];
+
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: Color(0xFFDC2626)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Colisión de IP detectada con CMDB ($ip)',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 540,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF2F2),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFFCA5A5)),
+                  ),
+                  child: Text(
+                    'La dirección IP $ip ya está registrada en CMDB en el activo:\n'
+                    '• [$ownerCode] $ownerName${ownerHost.isNotEmpty ? ' ($ownerHost)' : ''}'
+                    '${ownerRack.isNotEmpty ? ' • Rack $ownerRack${ownerU != null ? ' (U$ownerU)' : ''}' : ' • Descubierto / Sin Rack asignado'}\n\n'
+                    '¿Cómo deseas alinear los datos entre el Rack Editor y la CMDB?',
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF7F1D1D)),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    selectedAction == 'merge'
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    color: const Color(0xFF2563EB),
+                  ),
+                  title: const Text(
+                    'Es el mismo equipo: Unificar y alinear en un único activo CMDB (Recomendado)',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800),
+                  ),
+                  subtitle: Text(
+                    'Fusiona [$ownerCode] con este equipo del Rack Editor, conservando su posición física U, latencia de ping, MAC e IPs secundarias sin dejar duplicados.',
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  onTap: () => setModal(() => selectedAction = 'merge'),
+                ),
+                ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    selectedAction == 'reassign_or_clear'
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    color: const Color(0xFF2563EB),
+                  ),
+                  title: const Text(
+                    'Son equipos distintos: Asignar la IP a este equipo del Rack y liberarla del otro',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800),
+                  ),
+                  subtitle: Text(
+                    'Quita la IP $ip de [$ownerCode] y la asigna exclusivamente a este equipo del Rack.',
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  onTap: () => setModal(() => selectedAction = 'reassign_or_clear'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('Cancelar y cambiar IP'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(ctx, selectedAction),
+              icon: const Icon(Icons.merge_type_rounded, size: 16),
+              label: const Text('Aplicar y Guardar'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _saveDeviceSettings() async {
     final d = widget.selectedDevice;
     if (d == null) return;
+    final targetIp = _devIpCtrl.text.trim();
+    String? collisionAction;
+    int? collisionTargetAssetId;
+
+    if (targetIp.isNotEmpty) {
+      try {
+        final check = await widget.api.checkCmdbIpOwner(
+          ip: targetIp,
+          excludeRackDeviceId: d.id,
+        );
+        if (check['has_collision'] == true) {
+          final owners = ((check['owners'] as List?) ?? [])
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+          if (owners.isNotEmpty && mounted) {
+            final chosen = await _promptIpCollisionResolution(
+              ip: targetIp,
+              owner: owners.first,
+            );
+            if (chosen == null) {
+              return;
+            }
+            collisionAction = chosen;
+            collisionTargetAssetId = owners.first['id'] as int?;
+          }
+        }
+      } catch (_) {}
+    }
+
     setState(() => _isSaving = true);
     try {
       _syncPrimaryMethodAndPortFromChecks();
       _devCustomFields['heartbeat_config'] = _buildHeartbeatConfigMap();
       _devCustomFields['connect_config'] = _buildConnectConfigMap();
       _devCustomFields['u_height_override'] = _devUHeight;
+      final customPayload = Map<String, dynamic>.from(_devCustomFields);
+      if (collisionAction != null && collisionTargetAssetId != null) {
+        customPayload['on_ip_collision_action'] = collisionAction;
+        customPayload['collision_target_asset_id'] = collisionTargetAssetId;
+      }
       await widget.api.updateDevice(d.id, {
         'code': _devCodeCtrl.text.trim(),
         'name': _devNameCtrl.text.trim(),
@@ -692,7 +832,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         'fqdn': _devFqdnCtrl.text.trim(),
         'start_u': int.tryParse(_devStartUCtrl.text.trim()) ?? d.startU,
         'mounted_face': _devMountedFace,
-        'ip_address': _devIpCtrl.text.trim(),
+        'ip_address': targetIp,
         'subnet_mask': _devMaskCtrl.text.trim(),
         'gateway': _devGwCtrl.text.trim(),
         'mac_address': _devMacCtrl.text.trim(),
@@ -702,13 +842,19 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         'monitor_method': _devMonitorMethod,
         'monitor_port': _devMonitorPort,
         'serial_number': _devSerialCtrl.text.trim(),
-        'custom_fields': _devCustomFields,
+        'custom_fields': customPayload,
         'notes': _devNotesCtrl.text.trim(),
       });
       widget.onRefreshRack();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Configuración del equipo actualizada.')),
+          SnackBar(
+            content: Text(
+              collisionAction == 'merge'
+                  ? 'Equipo actualizado y unificado con el registro existente en CMDB ($targetIp).'
+                  : 'Configuración del equipo actualizada y sincronizada con CMDB.',
+            ),
+          ),
         );
       }
     } catch (e) {

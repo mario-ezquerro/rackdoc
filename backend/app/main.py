@@ -132,6 +132,8 @@ from .services.cmdb_service import (
     check_cmdb_asset_heartbeat,
     sync_physical_devices_to_cmdb,
     import_discovered_hosts_to_cmdb,
+    check_ip_collision_in_cmdb,
+    resolve_cmdb_ip_collision,
     _match_subnet_for_ip,
 )
 from .services.network_host_service import (
@@ -2422,6 +2424,29 @@ def add_device_to_rack(rack_id: int, payload: RackDeviceCreate, db: Session = De
     if device.monitoring_enabled:
         check_single_device(db, device)
         db.refresh(device)
+
+    # Sincronizar inmediatamente con la CMDB y aplicar resolución de colisión si el operario la indicó desde el Rack Editor
+    sync_physical_devices_to_cmdb(db)
+    cf_clean = dict(device.custom_fields or {})
+    col_action = cf_clean.pop("on_ip_collision_action", None)
+    col_target_id = cf_clean.pop("collision_target_asset_id", None)
+    if col_action or col_target_id is not None:
+        device.custom_fields = cf_clean
+        db.commit()
+    if col_action and col_target_id and (device.ip_address or "").strip():
+        my_asset = db.query(CmdbAsset).filter(CmdbAsset.rack_device_id == device.id).first()
+        if my_asset and my_asset.id != int(col_target_id):
+            try:
+                resolve_cmdb_ip_collision(
+                    db=db,
+                    ip_address=device.ip_address.strip(),
+                    action=str(col_action),
+                    keep_asset_id=my_asset.id,
+                    other_asset_id=int(col_target_id),
+                )
+                db.refresh(device)
+            except Exception:
+                pass
     return device
 
 
@@ -2658,6 +2683,29 @@ def update_rack_device(device_id: int, payload: RackDeviceUpdate, db: Session = 
     ):
         check_single_device(db, device)
         db.refresh(device)
+
+    # Sincronizar inmediatamente con la CMDB y aplicar resolución de colisión si el operario la indicó desde el Rack Editor
+    sync_physical_devices_to_cmdb(db)
+    cf_clean = dict(device.custom_fields or {})
+    col_action = cf_clean.pop("on_ip_collision_action", None)
+    col_target_id = cf_clean.pop("collision_target_asset_id", None)
+    if col_action or col_target_id is not None:
+        device.custom_fields = cf_clean
+        db.commit()
+    if col_action and col_target_id and (device.ip_address or "").strip():
+        my_asset = db.query(CmdbAsset).filter(CmdbAsset.rack_device_id == device.id).first()
+        if my_asset and my_asset.id != int(col_target_id):
+            try:
+                resolve_cmdb_ip_collision(
+                    db=db,
+                    ip_address=device.ip_address.strip(),
+                    action=str(col_action),
+                    keep_asset_id=my_asset.id,
+                    other_asset_id=int(col_target_id),
+                )
+                db.refresh(device)
+            except Exception:
+                pass
 
     return device
 
@@ -3840,6 +3888,25 @@ def add_ip_to_cmdb_asset_endpoint(
         notes=payload.notes,
     )
     db.add(new_ip)
+    db.flush()
+    if payload.is_heartbeat_ip and asset.sync_source == "rack_device" and asset.rack_device_id:
+        rdev = db.query(RackDevice).filter(RackDevice.id == asset.rack_device_id).first()
+        if rdev:
+            rdev.ip_address = new_ip.ip_address
+            if new_ip.subnet_mask:
+                rdev.subnet_mask = new_ip.subnet_mask
+            if new_ip.gateway:
+                rdev.gateway = new_ip.gateway
+            if new_ip.vlan_id is not None:
+                rdev.vlan_mgmt = new_ip.vlan_id
+            if new_ip.mac_address:
+                rdev.mac_address = new_ip.mac_address
+    elif payload.is_heartbeat_ip and asset.sync_source == "floor_device" and asset.floor_device_id:
+        fdev = db.query(FloorDevice).filter(FloorDevice.id == asset.floor_device_id).first()
+        if fdev:
+            fdev.ip_address = new_ip.ip_address
+            if new_ip.vlan_id is not None:
+                fdev.vlan = new_ip.vlan_id
     db.commit()
     return build_cmdb_overview(db)
 
@@ -4035,9 +4102,56 @@ def import_discovered_cmdb_endpoint(
             register_subnet_cidr=payload.register_subnet_cidr,
             subnet_name=payload.subnet_name,
             vlan_id=payload.vlan_id,
+            location_id=payload.location_id,
             items=[item.model_dump() for item in payload.items],
         )
     except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@api_router.get(
+    "/cmdb/check-ip-owner",
+    tags=["CMDB, Multi-IP & IP Verification"],
+    summary="Comprobar si una IP ya está asignada en CMDB o Rack Editor antes de guardar",
+)
+def check_cmdb_ip_owner_endpoint(
+    ip: str,
+    exclude_asset_id: Optional[int] = None,
+    exclude_rack_device_id: Optional[int] = None,
+    exclude_floor_device_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    return check_ip_collision_in_cmdb(
+        db=db,
+        ip_address=ip,
+        exclude_asset_id=exclude_asset_id,
+        exclude_rack_device_id=exclude_rack_device_id,
+        exclude_floor_device_id=exclude_floor_device_id,
+    )
+
+
+@api_router.post(
+    "/cmdb/resolve-ip-collision",
+    tags=["CMDB, Multi-IP & IP Verification"],
+    summary="Resolver una colisión de IP unificando equipos (Rack Editor + CMDB) o reasignando/liberando la IP",
+)
+def resolve_cmdb_ip_collision_endpoint(
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    try:
+        return resolve_cmdb_ip_collision(
+            db=db,
+            ip_address=str(payload.get("ip_address") or ""),
+            action=str(payload.get("action") or "merge"),
+            keep_asset_id=int(payload["keep_asset_id"]),
+            other_asset_id=int(payload["other_asset_id"]),
+            new_ip_for_other=str(payload.get("new_ip_for_other") or ""),
+            preferred_name=str(payload.get("preferred_name") or ""),
+            preferred_hostname=str(payload.get("preferred_hostname") or ""),
+            preferred_fqdn=str(payload.get("preferred_fqdn") or ""),
+        )
+    except (ValueError, KeyError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
 

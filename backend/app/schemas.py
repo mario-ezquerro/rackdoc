@@ -579,11 +579,13 @@ class CmdbVerifyIpRequest(BaseModel):
 
 class CmdbDiscoveredHostItem(BaseModel):
     ip_address: str
+    subnet_mask: str = ""
     hostname: str = ""
     fqdn: str = ""
     mac_address: str = ""
     asset_class: str = "other_machine"
     environment: str = "production"
+    location_id: Optional[int] = None
     open_ports: List[int] = []
     notes: str = ""
 
@@ -592,6 +594,7 @@ class CmdbImportDiscoveredRequest(BaseModel):
     register_subnet_cidr: Optional[str] = None
     subnet_name: Optional[str] = None
     vlan_id: Optional[int] = None
+    location_id: Optional[int] = None
     items: List[CmdbDiscoveredHostItem] = []
 
 

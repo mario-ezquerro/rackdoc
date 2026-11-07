@@ -6,6 +6,7 @@ class CmdbView extends StatefulWidget {
   final RackDocApiClient api;
   final bool canEdit;
   final void Function(int rackId, int? deviceId)? onNavigateToRackDevice;
+  final void Function(int stackId, int? nodeId)? onNavigateToStackNode;
   final VoidCallback? onExportExcel;
 
   const CmdbView({
@@ -13,6 +14,7 @@ class CmdbView extends StatefulWidget {
     required this.api,
     required this.canEdit,
     this.onNavigateToRackDevice,
+    this.onNavigateToStackNode,
     this.onExportExcel,
   });
 
@@ -33,6 +35,7 @@ class _CmdbViewState extends State<CmdbView> {
   final TextEditingController _searchCtrl = TextEditingController();
   String _classFilter = 'all';
   String _envFilter = 'all';
+  int? _locationFilter; // null = Todas las sedes, -1 = Sin sede asignada
   bool _onlyMultiIp = false;
   int? _expandedAssetId;
   int? _highlightedAssetId;
@@ -54,6 +57,7 @@ class _CmdbViewState extends State<CmdbView> {
   final Set<String> _selectedDiscoveredIps = {};
   final Set<String> _dismissedScanIps = {};
   String _bulkImportAssetClass = 'other_machine';
+  int? _bulkImportLocationId;
   bool _alsoRegisterScannedSubnet = true;
   bool _importingDiscovered = false;
 
@@ -144,6 +148,16 @@ class _CmdbViewState extends State<CmdbView> {
     return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
+  List<Map<String, dynamic>> get _locations {
+    final raw = (_overview?['locations'] as List?) ?? [];
+    return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  List<Map<String, dynamic>> get _ipCollisions {
+    final raw = (_overview?['ip_collisions'] as List?) ?? [];
+    return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
   int _ipToSortableInt(String ip) {
     final parts = ip.trim().split('.');
     if (parts.length != 4) return 0x7FFFFFFF;
@@ -162,6 +176,17 @@ class _CmdbViewState extends State<CmdbView> {
     final ips = (a['ip_addresses'] as List?) ?? [];
     if (ips.isNotEmpty) {
       return ((ips.first as Map)['ip_address'] ?? '').toString().trim();
+    }
+    return '';
+  }
+
+  String _primaryMaskOfAsset(Map<String, dynamic> a) {
+    final m = (a['primary_subnet_mask'] ?? '').toString().trim();
+    if (m.isNotEmpty) return m;
+    final ips = (a['ip_addresses'] as List?) ?? [];
+    for (final item in ips) {
+      final sm = ((item as Map)['subnet_mask'] ?? '').toString().trim();
+      if (sm.isNotEmpty) return sm;
     }
     return '';
   }
@@ -207,6 +232,14 @@ class _CmdbViewState extends State<CmdbView> {
           (a['environment'] ?? '').toString() != _envFilter) {
         return false;
       }
+      if (_locationFilter != null) {
+        final int? assetLocId = a['location_id'] as int?;
+        if (_locationFilter == -1) {
+          if (assetLocId != null) return false;
+        } else if (assetLocId != _locationFilter) {
+          return false;
+        }
+      }
       if (_onlyMultiIp && ((a['ip_count'] as int? ?? 0) <= 1)) {
         return false;
       }
@@ -218,6 +251,9 @@ class _CmdbViewState extends State<CmdbView> {
         final os = (a['os_or_firmware'] ?? '').toString().toLowerCase();
         final plat = (a['hypervisor_or_platform'] ?? '').toString().toLowerCase();
         final loc = (a['physical_location_label'] ?? '').toString().toLowerCase();
+        final siteLoc = (a['location_label'] ?? '').toString().toLowerCase();
+        final stackLbl = (a['primary_stack_label'] ?? '').toString().toLowerCase();
+        final primaryMask = _primaryMaskOfAsset(a).toLowerCase();
         final env = (a['environment'] ?? '').toString().toLowerCase();
         final cls = (a['asset_class_label'] ?? _assetClassLabels[a['asset_class']] ?? '')
             .toString()
@@ -231,11 +267,11 @@ class _CmdbViewState extends State<CmdbView> {
                 .toLowerCase();
         final ips = ((a['ip_addresses'] as List?) ?? [])
             .map((ip) =>
-                '${(ip as Map)['ip_address']} ${ip['fqdn']} ${ip['interface_name']} ${ip['mac_address']} ${ip['ip_role_label']} vlan ${ip['vlan_id'] ?? ''}'
+                '${(ip as Map)['ip_address']} ${ip['subnet_mask'] ?? ''} ${ip['gateway'] ?? ''} ${ip['fqdn']} ${ip['interface_name']} ${ip['mac_address']} ${ip['ip_role_label']} vlan ${ip['vlan_id'] ?? ''}'
                     .toLowerCase())
             .join(' ');
         final haystack =
-            '$code $name $host $fqdn $os $plat $loc $env $cls $status $owner $resp $notes $resources $ips';
+            '$code $name $host $fqdn $os $plat $loc $siteLoc $stackLbl $primaryMask $env $cls $status $owner $resp $notes $resources $ips';
         if (!haystack.contains(q)) {
           return false;
         }
@@ -274,6 +310,15 @@ class _CmdbViewState extends State<CmdbView> {
           cmp = _ipToSortableInt(_primaryIpOfAsset(a))
               .compareTo(_ipToSortableInt(_primaryIpOfAsset(b)));
           break;
+        case 'subnet_mask':
+          cmp = _primaryMaskOfAsset(a).compareTo(_primaryMaskOfAsset(b));
+          break;
+        case 'site_location':
+          cmp = (a['location_label'] ?? '')
+              .toString()
+              .toLowerCase()
+              .compareTo((b['location_label'] ?? '').toString().toLowerCase());
+          break;
         case 'mac_vlan':
           cmp = _primaryMacOfAsset(a).compareTo(_primaryMacOfAsset(b));
           break;
@@ -300,9 +345,11 @@ class _CmdbViewState extends State<CmdbView> {
           cmp = ra.compareTo(rb);
           break;
         case 'location':
-          cmp = (a['physical_location_label'] ?? '').toString().toLowerCase().compareTo(
-                (b['physical_location_label'] ?? '').toString().toLowerCase(),
-              );
+          final la = '${a['physical_location_label'] ?? ''} ${a['primary_stack_label'] ?? ''}'
+              .toLowerCase();
+          final lb = '${b['physical_location_label'] ?? ''} ${b['primary_stack_label'] ?? ''}'
+              .toLowerCase();
+          cmp = la.compareTo(lb);
           break;
         case 'owner':
           final oa = '${a['owner_team'] ?? ''} ${a['responsible_person'] ?? ''}'.toLowerCase();
@@ -408,6 +455,8 @@ class _CmdbViewState extends State<CmdbView> {
 
     setState(() => _importingDiscovered = true);
     try {
+      final parsedScanned =
+          scannedCidr != null ? _ParsedCidrBlock.tryParse(scannedCidr) : null;
       final itemsPayload = selectedRows.map((r) {
         final probes = Map<String, dynamic>.from((r['probes'] as Map?) ?? {});
         final dns = Map<String, dynamic>.from((probes['dns_ptr'] as Map?) ?? {});
@@ -420,6 +469,8 @@ class _CmdbViewState extends State<CmdbView> {
             .toList();
         return {
           'ip_address': (r['ip_address'] ?? '').toString(),
+          'subnet_mask': parsedScanned?.subnetMask ?? '255.255.255.0',
+          'location_id': _bulkImportLocationId,
           'hostname': ptr.isNotEmpty ? ptr.split('.').first : '',
           'fqdn': ptr,
           'mac_address': mac,
@@ -433,6 +484,7 @@ class _CmdbViewState extends State<CmdbView> {
       final updatedOverview = await widget.api.importDiscoveredCmdbHosts(
         registerSubnetCidr: shouldCreateSubnet ? scannedCidr : null,
         subnetName: shouldCreateSubnet ? 'Red $scannedCidr' : null,
+        locationId: _bulkImportLocationId,
         items: itemsPayload,
       );
       if (!mounted) return;
@@ -968,6 +1020,520 @@ class _CmdbViewState extends State<CmdbView> {
     });
   }
 
+  Future<void> _toggleAssetHeartbeatMonitoring(Map<String, dynamic> asset) async {
+    final int id = asset['id'] as int;
+    final bool currentVal = asset['monitoring_enabled'] ?? true;
+    final bool nextVal = !currentVal;
+    try {
+      await widget.api.updateCmdbAsset(id, {
+        'monitoring_enabled': nextVal,
+      });
+      await _loadOverview(silent: true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor:
+              nextVal ? const Color(0xFF15803D) : const Color(0xFF475569),
+          content: Text(
+            nextVal
+                ? 'Heartbeat ACTIVADO para [${asset['code']}] (${_primaryIpOfAsset(asset)})'
+                : 'Heartbeat DESACTIVADO para [${asset['code']}]',
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error actualizando Heartbeat: $e')),
+      );
+    }
+  }
+
+  Widget _buildIpCollisionsAlertBanner() {
+    final collisions = _ipCollisions;
+    if (collisions.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEF2F2),
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: const Color(0xFFEF4444), width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.warning_amber_rounded,
+                color: Color(0xFFB91C1C),
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Atención: Se han detectado ${collisions.length} colisión(es) de IP entre equipos de la CMDB y el Rack Editor',
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFF991B1B),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ...collisions.map((c) {
+            final String ipAddr = (c['ip_address'] ?? '').toString();
+            final List<Map<String, dynamic>> involved =
+                ((c['assets'] as List?) ?? [])
+                    .map((e) => Map<String, dynamic>.from(e as Map))
+                    .toList();
+            final String desc = involved
+                .map(
+                  (a) =>
+                      '[${a['code']}] ${a['name']} (${a['sync_source'] == 'rack_device' ? 'Rack Editor: ${a['physical_location_label']}' : 'CMDB'})',
+                )
+                .join('  ⚡  ');
+            return Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFB91C1C),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'IP $ipAddr',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      desc,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF7F1D1D),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (widget.canEdit)
+                    FilledButton.icon(
+                      onPressed: () => _openResolveCollisionDialog(c),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFB91C1C),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      icon: const Icon(Icons.merge_type_rounded, size: 15),
+                      label: const Text(
+                        'Resolver Colisión / Unificar Equipos',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openResolveCollisionDialog(
+    Map<String, dynamic> collision,
+  ) async {
+    final String ipAddr = (collision['ip_address'] ?? '').toString();
+    final List<Map<String, dynamic>> involved =
+        ((collision['assets'] as List?) ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+    if (involved.length < 2) return;
+
+    // Priorizar como "keep" el equipo que esté montado físicamente en el Rack Editor
+    Map<String, dynamic> primaryAsset = involved.firstWhere(
+      (a) => a['sync_source'] == 'rack_device' || a['sync_source'] == 'floor_device',
+      orElse: () => involved.first,
+    );
+    Map<String, dynamic> secondaryAsset = involved.firstWhere(
+      (a) => a['id'] != primaryAsset['id'],
+      orElse: () => involved[1],
+    );
+
+    String action = 'merge'; // 'merge' | 'reassign_or_clear' | 'delete_other'
+    int keepId = primaryAsset['id'] as int;
+    int otherId = secondaryAsset['id'] as int;
+
+    final String bestName = !(primaryAsset['name'] ?? '')
+            .toString()
+            .startsWith('Equipo Detectado')
+        ? (primaryAsset['name'] ?? '').toString()
+        : (secondaryAsset['name'] ?? primaryAsset['name'] ?? '').toString();
+    final String bestHost = !(primaryAsset['hostname'] ?? '')
+            .toString()
+            .startsWith('host-')
+        ? (primaryAsset['hostname'] ?? '').toString()
+        : (secondaryAsset['hostname'] ?? primaryAsset['hostname'] ?? '')
+            .toString();
+    final String bestFqdn = (primaryAsset['fqdn'] ?? '').toString().isNotEmpty
+        ? (primaryAsset['fqdn'] ?? '').toString()
+        : (secondaryAsset['fqdn'] ?? '').toString();
+
+    final nameCtrl = TextEditingController(text: bestName);
+    final hostCtrl = TextEditingController(text: bestHost);
+    final fqdnCtrl = TextEditingController(text: bestFqdn);
+    final newIpCtrl = TextEditingController();
+    bool saving = false;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          final keepObj = involved.firstWhere(
+            (a) => a['id'] == keepId,
+            orElse: () => primaryAsset,
+          );
+          final otherObj = involved.firstWhere(
+            (a) => a['id'] == otherId,
+            orElse: () => secondaryAsset,
+          );
+          return AlertDialog(
+            title: Row(
+              children: [
+                const Icon(
+                  Icons.merge_type_rounded,
+                  color: Color(0xFFB91C1C),
+                  size: 22,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Resolver Colisión de IP $ipAddr (Alinear Rack Editor y CMDB)',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: 660,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFFBEB),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFFCD34D)),
+                      ),
+                      child: Text(
+                        'La dirección IP $ipAddr figura simultáneamente en dos registros. Selecciona cómo deseas solucionarlo:',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF92400E),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    ...involved.map((a) {
+                      final bool isRack = a['sync_source'] == 'rack_device';
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: isRack
+                              ? const Color(0xFFEFF6FF)
+                              : const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isRack
+                                ? const Color(0xFF60A5FA)
+                                : const Color(0xFFCBD5E1),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              isRack
+                                  ? Icons.developer_board_rounded
+                                  : Icons.radar_rounded,
+                              size: 18,
+                              color: isRack
+                                  ? const Color(0xFF1D4ED8)
+                                  : const Color(0xFF475569),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '[${a['code']}] ${a['name']}',
+                                    style: const TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Origen: ${isRack ? 'Montado en Rack (${a['physical_location_label']})' : 'Descubierto/Creado en CMDB'} • Hostname/FQDN: ${(a['fqdn'] ?? '').toString().isNotEmpty ? a['fqdn'] : (a['hostname'] ?? '-')} • Estado: ${(a['status'] ?? '').toString().toUpperCase()}',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Color(0xFF475569),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                    const Divider(height: 18),
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        action == 'merge'
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_off,
+                        color: const Color(0xFF2563EB),
+                      ),
+                      title: const Text(
+                        '1. Es el mismo dispositivo físico: Unificar y alinear en un único equipo (Recomendado)',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                      subtitle: const Text(
+                        'Conserva la ubicación del Rack Editor y fusiona el estado Online, latencia, MAC, FQDN e IPs secundarias de la CMDB eliminando la fila duplicada.',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                      onTap: () => setModalState(() => action = 'merge'),
+                    ),
+                    if (action == 'merge') ...[
+                      Padding(
+                        padding: const EdgeInsets.only(left: 28, top: 6, bottom: 8),
+                        child: Column(
+                          children: [
+                            TextField(
+                              controller: nameCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Nombre definitivo del dispositivo unificado',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: hostCtrl,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Hostname definitivo',
+                                      border: OutlineInputBorder(),
+                                      isDense: true,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: TextField(
+                                    controller: fqdnCtrl,
+                                    decoration: const InputDecoration(
+                                      labelText: 'FQDN / DNS definitivo',
+                                      border: OutlineInputBorder(),
+                                      isDense: true,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        action == 'reassign_or_clear'
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_off,
+                        color: const Color(0xFF2563EB),
+                      ),
+                      title: const Text(
+                        '2. Son equipos distintos: Cambiar o liberar la IP de uno de ellos',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      subtitle: Text(
+                        'Mantiene $ipAddr en [${keepObj['code']}] y asigna otra IP (o deja sin IP) a [${otherObj['code']}].',
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                      onTap: () => setModalState(() => action = 'reassign_or_clear'),
+                    ),
+                    if (action == 'reassign_or_clear') ...[
+                      Padding(
+                        padding: const EdgeInsets.only(left: 28, top: 6, bottom: 8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: DropdownButtonFormField<int>(
+                                    initialValue: keepId,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Equipo que conserva la IP actual',
+                                      border: OutlineInputBorder(),
+                                      isDense: true,
+                                    ),
+                                    items: involved.map((a) {
+                                      return DropdownMenuItem<int>(
+                                        value: a['id'] as int,
+                                        child: Text('[${a['code']}] ${a['name']}'),
+                                      );
+                                    }).toList(),
+                                    onChanged: (v) {
+                                      if (v != null) {
+                                        setModalState(() {
+                                          keepId = v;
+                                          otherId = involved
+                                              .firstWhere((a) => a['id'] != v)['id']
+                                              as int;
+                                        });
+                                      }
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: newIpCtrl,
+                              decoration: InputDecoration(
+                                labelText:
+                                    'Nueva IP para [${otherObj['code']}] (dejar vacío para liberar su IP)',
+                                border: const OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        action == 'delete_other'
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_off,
+                        color: const Color(0xFFB91C1C),
+                      ),
+                      title: Text(
+                        '3. Eliminar directamente el registro duplicado [${otherObj['code']}]',
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFFB91C1C),
+                        ),
+                      ),
+                      onTap: () => setModalState(() => action = 'delete_other'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF15803D),
+                ),
+                onPressed: saving
+                    ? null
+                    : () async {
+                        setModalState(() => saving = true);
+                        try {
+                          final updated =
+                              await widget.api.resolveCmdbIpCollision({
+                            'ip_address': ipAddr,
+                            'action': action,
+                            'keep_asset_id': keepId,
+                            'other_asset_id': otherId,
+                            'new_ip_for_other': newIpCtrl.text.trim(),
+                            'preferred_name': nameCtrl.text.trim(),
+                            'preferred_hostname': hostCtrl.text.trim(),
+                            'preferred_fqdn': fqdnCtrl.text.trim(),
+                          });
+                          if (!ctx.mounted) return;
+                          Navigator.pop(ctx);
+                          if (!mounted) return;
+                          setState(() => _overview = updated);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              backgroundColor: const Color(0xFF15803D),
+                              content: Text(
+                                '✓ Colisión en IP $ipAddr resuelta y datos alineados entre Rack Editor y CMDB.',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                          );
+                        } catch (e) {
+                          if (!ctx.mounted) return;
+                          setModalState(() => saving = false);
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(
+                              content: Text('Error resolviendo colisión: $e'),
+                            ),
+                          );
+                        }
+                      },
+                icon: const Icon(Icons.check_circle_outline, size: 16),
+                label: const Text('Aplicar Solución Ahora'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildInventoryTab() {
     final items = _filteredAssets;
     final allVisibleSelected = items.isNotEmpty &&
@@ -975,6 +1541,7 @@ class _CmdbViewState extends State<CmdbView> {
 
     return Column(
       children: [
+        _buildIpCollisionsAlertBanner(),
         // Barra superior de búsqueda universal, filtros y acciones en lote (estilo Excel)
         Container(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
@@ -997,7 +1564,7 @@ class _CmdbViewState extends State<CmdbView> {
                         style: const TextStyle(fontSize: 12.5),
                         decoration: InputDecoration(
                           hintText:
-                              'Buscar por cualquier dato (Código, Nombre, Hostname, FQDN, IP, MAC, VLAN, Clase, SO, Puertos, Ubicación, Responsable, Notas)...',
+                              'Buscar por cualquier dato (Código, Nombre, IP, Máscara 255.255..., Sede/Location, Rack, Stack, MAC, VLAN, SO, Notas)...',
                           prefixIcon: const Icon(Icons.search, size: 18),
                           suffixIcon: _searchCtrl.text.isNotEmpty
                               ? IconButton(
@@ -1019,7 +1586,7 @@ class _CmdbViewState extends State<CmdbView> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   FilterChip(
                     selected: _onlyMultiIp,
                     visualDensity: VisualDensity.compact,
@@ -1031,6 +1598,45 @@ class _CmdbViewState extends State<CmdbView> {
                       ),
                     ),
                     onSelected: (v) => setState(() => _onlyMultiIp = v),
+                  ),
+                  const SizedBox(width: 8),
+                  // Selector de Sede / Location
+                  DropdownButtonHideUnderline(
+                    child: Container(
+                      height: 36,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                        borderRadius: BorderRadius.circular(7),
+                      ),
+                      child: DropdownButton<int?>(
+                        value: _locationFilter,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: Color(0xFF0F172A),
+                          fontWeight: FontWeight.w700,
+                        ),
+                        items: [
+                          const DropdownMenuItem<int?>(
+                            value: null,
+                            child: Text('Sede (Location): Todas'),
+                          ),
+                          const DropdownMenuItem<int?>(
+                            value: -1,
+                            child: Text('Sin Sede Asignada'),
+                          ),
+                          ..._locations.map((loc) {
+                            return DropdownMenuItem<int?>(
+                              value: loc['id'] as int,
+                              child: Text(
+                                'Sede: ${loc['code']} (${loc['name']})',
+                              ),
+                            );
+                          }),
+                        ],
+                        onChanged: (v) => setState(() => _locationFilter = v),
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 8),
                   DropdownButtonHideUnderline(
@@ -1170,7 +1776,7 @@ class _CmdbViewState extends State<CmdbView> {
             children: [
               if (widget.canEdit)
                 Container(
-                  width: 38,
+                  width: 34,
                   alignment: Alignment.center,
                   decoration: const BoxDecoration(
                     border: Border(right: BorderSide(color: Color(0xFFCBD5E1))),
@@ -1191,63 +1797,62 @@ class _CmdbViewState extends State<CmdbView> {
                     },
                   ),
                 ),
-              _buildExcelSortableHeaderCell('#', null, width: 38),
-              _buildExcelSortableHeaderCell('Estado / Ping', 'status', width: 108),
-              _buildExcelSortableHeaderCell('Código', 'code', width: 116),
+              _buildExcelSortableHeaderCell('#', null, width: 34),
+              _buildExcelSortableHeaderCell(
+                'Heartbeat / Ping',
+                'status',
+                width: 116,
+              ),
+              _buildExcelSortableHeaderCell('Código', 'code', width: 108),
               _buildExcelSortableHeaderCell(
                 'IP Principal (Gestión)',
                 'primary_ip',
-                width: 146,
+                width: 142,
+              ),
+              _buildExcelSortableHeaderCell(
+                'Máscara de Red',
+                'subnet_mask',
+                width: 118,
+              ),
+              _buildExcelSortableHeaderCell(
+                'Sede / Location',
+                'site_location',
+                flex: 12,
               ),
               _buildExcelSortableHeaderCell(
                 'Nombre del Equipo',
                 'name',
-                flex: 16,
+                flex: 15,
               ),
               _buildExcelSortableHeaderCell(
                 'Hostname / FQDN',
                 'hostname',
-                flex: 15,
+                flex: 13,
               ),
               _buildExcelSortableHeaderCell(
                 'MAC / VLAN / +IPs',
                 'mac_vlan',
-                flex: 14,
+                flex: 12,
               ),
               _buildExcelSortableHeaderCell(
                 'Clase / Tipo',
                 'asset_class',
-                flex: 13,
+                flex: 11,
               ),
               _buildExcelSortableHeaderCell(
-                'Entorno',
-                'environment',
-                width: 82,
-              ),
-              _buildExcelSortableHeaderCell(
-                'SO / Firmware / Puertos',
-                'os_or_firmware',
+                'Posición Rack / Stack',
+                'location',
                 flex: 16,
               ),
               _buildExcelSortableHeaderCell(
-                'vCPU / RAM / Disco',
-                'resources',
-                width: 122,
-              ),
-              _buildExcelSortableHeaderCell(
-                'Ubicación / Hipervisor',
-                'location',
-                flex: 14,
-              ),
-              _buildExcelSortableHeaderCell(
-                'Propietario / Resp.',
-                'owner',
+                'SO / Firmware',
+                'os_or_firmware',
                 flex: 12,
               ),
               _buildExcelSortableHeaderCell(
                 'Acciones',
                 null,
-                width: widget.canEdit ? 156 : 78,
+                width: widget.canEdit ? 174 : 84,
               ),
             ],
           ),
@@ -1356,32 +1961,30 @@ class _CmdbViewState extends State<CmdbView> {
     final String classLabel =
         (asset['asset_class_label'] ?? _assetClassLabels[assetClass] ?? assetClass)
             .toString();
-    final String env = (asset['environment'] ?? 'production').toString().toUpperCase();
     final String status = (asset['status'] ?? 'unmonitored').toString();
+    final bool hbEnabled = asset['monitoring_enabled'] ?? true;
     final double? pingMs = (asset['last_ping_ms'] as num?)?.toDouble();
     final List<Map<String, dynamic>> ips = ((asset['ip_addresses'] as List?) ?? [])
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
     final String primaryIp = _primaryIpOfAsset(asset);
+    final String primaryMask = _primaryMaskOfAsset(asset);
     final String primaryMac = _primaryMacOfAsset(asset);
     final String primaryVlan = _primaryVlanOfAsset(asset);
     final int extraIpsCount = ips.length > 1 ? ips.length - 1 : 0;
+    final bool hasIpCollision = asset['has_ip_collision'] == true;
 
-    final int cores = (asset['cpu_cores'] as int?) ?? 0;
-    final double ramGb = (asset['ram_gb'] as num?)?.toDouble() ?? 0.0;
-    final double storageGb = (asset['storage_gb'] as num?)?.toDouble() ?? 0.0;
-    final String resourcesStr = (cores > 0 || ramGb > 0 || storageGb > 0)
-        ? '${cores}C / ${ramGb.toStringAsFixed(0)}G / ${storageGb.toStringAsFixed(0)}G'
-        : '-';
     final String os = (asset['os_or_firmware'] ?? '-').toString();
+    final String siteLocLabel = (asset['location_label'] ?? '').toString();
     final String locLabel =
         (asset['physical_location_label'] ?? asset['hypervisor_or_platform'] ?? '-')
             .toString();
-    final String ownerTeam = (asset['owner_team'] ?? '').toString();
-    final String respPerson = (asset['responsible_person'] ?? '').toString();
-    final String ownerDisplay = respPerson.isNotEmpty
-        ? '$ownerTeam ($respPerson)'
-        : (ownerTeam.isNotEmpty ? ownerTeam : '-');
+    final int? rackId = asset['rack_id'] as int?;
+    final int? rackDevId =
+        (asset['rack_device_id'] as int?) ?? (asset['host_rack_device_id'] as int?);
+    final int? stackDiagramId = asset['primary_stack_diagram_id'] as int?;
+    final int? stackNodeId = asset['primary_stack_node_id'] as int?;
+    final String stackLabel = (asset['primary_stack_label'] ?? '').toString();
 
     final bool isExpanded = _expandedAssetId == assetId;
     final bool isHighlighted = _highlightedAssetId == assetId;
@@ -1389,8 +1992,11 @@ class _CmdbViewState extends State<CmdbView> {
     final Color badgeColor = _classBadgeColor(assetClass);
 
     Color statusColor = const Color(0xFF64748B);
-    String statusText = 'N/A';
-    if (status == 'online') {
+    String statusText = hbEnabled ? 'PEND.' : 'HB OFF';
+    if (!hbEnabled) {
+      statusColor = const Color(0xFF64748B);
+      statusText = 'HB OFF';
+    } else if (status == 'online') {
       statusColor = const Color(0xFF16A34A);
       statusText =
           'ONLINE${pingMs != null ? ' ${pingMs.toStringAsFixed(0)}ms' : ''}';
@@ -1402,13 +2008,15 @@ class _CmdbViewState extends State<CmdbView> {
       statusText = 'WARN';
     }
 
-    final Color rowBg = isHighlighted
-        ? const Color(0xFFFEF9C3)
-        : isSelected
-            ? const Color(0xFFE0F2FE)
-            : isExpanded
-                ? const Color(0xFFF0F9FF)
-                : (rowIndex.isEven ? Colors.white : const Color(0xFFF8FAFC));
+    final Color rowBg = hasIpCollision
+        ? const Color(0xFFFEF2F2)
+        : isHighlighted
+            ? const Color(0xFFFEF9C3)
+            : isSelected
+                ? const Color(0xFFE0F2FE)
+                : isExpanded
+                    ? const Color(0xFFF0F9FF)
+                    : (rowIndex.isEven ? Colors.white : const Color(0xFFF8FAFC));
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1425,10 +2033,12 @@ class _CmdbViewState extends State<CmdbView> {
               color: rowBg,
               border: Border(
                 bottom: BorderSide(
-                  color: isHighlighted
-                      ? const Color(0xFFEAB308)
-                      : const Color(0xFFCBD5E1),
-                  width: isHighlighted ? 1.5 : 0.8,
+                  color: hasIpCollision
+                      ? const Color(0xFFF87171)
+                      : isHighlighted
+                          ? const Color(0xFFEAB308)
+                          : const Color(0xFFCBD5E1),
+                  width: (hasIpCollision || isHighlighted) ? 1.5 : 0.8,
                 ),
               ),
             ),
@@ -1438,7 +2048,7 @@ class _CmdbViewState extends State<CmdbView> {
                 children: [
                   if (widget.canEdit)
                     Container(
-                      width: 38,
+                      width: 34,
                       alignment: Alignment.center,
                       decoration: const BoxDecoration(
                         border: Border(
@@ -1469,61 +2079,72 @@ class _CmdbViewState extends State<CmdbView> {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    width: 38,
+                    width: 34,
                     alignment: Alignment.center,
                   ),
                   _buildExcelBodyCell(
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: statusColor.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(
-                          color: statusColor.withValues(alpha: 0.35),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 6,
-                            height: 6,
-                            decoration: BoxDecoration(
-                              color: statusColor,
-                              shape: BoxShape.circle,
+                    InkWell(
+                      onTap: widget.canEdit
+                          ? () => _toggleAssetHeartbeatMonitoring(asset)
+                          : null,
+                      child: Tooltip(
+                        message: widget.canEdit
+                            ? (hbEnabled
+                                ? 'Heartbeat ACTIVO (${asset['monitor_method'] ?? 'icmp'}). Clic para desactivar Heartbeat'
+                                : 'Heartbeat DESACTIVADO. Clic para activar Heartbeat')
+                            : statusText,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: statusColor.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(
+                              color: statusColor.withValues(alpha: 0.35),
                             ),
                           ),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(
-                              statusText,
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w900,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                hbEnabled
+                                    ? Icons.monitor_heart_rounded
+                                    : Icons.heart_broken_outlined,
+                                size: 11,
                                 color: statusColor,
                               ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  statusText,
+                                  style: TextStyle(
+                                    fontSize: 9.8,
+                                    fontWeight: FontWeight.w900,
+                                    color: statusColor,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
                     ),
-                    width: 108,
+                    width: 116,
                   ),
                   _buildExcelBodyCell(
                     SelectableText(
                       code,
                       style: const TextStyle(
-                        fontSize: 11.5,
+                        fontSize: 11,
                         fontWeight: FontWeight.w900,
                         fontFamily: 'monospace',
                         color: Color(0xFF0F172A),
                       ),
                     ),
-                    width: 116,
+                    width: 108,
                   ),
                   _buildExcelBodyCell(
                     primaryIp.isEmpty
@@ -1534,33 +2155,123 @@ class _CmdbViewState extends State<CmdbView> {
                               color: Color(0xFF94A3B8),
                             ),
                           )
-                        : InkWell(
-                            onTap: () => _jumpToIpInIpamMap(primaryIp),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.lan_outlined,
-                                  size: 13,
-                                  color: Color(0xFF0284C7),
-                                ),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                  child: Text(
-                                    primaryIp,
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w900,
-                                      fontFamily: 'monospace',
-                                      color: Color(0xFF0369A1),
-                                      decoration: TextDecoration.underline,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
+                        : Row(
+                            children: [
+                              Expanded(
+                                child: InkWell(
+                                  onTap: () => _jumpToIpInIpamMap(primaryIp),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        hasIpCollision
+                                            ? Icons.warning_amber_rounded
+                                            : Icons.lan_outlined,
+                                        size: 13,
+                                        color: hasIpCollision
+                                            ? const Color(0xFFB91C1C)
+                                            : const Color(0xFF0284C7),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          primaryIp,
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            fontWeight: FontWeight.w900,
+                                            fontFamily: 'monospace',
+                                            color: hasIpCollision
+                                                ? const Color(0xFFB91C1C)
+                                                : const Color(0xFF0369A1),
+                                            decoration:
+                                                TextDecoration.underline,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                              ],
-                            ),
+                              ),
+                              if (hasIpCollision && widget.canEdit)
+                                Tooltip(
+                                  message:
+                                      'Colisión de IP detectada. Pulsa para unificar o resolver.',
+                                  child: InkWell(
+                                    onTap: () {
+                                      final col = _ipCollisions.firstWhere(
+                                        (c) => c['ip_address'] == primaryIp,
+                                        orElse: () => _ipCollisions.first,
+                                      );
+                                      _openResolveCollisionDialog(col);
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 4,
+                                        vertical: 1,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFB91C1C),
+                                        borderRadius: BorderRadius.circular(3),
+                                      ),
+                                      child: const Text(
+                                        'UNIFICAR',
+                                        style: TextStyle(
+                                          fontSize: 8.5,
+                                          fontWeight: FontWeight.w900,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
-                    width: 146,
+                    width: 142,
+                  ),
+                  _buildExcelBodyCell(
+                    Text(
+                      primaryMask.isEmpty ? '-' : primaryMask,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF334155),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    width: 118,
+                  ),
+                  _buildExcelBodyCell(
+                    siteLocLabel.isEmpty
+                        ? const Text(
+                            'Sin Sede',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              color: Color(0xFF94A3B8),
+                            ),
+                          )
+                        : Row(
+                            children: [
+                              const Icon(
+                                Icons.location_on_outlined,
+                                size: 13,
+                                color: Color(0xFF0F766E),
+                              ),
+                              const SizedBox(width: 3),
+                              Expanded(
+                                child: Text(
+                                  siteLocLabel,
+                                  style: const TextStyle(
+                                    fontSize: 10.8,
+                                    fontWeight: FontWeight.w800,
+                                    color: Color(0xFF0F766E),
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                    flex: 12,
                   ),
                   _buildExcelBodyCell(
                     Text(
@@ -1572,7 +2283,7 @@ class _CmdbViewState extends State<CmdbView> {
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
-                    flex: 16,
+                    flex: 15,
                   ),
                   _buildExcelBodyCell(
                     Text(
@@ -1586,7 +2297,7 @@ class _CmdbViewState extends State<CmdbView> {
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
-                    flex: 15,
+                    flex: 13,
                   ),
                   _buildExcelBodyCell(
                     Row(
@@ -1632,7 +2343,7 @@ class _CmdbViewState extends State<CmdbView> {
                           ),
                       ],
                     ),
-                    flex: 14,
+                    flex: 12,
                   ),
                   _buildExcelBodyCell(
                     Container(
@@ -1654,60 +2365,132 @@ class _CmdbViewState extends State<CmdbView> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    flex: 13,
+                    flex: 11,
                   ),
+                  // Columna con enlaces directos a Posición de Rack (si tiene) y Posición de Stack Tecnológico (si tiene)
                   _buildExcelBodyCell(
-                    Text(
-                      env,
-                      style: const TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF475569),
-                      ),
-                    ),
-                    width: 82,
-                  ),
-                  _buildExcelBodyCell(
-                    Text(
-                      os,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: Color(0xFF334155),
-                      ),
-                      overflow: TextOverflow.ellipsis,
+                    Wrap(
+                      spacing: 4,
+                      runSpacing: 3,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        if (rackId != null &&
+                            widget.onNavigateToRackDevice != null)
+                          InkWell(
+                            borderRadius: BorderRadius.circular(4),
+                            onTap: () => widget.onNavigateToRackDevice!(
+                              rackId,
+                              rackDevId,
+                            ),
+                            child: Tooltip(
+                              message:
+                                  'Ir a la posición en el Rack Editor ($locLabel)',
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE0F2FE),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(
+                                    color: const Color(0xFF7DD3FC),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.developer_board_rounded,
+                                      size: 12,
+                                      color: Color(0xFF0369A1),
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Flexible(
+                                      child: Text(
+                                        locLabel,
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w900,
+                                          color: Color(0xFF0369A1),
+                                          decoration: TextDecoration.underline,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          )
+                        else if (stackDiagramId == null)
+                          Text(
+                            locLabel,
+                            style: const TextStyle(
+                              fontSize: 10.5,
+                              color: Color(0xFF64748B),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        if (stackDiagramId != null &&
+                            widget.onNavigateToStackNode != null)
+                          InkWell(
+                            borderRadius: BorderRadius.circular(4),
+                            onTap: () => widget.onNavigateToStackNode!(
+                              stackDiagramId,
+                              stackNodeId,
+                            ),
+                            child: Tooltip(
+                              message:
+                                  'Ir a la posición en el Stack Tecnológico ($stackLabel)',
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF3E8FF),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(
+                                    color: const Color(0xFFD8B4FE),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.layers_rounded,
+                                      size: 12,
+                                      color: Color(0xFF7E22CE),
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Flexible(
+                                      child: Text(
+                                        'Stack: $stackLabel',
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w900,
+                                          color: Color(0xFF7E22CE),
+                                          decoration: TextDecoration.underline,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     flex: 16,
                   ),
                   _buildExcelBodyCell(
                     Text(
-                      resourcesStr,
+                      os,
                       style: const TextStyle(
-                        fontSize: 10.5,
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w700,
+                        fontSize: 10.8,
                         color: Color(0xFF334155),
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    width: 122,
-                  ),
-                  _buildExcelBodyCell(
-                    Text(
-                      locLabel,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: Color(0xFF475569),
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    flex: 14,
-                  ),
-                  _buildExcelBodyCell(
-                    Text(
-                      ownerDisplay,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: Color(0xFF475569),
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1744,6 +2527,28 @@ class _CmdbViewState extends State<CmdbView> {
                         ),
                         if (widget.canEdit) ...[
                           IconButton(
+                            tooltip: hbEnabled
+                                ? 'Heartbeat Activo (Clic para desactivar)'
+                                : 'Heartbeat Desactivado (Clic para activar)',
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 26,
+                              minHeight: 26,
+                            ),
+                            onPressed: () =>
+                                _toggleAssetHeartbeatMonitoring(asset),
+                            icon: Icon(
+                              hbEnabled
+                                  ? Icons.favorite_rounded
+                                  : Icons.heart_broken_outlined,
+                              size: 15,
+                              color: hbEnabled
+                                  ? const Color(0xFF16A34A)
+                                  : const Color(0xFF94A3B8),
+                            ),
+                          ),
+                          IconButton(
                             tooltip: 'Añadir otra IP a este equipo',
                             visualDensity: VisualDensity.compact,
                             padding: EdgeInsets.zero,
@@ -1759,7 +2564,7 @@ class _CmdbViewState extends State<CmdbView> {
                             ),
                           ),
                           IconButton(
-                            tooltip: 'Editar equipo y sus IPs',
+                            tooltip: 'Editar equipo, IPs, Máscara, Sede y Heartbeat',
                             visualDensity: VisualDensity.compact,
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(
@@ -1813,7 +2618,7 @@ class _CmdbViewState extends State<CmdbView> {
                         ),
                       ],
                     ),
-                    width: widget.canEdit ? 156 : 78,
+                    width: widget.canEdit ? 174 : 84,
                   ),
                 ],
               ),
@@ -2349,17 +3154,26 @@ class _CmdbViewState extends State<CmdbView> {
     Map<String, dynamic> asset,
     List<Map<String, dynamic>> ips,
   ) {
+    final int? rackId = asset['rack_id'] as int?;
+    final int? rackDevId =
+        (asset['rack_device_id'] as int?) ?? (asset['host_rack_device_id'] as int?);
+    final int? stackDiagramId = asset['primary_stack_diagram_id'] as int?;
+    final int? stackNodeId = asset['primary_stack_node_id'] as int?;
+    final String stackLabel = (asset['primary_stack_label'] ?? '').toString();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
+        Wrap(
+          spacing: 10,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             const Icon(
               Icons.settings_ethernet_rounded,
               size: 16,
               color: Color(0xFF1E3A8A),
             ),
-            const SizedBox(width: 6),
             Text(
               'Desglose de Interfaces de Red e IPs de ${asset['code']} (${ips.length} IPs configuradas)',
               style: const TextStyle(
@@ -2368,7 +3182,61 @@ class _CmdbViewState extends State<CmdbView> {
                 color: Color(0xFF0F172A),
               ),
             ),
-            const Spacer(),
+            if ((asset['location_label'] ?? '').toString().isNotEmpty)
+              Chip(
+                visualDensity: VisualDensity.compact,
+                avatar: const Icon(
+                  Icons.location_on_rounded,
+                  size: 14,
+                  color: Color(0xFF0F766E),
+                ),
+                label: Text(
+                  'Sede: ${asset['location_label']}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF0F766E),
+                  ),
+                ),
+              ),
+            if (rackId != null && widget.onNavigateToRackDevice != null)
+              ActionChip(
+                visualDensity: VisualDensity.compact,
+                avatar: const Icon(
+                  Icons.developer_board_rounded,
+                  size: 14,
+                  color: Color(0xFF0369A1),
+                ),
+                label: Text(
+                  'Ir al Rack: ${asset['physical_location_label']}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF0369A1),
+                  ),
+                ),
+                onPressed: () =>
+                    widget.onNavigateToRackDevice!(rackId, rackDevId),
+              ),
+            if (stackDiagramId != null && widget.onNavigateToStackNode != null)
+              ActionChip(
+                visualDensity: VisualDensity.compact,
+                avatar: const Icon(
+                  Icons.layers_rounded,
+                  size: 14,
+                  color: Color(0xFF7E22CE),
+                ),
+                label: Text(
+                  'Ir al Stack: $stackLabel',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF7E22CE),
+                  ),
+                ),
+                onPressed: () =>
+                    widget.onNavigateToStackNode!(stackDiagramId, stackNodeId),
+              ),
             Text(
               'Propietario: ${asset['owner_team'] ?? '-'} • Resp: ${asset['responsible_person'] ?? '-'}',
               style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
@@ -2390,20 +3258,22 @@ class _CmdbViewState extends State<CmdbView> {
         Table(
           border: TableBorder.all(color: const Color(0xFFE2E8F0)),
           columnWidths: const {
-            0: FlexColumnWidth(1.4),
+            0: FlexColumnWidth(1.3),
             1: FlexColumnWidth(1.2),
-            2: FlexColumnWidth(1.6),
-            3: FlexColumnWidth(0.9),
-            4: FlexColumnWidth(1.6),
-            5: FlexColumnWidth(1.2),
-            6: FlexColumnWidth(1.8),
-            7: IntrinsicColumnWidth(),
+            2: FlexColumnWidth(1.0),
+            3: FlexColumnWidth(1.6),
+            4: FlexColumnWidth(0.7),
+            5: FlexColumnWidth(1.4),
+            6: FlexColumnWidth(1.2),
+            7: FlexColumnWidth(1.5),
+            8: IntrinsicColumnWidth(),
           },
           children: [
             const TableRow(
               decoration: BoxDecoration(color: Color(0xFFF1F5F9)),
               children: [
                 _TableHeaderCell('Dirección IP'),
+                _TableHeaderCell('Máscara de Red'),
                 _TableHeaderCell('Interfaz'),
                 _TableHeaderCell('Función / Rol de la IP'),
                 _TableHeaderCell('VLAN'),
@@ -2416,6 +3286,7 @@ class _CmdbViewState extends State<CmdbView> {
             ...ips.map((ip) {
               final ipId = ip['id'] as int?;
               final addr = (ip['ip_address'] ?? '').toString();
+              final mask = (ip['subnet_mask'] ?? '255.255.255.0').toString();
               final isHb = ip['is_heartbeat_ip'] == true;
               return TableRow(
                 children: [
@@ -2423,6 +3294,10 @@ class _CmdbViewState extends State<CmdbView> {
                     addr,
                     mono: true,
                     bold: true,
+                  ),
+                  _TableBodyCell(
+                    mask,
+                    mono: true,
                   ),
                   _TableBodyCell((ip['interface_name'] ?? '').toString()),
                   _TableBodyCell(
@@ -2447,6 +3322,18 @@ class _CmdbViewState extends State<CmdbView> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        if (widget.canEdit)
+                          IconButton(
+                            tooltip:
+                                'Editar IP, Máscara de Red, Rol y Heartbeat',
+                            icon: const Icon(
+                              Icons.edit_outlined,
+                              size: 15,
+                              color: Color(0xFF1E3A8A),
+                            ),
+                            onPressed: () =>
+                                _openAssetEditorDialog(existing: asset),
+                          ),
                         IconButton(
                           tooltip: 'Copiar IP $addr',
                           icon: const Icon(Icons.copy, size: 15),
@@ -2920,6 +3807,52 @@ class _CmdbViewState extends State<CmdbView> {
                                     setState(() => _bulkImportAssetClass = v);
                                   }
                                 },
+                              ),
+                            ),
+                          ),
+                          DropdownButtonHideUnderline(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: const Color(0xFFCBD5E1),
+                                ),
+                              ),
+                              child: DropdownButton<int?>(
+                                value: _locations.any(
+                                          (l) =>
+                                              l['id'] == _bulkImportLocationId,
+                                        )
+                                    ? _bulkImportLocationId
+                                    : null,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF0F172A),
+                                ),
+                                items: [
+                                  const DropdownMenuItem<int?>(
+                                    value: null,
+                                    child: Text(
+                                      'Sede (Location): Sin Sede específica',
+                                    ),
+                                  ),
+                                  ..._locations.map((loc) {
+                                    return DropdownMenuItem<int?>(
+                                      value: loc['id'] as int,
+                                      child: Text(
+                                        'Sede: ${loc['code']} (${loc['name']})',
+                                      ),
+                                    );
+                                  }),
+                                ],
+                                onChanged: (v) =>
+                                    setState(() => _bulkImportLocationId = v),
                               ),
                             ),
                           ),
@@ -3642,6 +4575,32 @@ class _CmdbViewState extends State<CmdbView> {
                                   color: Color(0xFF334155),
                                 ),
                               ),
+                              if ((s['location_label'] ?? '')
+                                  .toString()
+                                  .isNotEmpty) ...[
+                                const SizedBox(height: 3),
+                                Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.location_on_rounded,
+                                      size: 12,
+                                      color: Color(0xFF0F766E),
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Expanded(
+                                      child: Text(
+                                        'Sede: ${s['location_label']}',
+                                        style: const TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w800,
+                                          color: Color(0xFF0F766E),
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                               const SizedBox(height: 4),
                               Text(
                                 'Máscara: $sMask • Red: $sNetAddr • Bcast: $sBcastAddr',
@@ -3803,6 +4762,18 @@ class _CmdbViewState extends State<CmdbView> {
                               value: gwIp.isEmpty ? '-' : gwIp,
                               color: const Color(0xFFB45309),
                               bgColor: const Color(0xFFFEF3C7),
+                            ),
+                            _buildSubnetSpecPill(
+                              icon: Icons.location_on_rounded,
+                              label: 'Sede / Location',
+                              value: (selectedSubnet['location_label'] ?? '')
+                                      .toString()
+                                      .isNotEmpty
+                                  ? (selectedSubnet['location_label'])
+                                      .toString()
+                                  : 'Sin Sede específica',
+                              color: const Color(0xFF0F766E),
+                              bgColor: const Color(0xFFF0FDFA),
                             ),
                           ],
                         ),
@@ -4972,16 +5943,22 @@ class _CmdbViewState extends State<CmdbView> {
 
   Future<void> _openAddSingleIpDialog(Map<String, dynamic> asset) async {
     final ipCtrl = TextEditingController();
+    final maskCtrl = TextEditingController(
+      text: _primaryMaskOfAsset(asset).isNotEmpty
+          ? _primaryMaskOfAsset(asset)
+          : '255.255.255.0',
+    );
     final ifaceCtrl = TextEditingController(
       text: 'eth${(asset['ip_count'] as int? ?? 1)}',
     );
     final fqdnCtrl = TextEditingController();
     final macCtrl = TextEditingController();
     final vlanCtrl = TextEditingController(text: '20');
-    final gwCtrl = TextEditingController(text: '10.20.20.1');
+    final gwCtrl = TextEditingController(text: '192.168.2.1');
     final notesCtrl = TextEditingController();
     String selectedRole = 'primary_service';
     bool isHb = false;
+    bool enableAssetHeartbeat = asset['monitoring_enabled'] ?? true;
     Map<String, dynamic>? liveCheckResult;
     bool checkingNow = false;
 
@@ -4990,11 +5967,11 @@ class _CmdbViewState extends State<CmdbView> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
           title: Text(
-            'Añadir Nueva IP a ${asset['code']} (${asset['name']})',
+            'Añadir / Configurar IP en ${asset['code']} (${asset['name']})',
             style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
           ),
           content: SizedBox(
-            width: 540,
+            width: 580,
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -5003,11 +5980,25 @@ class _CmdbViewState extends State<CmdbView> {
                   Row(
                     children: [
                       Expanded(
+                        flex: 3,
                         child: TextField(
                           controller: ipCtrl,
                           decoration: const InputDecoration(
-                            labelText: 'Nueva Dirección IP (ej. 10.20.20.55)',
+                            labelText: 'Dirección IP (ej. 192.168.2.55)',
                             border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: maskCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Máscara de Red (ej. 255.255.255.0)',
+                            border: OutlineInputBorder(),
+                            isDense: true,
                           ),
                         ),
                       ),
@@ -5044,7 +6035,7 @@ class _CmdbViewState extends State<CmdbView> {
                                 ),
                               )
                             : const Icon(Icons.radar_rounded, size: 16),
-                        label: const Text('Verificar si está Libre'),
+                        label: const Text('Verificar IP'),
                       ),
                     ],
                   ),
@@ -5079,8 +6070,10 @@ class _CmdbViewState extends State<CmdbView> {
                   DropdownButtonFormField<String>(
                     initialValue: selectedRole,
                     decoration: const InputDecoration(
-                      labelText: 'Rol de la IP (Servicio, VIP, Storage, Backup, Gestión...)',
+                      labelText:
+                          'Diferenciar Tipo / Rol de la IP (Gestión/Heartbeat, Servicio, VIP, Storage, iDRAC...)',
                       border: OutlineInputBorder(),
+                      isDense: true,
                     ),
                     items: _ipRoleLabels.entries.map((e) {
                       return DropdownMenuItem<String>(
@@ -5089,7 +6082,12 @@ class _CmdbViewState extends State<CmdbView> {
                       );
                     }).toList(),
                     onChanged: (v) {
-                      if (v != null) setModalState(() => selectedRole = v);
+                      if (v != null) {
+                        setModalState(() {
+                          selectedRole = v;
+                          if (v == 'mgmt_heartbeat') isHb = true;
+                        });
+                      }
                     },
                   ),
                   const SizedBox(height: 12),
@@ -5101,6 +6099,7 @@ class _CmdbViewState extends State<CmdbView> {
                           decoration: const InputDecoration(
                             labelText: 'Interfaz (eth1, ens224, vip0...)',
                             border: OutlineInputBorder(),
+                            isDense: true,
                           ),
                         ),
                       ),
@@ -5111,6 +6110,7 @@ class _CmdbViewState extends State<CmdbView> {
                           decoration: const InputDecoration(
                             labelText: 'VLAN ID',
                             border: OutlineInputBorder(),
+                            isDense: true,
                           ),
                         ),
                       ),
@@ -5121,6 +6121,7 @@ class _CmdbViewState extends State<CmdbView> {
                           decoration: const InputDecoration(
                             labelText: 'Gateway',
                             border: OutlineInputBorder(),
+                            isDense: true,
                           ),
                         ),
                       ),
@@ -5135,6 +6136,7 @@ class _CmdbViewState extends State<CmdbView> {
                           decoration: const InputDecoration(
                             labelText: 'FQDN / DNS asociado a esta IP',
                             border: OutlineInputBorder(),
+                            isDense: true,
                           ),
                         ),
                       ),
@@ -5145,6 +6147,7 @@ class _CmdbViewState extends State<CmdbView> {
                           decoration: const InputDecoration(
                             labelText: 'MAC Address (opcional)',
                             border: OutlineInputBorder(),
+                            isDense: true,
                           ),
                         ),
                       ),
@@ -5153,21 +6156,39 @@ class _CmdbViewState extends State<CmdbView> {
                   const SizedBox(height: 8),
                   CheckboxListTile(
                     value: isHb,
+                    dense: true,
                     contentPadding: EdgeInsets.zero,
                     title: const Text(
-                      'Marcar como la IP de Gestión / Heartbeat de esta máquina',
+                      'Usar esta IP como IP principal de Gestión / Heartbeat de la máquina',
                       style: TextStyle(
                         fontSize: 12,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                     onChanged: (v) => setModalState(() => isHb = v ?? false),
                   ),
+                  SwitchListTile(
+                    value: enableAssetHeartbeat,
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(
+                      'Activar Heartbeat de la conexión para este equipo',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF0369A1),
+                      ),
+                    ),
+                    onChanged: (v) =>
+                        setModalState(() => enableAssetHeartbeat = v),
+                  ),
+                  const SizedBox(height: 6),
                   TextField(
                     controller: notesCtrl,
                     decoration: const InputDecoration(
                       labelText: 'Notas de la interfaz / servicio',
                       border: OutlineInputBorder(),
+                      isDense: true,
                     ),
                   ),
                 ],
@@ -5181,9 +6202,13 @@ class _CmdbViewState extends State<CmdbView> {
             ),
             FilledButton.icon(
               onPressed: () async {
-                if (ipCtrl.text.trim().isEmpty) return;
+                final cleanIp = ipCtrl.text.trim();
+                if (cleanIp.isEmpty) return;
                 await widget.api.addCmdbAssetIp(asset['id'] as int, {
-                  'ip_address': ipCtrl.text.trim(),
+                  'ip_address': cleanIp,
+                  'subnet_mask': maskCtrl.text.trim().isNotEmpty
+                      ? maskCtrl.text.trim()
+                      : '255.255.255.0',
                   'ip_role': selectedRole,
                   'interface_name': ifaceCtrl.text.trim(),
                   'vlan_id': int.tryParse(vlanCtrl.text.trim()),
@@ -5193,6 +6218,12 @@ class _CmdbViewState extends State<CmdbView> {
                   'is_heartbeat_ip': isHb,
                   'notes': notesCtrl.text.trim(),
                 });
+                if (enableAssetHeartbeat !=
+                    (asset['monitoring_enabled'] ?? true)) {
+                  await widget.api.updateCmdbAsset(asset['id'] as int, {
+                    'monitoring_enabled': enableAssetHeartbeat,
+                  });
+                }
                 if (!ctx.mounted) return;
                 Navigator.pop(ctx);
                 await _loadOverview(silent: true);
@@ -5257,6 +6288,7 @@ class _CmdbViewState extends State<CmdbView> {
     String criticality = (existing?['criticality'] ?? 'high').toString();
     int? hostRackDeviceId =
         (existing?['host_rack_device_id'] as int?) ?? defaultHostRackDeviceId;
+    int? selectedLocationId = existing?['location_id'] as int?;
     bool monitoringEnabled = existing?['monitoring_enabled'] ?? true;
     String monitorMethod = (existing?['monitor_method'] ?? 'icmp').toString();
     final monitorPortCtrl = TextEditingController(
@@ -5271,26 +6303,16 @@ class _CmdbViewState extends State<CmdbView> {
     } else {
       ipDrafts = [
         {
-          'ip_address': prefilledIp ?? '10.20.1.150',
+          'ip_address': prefilledIp ?? '192.168.2.150',
+          'subnet_mask': '255.255.255.0',
           'ip_role': 'mgmt_heartbeat',
           'interface_name': 'eth0 (Mgmt)',
-          'vlan_id': 10,
-          'gateway': '10.20.1.1',
+          'vlan_id': 1,
+          'gateway': '192.168.2.1',
           'fqdn': prefilledFqdn ?? '',
           'mac_address': prefilledMac ?? '',
           'is_heartbeat_ip': true,
           'notes': 'IP de Gestión / Heartbeat',
-        },
-        {
-          'ip_address': '10.20.20.150',
-          'ip_role': 'primary_service',
-          'interface_name': 'eth1 (Prod Service)',
-          'vlan_id': 20,
-          'gateway': '10.20.20.1',
-          'fqdn': '',
-          'mac_address': '',
-          'is_heartbeat_ip': false,
-          'notes': 'IP de Servicio / Producción',
         },
       ];
     }
@@ -5301,12 +6323,12 @@ class _CmdbViewState extends State<CmdbView> {
         builder: (ctx, setModalState) => AlertDialog(
           title: Text(
             isEdit
-                ? 'Editar Máquina / CI en CMDB: ${existing['code']}'
+                ? 'Editar Máquina / CI e Interfaces IP en CMDB: ${existing['code']}'
                 : 'Alta en CMDB: Nueva Máquina Virtual, Contenedor, Cluster o Activo Multi-IP',
             style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w900),
           ),
           content: SizedBox(
-            width: 780,
+            width: 860,
             child: SingleChildScrollView(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -5318,7 +6340,7 @@ class _CmdbViewState extends State<CmdbView> {
                         child: TextField(
                           controller: codeCtrl,
                           decoration: const InputDecoration(
-                            labelText: 'Código CI (ej. VM-ERP-02, CLU-WEB-VIP)',
+                            labelText: 'Código CI (ej. VM-ERP-02, ROU-CORE-01)',
                             border: OutlineInputBorder(),
                             isDense: true,
                           ),
@@ -5334,6 +6356,39 @@ class _CmdbViewState extends State<CmdbView> {
                             border: OutlineInputBorder(),
                             isDense: true,
                           ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: DropdownButtonFormField<int?>(
+                          initialValue: _locations.any(
+                                    (l) => l['id'] == selectedLocationId,
+                                  )
+                              ? selectedLocationId
+                              : null,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Sede / Location (Opcional)',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          items: [
+                            const DropdownMenuItem<int?>(
+                              value: null,
+                              child: Text('Sin Sede específica / Automática'),
+                            ),
+                            ..._locations.map((loc) {
+                              return DropdownMenuItem<int?>(
+                                value: loc['id'] as int,
+                                child: Text(
+                                  '${loc['code']} — ${loc['name']}',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              );
+                            }),
+                          ],
+                          onChanged: (v) =>
+                              setModalState(() => selectedLocationId = v),
                         ),
                       ),
                     ],
@@ -5552,62 +6607,79 @@ class _CmdbViewState extends State<CmdbView> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: SwitchListTile(
-                          value: monitoringEnabled,
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text(
-                            'Heartbeat Activo sobre su IP de Gestión',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: monitoringEnabled
+                          ? const Color(0xFFF0FDF4)
+                          : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: monitoringEnabled
+                            ? const Color(0xFF86EFAC)
+                            : const Color(0xFFCBD5E1),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: SwitchListTile(
+                            value: monitoringEnabled,
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              'Activar Heartbeat de la Conexión (Monitorización continua sobre la IP marcada como ★ Heartbeat)',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            onChanged: (v) =>
+                                setModalState(() => monitoringEnabled = v),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: 150,
+                          child: DropdownButtonFormField<String>(
+                            initialValue: monitorMethod,
+                            decoration: const InputDecoration(
+                              labelText: 'Método Heartbeat',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            items: const [
+                              DropdownMenuItem(value: 'icmp', child: Text('ICMP Ping')),
+                              DropdownMenuItem(value: 'ssh', child: Text('SSH')),
+                              DropdownMenuItem(value: 'https', child: Text('HTTPS')),
+                              DropdownMenuItem(value: 'http', child: Text('HTTP')),
+                              DropdownMenuItem(value: 'tcp', child: Text('TCP Puerto')),
+                              DropdownMenuItem(value: 'snmp', child: Text('SNMP')),
+                            ],
+                            onChanged: (v) {
+                              if (v != null) {
+                                setModalState(() => monitorMethod = v);
+                              }
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: 90,
+                          child: TextField(
+                            controller: monitorPortCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Puerto',
+                              border: OutlineInputBorder(),
+                              isDense: true,
                             ),
                           ),
-                          onChanged: (v) =>
-                              setModalState(() => monitoringEnabled = v),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      SizedBox(
-                        width: 150,
-                        child: DropdownButtonFormField<String>(
-                          initialValue: monitorMethod,
-                          decoration: const InputDecoration(
-                            labelText: 'Método Heartbeat',
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                          ),
-                          items: const [
-                            DropdownMenuItem(value: 'icmp', child: Text('ICMP Ping')),
-                            DropdownMenuItem(value: 'ssh', child: Text('SSH')),
-                            DropdownMenuItem(value: 'https', child: Text('HTTPS')),
-                            DropdownMenuItem(value: 'http', child: Text('HTTP')),
-                            DropdownMenuItem(value: 'tcp', child: Text('TCP Puerto')),
-                            DropdownMenuItem(value: 'snmp', child: Text('SNMP')),
-                          ],
-                          onChanged: (v) {
-                            if (v != null) {
-                              setModalState(() => monitorMethod = v);
-                            }
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      SizedBox(
-                        width: 100,
-                        child: TextField(
-                          controller: monitorPortCtrl,
-                          decoration: const InputDecoration(
-                            labelText: 'Puerto',
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                          ),
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                   const Divider(height: 22),
                   Row(
@@ -5620,7 +6692,7 @@ class _CmdbViewState extends State<CmdbView> {
                       const SizedBox(width: 8),
                       const Expanded(
                         child: Text(
-                          'Direcciones IP de la Máquina (IP de Gestión/Heartbeat + IPs de Producción/Servicio/VIP/Backup)',
+                          'Direcciones IP y Máscaras de Red (Diferenciar IP de Gestión/Heartbeat vs IPs de Servicio/VIP/iDRAC)',
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w900,
@@ -5632,10 +6704,11 @@ class _CmdbViewState extends State<CmdbView> {
                           setModalState(() {
                             ipDrafts.add({
                               'ip_address': '',
+                              'subnet_mask': '255.255.255.0',
                               'ip_role': 'secondary_service',
                               'interface_name': 'eth${ipDrafts.length}',
                               'vlan_id': 20,
-                              'gateway': '10.20.20.1',
+                              'gateway': '192.168.2.1',
                               'fqdn': '',
                               'mac_address': '',
                               'is_heartbeat_ip': false,
@@ -5667,115 +6740,182 @@ class _CmdbViewState extends State<CmdbView> {
                               : const Color(0xFFCBD5E1),
                         ),
                       ),
-                      child: Row(
+                      child: Column(
                         children: [
-                          Expanded(
-                            flex: 2,
-                            child: TextFormField(
-                              initialValue: (item['ip_address'] ?? '').toString(),
-                              decoration: const InputDecoration(
-                                labelText: 'Dirección IP',
-                                border: OutlineInputBorder(),
-                                isDense: true,
-                              ),
-                              onChanged: (v) => item['ip_address'] = v,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            flex: 2,
-                            child: DropdownButtonFormField<String>(
-                              initialValue: _ipRoleLabels.containsKey(item['ip_role'])
-                                  ? item['ip_role'] as String
-                                  : 'primary_service',
-                              decoration: const InputDecoration(
-                                labelText: 'Rol de IP',
-                                border: OutlineInputBorder(),
-                                isDense: true,
-                              ),
-                              items: _ipRoleLabels.entries.map((e) {
-                                return DropdownMenuItem<String>(
-                                  value: e.key,
-                                  child: Text(
-                                    e.value,
-                                    style: const TextStyle(fontSize: 11.5),
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 2,
+                                child: TextFormField(
+                                  initialValue:
+                                      (item['ip_address'] ?? '').toString(),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Dirección IP',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
                                   ),
-                                );
-                              }).toList(),
-                              onChanged: (v) {
-                                if (v != null) {
-                                  setModalState(() => item['ip_role'] = v);
-                                }
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: TextFormField(
-                              initialValue:
-                                  (item['interface_name'] ?? '').toString(),
-                              decoration: const InputDecoration(
-                                labelText: 'Interfaz',
-                                border: OutlineInputBorder(),
-                                isDense: true,
+                                  onChanged: (v) => item['ip_address'] = v,
+                                ),
                               ),
-                              onChanged: (v) => item['interface_name'] = v,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            flex: 2,
-                            child: TextFormField(
-                              initialValue: (item['fqdn'] ?? '').toString(),
-                              decoration: const InputDecoration(
-                                labelText: 'FQDN / DNS de esta IP',
-                                border: OutlineInputBorder(),
-                                isDense: true,
+                              const SizedBox(width: 6),
+                              Expanded(
+                                flex: 2,
+                                child: TextFormField(
+                                  initialValue:
+                                      (item['subnet_mask'] ?? '255.255.255.0')
+                                          .toString(),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Máscara de Red',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  onChanged: (v) => item['subnet_mask'] = v,
+                                ),
                               ),
-                              onChanged: (v) => item['fqdn'] = v,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Tooltip(
-                            message:
-                                'Marcar como IP principal de Gestión / Heartbeat',
-                            child: InkWell(
-                              onTap: () {
-                                setModalState(() {
-                                  for (final d in ipDrafts) {
-                                    d['is_heartbeat_ip'] = false;
-                                  }
-                                  item['is_heartbeat_ip'] = true;
-                                });
-                              },
-                              child: Chip(
-                                backgroundColor: isHb
-                                    ? const Color(0xFF0284C7)
-                                    : const Color(0xFFE2E8F0),
-                                label: Text(
-                                  isHb ? '★ Heartbeat' : 'Servicio',
-                                  style: TextStyle(
-                                    fontSize: 10.5,
-                                    fontWeight: FontWeight.w800,
-                                    color: isHb
-                                        ? Colors.white
-                                        : const Color(0xFF475569),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                flex: 3,
+                                child: DropdownButtonFormField<String>(
+                                  initialValue:
+                                      _ipRoleLabels.containsKey(item['ip_role'])
+                                          ? item['ip_role'] as String
+                                          : 'primary_service',
+                                  decoration: const InputDecoration(
+                                    labelText: 'Rol / Diferenciación de IP',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  items: _ipRoleLabels.entries.map((e) {
+                                    return DropdownMenuItem<String>(
+                                      value: e.key,
+                                      child: Text(
+                                        e.value,
+                                        style: const TextStyle(fontSize: 11.5),
+                                      ),
+                                    );
+                                  }).toList(),
+                                  onChanged: (v) {
+                                    if (v != null) {
+                                      setModalState(() => item['ip_role'] = v);
+                                    }
+                                  },
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Tooltip(
+                                message:
+                                    'Marcar esta IP como la IP principal de Gestión / Heartbeat de la conexión',
+                                child: InkWell(
+                                  onTap: () {
+                                    setModalState(() {
+                                      for (final d in ipDrafts) {
+                                        d['is_heartbeat_ip'] = false;
+                                      }
+                                      item['is_heartbeat_ip'] = true;
+                                    });
+                                  },
+                                  child: Chip(
+                                    backgroundColor: isHb
+                                        ? const Color(0xFF0284C7)
+                                        : const Color(0xFFE2E8F0),
+                                    label: Text(
+                                      isHb ? '★ Heartbeat ON' : 'Marcar Heartbeat',
+                                      style: TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w800,
+                                        color: isHb
+                                            ? Colors.white
+                                            : const Color(0xFF475569),
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
+                              if (ipDrafts.length > 1)
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    size: 18,
+                                    color: Colors.redAccent,
+                                  ),
+                                  onPressed: () {
+                                    setModalState(() => ipDrafts.removeAt(idx));
+                                  },
+                                ),
+                            ],
                           ),
-                          if (ipDrafts.length > 1)
-                            IconButton(
-                              icon: const Icon(
-                                Icons.delete_outline,
-                                size: 18,
-                                color: Colors.redAccent,
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextFormField(
+                                  initialValue:
+                                      (item['interface_name'] ?? '').toString(),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Interfaz (eth0...)',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  onChanged: (v) => item['interface_name'] = v,
+                                ),
                               ),
-                              onPressed: () {
-                                setModalState(() => ipDrafts.removeAt(idx));
-                              },
-                            ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: TextFormField(
+                                  initialValue:
+                                      (item['gateway'] ?? '').toString(),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Gateway',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  onChanged: (v) => item['gateway'] = v,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              SizedBox(
+                                width: 85,
+                                child: TextFormField(
+                                  initialValue:
+                                      '${item['vlan_id'] ?? ''}',
+                                  decoration: const InputDecoration(
+                                    labelText: 'VLAN',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  onChanged: (v) =>
+                                      item['vlan_id'] = int.tryParse(v.trim()),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                flex: 2,
+                                child: TextFormField(
+                                  initialValue: (item['fqdn'] ?? '').toString(),
+                                  decoration: const InputDecoration(
+                                    labelText: 'FQDN / DNS de esta IP',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  onChanged: (v) => item['fqdn'] = v,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                flex: 2,
+                                child: TextFormField(
+                                  initialValue:
+                                      (item['mac_address'] ?? '').toString(),
+                                  decoration: const InputDecoration(
+                                    labelText: 'MAC Address',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  onChanged: (v) => item['mac_address'] = v,
+                                ),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     );
@@ -5801,6 +6941,133 @@ class _CmdbViewState extends State<CmdbView> {
             ),
             FilledButton.icon(
               onPressed: () async {
+                final existingCf = Map<String, dynamic>.from(
+                  (existing?['custom_fields'] as Map?) ?? {},
+                );
+                if (selectedLocationId != null) {
+                  existingCf['location_id'] = selectedLocationId;
+                } else {
+                  existingCf.remove('location_id');
+                }
+
+                final validIps = ipDrafts
+                    .where(
+                      (d) =>
+                          (d['ip_address'] ?? '').toString().trim().isNotEmpty,
+                    )
+                    .toList();
+
+                // Comprobar si alguna de las IPs colisiona con otro equipo (ej. montado en Rack Editor)
+                for (final d in validIps) {
+                  final candidateIp =
+                      (d['ip_address'] ?? '').toString().trim();
+                  final checkRes = await widget.api.checkCmdbIpOwner(
+                    ip: candidateIp,
+                    excludeAssetId: isEdit ? existing['id'] as int : null,
+                  );
+                  if (checkRes['has_collision'] == true) {
+                    final owners = (checkRes['owners'] as List?) ?? [];
+                    if (owners.isNotEmpty && ctx.mounted) {
+                      final owner = Map<String, dynamic>.from(
+                        owners.first as Map,
+                      );
+                      final String? choice = await showDialog<String>(
+                        context: ctx,
+                        builder: (dCtx) => AlertDialog(
+                          title: Row(
+                            children: [
+                              const Icon(
+                                Icons.warning_amber_rounded,
+                                color: Color(0xFFB91C1C),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Colisión de IP Detectada ($candidateIp)',
+                                  style: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          content: Text(
+                            'La dirección IP $candidateIp ya está asignada a:\n'
+                            '• [${owner['code']}] ${owner['name']} (${owner['physical_location_label']})\n\n'
+                            '¿Cómo deseas proceder?',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(dCtx, 'cancel'),
+                              child: const Text('Cancelar y cambiar IP'),
+                            ),
+                            OutlinedButton(
+                              onPressed: () => Navigator.pop(dCtx, 'save_anyway'),
+                              child: const Text('Guardar igualmente'),
+                            ),
+                            FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF15803D),
+                              ),
+                              onPressed: () => Navigator.pop(dCtx, 'merge'),
+                              icon: const Icon(
+                                Icons.merge_type_rounded,
+                                size: 16,
+                              ),
+                              label: const Text(
+                                'Es el mismo equipo: Unificar con existente',
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (choice == 'cancel' || choice == null) {
+                        return;
+                      }
+                      if (choice == 'merge') {
+                        if (isEdit) {
+                          final updated =
+                              await widget.api.resolveCmdbIpCollision({
+                            'ip_address': candidateIp,
+                            'action': 'merge',
+                            'keep_asset_id': owner['id'],
+                            'other_asset_id': existing['id'],
+                            'preferred_name': nameCtrl.text.trim(),
+                            'preferred_hostname': hostCtrl.text.trim(),
+                            'preferred_fqdn': fqdnCtrl.text.trim(),
+                          });
+                          if (!ctx.mounted) return;
+                          Navigator.pop(ctx);
+                          setState(() => _overview = updated);
+                          return;
+                        } else {
+                          await widget.api.updateCmdbAsset(
+                            owner['id'] as int,
+                            {
+                              if (nameCtrl.text.trim().isNotEmpty)
+                                'name': nameCtrl.text.trim(),
+                              if (hostCtrl.text.trim().isNotEmpty)
+                                'hostname': hostCtrl.text.trim(),
+                              if (fqdnCtrl.text.trim().isNotEmpty)
+                                'fqdn': fqdnCtrl.text.trim(),
+                              'monitoring_enabled': monitoringEnabled,
+                              'monitor_method': monitorMethod,
+                              'monitor_port':
+                                  int.tryParse(monitorPortCtrl.text.trim()) ??
+                                      22,
+                            },
+                          );
+                          if (!ctx.mounted) return;
+                          Navigator.pop(ctx);
+                          await _loadOverview(silent: true);
+                          return;
+                        }
+                      }
+                    }
+                  }
+                }
+
                 final payload = {
                   'code': codeCtrl.text.trim(),
                   'name': nameCtrl.text.trim(),
@@ -5820,13 +7087,9 @@ class _CmdbViewState extends State<CmdbView> {
                   'monitoring_enabled': monitoringEnabled,
                   'monitor_method': monitorMethod,
                   'monitor_port': int.tryParse(monitorPortCtrl.text.trim()) ?? 22,
+                  'custom_fields': existingCf,
                   'notes': notesCtrl.text.trim(),
-                  'ip_addresses': ipDrafts
-                      .where(
-                        (d) =>
-                            (d['ip_address'] ?? '').toString().trim().isNotEmpty,
-                      )
-                      .toList(),
+                  'ip_addresses': validIps,
                 };
                 try {
                   if (isEdit) {
@@ -5906,6 +7169,7 @@ class _CmdbViewState extends State<CmdbView> {
       text: (existing?['notes'] ?? '').toString(),
     );
     String env = (existing?['environment'] ?? 'production').toString();
+    int? selectedLocationId = existing?['location_id'] as int?;
     bool userEditedGateway = isEdit;
 
     await showDialog(
@@ -5920,7 +7184,7 @@ class _CmdbViewState extends State<CmdbView> {
                   : 'Registrar Nueva Subred / VLAN en IPAM',
             ),
             content: SizedBox(
-              width: 520,
+              width: 540,
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -5997,6 +7261,39 @@ class _CmdbViewState extends State<CmdbView> {
                       ),
                     ),
                     const SizedBox(height: 10),
+                    DropdownButtonFormField<int?>(
+                      initialValue: _locations.any(
+                                (l) => l['id'] == selectedLocationId,
+                              )
+                          ? selectedLocationId
+                          : null,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText:
+                            'Sede / Location asociada al rango de IPs (Opcional)',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text(
+                            'Sin Sede específica (Global / Multi-sede)',
+                          ),
+                        ),
+                        ..._locations.map((loc) {
+                          return DropdownMenuItem<int?>(
+                            value: loc['id'] as int,
+                            child: Text(
+                              '${loc['code']} — ${loc['name']}',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        }),
+                      ],
+                      onChanged: (v) =>
+                          setModalState(() => selectedLocationId = v),
+                    ),
+                    const SizedBox(height: 10),
                     Row(
                       children: [
                         Expanded(
@@ -6055,6 +7352,7 @@ class _CmdbViewState extends State<CmdbView> {
                           'subnet_mask': parsed.subnetMask,
                           'name': nameCtrl.text.trim(),
                           'vlan_id': int.tryParse(vlanCtrl.text.trim()),
+                          'location_id': selectedLocationId,
                           'gateway': gwCtrl.text.trim().isNotEmpty
                               ? gwCtrl.text.trim()
                               : parsed.firstUsableIp,

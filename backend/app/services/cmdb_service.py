@@ -17,9 +17,14 @@ from ..models import (
     Floor,
     FloorDevice,
     Location,
+    LogicalTopologyLink,
+    MonitoredServiceCheck,
     Rack,
     RackDevice,
     Room,
+    SwitchSnmpPort,
+    TechStackDiagram,
+    TechStackNode,
 )
 from .monitor import check_host_connectivity
 
@@ -162,20 +167,32 @@ def sync_physical_devices_to_cmdb(db: Session) -> None:
             db.flush()
             changed = True
         else:
-            # Mantener estado de monitorización y datos base sincronizados desde el Rack
+            # Mantener estado de monitorización y datos base alineados bidireccionalmente entre Rack y CMDB
             asset.name = rdev.name
+            asset.asset_class = _infer_asset_class_from_rack_device(rdev)
             if rdev.hostname:
                 asset.hostname = rdev.hostname
+            elif asset.hostname:
+                rdev.hostname = asset.hostname
             if rdev.fqdn:
                 asset.fqdn = rdev.fqdn
+            elif asset.fqdn:
+                rdev.fqdn = asset.fqdn
             asset.monitoring_enabled = rdev.monitoring_enabled
             asset.monitor_method = rdev.monitor_method or asset.monitor_method
             asset.monitor_port = rdev.monitor_port or asset.monitor_port
-            asset.status = rdev.status or asset.status
-            asset.last_ping_ms = rdev.last_ping_ms
-            asset.last_checked_at = rdev.last_checked_at
+            if rdev.status and rdev.status not in ("unmonitored", "unknown"):
+                asset.status = rdev.status
+                asset.last_ping_ms = rdev.last_ping_ms
+                asset.last_checked_at = rdev.last_checked_at
+            elif asset.status == "online" and rdev.status in ("unmonitored", "unknown", None):
+                rdev.status = asset.status
+                rdev.last_ping_ms = asset.last_ping_ms
+                rdev.last_checked_at = asset.last_checked_at
             if rdev.serial_number:
                 asset.serial_or_uuid = rdev.serial_number
+            elif asset.serial_or_uuid:
+                rdev.serial_number = asset.serial_or_uuid
 
         # Sincronizar la IP primaria (Heartbeat / Gestión) del RackDevice
         primary_ip = (rdev.ip_address or "").strip()
@@ -192,7 +209,7 @@ def sync_physical_devices_to_cmdb(db: Session) -> None:
                     ip_address=primary_ip,
                     subnet_mask=rdev.subnet_mask or (matched_sub.subnet_mask if matched_sub else "255.255.255.0"),
                     gateway=rdev.gateway or (matched_sub.gateway if matched_sub else ""),
-                    vlan_id=rdev.vlan_mgmt or (matched_sub.vlan_id if matched_sub else None),
+                    vlan_id=rdev.vlan_mgmt if rdev.vlan_mgmt is not None else (matched_sub.vlan_id if matched_sub else None),
                     ip_role="mgmt_heartbeat",
                     interface_name="mgmt0",
                     mac_address=rdev.mac_address or "",
@@ -209,10 +226,22 @@ def sync_physical_devices_to_cmdb(db: Session) -> None:
                     hb_ip_obj.ip_address = primary_ip
                     hb_ip_obj.subnet_id = matched_sub.id if matched_sub else hb_ip_obj.subnet_id
                     changed = True
-                if rdev.mac_address and not hb_ip_obj.mac_address:
+                if rdev.subnet_mask and hb_ip_obj.subnet_mask != rdev.subnet_mask:
+                    hb_ip_obj.subnet_mask = rdev.subnet_mask
+                elif hb_ip_obj.subnet_mask and not rdev.subnet_mask:
+                    rdev.subnet_mask = hb_ip_obj.subnet_mask
+                if rdev.gateway and hb_ip_obj.gateway != rdev.gateway:
+                    hb_ip_obj.gateway = rdev.gateway
+                elif hb_ip_obj.gateway and not rdev.gateway:
+                    rdev.gateway = hb_ip_obj.gateway
+                if rdev.mac_address and hb_ip_obj.mac_address != rdev.mac_address:
                     hb_ip_obj.mac_address = rdev.mac_address
-                if rdev.vlan_mgmt and not hb_ip_obj.vlan_id:
+                elif hb_ip_obj.mac_address and not rdev.mac_address:
+                    rdev.mac_address = hb_ip_obj.mac_address
+                if rdev.vlan_mgmt is not None and hb_ip_obj.vlan_id != rdev.vlan_mgmt:
                     hb_ip_obj.vlan_id = rdev.vlan_mgmt
+                elif hb_ip_obj.vlan_id is not None and rdev.vlan_mgmt is None:
+                    rdev.vlan_mgmt = hb_ip_obj.vlan_id
 
     # 2. Sincronizar FloorDevices con IP
     floor_devices = db.query(FloorDevice).all()
@@ -695,6 +724,9 @@ def verify_ip_target_or_find_free(
                 break
         ips_to_test = candidates
 
+    # 0. Sincronizar primero cualquier equipo recién añadido/modificado en Rack Editor o Planta
+    sync_physical_devices_to_cmdb(db)
+
     probe_ports = ports or [22, 80, 443, 3389, 445, 8006, 902, 161]
     is_bulk = len(ips_to_test) > 12
 
@@ -747,7 +779,7 @@ def verify_ip_target_or_find_free(
         for fut, ip_key in fut_map.items():
             probe_outputs_by_ip[ip_key] = fut.result()
 
-    # 3. Ensamblar resultados manteniendo el orden y actualizar registros CMDB existentes
+    # 3. Ensamblar resultados manteniendo el orden y actualizar registros CMDB + RackDevice existentes
     now_dt = datetime.utcnow()
     results: List[Dict[str, Any]] = []
     db_modified = False
@@ -769,6 +801,29 @@ def verify_ip_target_or_find_free(
                 rec.last_verification_status = assembled["verdict"]
                 rec.last_verified_at = now_dt
                 rec.last_verification_detail = assembled["summary"]
+                if pdata.get("arp_mac") and not rec.mac_address:
+                    rec.mac_address = pdata["arp_mac"]
+                if pdata.get("ptr_hostname") and not rec.fqdn:
+                    rec.fqdn = pdata["ptr_hostname"]
+                ast = rec.asset
+                if ast:
+                    is_alive = bool(
+                        pdata.get("icmp_alive")
+                        or pdata.get("tcp_alive")
+                        or pdata.get("arp_alive")
+                    )
+                    ast.status = "online" if is_alive else "offline"
+                    if pdata.get("icmp_ms") is not None:
+                        ast.last_ping_ms = pdata["icmp_ms"]
+                    ast.last_checked_at = now_dt
+                    if ast.rack_device_id:
+                        rdev = db.query(RackDevice).filter(RackDevice.id == ast.rack_device_id).first()
+                        if rdev:
+                            rdev.status = ast.status
+                            rdev.last_ping_ms = ast.last_ping_ms
+                            rdev.last_checked_at = now_dt
+                            if pdata.get("arp_mac") and not rdev.mac_address:
+                                rdev.mac_address = pdata["arp_mac"]
                 db_modified = True
 
     if db_modified:
@@ -817,6 +872,7 @@ def import_discovered_hosts_to_cmdb(
     register_subnet_cidr: Optional[str] = None,
     subnet_name: Optional[str] = None,
     vlan_id: Optional[int] = None,
+    location_id: Optional[int] = None,
     items: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
@@ -835,6 +891,7 @@ def import_discovered_hosts_to_cmdb(
                 cidr=cidr_norm,
                 name=(subnet_name or "").strip() or f"Subred Descubierta {cidr_norm}",
                 vlan_id=vlan_id,
+                location_id=location_id,
                 gateway=first_host,
                 subnet_mask=str(net.netmask),
                 environment="production",
@@ -843,6 +900,12 @@ def import_discovered_hosts_to_cmdb(
             db.add(existing_sub)
             db.flush()
             created_subnet = cidr_norm
+        elif location_id is not None and existing_sub.location_id is None:
+            existing_sub.location_id = location_id
+            db.flush()
+
+    # Sincronizar primero cualquier equipo físico dado de alta en Rack Editor / Planta
+    sync_physical_devices_to_cmdb(db)
 
     subnets = db.query(CmdbSubnet).all()
     created_assets_count = 0
@@ -852,10 +915,38 @@ def import_discovered_hosts_to_cmdb(
         ip_str = str(item.get("ip_address") or "").strip()
         if not ip_str:
             continue
-        # Comprobar si ya existe la IP en la CMDB
+        item_loc_id = item.get("location_id") if item.get("location_id") is not None else location_id
+        # Comprobar si ya existe la IP en la CMDB (incluyendo equipos creados primero en Rack Editor)
         existing_ip = db.query(CmdbIpAddress).filter(CmdbIpAddress.ip_address == ip_str).first()
         if existing_ip:
             ast_ex = existing_ip.asset
+            mac_in = str(item.get("mac_address") or "").strip()
+            ptr_in = str(item.get("fqdn") or "").strip()
+            if mac_in and not existing_ip.mac_address:
+                existing_ip.mac_address = mac_in
+            if ptr_in and not existing_ip.fqdn:
+                existing_ip.fqdn = ptr_in
+            existing_ip.last_verification_status = "active_in_network"
+            existing_ip.last_verified_at = datetime.utcnow()
+            if ast_ex:
+                ast_ex.status = "online"
+                ast_ex.last_checked_at = datetime.utcnow()
+                if ptr_in and not ast_ex.fqdn:
+                    ast_ex.fqdn = ptr_in
+                if item_loc_id is not None:
+                    cf = dict(ast_ex.custom_fields or {})
+                    if not cf.get("location_id"):
+                        cf["location_id"] = item_loc_id
+                        ast_ex.custom_fields = cf
+                if ast_ex.rack_device_id:
+                    rdev = db.query(RackDevice).filter(RackDevice.id == ast_ex.rack_device_id).first()
+                    if rdev:
+                        rdev.status = "online"
+                        rdev.last_checked_at = datetime.utcnow()
+                        if mac_in and not rdev.mac_address:
+                            rdev.mac_address = mac_in
+                        if ptr_in and not rdev.fqdn:
+                            rdev.fqdn = ptr_in
             imported_ips_list.append(ip_str)
             imported_assets_info.append({
                 "ip_address": ip_str,
@@ -902,6 +993,11 @@ def import_discovered_hosts_to_cmdb(
             mon_method, mon_port = "tcp", int(open_ports[0])
 
         matched_sub = _match_subnet_for_ip(ip_str, subnets)
+        eff_loc_id = item_loc_id if item_loc_id is not None else (matched_sub.location_id if matched_sub else None)
+        custom_f: Dict[str, Any] = {}
+        if eff_loc_id is not None:
+            custom_f["location_id"] = eff_loc_id
+
         asset = CmdbAsset(
             code=code,
             name=ptr_fqdn or f"Equipo Detectado ({ip_str})",
@@ -921,16 +1017,18 @@ def import_discovered_hosts_to_cmdb(
             monitor_port=mon_port,
             status="online",
             last_checked_at=datetime.utcnow(),
+            custom_fields=custom_f,
             notes=str(item.get("notes") or f"Incorporado desde escaneo de rango ({ip_str})"),
         )
         db.add(asset)
         db.flush()
 
+        item_mask = str(item.get("subnet_mask") or "").strip()
         new_ip_rec = CmdbIpAddress(
             asset_id=asset.id,
             subnet_id=matched_sub.id if matched_sub else None,
             ip_address=ip_str,
-            subnet_mask=matched_sub.subnet_mask if matched_sub else "255.255.255.0",
+            subnet_mask=item_mask or (matched_sub.subnet_mask if matched_sub else "255.255.255.0"),
             gateway=matched_sub.gateway if matched_sub else "",
             vlan_id=matched_sub.vlan_id if matched_sub else vlan_id,
             ip_role="mgmt_heartbeat",
@@ -1055,15 +1153,24 @@ def serialize_cmdb_asset(
     rack_devs_by_id: Dict[int, RackDevice],
     subnets_by_id: Dict[int, CmdbSubnet],
     assets_by_id: Dict[int, CmdbAsset],
+    locations_by_id: Optional[Dict[int, Location]] = None,
+    floor_devs_by_id: Optional[Dict[int, FloorDevice]] = None,
+    stack_nodes_by_asset_id: Optional[Dict[int, List[TechStackNode]]] = None,
+    stack_diagrams_by_id: Optional[Dict[int, TechStackDiagram]] = None,
 ) -> Dict[str, Any]:
     ips_serialized = []
     heartbeat_ip = ""
+    primary_subnet_mask = ""
+    primary_ip_subnet: Optional[CmdbSubnet] = None
     service_ips: List[str] = []
 
     for ip in asset.ip_addresses:
-        sub = subnets_by_id.get(ip.subnet_id) if ip.subnet_id else None
+        sub = subnets_by_id.get(ip.subnet_id) if ip.subnet_id else _match_subnet_for_ip(ip.ip_address, list(subnets_by_id.values()))
+        eff_mask = (ip.subnet_mask or "").strip() or (sub.subnet_mask if sub else "255.255.255.0")
         if ip.is_heartbeat_ip or (not heartbeat_ip and ip.ip_role == "mgmt_heartbeat"):
             heartbeat_ip = ip.ip_address
+            primary_subnet_mask = eff_mask
+            primary_ip_subnet = sub
         else:
             service_ips.append(ip.ip_address)
         ips_serialized.append(
@@ -1074,7 +1181,7 @@ def serialize_cmdb_asset(
                 "subnet_cidr": sub.cidr if sub else "",
                 "subnet_name": sub.name if sub else "",
                 "ip_address": ip.ip_address,
-                "subnet_mask": ip.subnet_mask,
+                "subnet_mask": eff_mask,
                 "gateway": ip.gateway,
                 "vlan_id": ip.vlan_id,
                 "ip_role": ip.ip_role,
@@ -1093,6 +1200,10 @@ def serialize_cmdb_asset(
 
     if not heartbeat_ip and ips_serialized:
         heartbeat_ip = ips_serialized[0]["ip_address"]
+        primary_subnet_mask = ips_serialized[0]["subnet_mask"] or "255.255.255.0"
+        if not primary_ip_subnet:
+            sid0 = ips_serialized[0].get("subnet_id")
+            primary_ip_subnet = subnets_by_id.get(sid0) if sid0 else _match_subnet_for_ip(heartbeat_ip, list(subnets_by_id.values()))
 
     # Información de ubicación física o Hipervisor Padre
     physical_location_label = "Virtual / No ubicado en Rack"
@@ -1100,6 +1211,7 @@ def serialize_cmdb_asset(
     rack_code = ""
     start_u = None
     host_server_label = ""
+    derived_loc_obj: Optional[Location] = None
 
     if asset.sync_source == "rack_device" and asset.rack_device_id:
         rdev = rack_devs_by_id.get(asset.rack_device_id)
@@ -1109,6 +1221,8 @@ def serialize_cmdb_asset(
             rack_code = rk.code if rk else ""
             start_u = rdev.start_u
             physical_location_label = f"Rack {rack_code} • U{rdev.start_u} ({rdev.mounted_face.upper()})"
+            if rk and rk.room and rk.room.floor and rk.room.floor.location:
+                derived_loc_obj = rk.room.floor.location
     elif asset.host_rack_device_id:
         host_dev = rack_devs_by_id.get(asset.host_rack_device_id)
         if host_dev:
@@ -1118,10 +1232,54 @@ def serialize_cmdb_asset(
             start_u = host_dev.start_u
             host_server_label = f"{host_dev.code} ({host_dev.name})"
             physical_location_label = f"Alojado en {host_dev.code} [Rack {rack_code} • U{host_dev.start_u}]"
+            if rk and rk.room and rk.room.floor and rk.room.floor.location:
+                derived_loc_obj = rk.room.floor.location
     elif asset.sync_source == "floor_device":
         physical_location_label = asset.hypervisor_or_platform or "Dispositivo en Planta"
+        if floor_devs_by_id and asset.floor_device_id:
+            fdev = floor_devs_by_id.get(asset.floor_device_id)
+            if fdev and fdev.floor and fdev.floor.location:
+                derived_loc_obj = fdev.floor.location
     elif asset.asset_class == "cloud_instance":
         physical_location_label = asset.hypervisor_or_platform or "Cloud / Externo"
+
+    # Resolver Location / Sede (1. custom_fields['location_id'], 2. Ubicación física Rack/Planta, 3. Subred de la IP)
+    locs_map = locations_by_id or {}
+    cf_dict = asset.custom_fields or {}
+    explicit_loc_id = cf_dict.get("location_id")
+    resolved_loc: Optional[Location] = None
+    if explicit_loc_id is not None:
+        try:
+            resolved_loc = locs_map.get(int(explicit_loc_id))
+        except (ValueError, TypeError):
+            resolved_loc = None
+    if not resolved_loc and derived_loc_obj:
+        resolved_loc = derived_loc_obj
+    if not resolved_loc and primary_ip_subnet and primary_ip_subnet.location_id:
+        resolved_loc = locs_map.get(primary_ip_subnet.location_id)
+
+    location_id = resolved_loc.id if resolved_loc else None
+    location_code = resolved_loc.code if resolved_loc else ""
+    location_name = resolved_loc.name if resolved_loc else ""
+    location_label = f"{resolved_loc.code} • {resolved_loc.name}" if resolved_loc else ""
+
+    # Posición en el Stack Tecnológico (si está presente en algún diagrama de Stack)
+    stack_nodes = (stack_nodes_by_asset_id or {}).get(asset.id, [])
+    diag_map = stack_diagrams_by_id or {}
+    stack_placements = []
+    for sn in stack_nodes:
+        diag = diag_map.get(sn.stack_id)
+        node_lbl = (sn.custom_label or "").strip() or asset.name or asset.code
+        stack_placements.append(
+            {
+                "diagram_id": sn.stack_id,
+                "diagram_name": diag.name if diag else f"Stack #{sn.stack_id}",
+                "node_id": sn.id,
+                "node_label": node_lbl,
+                "layer": sn.role_layer,
+            }
+        )
+    primary_stack = stack_placements[0] if stack_placements else None
 
     parent_ast = assets_by_id.get(asset.parent_asset_id) if asset.parent_asset_id else None
 
@@ -1155,6 +1313,15 @@ def serialize_cmdb_asset(
         "rack_code": rack_code,
         "start_u": start_u,
         "physical_location_label": physical_location_label,
+        "location_id": location_id,
+        "location_code": location_code,
+        "location_name": location_name,
+        "location_label": location_label,
+        "stack_placements": stack_placements,
+        "primary_stack_diagram_id": primary_stack["diagram_id"] if primary_stack else None,
+        "primary_stack_diagram_name": primary_stack["diagram_name"] if primary_stack else "",
+        "primary_stack_node_id": primary_stack["node_id"] if primary_stack else None,
+        "primary_stack_label": f"{primary_stack['diagram_name']} • {primary_stack['node_label']}" if primary_stack else "",
         "monitoring_enabled": asset.monitoring_enabled,
         "monitor_method": asset.monitor_method,
         "monitor_port": asset.monitor_port,
@@ -1165,6 +1332,7 @@ def serialize_cmdb_asset(
         "custom_fields": asset.custom_fields or {},
         "notes": asset.notes or "",
         "heartbeat_ip": heartbeat_ip,
+        "primary_subnet_mask": primary_subnet_mask,
         "service_ips": service_ips,
         "ip_count": len(ips_serialized),
         "ip_addresses": ips_serialized,
@@ -1178,13 +1346,40 @@ def build_cmdb_overview(db: Session) -> Dict[str, Any]:
     - 'assets': Todas las máquinas/CIs (físicas sincronizadas + virtuales/clusters/cloud gestionadas en CMDB) con sus múltiples IPs
     - 'subnets': Todas las subredes con su ocupación y mapa de direcciones (.1 a .254)
     - 'physical_hosts': Lista de servidores físicos de Rack disponibles para seleccionarlos como Hipervisor/Host Padre de VMs
+    - 'locations': Lista de Sedes / Locations disponibles para asociar a rangos de IP y activos
     """
     sync_physical_devices_to_cmdb(db)
 
-    racks = db.query(Rack).all()
+    locations = db.query(Location).order_by(Location.id).all()
+    locations_by_id = {loc.id: loc for loc in locations}
+
+    racks = (
+        db.query(Rack)
+        .options(joinedload(Rack.room).joinedload(Room.floor).joinedload(Floor.location))
+        .all()
+    )
     racks_by_id = {r.id: r for r in racks}
     rack_devs = db.query(RackDevice).options(joinedload(RackDevice.template)).all()
     rack_devs_by_id = {d.id: d for d in rack_devs}
+
+    floor_devs = (
+        db.query(FloorDevice)
+        .options(joinedload(FloorDevice.floor).joinedload(Floor.location))
+        .all()
+    )
+    floor_devs_by_id = {fd.id: fd for fd in floor_devs}
+
+    stack_diagrams = db.query(TechStackDiagram).all()
+    stack_diagrams_by_id = {sd.id: sd for sd in stack_diagrams}
+    stack_nodes = (
+        db.query(TechStackNode)
+        .filter(TechStackNode.asset_id.isnot(None))
+        .all()
+    )
+    stack_nodes_by_asset_id: Dict[int, List[TechStackNode]] = {}
+    for sn in stack_nodes:
+        if sn.asset_id is not None:
+            stack_nodes_by_asset_id.setdefault(sn.asset_id, []).append(sn)
 
     subnets = db.query(CmdbSubnet).order_by(CmdbSubnet.vlan_id, CmdbSubnet.id).all()
     subnets_by_id = {s.id: s for s in subnets}
@@ -1198,7 +1393,17 @@ def build_cmdb_overview(db: Session) -> Dict[str, Any]:
     assets_by_id = {a.id: a for a in assets}
 
     serialized_assets = [
-        serialize_cmdb_asset(a, racks_by_id, rack_devs_by_id, subnets_by_id, assets_by_id)
+        serialize_cmdb_asset(
+            a,
+            racks_by_id,
+            rack_devs_by_id,
+            subnets_by_id,
+            assets_by_id,
+            locations_by_id=locations_by_id,
+            floor_devs_by_id=floor_devs_by_id,
+            stack_nodes_by_asset_id=stack_nodes_by_asset_id,
+            stack_diagrams_by_id=stack_diagrams_by_id,
+        )
         for a in assets
     ]
 
@@ -1320,6 +1525,7 @@ def build_cmdb_overview(db: Session) -> Dict[str, Any]:
 
         occupied_count = len(used_map)
         usage_pct = round((occupied_count / total_usable) * 100.0, 1) if total_usable > 0 else 0.0
+        sub_loc = locations_by_id.get(sub.location_id) if sub.location_id else None
 
         serialized_subnets.append(
             {
@@ -1338,6 +1544,9 @@ def build_cmdb_overview(db: Session) -> Dict[str, Any]:
                 "dns_servers": sub.dns_servers,
                 "environment": sub.environment,
                 "location_id": sub.location_id,
+                "location_code": sub_loc.code if sub_loc else "",
+                "location_name": sub_loc.name if sub_loc else "",
+                "location_label": f"{sub_loc.code} • {sub_loc.name}" if sub_loc else "",
                 "notes": sub.notes or "",
                 "total_usable": total_usable,
                 "occupied_count": occupied_count,
@@ -1380,11 +1589,42 @@ def build_cmdb_overview(db: Session) -> Dict[str, Any]:
                 }
             )
 
+    # Detectar colisiones de IP entre activos de la CMDB (ej. dado de alta en CMDB y luego en Rack Editor o viceversa)
+    serialized_by_id = {a["id"]: a for a in serialized_assets}
+    ip_to_asset_ids: Dict[str, List[int]] = {}
+    for ip_rec in all_ips:
+        ip_s = (ip_rec.ip_address or "").strip()
+        if not ip_s or not ip_rec.asset_id:
+            continue
+        lst = ip_to_asset_ids.setdefault(ip_s, [])
+        if ip_rec.asset_id not in lst:
+            lst.append(ip_rec.asset_id)
+
+    ip_collisions: List[Dict[str, Any]] = []
+    colliding_ips_by_asset: Dict[int, List[str]] = {}
+    for ip_s, aid_list in ip_to_asset_ids.items():
+        if len(aid_list) > 1:
+            involved = [serialized_by_id[aid] for aid in aid_list if aid in serialized_by_id]
+            if len(involved) > 1:
+                ip_collisions.append(
+                    {
+                        "ip_address": ip_s,
+                        "assets": involved,
+                    }
+                )
+                for aid in aid_list:
+                    colliding_ips_by_asset.setdefault(aid, []).append(ip_s)
+
+    for a in serialized_assets:
+        c_ips = colliding_ips_by_asset.get(a["id"], [])
+        a["has_ip_collision"] = len(c_ips) > 0
+        a["colliding_ips"] = c_ips
+
     vm_count = sum(1 for a in serialized_assets if a["asset_class"] in ("virtual_machine", "virtual_appliance"))
     container_cluster_count = sum(1 for a in serialized_assets if a["asset_class"] in ("container_lxc", "cluster_vip", "cloud_instance"))
     phys_count = sum(1 for a in serialized_assets if a["sync_source"] in ("rack_device", "floor_device") or a["asset_class"] == "physical_server")
     multi_ip_hosts = sum(1 for a in serialized_assets if a["ip_count"] > 1)
-    conflict_ips = sum(1 for ip in all_ips if ip.last_verification_status == "conflict_unregistered")
+    conflict_ips = sum(1 for ip in all_ips if ip.last_verification_status == "conflict_unregistered") + len(ip_collisions)
 
     return {
         "summary": {
@@ -1396,8 +1636,245 @@ def build_cmdb_overview(db: Session) -> Dict[str, Any]:
             "total_ip_addresses": len(all_ips),
             "total_subnets": len(serialized_subnets),
             "conflict_ips_count": conflict_ips,
+            "ip_collisions_count": len(ip_collisions),
         },
+        "ip_collisions": ip_collisions,
         "assets": serialized_assets,
         "subnets": serialized_subnets,
         "physical_hosts": physical_hosts,
+        "locations": [
+            {
+                "id": loc.id,
+                "code": loc.code,
+                "name": loc.name,
+                "address": loc.address or "",
+            }
+            for loc in locations
+        ],
     }
+
+
+def check_ip_collision_in_cmdb(
+    db: Session,
+    ip_address: str,
+    exclude_asset_id: Optional[int] = None,
+    exclude_rack_device_id: Optional[int] = None,
+    exclude_floor_device_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Comprueba si una dirección IP ya está asignada a algún activo de la CMDB o equipo de Rack/Planta,
+    excluyendo el propio equipo que se está editando.
+    """
+    sync_physical_devices_to_cmdb(db)
+    ip_clean = (ip_address or "").strip()
+    if not ip_clean:
+        return {"has_collision": False, "ip_address": "", "owners": []}
+
+    racks = {r.id: r for r in db.query(Rack).all()}
+    rack_devs = {d.id: d for d in db.query(RackDevice).options(joinedload(RackDevice.template)).all()}
+    subnets = {s.id: s for s in db.query(CmdbSubnet).all()}
+    all_assets = {
+        a.id: a
+        for a in db.query(CmdbAsset).options(joinedload(CmdbAsset.ip_addresses)).all()
+    }
+
+    records = (
+        db.query(CmdbIpAddress)
+        .options(joinedload(CmdbIpAddress.asset))
+        .filter(CmdbIpAddress.ip_address == ip_clean)
+        .all()
+    )
+    owners: List[Dict[str, Any]] = []
+    seen_asset_ids = set()
+    for rec in records:
+        ast = rec.asset
+        if not ast:
+            continue
+        if exclude_asset_id is not None and ast.id == exclude_asset_id:
+            continue
+        if exclude_rack_device_id is not None and ast.rack_device_id == exclude_rack_device_id:
+            continue
+        if exclude_floor_device_id is not None and ast.floor_device_id == exclude_floor_device_id:
+            continue
+        if ast.id in seen_asset_ids:
+            continue
+        seen_asset_ids.add(ast.id)
+        owners.append(
+            serialize_cmdb_asset(ast, racks, rack_devs, subnets, all_assets)
+        )
+
+    return {
+        "has_collision": len(owners) > 0,
+        "ip_address": ip_clean,
+        "owners": owners,
+    }
+
+
+def resolve_cmdb_ip_collision(
+    db: Session,
+    ip_address: str,
+    action: str,
+    keep_asset_id: int,
+    other_asset_id: int,
+    new_ip_for_other: str = "",
+    preferred_name: str = "",
+    preferred_hostname: str = "",
+    preferred_fqdn: str = "",
+) -> Dict[str, Any]:
+    """
+    Permite al operario resolver una colisión de IP entre dos activos (ej. un equipo detectado en CMDB
+    y un equipo montado en el Rack Editor que representan la misma máquina física o dos máquinas con IP duplicada):
+    - action == 'merge': Unifica ambos activos en uno solo (si uno de ellos está montado en Rack o Planta,
+      conserva el vínculo con el Rack/Planta y absorbe los datos descubiertos de red, MAC, FQDN, estado Online,
+      latencia e IPs secundarias del otro activo, eliminando el duplicado).
+    - action == 'reassign_or_clear': Mantiene la IP en keep_asset_id y cambia la IP de other_asset_id a
+      new_ip_for_other (o deja a other_asset_id sin esa IP si new_ip_for_other está vacío, sincronizando con Rack Editor).
+    - action == 'delete_other': Mantiene keep_asset_id y elimina por completo other_asset_id.
+    """
+    ip_clean = (ip_address or "").strip()
+    keep_ast = db.query(CmdbAsset).options(joinedload(CmdbAsset.ip_addresses)).filter(CmdbAsset.id == keep_asset_id).first()
+    other_ast = db.query(CmdbAsset).options(joinedload(CmdbAsset.ip_addresses)).filter(CmdbAsset.id == other_asset_id).first()
+    if not keep_ast or not other_ast:
+        raise ValueError("Uno de los activos seleccionados para resolver la colisión ya no existe.")
+
+    if action == "merge":
+        # Si el activo "other_ast" es el que está vinculado al Rack/Planta y "keep_ast" es solo CMDB,
+        # transferimos el vínculo físico a keep_ast o invertimos para que el registro resultante sea siempre el vinculado al Rack
+        if other_ast.sync_source in ("rack_device", "floor_device") and keep_ast.sync_source == "cmdb":
+            keep_ast, other_ast = other_ast, keep_ast
+
+        # Absorber datos útiles de other_ast hacia keep_ast
+        if preferred_name.strip():
+            keep_ast.name = preferred_name.strip()
+        elif not keep_ast.name or keep_ast.name.startswith("Equipo Detectado"):
+            if other_ast.name:
+                keep_ast.name = other_ast.name
+
+        if preferred_hostname.strip():
+            keep_ast.hostname = preferred_hostname.strip()
+        elif (not keep_ast.hostname or keep_ast.hostname.startswith("host-")) and other_ast.hostname:
+            keep_ast.hostname = other_ast.hostname
+
+        if preferred_fqdn.strip():
+            keep_ast.fqdn = preferred_fqdn.strip()
+        elif not keep_ast.fqdn and other_ast.fqdn:
+            keep_ast.fqdn = other_ast.fqdn
+
+        if other_ast.status == "online":
+            keep_ast.status = "online"
+            if other_ast.last_ping_ms is not None:
+                keep_ast.last_ping_ms = other_ast.last_ping_ms
+            if other_ast.last_checked_at is not None:
+                keep_ast.last_checked_at = other_ast.last_checked_at
+
+        if not keep_ast.owner_team and other_ast.owner_team:
+            keep_ast.owner_team = other_ast.owner_team
+        if not keep_ast.responsible_person and other_ast.responsible_person:
+            keep_ast.responsible_person = other_ast.responsible_person
+        if other_ast.notes and other_ast.notes not in (keep_ast.notes or ""):
+            keep_ast.notes = f"{keep_ast.notes} | {other_ast.notes}".strip(" |")
+
+        # Alinear IPs: enriquecer la IP coincidente con MAC/FQDN/VLAN y mover IPs secundarias adicionales
+        keep_ips_by_addr = {ip.ip_address: ip for ip in keep_ast.ip_addresses}
+        for o_ip in list(other_ast.ip_addresses):
+            if o_ip.ip_address in keep_ips_by_addr:
+                k_ip = keep_ips_by_addr[o_ip.ip_address]
+                if o_ip.mac_address and not k_ip.mac_address:
+                    k_ip.mac_address = o_ip.mac_address
+                if o_ip.fqdn and not k_ip.fqdn:
+                    k_ip.fqdn = o_ip.fqdn
+                if o_ip.vlan_id is not None and k_ip.vlan_id is None:
+                    k_ip.vlan_id = o_ip.vlan_id
+                if o_ip.last_verification_status == "active_in_network":
+                    k_ip.last_verification_status = "active_in_network"
+                    k_ip.last_verified_at = o_ip.last_verified_at
+                db.delete(o_ip)
+            else:
+                o_ip.asset_id = keep_ast.id
+                o_ip.is_heartbeat_ip = False
+
+        # Reasignar referencias de monitorización, topología y stack de other_ast a keep_ast
+        for mcheck in db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.asset_id == other_ast.id).all():
+            mcheck.asset_id = keep_ast.id
+        for sp in db.query(SwitchSnmpPort).filter(SwitchSnmpPort.asset_id == other_ast.id).all():
+            sp.asset_id = keep_ast.id
+        for link in db.query(LogicalTopologyLink).filter(LogicalTopologyLink.source_asset_id == other_ast.id).all():
+            link.source_asset_id = keep_ast.id
+        for link in db.query(LogicalTopologyLink).filter(LogicalTopologyLink.target_asset_id == other_ast.id).all():
+            link.target_asset_id = keep_ast.id
+        for tnode in db.query(TechStackNode).filter(TechStackNode.asset_id == other_ast.id).all():
+            tnode.asset_id = keep_ast.id
+
+        # Si keep_ast está vinculado a un RackDevice, propagar todos los datos alineados al Rack Editor
+        if keep_ast.rack_device_id:
+            rdev = db.query(RackDevice).filter(RackDevice.id == keep_ast.rack_device_id).first()
+            if rdev:
+                rdev.name = keep_ast.name
+                rdev.hostname = keep_ast.hostname
+                rdev.fqdn = keep_ast.fqdn
+                rdev.status = keep_ast.status
+                rdev.last_ping_ms = keep_ast.last_ping_ms
+                rdev.last_checked_at = keep_ast.last_checked_at
+                rdev.monitoring_enabled = True
+                hb_ip = keep_ips_by_addr.get(ip_clean) or (keep_ast.ip_addresses[0] if keep_ast.ip_addresses else None)
+                if hb_ip:
+                    rdev.ip_address = hb_ip.ip_address
+                    if hb_ip.mac_address:
+                        rdev.mac_address = hb_ip.mac_address
+                    if hb_ip.vlan_id is not None:
+                        rdev.vlan_mgmt = hb_ip.vlan_id
+                    if hb_ip.subnet_mask:
+                        rdev.subnet_mask = hb_ip.subnet_mask
+                    if hb_ip.gateway:
+                        rdev.gateway = hb_ip.gateway
+
+        db.flush()
+        db.delete(other_ast)
+        db.commit()
+        return build_cmdb_overview(db)
+
+    elif action == "reassign_or_clear":
+        new_ip_clean = (new_ip_for_other or "").strip()
+        subnets = db.query(CmdbSubnet).all()
+        for o_ip in list(other_ast.ip_addresses):
+            if o_ip.ip_address == ip_clean:
+                if new_ip_clean:
+                    matched_sub = _match_subnet_for_ip(new_ip_clean, subnets)
+                    o_ip.ip_address = new_ip_clean
+                    o_ip.subnet_id = matched_sub.id if matched_sub else o_ip.subnet_id
+                else:
+                    db.delete(o_ip)
+        if other_ast.rack_device_id:
+            rdev = db.query(RackDevice).filter(RackDevice.id == other_ast.rack_device_id).first()
+            if rdev and (rdev.ip_address or "").strip() == ip_clean:
+                rdev.ip_address = new_ip_clean or None
+        if other_ast.floor_device_id:
+            fdev = db.query(FloorDevice).filter(FloorDevice.id == other_ast.floor_device_id).first()
+            if fdev and (fdev.ip_address or "").strip() == ip_clean:
+                fdev.ip_address = new_ip_clean or None
+        db.commit()
+        return build_cmdb_overview(db)
+
+    elif action == "delete_other":
+        if other_ast.rack_device_id:
+            rdev = db.query(RackDevice).filter(RackDevice.id == other_ast.rack_device_id).first()
+            if rdev and (rdev.ip_address or "").strip() == ip_clean:
+                rdev.ip_address = None
+        if other_ast.floor_device_id:
+            fdev = db.query(FloorDevice).filter(FloorDevice.id == other_ast.floor_device_id).first()
+            if fdev and (fdev.ip_address or "").strip() == ip_clean:
+                fdev.ip_address = None
+        db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.asset_id == other_ast.id).delete()
+        db.query(SwitchSnmpPort).filter(SwitchSnmpPort.asset_id == other_ast.id).delete()
+        db.query(LogicalTopologyLink).filter(
+            (LogicalTopologyLink.source_asset_id == other_ast.id) | (LogicalTopologyLink.target_asset_id == other_ast.id)
+        ).delete(synchronize_session=False)
+        db.query(TechStackNode).filter(TechStackNode.asset_id == other_ast.id).delete()
+        db.query(CmdbIpAddress).filter(CmdbIpAddress.asset_id == other_ast.id).delete()
+        if other_ast.sync_source not in ("rack_device", "floor_device"):
+            db.delete(other_ast)
+        db.commit()
+        return build_cmdb_overview(db)
+
+    else:
+        raise ValueError(f"Acción no válida: {action}")

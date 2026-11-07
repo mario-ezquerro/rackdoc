@@ -2579,6 +2579,139 @@ class _RackEditorViewState extends State<RackEditorView> {
 
     if (confirmed != true) return;
 
+    final targetIp = ipCtrl.text.trim();
+    String? collisionAction;
+    int? collisionTargetAssetId;
+    if (targetIp.isNotEmpty) {
+      try {
+        final check = await widget.api.checkCmdbIpOwner(ip: targetIp);
+        if (check['has_collision'] == true) {
+          final owners = ((check['owners'] as List?) ?? [])
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+          if (owners.isNotEmpty && mounted) {
+            final owner = owners.first;
+            final ownerCode = '${owner['asset_code'] ?? ''}';
+            final ownerName = '${owner['name'] ?? ''}';
+            final ownerHost = '${owner['hostname'] ?? ''}';
+            String selAct = 'merge';
+            final chosen = await showDialog<String>(
+              context: context,
+              builder: (ctx) => StatefulBuilder(
+                builder: (ctx, setModal) => AlertDialog(
+                  title: Row(
+                    children: [
+                      const Icon(
+                        Icons.warning_amber_rounded,
+                        color: Color(0xFFDC2626),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Colisión de IP detectada en CMDB ($targetIp)',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  content: SizedBox(
+                    width: 540,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF2F2),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFFCA5A5)),
+                          ),
+                          child: Text(
+                            'La IP $targetIp ya figura en la CMDB asociada al activo:\n'
+                            '• [$ownerCode] $ownerName${ownerHost.isNotEmpty ? ' ($ownerHost)' : ''}\n\n'
+                            '¿Cómo deseas alinear el equipo montado en el Rack con la CMDB?',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF7F1D1D),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(
+                            selAct == 'merge'
+                                ? Icons.radio_button_checked
+                                : Icons.radio_button_off,
+                            color: const Color(0xFF2563EB),
+                          ),
+                          title: const Text(
+                            'Es el mismo equipo: Unificar con el activo existente en CMDB (Recomendado)',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'Fusiona [$ownerCode] con este equipo recién montado en U$targetStartU, conservando su estado ONLINE/ping e IPs sin duplicar registros.',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          onTap: () => setModal(() => selAct = 'merge'),
+                        ),
+                        ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(
+                            selAct == 'reassign_or_clear'
+                                ? Icons.radio_button_checked
+                                : Icons.radio_button_off,
+                            color: const Color(0xFF2563EB),
+                          ),
+                          title: const Text(
+                            'Son equipos distintos: Reasignar la IP a este equipo del Rack y liberarla del otro',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'Libera $targetIp de [$ownerCode] y la asigna exclusivamente a este equipo del Rack.',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          onTap: () => setModal(
+                            () => selAct = 'reassign_or_clear',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, null),
+                      child: const Text('Cancelar montaje'),
+                    ),
+                    FilledButton.icon(
+                      onPressed: () => Navigator.pop(ctx, selAct),
+                      icon: const Icon(Icons.merge_type_rounded, size: 16),
+                      label: const Text('Confirmar y Montar en Rack'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+            if (chosen == null) return;
+            collisionAction = chosen;
+            collisionTargetAssetId = owner['id'] as int?;
+          }
+        }
+      } catch (_) {}
+    }
+
     final newCounts = {
       'front_rj45': int.tryParse(fRjCtrl.text.trim()) ?? 0,
       'front_sfp': int.tryParse(fSfpCtrl.text.trim()) ?? 0,
@@ -2603,12 +2736,16 @@ class _RackEditorViewState extends State<RackEditorView> {
         'start_u': targetStartU,
         'mounted_face':
             targetFace ?? (_activeFace == 'back' ? 'back' : 'front'),
-        'ip_address': ipCtrl.text.trim(),
+        'ip_address': targetIp,
         'subnet_mask': maskCtrl.text.trim(),
         'gateway': gwCtrl.text.trim(),
-        'monitoring_enabled': ipCtrl.text.trim().isNotEmpty,
+        'monitoring_enabled': targetIp.isNotEmpty,
         'custom_fields': {
           if (chosenUHeight != tpl.uHeight) 'u_height_override': chosenUHeight,
+          if (collisionAction != null && collisionTargetAssetId != null) ...{
+            'on_ip_collision_action': collisionAction,
+            'collision_target_asset_id': collisionTargetAssetId,
+          },
           if (portsCustomized)
             'custom_layout_spec': {
               'front': _buildFacePortGroups(

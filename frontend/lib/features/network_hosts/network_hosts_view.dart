@@ -27,6 +27,8 @@ class AppTheme {
 class NetworkHostsView extends StatefulWidget {
   final RackDocApiClient api;
   final bool canEdit;
+  final int? initialStackId;
+  final int? initialStackNodeId;
   final void Function(int rackId, int? deviceId)? onNavigateToRackDevice;
   final void Function(String? assetCode)? onNavigateToCmdb;
 
@@ -34,6 +36,8 @@ class NetworkHostsView extends StatefulWidget {
     super.key,
     required this.api,
     this.canEdit = true,
+    this.initialStackId,
+    this.initialStackNodeId,
     this.onNavigateToRackDevice,
     this.onNavigateToCmdb,
   });
@@ -109,6 +113,8 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
   @override
   void initState() {
     super.initState();
+    _selectedStackId = widget.initialStackId;
+    _selectedStackNodeId = widget.initialStackNodeId;
     _tabController = TabController(length: 7, vsync: this);
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging && mounted) {
@@ -121,6 +127,29 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
       }
     });
     _loadOverview();
+  }
+
+  @override
+  void didUpdateWidget(covariant NetworkHostsView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if ((widget.initialStackId != null &&
+            widget.initialStackId != oldWidget.initialStackId) ||
+        (widget.initialStackNodeId != null &&
+            widget.initialStackNodeId != oldWidget.initialStackNodeId)) {
+      setState(() {
+        if (widget.initialStackId != null) {
+          _selectedStackId = widget.initialStackId;
+        }
+        if (widget.initialStackNodeId != null) {
+          _selectedStackNodeId = widget.initialStackNodeId;
+          _selectedBoxId = null;
+        }
+        _syncStackCanvasState();
+      });
+      if (_tabController.index != 0) {
+        _tabController.animateTo(0);
+      }
+    }
   }
 
   @override

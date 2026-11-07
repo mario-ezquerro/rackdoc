@@ -58,6 +58,8 @@ class _RackDocShellState extends State<RackDocShell> {
   int? _activeFloorId;
   int _activeRackId = 1;
   int? _highlightedDeviceId;
+  int? _highlightedStackId;
+  int? _highlightedStackNodeId;
 
   // Estado de expansión del árbol jerárquico en la columna izquierda ("DATACENTERS & RACKS"):
   // Cada Datacenter tiene su triángulo (gira 90°) para mostrar sus Pisos, y cada Piso tiene su triángulo (gira 90°) para mostrar sus Racks.
@@ -2069,6 +2071,8 @@ class _RackDocShellState extends State<RackDocShell> {
       return NetworkHostsView(
         api: _api,
         canEdit: _currentUser.canEdit,
+        initialStackId: _highlightedStackId,
+        initialStackNodeId: _highlightedStackNodeId,
         onNavigateToRackDevice: (rackId, deviceId) {
           _openRack(rackId, highlightDeviceId: deviceId);
         },
@@ -2084,6 +2088,13 @@ class _RackDocShellState extends State<RackDocShell> {
         canEdit: _currentUser.canEdit,
         onNavigateToRackDevice: (rackId, deviceId) {
           _openRack(rackId, highlightDeviceId: deviceId);
+        },
+        onNavigateToStackNode: (stackId, nodeId) {
+          setState(() {
+            _highlightedStackId = stackId;
+            _highlightedStackNodeId = nodeId;
+            _activeNav = 'network_hosts';
+          });
         },
         onExportExcel: () async {
           final url = _api.getExcelExportUrl();
