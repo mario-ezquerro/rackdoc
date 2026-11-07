@@ -221,13 +221,8 @@ def sync_prometheus_targets_file(db: Session) -> Dict[str, Any]:
 
 def ensure_network_hosts_seeded(db: Session) -> None:
     """
-    Inicializa los datos base de '4. Red & Host' coordinados 1:1 con el Rack Editor y la CMDB:
-    - Grupos de Hosts (HostGroups)
-    - Conectores de Infraestructura (Switches SNMP/LLDP, Proxmox VE, VMware ESXi, Docker, Apache, Nginx, PostgreSQL, Exporters)
-    - Bocas SNMP auto-descubiertas en Switches del Rack y enlaces LLDP
-    - Enlaces de Topología Lógica (5 capas)
-    - Chequeos de Servicio y Heartbeats Multi-Protocolo (ICMP, HTTPS+SSL, HTTP, SSH, SNMP, Apache, Nginx, Docker, PostgreSQL)
-    - Personas (AlertContact), Grupos de Personas (AlertContactGroup), Reglas de Alarma y Ventanas de Mantenimiento
+    Inicializa únicamente la configuración base de '4. Red & Host' sin inyectar
+    hosts, chequeos, bocas SNMP, contactos ni diagramas ficticios de demostración.
     """
     ensure_cmdb_seed_data(db)
     sync_physical_devices_to_cmdb(db)
@@ -235,907 +230,36 @@ def ensure_network_hosts_seeded(db: Session) -> None:
     if db.query(SmtpAlertConfig).count() == 0:
         db.add(
             SmtpAlertConfig(
-                smtp_host=os.getenv("SMTP_HOST", "smtp.empresa.local"),
+                smtp_host=os.getenv("SMTP_HOST", ""),
                 smtp_port=int(os.getenv("SMTP_PORT", "587")),
                 use_tls=True,
-                smtp_username=os.getenv("SMTP_USER", "alertas-rackdoc@empresa.local"),
+                smtp_username=os.getenv("SMTP_USER", ""),
                 smtp_password="",
-                from_email="RackDoc Monitor & CMDB <alertas-rackdoc@empresa.local>",
+                from_email=os.getenv("SMTP_FROM", ""),
                 global_webhook_url="",
-                enabled=True,
+                enabled=False,
             )
         )
         db.commit()
 
-    assets = db.query(CmdbAsset).options(joinedload(CmdbAsset.ip_addresses)).all()
-    if not assets:
-        return
-
-    assets_by_code = {a.code: a for a in assets}
-
-    # Identificar activos clave del Rack y de la CMDB
-    sw_assets = [
-        a for a in assets
-        if a.asset_class == "network_security" and ("sw" in a.code.lower() or "switch" in a.name.lower())
-    ]
-    fw_assets = [
-        a for a in assets
-        if a.asset_class == "network_security" and ("fw" in a.code.lower() or "firewall" in a.name.lower() or "rt" in a.code.lower())
-    ]
-    phys_servers = [a for a in assets if a.asset_class == "physical_server"]
-    vm_assets = [a for a in assets if a.asset_class == "virtual_machine"]
-    ct_assets = [a for a in assets if a.asset_class == "container_lxc"]
-    vip_assets = [a for a in assets if a.asset_class == "cluster_vip"]
-
-    primary_sw = sw_assets[0] if sw_assets else assets[0]
-    primary_fw = fw_assets[0] if fw_assets else (sw_assets[1] if len(sw_assets) > 1 else primary_sw)
-    srv_esxi = phys_servers[0] if phys_servers else primary_sw
-    srv_proxmox = phys_servers[1] if len(phys_servers) > 1 else srv_esxi
-
-    vm_erp = assets_by_code.get("VM-ERP-APP01") or (vm_assets[0] if vm_assets else srv_esxi)
-    vm_pg1 = assets_by_code.get("VM-DB-PG01") or (vm_assets[1] if len(vm_assets) > 1 else vm_erp)
-    vm_pg2 = assets_by_code.get("VM-DB-PG02") or (vm_assets[2] if len(vm_assets) > 2 else vm_pg1)
-    vm_ad = assets_by_code.get("VM-AD-DC01") or (vm_assets[3] if len(vm_assets) > 3 else vm_erp)
-    ct_waf = assets_by_code.get("CT-WAF-PROXY01") or (ct_assets[0] if ct_assets else vm_erp)
-    clu_vip = assets_by_code.get("CLU-PGSQL-VIP") or (vip_assets[0] if vip_assets else vm_pg1)
-
-    # Asegurar relaciones Padre -> Hijo para el cálculo de alcanzabilidad Nagios (UNREACHABLE)
-    if primary_sw and srv_esxi and srv_esxi.id != primary_sw.id and not srv_esxi.parent_asset_id:
-        srv_esxi.parent_asset_id = primary_sw.id
-    if primary_sw and srv_proxmox and srv_proxmox.id != primary_sw.id and not srv_proxmox.parent_asset_id:
-        srv_proxmox.parent_asset_id = primary_sw.id
-    if srv_esxi and vm_erp and not vm_erp.parent_asset_id:
-        vm_erp.parent_asset_id = srv_esxi.id
-    if srv_esxi and vm_pg1 and not vm_pg1.parent_asset_id:
-        vm_pg1.parent_asset_id = srv_esxi.id
-    if srv_proxmox and vm_pg2 and not vm_pg2.parent_asset_id:
-        vm_pg2.parent_asset_id = srv_proxmox.id
-    if srv_proxmox and ct_waf and not ct_waf.parent_asset_id:
-        ct_waf.parent_asset_id = srv_proxmox.id
-    db.commit()
-
-    # 1. Seed HostGroups
-    if db.query(HostGroup).count() == 0:
-        groups_seed = [
-            HostGroup(
-                code="HG-SWITCHES-CORE",
-                name="Electrónica de Red, Switches & Firewalls CPD",
-                category="network",
+    if db.query(TechStackDiagram).count() == 0:
+        db.add(
+            TechStackDiagram(
+                code="STACK-POC",
+                name="Stack Principal POC",
+                description="Lienzo 2D limpio para organizar tus elementos y conexiones reales.",
+                business_service="Infraestructura Real POC",
                 environment="production",
-                color_hex="#0284C7",
-                member_asset_ids=[a.id for a in (sw_assets + fw_assets)],
-                description="Switches ToR/Core y Firewalls monitorizados por SNMP v2c/v3 (IF-MIB + LLDP-MIB).",
-            ),
-            HostGroup(
-                code="HG-HYPERVISORS-BAREBONE",
-                name="Hipervisores Físicos (VMware ESXi & Proxmox VE)",
-                category="virtualization",
-                environment="production",
-                color_hex="#0F766E",
-                member_asset_ids=[a.id for a in phys_servers],
-                description="Servidores físicos del Rack y nodos Barebone que alojan VMs y contenedores LXC/Docker.",
-            ),
-            HostGroup(
-                code="HG-WEB-APACHE-NGINX",
-                name="Granja Web, Reverse Proxies (Nginx / Apache) & Docker",
-                category="web_middleware",
-                environment="production",
-                color_hex="#4F46E5",
-                member_asset_ids=list({vm_erp.id, ct_waf.id}),
-                description="Servidores frontales Nginx/WAF, aplicaciones Apache/ERP y nodos de contenedores.",
-            ),
-            HostGroup(
-                code="HG-DB-CRITICAL",
-                name="Clúster Bases de Datos Corporativas (PostgreSQL HA & AD)",
-                category="database",
-                environment="production",
-                color_hex="#B45309",
-                member_asset_ids=list({vm_pg1.id, vm_pg2.id, clu_vip.id, vm_ad.id}),
-                description="Nodos de base de datos PostgreSQL Patroni HA, VIPs y controladores Active Directory.",
-            ),
-        ]
-        db.add_all(groups_seed)
-        db.commit()
-
-    # 2. Seed Bocas de Switch SNMP (IF-MIB + LLDP-MIB) sin tener que crearlas una a una
-    if db.query(SwitchSnmpPort).count() == 0 and primary_sw:
-        sw_ports_seed = []
-        neighbor_map = {
-            1: (srv_esxi.hostname or srv_esxi.code, "vmnic0 (10GbE Mgmt/Trunk)", srv_esxi.ip_addresses[0].ip_address if srv_esxi.ip_addresses else "10.20.1.10", srv_esxi.id, 10000, 10, "trunk", 412.5, 289.1),
-            2: (srv_esxi.hostname or srv_esxi.code, "vmnic1 (10GbE VMware Prod)", "10.20.20.10", srv_esxi.id, 10000, 20, "trunk", 684.2, 519.8),
-            3: (srv_proxmox.hostname or srv_proxmox.code, "eno1 (Proxmox vmbr0)", srv_proxmox.ip_addresses[0].ip_address if srv_proxmox.ip_addresses else "10.20.1.11", srv_proxmox.id, 10000, 10, "trunk", 328.4, 245.0),
-            4: (srv_proxmox.hostname or srv_proxmox.code, "eno2 (Proxmox Ceph/SAN)", "10.20.30.11", srv_proxmox.id, 10000, 30, "trunk", 520.9, 498.3),
-            24: (primary_fw.hostname or primary_fw.code, "port1 (LAN Trunk)", primary_fw.ip_addresses[0].ip_address if primary_fw.ip_addresses else "10.20.1.254", primary_fw.id, 10000, 1, "trunk", 215.7, 198.4),
-        }
-        for idx in range(1, 25):
-            if idx in neighbor_map:
-                nsys, nport, nip, nasset_id, spd, vlan, vmode, in_m, out_m = neighbor_map[idx]
-                if_name = f"Te1/0/{idx}" if spd >= 10000 else f"Gi1/0/{idx}"
-                alias = f"UPLINK_{nsys.upper()}"
-                oper = "up"
-            else:
-                if_name = f"Gi1/0/{idx}"
-                oper = "up" if idx in (5, 6, 7, 8, 11, 12, 15, 16) else "down"
-                alias = f"ACCESO_VLAN20_P{idx:02d}" if oper == "up" else "LIBRE_DISPONIBLE"
-                nsys, nport, nip, nasset_id = "", "", "", None
-                spd = 1000
-                vlan = 20 if oper == "up" else 1
-                vmode = "access"
-                in_m = round(14.5 + (idx * 2.3), 1) if oper == "up" else 0.0
-                out_m = round(9.2 + (idx * 1.7), 1) if oper == "up" else 0.0
-
-            sw_ports_seed.append(
-                SwitchSnmpPort(
-                    asset_id=primary_sw.id,
-                    rack_device_id=primary_sw.rack_device_id,
-                    if_index=idx,
-                    if_name=if_name,
-                    if_alias=alias,
-                    if_type="ethernetCsmacd",
-                    admin_status="up",
-                    oper_status=oper,
-                    speed_mbps=spd,
-                    mac_address=f"00:1A:2B:3C:4D:{idx:02X}",
-                    vlan_id=vlan,
-                    vlan_mode=vmode,
-                    in_mbps=in_m,
-                    out_mbps=out_m,
-                    in_errors=0,
-                    out_errors=0,
-                    lldp_neighbor_sysname=nsys,
-                    lldp_neighbor_port=nport,
-                    lldp_neighbor_ip=nip,
-                    lldp_neighbor_asset_id=nasset_id,
-                    last_polled_at=datetime.utcnow(),
-                )
+                owner_team="",
+                criticality="high",
+                map_scale=1.0,
+                canvas_boxes=[],
             )
-        db.add_all(sw_ports_seed)
-        db.commit()
-
-    # 3. Seed Conectores de Infraestructura (SNMP, Proxmox, VMware, Docker, Apache, Nginx, PostgreSQL, Exporters)
-    if db.query(InfraConnector).count() == 0:
-        sw_ip = primary_sw.ip_addresses[0].ip_address if primary_sw.ip_addresses else "10.20.1.2"
-        esxi_ip = srv_esxi.ip_addresses[0].ip_address if srv_esxi.ip_addresses else "10.20.1.10"
-        pve_ip = srv_proxmox.ip_addresses[0].ip_address if srv_proxmox.ip_addresses else "10.20.1.11"
-        erp_ip = vm_erp.ip_addresses[0].ip_address if vm_erp.ip_addresses else "10.20.1.110"
-        waf_ip = ct_waf.ip_addresses[0].ip_address if ct_waf.ip_addresses else "10.20.1.140"
-        pg_ip = vm_pg1.ip_addresses[0].ip_address if vm_pg1.ip_addresses else "10.20.1.120"
-        ad_ip = vm_ad.ip_addresses[0].ip_address if vm_ad.ip_addresses else "10.20.1.5"
-
-        connectors_seed = [
-            InfraConnector(
-                name=f"SNMP Switch Poller — {primary_sw.code} (IF-MIB + LLDP-MIB)",
-                connector_type="snmp_switch",
-                endpoint_host=sw_ip,
-                endpoint_port=161,
-                auth_username_or_community="public",
-                linked_asset_id=primary_sw.id,
-                linked_rack_device_id=primary_sw.rack_device_id,
-                extra_settings={"snmp_version": "v2c", "mibs": ["SNMPv2-MIB", "IF-MIB", "ENTITY-MIB", "LLDP-MIB", "IP-MIB"]},
-                enabled=True,
-                last_sync_status="ok",
-                last_sync_at=datetime.utcnow(),
-                last_sync_summary="Autodescubiertos 24 puertos (Te1/0/1..4 + Gi1/0/5..24) y 5 vecinos LLDP activos.",
-                discovered_items_count=24,
-            ),
-            InfraConnector(
-                name=f"VMware vSphere / ESXi Host — {srv_esxi.code}",
-                connector_type="vmware_vsphere",
-                endpoint_host=esxi_ip,
-                endpoint_port=443,
-                auth_username_or_community="readonly@vsphere.local",
-                linked_asset_id=srv_esxi.id,
-                linked_rack_device_id=srv_esxi.rack_device_id,
-                extra_settings={"datacenter": "CPD-Principal", "collect_guest_ips": True},
-                enabled=True,
-                last_sync_status="ok",
-                last_sync_at=datetime.utcnow(),
-                last_sync_summary="Sincronizado Host ESXi + VMs alojadas y sus múltiples IPs (VMware Tools) en la CMDB.",
-                discovered_items_count=4,
-            ),
-            InfraConnector(
-                name=f"Proxmox VE Cluster & LXC API — {srv_proxmox.code}",
-                connector_type="proxmox_ve",
-                endpoint_host=pve_ip,
-                endpoint_port=8006,
-                auth_username_or_community="root@pam!rackdoc-mon",
-                linked_asset_id=srv_proxmox.id,
-                linked_rack_device_id=srv_proxmox.rack_device_id,
-                extra_settings={"node": "pve-node01", "collect_lxc": True, "collect_qemu_agent": True},
-                enabled=True,
-                last_sync_status="ok",
-                last_sync_at=datetime.utcnow(),
-                last_sync_summary="Sincronizado nodo Proxmox VE + contenedores LXC y VMs con la CMDB.",
-                discovered_items_count=3,
-            ),
-            InfraConnector(
-                name=f"Nginx stub_status & WAF Frontal — {ct_waf.code}",
-                connector_type="nginx_status",
-                endpoint_host=waf_ip,
-                endpoint_port=80,
-                auth_username_or_community="/nginx_status",
-                linked_asset_id=ct_waf.id,
-                extra_settings={"status_url": f"http://{waf_ip}/nginx_status", "exporter_port": 9113},
-                enabled=True,
-                last_sync_status="ok",
-                last_sync_at=datetime.utcnow(),
-                last_sync_summary="Métricas Nginx activas (Active connections, req/s, upstream status).",
-                discovered_items_count=3,
-            ),
-            InfraConnector(
-                name=f"Apache HTTPd mod_status & Docker Engine — {vm_erp.code}",
-                connector_type="apache_status",
-                endpoint_host=erp_ip,
-                endpoint_port=80,
-                auth_username_or_community="/server-status?auto",
-                linked_asset_id=vm_erp.id,
-                extra_settings={"status_url": f"http://{erp_ip}/server-status?auto", "exporter_port": 9117, "docker_port": 9323},
-                enabled=True,
-                last_sync_status="ok",
-                last_sync_at=datetime.utcnow(),
-                last_sync_summary="Apache mod_status (BusyWorkers, ReqPerSec) + contenedores de aplicación ERP monitorizados.",
-                discovered_items_count=5,
-            ),
-            InfraConnector(
-                name=f"PostgreSQL HA Metrics & Exporter — {vm_pg1.code}",
-                connector_type="postgresql",
-                endpoint_host=pg_ip,
-                endpoint_port=5432,
-                auth_username_or_community="pg_monitor",
-                linked_asset_id=vm_pg1.id,
-                extra_settings={"exporter_port": 9187, "cluster_vip": "10.20.20.100"},
-                enabled=True,
-                last_sync_status="ok",
-                last_sync_at=datetime.utcnow(),
-                last_sync_summary="Cluster Patroni PostgreSQL online (Master RW + Standby Replica sincronizada).",
-                discovered_items_count=2,
-            ),
-            InfraConnector(
-                name=f"Windows Exporter (AD / DNS / IIS) — {vm_ad.code}",
-                connector_type="windows_exporter",
-                endpoint_host=ad_ip,
-                endpoint_port=9182,
-                auth_username_or_community="windows_exporter",
-                linked_asset_id=vm_ad.id,
-                extra_settings={"collectors": "cpu,cs,logical_disk,net,os,service,ad,dns"},
-                enabled=True,
-                last_sync_status="ok",
-                last_sync_at=datetime.utcnow(),
-                last_sync_summary="Recolectando CPU, RAM, Disco C:, Active Directory y DNS en Prometheus.",
-                discovered_items_count=8,
-            ),
-        ]
-        db.add_all(connectors_seed)
-        db.commit()
-
-    # 4. Seed Enlaces del Diagrama de Topología Lógica (5 Capas con Monitorización Integrada)
-    if db.query(LogicalTopologyLink).count() == 0:
-        links_seed = []
-        if primary_fw and primary_sw and primary_fw.id != primary_sw.id:
-            links_seed.append(
-                LogicalTopologyLink(
-                    source_asset_id=primary_fw.id,
-                    target_asset_id=primary_sw.id,
-                    link_type="lldp_trunk",
-                    source_interface="port1 (LAN Trunk)",
-                    target_interface="Te1/0/24",
-                    protocol_label="10GbE Trunk 802.1Q (LLDP)",
-                    vlan_id=1,
-                    bandwidth_mbps=215.7,
-                    status="UP",
-                    auto_discovered=True,
-                    notes="Enlace troncal principal entre Firewall perimetral y Switch Core descubierto por LLDP-MIB.",
-                )
-            )
-        if primary_sw and srv_esxi and primary_sw.id != srv_esxi.id:
-            links_seed.append(
-                LogicalTopologyLink(
-                    source_asset_id=primary_sw.id,
-                    target_asset_id=srv_esxi.id,
-                    link_type="switch_uplink",
-                    source_interface="Te1/0/1-2 (LACP)",
-                    target_interface="vmnic0-1",
-                    protocol_label="2x10GbE LACP Trunk (VLAN 10,20,30)",
-                    vlan_id=20,
-                    bandwidth_mbps=684.2,
-                    status="UP",
-                    auto_discovered=True,
-                    notes="Doble enlace 10GbE desde el Switch del Rack hacia el Hipervisor VMware ESXi.",
-                )
-            )
-        if primary_sw and srv_proxmox and primary_sw.id != srv_proxmox.id:
-            links_seed.append(
-                LogicalTopologyLink(
-                    source_asset_id=primary_sw.id,
-                    target_asset_id=srv_proxmox.id,
-                    link_type="switch_uplink",
-                    source_interface="Te1/0/3-4",
-                    target_interface="eno1-2 (vmbr0)",
-                    protocol_label="2x10GbE Bridge Trunk (VLAN 10,20,30,50)",
-                    vlan_id=20,
-                    bandwidth_mbps=520.9,
-                    status="UP",
-                    auto_discovered=True,
-                    notes="Enlace 10GbE hacia el nodo Hipervisor Proxmox VE.",
-                )
-            )
-        if srv_esxi and vm_erp:
-            links_seed.append(
-                LogicalTopologyLink(
-                    source_asset_id=srv_esxi.id,
-                    target_asset_id=vm_erp.id,
-                    link_type="hypervisor_vm",
-                    source_interface="vSwitch0 (VLAN 20)",
-                    target_interface="ens192 / ens224",
-                    protocol_label="VMware vSphere Guest VM",
-                    vlan_id=20,
-                    bandwidth_mbps=145.0,
-                    status="UP",
-                    auto_discovered=True,
-                    notes="VM alojada en el hipervisor físico del Rack.",
-                )
-            )
-        if srv_esxi and vm_pg1:
-            links_seed.append(
-                LogicalTopologyLink(
-                    source_asset_id=srv_esxi.id,
-                    target_asset_id=vm_pg1.id,
-                    link_type="hypervisor_vm",
-                    source_interface="vSwitch0 (VLAN 20/30)",
-                    target_interface="ens192 / ens224",
-                    protocol_label="VMware vSphere Guest VM",
-                    vlan_id=20,
-                    bandwidth_mbps=210.4,
-                    status="UP",
-                    auto_discovered=True,
-                    notes="Nodo Master de PostgreSQL alojado en SRV-01.",
-                )
-            )
-        if srv_proxmox and vm_pg2:
-            links_seed.append(
-                LogicalTopologyLink(
-                    source_asset_id=srv_proxmox.id,
-                    target_asset_id=vm_pg2.id,
-                    link_type="hypervisor_vm",
-                    source_interface="vmbr0 (VLAN 20/30)",
-                    target_interface="ens192 / ens224",
-                    protocol_label="Proxmox KVM Guest VM",
-                    vlan_id=20,
-                    bandwidth_mbps=195.8,
-                    status="UP",
-                    auto_discovered=True,
-                    notes="Nodo Standby de PostgreSQL alojado en segundo servidor físico (Alta Disponibilidad).",
-                )
-            )
-        if srv_proxmox and ct_waf:
-            links_seed.append(
-                LogicalTopologyLink(
-                    source_asset_id=srv_proxmox.id,
-                    target_asset_id=ct_waf.id,
-                    link_type="docker_host",
-                    source_interface="vmbr0 (VLAN 10/20/50)",
-                    target_interface="eth0 / eth1 / eth2",
-                    protocol_label="Contenedor LXC / Nginx WAF",
-                    vlan_id=50,
-                    bandwidth_mbps=168.3,
-                    status="UP",
-                    auto_discovered=True,
-                    notes="Contenedor Reverse Proxy Nginx alojado en Proxmox VE.",
-                )
-            )
-        if ct_waf and vm_erp and ct_waf.id != vm_erp.id:
-            links_seed.append(
-                LogicalTopologyLink(
-                    source_asset_id=ct_waf.id,
-                    target_asset_id=vm_erp.id,
-                    link_type="reverse_proxy_upstream",
-                    source_interface="eth2 (10.20.20.140)",
-                    target_interface="ens224 (10.20.20.110:8080)",
-                    protocol_label="HTTP/HTTPS Reverse Proxy -> Apache/ERP :8080",
-                    vlan_id=20,
-                    bandwidth_mbps=94.6,
-                    status="UP",
-                    auto_discovered=False,
-                    notes="Flujo lógico de tráfico web desde Nginx WAF hacia el servidor Apache/ERP.",
-                )
-            )
-        if vm_erp and clu_vip and vm_erp.id != clu_vip.id:
-            links_seed.append(
-                LogicalTopologyLink(
-                    source_asset_id=vm_erp.id,
-                    target_asset_id=clu_vip.id,
-                    link_type="app_to_db",
-                    source_interface="ens224 (10.20.20.110)",
-                    target_interface="vip0 (10.20.20.100:5432)",
-                    protocol_label="SQL/TCP :5432 -> VIP Cluster PostgreSQL",
-                    vlan_id=20,
-                    bandwidth_mbps=68.2,
-                    status="UP",
-                    auto_discovered=False,
-                    notes="Conexión lógica de la aplicación ERP hacia la IP flotante (VIP) del clúster de BBDD.",
-                )
-            )
-        if clu_vip and vm_pg1 and clu_vip.id != vm_pg1.id:
-            links_seed.append(
-                LogicalTopologyLink(
-                    source_asset_id=clu_vip.id,
-                    target_asset_id=vm_pg1.id,
-                    link_type="ha_cluster_sync",
-                    source_interface="vip0 (10.20.20.100)",
-                    target_interface="ens224 (10.20.20.120:5432)",
-                    protocol_label="Keepalived VIP Master RW :5432",
-                    vlan_id=20,
-                    bandwidth_mbps=64.0,
-                    status="UP",
-                    auto_discovered=True,
-                    notes="Tráfico de escritura dirigido al nodo Master activo.",
-                )
-            )
-        if vm_pg1 and vm_pg2 and vm_pg1.id != vm_pg2.id:
-            links_seed.append(
-                LogicalTopologyLink(
-                    source_asset_id=vm_pg1.id,
-                    target_asset_id=vm_pg2.id,
-                    link_type="ha_cluster_sync",
-                    source_interface="ens256 (10.20.30.120)",
-                    target_interface="ens256 (10.20.30.121)",
-                    protocol_label="Patroni WAL Sync Replication (VLAN 30)",
-                    vlan_id=30,
-                    bandwidth_mbps=112.5,
-                    status="UP",
-                    auto_discovered=True,
-                    notes="Replicación síncrona continua entre Master y Standby.",
-                )
-            )
-        db.add_all(links_seed)
-        db.commit()
-
-    # 5. Seed Chequeos de Servicio y Heartbeats Multi-Protocolo (HTTP, HTTPS+SSL, ICMP, TCP, SNMP, Apache, Nginx, Docker, PostgreSQL)
-    if db.query(MonitoredServiceCheck).count() == 0:
-        now = datetime.utcnow()
-        checks_seed: List[MonitoredServiceCheck] = []
-        for idx, ast in enumerate(assets):
-            hb_ip = next(
-                (ip.ip_address for ip in ast.ip_addresses if ip.is_heartbeat_ip),
-                ast.ip_addresses[0].ip_address if ast.ip_addresses else "10.20.1.10",
-            )
-            cpu_val = round(18.0 + ((idx * 11) % 58), 1)
-            ram_val = round(32.0 + ((idx * 13) % 52), 1)
-            disk_val = round(24.0 + ((idx * 9) % 55), 1)
-
-            # 1) Heartbeat Primario ICMP Ping para cada máquina
-            checks_seed.append(
-                MonitoredServiceCheck(
-                    asset_id=ast.id,
-                    service_name="PING Heartbeat (Gestión)",
-                    check_type="icmp",
-                    target_ip_or_url=hb_ip,
-                    port=0,
-                    nagios_state="OK",
-                    state_type="HARD",
-                    current_attempt=1,
-                    max_check_attempts=3,
-                    latency_ms=round(0.6 + (idx * 0.25), 2),
-                    metrics_snapshot={"cpu_pct": cpu_val, "ram_pct": ram_val, "disk_pct": disk_val},
-                    status_output=f"PING OK - Packet loss = 0%, RTA = {0.6 + (idx * 0.25):.2f} ms ({hb_ip})",
-                    enabled=True,
-                    is_primary_heartbeat=True,
-                    last_checked_at=now,
-                    last_state_change_at=now,
-                )
-            )
-
-        # Chequeos adicionales especializados (SNMP, HTTPS+SSL, Apache, Nginx, Docker, Proxmox, VMware, PostgreSQL, Node/Windows Exporter)
-        if primary_sw:
-            sw_ip = primary_sw.ip_addresses[0].ip_address if primary_sw.ip_addresses else "10.20.1.2"
-            checks_seed.append(
-                MonitoredServiceCheck(
-                    asset_id=primary_sw.id,
-                    service_name="SNMP Agent & IF-MIB / LLDP Poller",
-                    check_type="snmp",
-                    target_ip_or_url=sw_ip,
-                    port=161,
-                    nagios_state="OK",
-                    state_type="HARD",
-                    current_attempt=1,
-                    max_check_attempts=3,
-                    latency_ms=2.4,
-                    metrics_snapshot={"ports_up": 13, "ports_total": 24, "lldp_neighbors": 5, "cpu_pct": 14.2, "temp_c": 38.0},
-                    status_output="SNMP OK - 24 puertos monitorizados (13 UP, 11 DOWN), 5 vecinos LLDP, Temp 38C",
-                    enabled=True,
-                    last_checked_at=now,
-                    last_state_change_at=now,
-                )
-            )
-        if ct_waf:
-            checks_seed.extend(
-                [
-                    MonitoredServiceCheck(
-                        asset_id=ct_waf.id,
-                        service_name="HTTPS Portal Público + Control Certificado SSL",
-                        check_type="https",
-                        target_ip_or_url="https://portal.empresa.com/health",
-                        port=443,
-                        expected_status_code=200,
-                        expected_string="ok",
-                        nagios_state="OK",
-                        state_type="HARD",
-                        current_attempt=1,
-                        max_check_attempts=3,
-                        latency_ms=11.8,
-                        ssl_days_remaining=84,
-                        metrics_snapshot={"http_status": 200, "ssl_days_remaining": 84},
-                        status_output="HTTPS OK - HTTP/1.1 200 OK - 11.8 ms - Certificado SSL válido (84 días restantes)",
-                        enabled=True,
-                        last_checked_at=now,
-                        last_state_change_at=now,
-                    ),
-                    MonitoredServiceCheck(
-                        asset_id=ct_waf.id,
-                        service_name="Nginx Reverse Proxy (stub_status)",
-                        check_type="nginx",
-                        target_ip_or_url="http://10.20.1.140/nginx_status",
-                        port=80,
-                        nagios_state="OK",
-                        state_type="HARD",
-                        current_attempt=1,
-                        max_check_attempts=3,
-                        latency_ms=3.1,
-                        metrics_snapshot={"active_connections": 142, "requests_per_sec": 385.4, "reading": 4, "writing": 18, "waiting": 120},
-                        status_output="NGINX OK - 142 conexiones activas, 385.4 req/s (Waiting: 120)",
-                        enabled=True,
-                        last_checked_at=now,
-                        last_state_change_at=now,
-                    ),
-                ]
-            )
-        if vm_erp:
-            checks_seed.extend(
-                [
-                    MonitoredServiceCheck(
-                        asset_id=vm_erp.id,
-                        service_name="Apache HTTPd Server (mod_status)",
-                        check_type="apache",
-                        target_ip_or_url="http://10.20.20.110:8080/server-status?auto",
-                        port=8080,
-                        nagios_state="OK",
-                        state_type="HARD",
-                        current_attempt=1,
-                        max_check_attempts=3,
-                        latency_ms=6.4,
-                        metrics_snapshot={"busy_workers": 28, "idle_workers": 72, "requests_per_sec": 194.2, "cpu_load": 1.45},
-                        status_output="APACHE OK - 194.2 req/s - BusyWorkers: 28 / IdleWorkers: 72",
-                        enabled=True,
-                        last_checked_at=now,
-                        last_state_change_at=now,
-                    ),
-                    MonitoredServiceCheck(
-                        asset_id=vm_erp.id,
-                        service_name="Docker Engine & Contenedores Microservicios",
-                        check_type="docker",
-                        target_ip_or_url="http://10.20.1.110:9323/metrics",
-                        port=9323,
-                        nagios_state="OK",
-                        state_type="HARD",
-                        current_attempt=1,
-                        max_check_attempts=3,
-                        latency_ms=4.5,
-                        metrics_snapshot={"containers_running": 6, "containers_stopped": 0, "containers_unhealthy": 0},
-                        status_output="DOCKER OK - 6 contenedores activos, 0 unhealthy",
-                        enabled=True,
-                        last_checked_at=now,
-                        last_state_change_at=now,
-                    ),
-                    MonitoredServiceCheck(
-                        asset_id=vm_erp.id,
-                        service_name="Prometheus Linux Node Exporter (:9100)",
-                        check_type="node_exporter",
-                        target_ip_or_url="10.20.1.110",
-                        port=9100,
-                        nagios_state="OK",
-                        state_type="HARD",
-                        current_attempt=1,
-                        max_check_attempts=3,
-                        latency_ms=1.9,
-                        metrics_snapshot={"cpu_pct": 42.5, "ram_pct": 64.0, "disk_pct": 51.2},
-                        status_output="NODE_EXPORTER OK - CPU 42.5% | RAM 64.0% | Disco / 51.2%",
-                        enabled=True,
-                        last_checked_at=now,
-                        last_state_change_at=now,
-                    ),
-                ]
-            )
-        if vm_pg1:
-            checks_seed.append(
-                MonitoredServiceCheck(
-                    asset_id=vm_pg1.id,
-                    service_name="PostgreSQL HA Master Listener (:5432)",
-                    check_type="postgres",
-                    target_ip_or_url="10.20.20.120",
-                    port=5432,
-                    nagios_state="OK",
-                    state_type="HARD",
-                    current_attempt=1,
-                    max_check_attempts=3,
-                    latency_ms=2.1,
-                    metrics_snapshot={"active_connections": 46, "max_connections": 200, "replication_lag_ms": 0.4},
-                    status_output="POSTGRES OK - Puerto 5432 activo (46/200 conexiones, Lag réplica: 0.4 ms)",
-                    enabled=True,
-                    last_checked_at=now,
-                    last_state_change_at=now,
-                )
-            )
-        db.add_all(checks_seed)
-        db.commit()
-
-    # 6. Seed Contactos (Personas), Grupos de Personas y Reglas de Enrutamiento de Avisos
-    if db.query(AlertContact).count() == 0:
-        c1 = AlertContact(
-            code="USR-ALEX-GENG",
-            full_name="Alex Geng",
-            role_title="Responsable de Infraestructura & Cloud",
-            email="alex.geng@empresa.local",
-            phone_or_telegram="@alexgeng_ops",
-            schedule_period="24x7",
-            notify_on_down=True,
-            notify_on_critical=True,
-            notify_on_warning=True,
-            notify_on_unreachable=False,
-            notify_on_recovery=True,
-            active=True,
         )
-        c2 = AlertContact(
-            code="USR-MARTA-SOLER",
-            full_name="Marta Soler",
-            role_title="DevOps & Plataformas Web (Apache/Nginx/Docker)",
-            email="marta.soler@empresa.local",
-            phone_or_telegram="@msoler_devops",
-            schedule_period="24x7",
-            notify_on_down=True,
-            notify_on_critical=True,
-            notify_on_warning=True,
-            notify_on_unreachable=False,
-            notify_on_recovery=True,
-            active=True,
-        )
-        c3 = AlertContact(
-            code="USR-JAVIER-GARCIA",
-            full_name="Javier García",
-            role_title="Administrador BBDD (DBA PostgreSQL / SQL)",
-            email="javier.garcia@empresa.local",
-            phone_or_telegram="@jgarcia_dba",
-            schedule_period="24x7",
-            notify_on_down=True,
-            notify_on_critical=True,
-            notify_on_warning=False,
-            notify_on_unreachable=False,
-            notify_on_recovery=True,
-            active=True,
-        )
-        c4 = AlertContact(
-            code="USR-ROBERTO-NAVARRO",
-            full_name="Roberto Navarro",
-            role_title="Ingeniero de Redes & Ciberseguridad (Switches/FW)",
-            email="roberto.navarro@empresa.local",
-            phone_or_telegram="@rnavarro_net",
-            schedule_period="24x7",
-            notify_on_down=True,
-            notify_on_critical=True,
-            notify_on_warning=True,
-            notify_on_unreachable=True,
-            notify_on_recovery=True,
-            active=True,
-        )
-        db.add_all([c1, c2, c3, c4])
-        db.flush()
-
-        cg_net = AlertContactGroup(
-            code="CG-REDES-SEC",
-            name="Equipo de Redes, Switching & Firewalls",
-            description="Recibe avisos de caídas de Switches, Routers, enlaces LLDP y Firewalls.",
-            group_email="redes-alertas@empresa.local",
-            channel_webhook_url="https://hooks.empresa.local/webhook/net-ops",
-            member_contact_ids=[c4.id, c1.id],
-        )
-        cg_sys = AlertContactGroup(
-            code="CG-SISTEMAS-VIRT",
-            name="Equipo de Sistemas, Proxmox & VMware",
-            description="Recibe avisos de servidores físicos del Rack, hipervisores y sistemas operativos.",
-            group_email="sistemas-guardia@empresa.local",
-            channel_webhook_url="https://hooks.empresa.local/webhook/sys-virt",
-            member_contact_ids=[c1.id, c2.id],
-        )
-        cg_web = AlertContactGroup(
-            code="CG-WEB-DEVOPS",
-            name="Equipo Web, Apache, Nginx & Docker",
-            description="Recibe avisos de certificados SSL, caídas HTTP/HTTPS, Apache, Nginx y contenedores Docker.",
-            group_email="devops-web@empresa.local",
-            channel_webhook_url="https://hooks.empresa.local/webhook/devops-web",
-            member_contact_ids=[c2.id, c1.id],
-        )
-        cg_dba = AlertContactGroup(
-            code="CG-DBA-DATOS",
-            name="Equipo de Bases de Datos (DBA)",
-            description="Recibe avisos de clústeres PostgreSQL, MySQL, SQL Server y almacenamiento.",
-            group_email="dba-alertas@empresa.local",
-            channel_webhook_url="https://hooks.empresa.local/webhook/dba-ops",
-            member_contact_ids=[c3.id, c1.id],
-        )
-        db.add_all([cg_net, cg_sys, cg_web, cg_dba])
-        db.flush()
-
-        hg_by_code = {hg.code: hg for hg in db.query(HostGroup).all()}
-        rules_seed = [
-            NotificationRoutingRule(
-                name="Regla 1: Electrónica de Red y Switches Core -> Equipo Redes",
-                description="Cuando un Switch o Firewall del grupo HG-SWITCHES-CORE pasa a HARD DOWN/CRITICAL, avisa por correo y webhook al equipo de Redes.",
-                enabled=True,
-                scope_type="host_group",
-                host_group_id=hg_by_code["HG-SWITCHES-CORE"].id if "HG-SWITCHES-CORE" in hg_by_code else None,
-                contact_group_ids=[cg_net.id],
-                contact_ids=[c4.id],
-                send_email=True,
-                send_webhook=True,
-                only_on_hard_state=True,
-            ),
-            NotificationRoutingRule(
-                name="Regla 2: Hipervisores VMware/Proxmox y Rack Servers -> Sistemas",
-                description="Avisa al grupo de Sistemas y a Alex Geng si un hipervisor o servidor físico entra en estado crítico.",
-                enabled=True,
-                scope_type="host_group",
-                host_group_id=hg_by_code["HG-HYPERVISORS-BAREBONE"].id if "HG-HYPERVISORS-BAREBONE" in hg_by_code else None,
-                contact_group_ids=[cg_sys.id],
-                contact_ids=[c1.id],
-                send_email=True,
-                send_webhook=True,
-                only_on_hard_state=True,
-            ),
-            NotificationRoutingRule(
-                name="Regla 3: Servicios Web (Apache, Nginx, HTTPS SSL, Docker) -> DevOps Web",
-                description="Notifica caídas de portales HTTPS, caducidad SSL y fallos de Apache/Nginx/Docker a Marta Soler y al grupo DevOps.",
-                enabled=True,
-                scope_type="host_group",
-                host_group_id=hg_by_code["HG-WEB-APACHE-NGINX"].id if "HG-WEB-APACHE-NGINX" in hg_by_code else None,
-                contact_group_ids=[cg_web.id],
-                contact_ids=[c2.id],
-                send_email=True,
-                send_webhook=True,
-                only_on_hard_state=True,
-            ),
-            NotificationRoutingRule(
-                name="Regla 4: Clúster BBDD PostgreSQL & Active Directory -> DBA",
-                description="Notifica incidencias en BBDD críticas o VIPs a Javier García y al grupo DBA.",
-                enabled=True,
-                scope_type="host_group",
-                host_group_id=hg_by_code["HG-DB-CRITICAL"].id if "HG-DB-CRITICAL" in hg_by_code else None,
-                contact_group_ids=[cg_dba.id],
-                contact_ids=[c3.id],
-                send_email=True,
-                send_webhook=True,
-                only_on_hard_state=True,
-            ),
-        ]
-        db.add_all(rules_seed)
-        db.commit()
-
-    # 7. Seed Stacks Tecnológicos / Esquemas de Lógica de Negocio Interactivos
-    if db.query(TechStackDiagram).count() == 0 or db.query(TechStackNode).count() < 5:
-        db.query(TechStackEdge).delete()
-        db.query(TechStackNode).delete()
-        db.flush()
-        all_assets = db.query(CmdbAsset).all()
-        assets_by_code = {a.code: a for a in all_assets}
-
-        def _find_ast(*candidates: str) -> Optional[CmdbAsset]:
-            for c in candidates:
-                if c in assets_by_code:
-                    return assets_by_code[c]
-            for c in candidates:
-                c_up = c.upper()
-                for k, v in assets_by_code.items():
-                    if c_up in k.upper():
-                        return v
-            return all_assets[0] if all_assets else None
-
-        st1 = db.query(TechStackDiagram).filter(TechStackDiagram.code == "STACK-PORTAL-ERP").first()
-        if not st1:
-            st1 = TechStackDiagram(
-                code="STACK-PORTAL-ERP",
-                name="Stack 1: Portal Web Ecommerce, Microservicios & Clúster BBDD ERP",
-                description="Flujo completo de lógica de negocio: Entrada VIP Keepalived -> Frontal Nginx Reverse Proxy -> Backend Apache/Docker ERP -> Clúster PostgreSQL Master/Réplica.",
-                business_service="Ecommerce & Core ERP Transaccional",
-                environment="production",
-                owner_team="DevOps Web & DBA",
-                criticality="critical",
-            )
-            db.add(st1)
-
-        st2 = db.query(TechStackDiagram).filter(TechStackDiagram.code == "STACK-IDENTIDAD-INFRA").first()
-        if not st2:
-            st2 = TechStackDiagram(
-                code="STACK-IDENTIDAD-INFRA",
-                name="Stack 2: Seguridad Perimetral, Switching Core & Directorio Activo",
-                description="Esquema lógico de Perímetro Firewall -> Switch Core SNMP -> Hipervisor VMware ESXi -> Controlador de Dominio Active Directory & DNS.",
-                business_service="Autenticación Corporativa, DNS & Virtualización",
-                environment="production",
-                owner_team="Redes & Sistemas",
-                criticality="critical",
-            )
-            db.add(st2)
-        db.flush()
-
-        def _add_node(stack_id: int, candidates: Tuple[str, ...], role: str, label: str, px: float, py: float, ssh_user: str = "root", ssh_port: int = 22) -> Optional[TechStackNode]:
-            ast = _find_ast(*candidates)
-            if not ast:
-                return None
-            n = TechStackNode(
-                stack_id=stack_id,
-                asset_id=ast.id,
-                role_layer=role,
-                custom_label=label,
-                pos_x=px,
-                pos_y=py,
-                ssh_enabled=True,
-                ssh_user=ssh_user,
-                ssh_port=ssh_port,
-            )
-            db.add(n)
-            db.flush()
-            return n
-
-        # Nodos del Stack 1 (Ecommerce & ERP)
-        n_vip = _add_node(st1.id, ("CLU-PGSQL-VIP", "VIP-K8S-INGRESS", "RK001_M-RT01"), "ingress_vip", "VIP Balanceador HA (:443)", 0.04, 0.34)
-        n_web = _add_node(st1.id, ("CT-WAF-PROXY01", "VM-WEB-FRONT-01"), "web_frontend", "Frontal Web Nginx + WAF", 0.29, 0.14)
-        n_sw = _add_node(st1.id, ("RK001_M-SW01", "SW-CORE-01"), "infra_backing", "Switch Core VLAN 20/30", 0.29, 0.56, ssh_user="admin")
-        n_erp = _add_node(st1.id, ("VM-ERP-APP01", "VM-ERP-PROD-01"), "app_middleware", "Backend Apache + Docker ERP", 0.55, 0.16)
-        n_pve = _add_node(st1.id, ("RK001_M-SRV02", "SRV-PVE-01"), "infra_backing", "Hipervisor Proxmox VE", 0.55, 0.56)
-        n_pg1 = _add_node(st1.id, ("VM-DB-PG01", "VM-DB-PG-01"), "database_cache", "PostgreSQL 16 Master (RW)", 0.79, 0.14, ssh_user="postgres")
-        n_pg2 = _add_node(st1.id, ("VM-DB-PG02", "VM-DB-PG-02"), "database_cache", "PostgreSQL 16 Standby (RO)", 0.79, 0.56, ssh_user="postgres")
-
-        edges_s1 = [
-            (n_vip, n_web, "HTTPS :443 (Balanceo L7)", 443),
-            (n_web, n_erp, "Proxy Pass HTTP :8080", 8080),
-            (n_erp, n_pg1, "SQL Pool TCP :5432 (RW)", 5432),
-            (n_pg1, n_pg2, "Streaming Replication :5432", 5432),
-            (n_sw, n_pve, "Trunk 10GbE LLDP", 161),
-            (n_pve, n_erp, "Alojamiento VM KVM", 8006),
-        ]
-        for src_n, dst_n, lbl, prt in edges_s1:
-            if src_n and dst_n:
-                db.add(
-                    TechStackEdge(
-                        stack_id=st1.id,
-                        source_node_id=src_n.id,
-                        target_node_id=dst_n.id,
-                        protocol_label=lbl,
-                        port=prt,
-                    )
-                )
-
-        # Nodos del Stack 2 (Identidad & Core)
-        n2_fw = _add_node(st2.id, ("RK001_M-FW01", "FW-EDGE-01"), "ingress_vip", "Firewall Perimetral HA", 0.05, 0.34, ssh_user="admin")
-        n2_sw = _add_node(st2.id, ("RK001_M-SW01", "SW-CORE-01"), "infra_backing", "Switch Core Catalyst", 0.31, 0.34, ssh_user="admin")
-        n2_esx = _add_node(st2.id, ("RK001_M-SRV01", "SRV-ESXI-01"), "app_middleware", "Cluster VMware ESXi 8", 0.56, 0.20, ssh_user="root")
-        n2_ad = _add_node(st2.id, ("VM-AD-DC01", "CLOUD-DR-VPS01"), "database_cache", "Active Directory & DNS (:389/:53)", 0.79, 0.34, ssh_user="Administrator", ssh_port=22)
-
-        for src_n, dst_n, lbl, prt in [
-            (n2_fw, n2_sw, "Uplink Trunk 10GbE", 443),
-            (n2_sw, n2_esx, "LLDP Gi1/0/1 (10GbE)", 443),
-            (n2_esx, n2_ad, "vSwitch0 VLAN 20 -> LDAPS :636", 636),
-        ]:
-            if src_n and dst_n:
-                db.add(
-                    TechStackEdge(
-                        stack_id=st2.id,
-                        source_node_id=src_n.id,
-                        target_node_id=dst_n.id,
-                        protocol_label=lbl,
-                        port=prt,
-                    )
-                )
         db.commit()
 
     sync_prometheus_targets_file(db)
+
 
 
 def is_asset_in_maintenance(
@@ -1309,7 +433,7 @@ def _dispatch_alert_notification(
 
 
 def _check_ssl_days_remaining(host: str, port: int = 443, timeout_sec: float = 2.0) -> Optional[int]:
-    """Obtiene los días restantes de validez de un certificado X.509 SSL/TLS en chequeos HTTPS."""
+    """Obtiene los días restantes reales de validez de un certificado X.509 SSL/TLS en chequeos HTTPS."""
     try:
         ctx = ssl.create_default_context()
         with socket.create_connection((host, port), timeout=timeout_sec) as sock:
@@ -1320,7 +444,87 @@ def _check_ssl_days_remaining(host: str, port: int = 443, timeout_sec: float = 2
                     return max(0, (exp_dt - datetime.utcnow()).days)
     except Exception:
         pass
-    return 84
+    return None
+
+
+def _scrape_real_exporter_metrics(host: str, port: int, check_type: str, timeout_sec: float = 1.8) -> Dict[str, Any]:
+    """
+    Lee las métricas reales expuestas por node_exporter (:9100/metrics), windows_exporter (:9182/metrics),
+    nginx (:8080/nginx_status) o apache (:80/server-status?auto) cuando el agente está instalado y accesible.
+    No inventa ningún valor si el agente no responde.
+    """
+    snapshot: Dict[str, Any] = {}
+    ctype = (check_type or "").lower().strip()
+    try:
+        if ctype in ("node_exporter", "windows_exporter"):
+            url = f"http://{host}:{port}/metrics"
+            req = urllib.request.Request(url, method="GET", headers={"User-Agent": "RackDoc-Scraper/1.3"})
+            with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+                if resp.status != 200:
+                    return snapshot
+                text = resp.read().decode("utf-8", errors="ignore")
+
+            mem_total = None
+            mem_avail = None
+            mem_free = None
+            fs_size = None
+            fs_avail = None
+            load1 = None
+            cpu_cores = 0
+            for raw_line in text.splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("node_memory_MemTotal_bytes "):
+                    mem_total = float(line.split()[-1])
+                elif line.startswith("node_memory_MemAvailable_bytes "):
+                    mem_avail = float(line.split()[-1])
+                elif line.startswith("windows_cs_physical_memory_bytes "):
+                    mem_total = float(line.split()[-1])
+                elif line.startswith("windows_os_physical_memory_free_bytes "):
+                    mem_free = float(line.split()[-1])
+                elif line.startswith("node_load1 "):
+                    load1 = float(line.split()[-1])
+                elif line.startswith("node_cpu_seconds_total{") and 'mode="idle"' in line:
+                    cpu_cores += 1
+                elif line.startswith("node_filesystem_size_bytes{") and 'mountpoint="/"' in line:
+                    fs_size = float(line.split()[-1])
+                elif line.startswith("node_filesystem_avail_bytes{") and 'mountpoint="/"' in line:
+                    fs_avail = float(line.split()[-1])
+
+            if mem_total and mem_total > 0:
+                if mem_avail is not None:
+                    snapshot["ram_pct"] = round(max(0.0, min(100.0, ((mem_total - mem_avail) / mem_total) * 100.0)), 1)
+                elif mem_free is not None:
+                    snapshot["ram_pct"] = round(max(0.0, min(100.0, ((mem_total - mem_free) / mem_total) * 100.0)), 1)
+            if fs_size and fs_size > 0 and fs_avail is not None:
+                snapshot["disk_pct"] = round(max(0.0, min(100.0, ((fs_size - fs_avail) / fs_size) * 100.0)), 1)
+            if load1 is not None:
+                denom = max(1, cpu_cores)
+                snapshot["cpu_pct"] = round(max(0.0, min(100.0, (load1 / denom) * 100.0)), 1)
+        elif ctype == "nginx":
+            url = f"http://{host}:{port}/nginx_status"
+            req = urllib.request.Request(url, method="GET", headers={"User-Agent": "RackDoc-Scraper/1.3"})
+            with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+                if resp.status == 200:
+                    text = resp.read().decode("utf-8", errors="ignore")
+                    for line in text.splitlines():
+                        if "Active connections:" in line:
+                            snapshot["active_connections"] = int(line.split(":")[-1].strip())
+        elif ctype == "apache":
+            url = f"http://{host}:{port}/server-status?auto"
+            req = urllib.request.Request(url, method="GET", headers={"User-Agent": "RackDoc-Scraper/1.3"})
+            with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+                if resp.status == 200:
+                    text = resp.read().decode("utf-8", errors="ignore")
+                    for line in text.splitlines():
+                        if line.startswith("ReqPerSec:"):
+                            snapshot["req_per_sec"] = round(float(line.split(":", 1)[1].strip()), 2)
+                        elif line.startswith("BusyWorkers:"):
+                            snapshot["busy_workers"] = int(line.split(":", 1)[1].strip())
+    except Exception:
+        pass
+    return snapshot
 
 
 def run_single_service_check(
@@ -1331,9 +535,9 @@ def run_single_service_check(
     host_groups_by_id: Optional[Dict[int, HostGroup]] = None,
 ) -> Dict[str, Any]:
     """
-    Ejecuta un chequeo individual de Heartbeat / Servicio (ICMP, HTTP, HTTPS+SSL, TCP, SSH, SNMP,
+    Ejecuta un chequeo individual de Heartbeat / Servicio REAL en red (ICMP, HTTP, HTTPS+SSL, TCP, SSH, SNMP,
     Apache, Nginx, Docker, Proxmox, VMware, PostgreSQL, Node/Windows Exporter) aplicando la
-    máquina de estados de Nagios Core (SOFT 1..N -> HARD).
+    máquina de estados de Nagios Core (SOFT 1..N -> HARD) sin ninguna simulación.
     """
     now = datetime.utcnow()
     if active_windows is None:
@@ -1351,7 +555,7 @@ def run_single_service_check(
 
     hb_ip = next(
         (ip.ip_address for ip in asset.ip_addresses if ip.is_heartbeat_ip),
-        asset.ip_addresses[0].ip_address if asset.ip_addresses else "127.0.0.1",
+        asset.ip_addresses[0].ip_address if asset.ip_addresses else "",
     )
     target = (chk.target_ip_or_url or "").strip() or hb_ip
     host_only = target
@@ -1362,63 +566,78 @@ def run_single_service_check(
     ctype = (chk.check_type or "icmp").lower().strip()
     port = chk.port or 80
 
-    # Intentar chequeo de red real con fallback inteligente para el entorno de demostración
-    if ctype in ("http", "https"):
+    if not host_only:
+        new_state = "CRITICAL"
+        chk.latency_ms = None
+        chk.status_output = f"{ctype.upper()} CRITICAL - Sin dirección IP o hostname configurado"
+    elif ctype in ("http", "https"):
+        eff_port = port or (443 if ctype == "https" else 80)
         st, lat, det = check_host_connectivity(
             host=host_only,
             method=ctype,
-            port=port or (443 if ctype == "https" else 80),
-            timeout_sec=1.5,
-            extra_config={"url": target if "://" in target else f"{ctype}://{host_only}:{port}"},
+            port=eff_port,
+            timeout_sec=2.0,
+            extra_config={
+                "url": target if "://" in target else f"{ctype}://{host_only}:{eff_port}",
+                "expected_status": chk.expected_status_code or 200,
+                "expected_keyword": chk.expected_string or "",
+            },
             device_code=asset.code,
         )
         if ctype == "https":
-            chk.ssl_days_remaining = _check_ssl_days_remaining(host_only, port or 443)
+            chk.ssl_days_remaining = _check_ssl_days_remaining(host_only, eff_port)
         if st == "online":
             new_state = "OK"
-            chk.latency_ms = lat or 11.4
+            chk.latency_ms = lat
             chk.status_output = f"{ctype.upper()} OK - {det}" + (
                 f" - SSL válido ({chk.ssl_days_remaining} días)" if chk.ssl_days_remaining is not None else ""
             )
-        elif asset.sync_source == "cmdb" and host_only.startswith(("10.20.", "172.16.", "portal.")):
-            new_state = "OK"
-            chk.latency_ms = 12.3
-            chk.status_output = f"{ctype.upper()} OK - HTTP/1.1 {chk.expected_status_code} OK - {chk.latency_ms} ms" + (
-                f" - SSL válido ({chk.ssl_days_remaining or 84} días)" if ctype == "https" else ""
-            )
+        elif st == "warning":
+            new_state = "WARNING"
+            chk.latency_ms = lat
+            chk.status_output = f"{ctype.upper()} WARNING - {det}"
         else:
             new_state = "CRITICAL"
             chk.latency_ms = None
             chk.status_output = f"{ctype.upper()} CRITICAL - {det}"
     elif ctype in ("apache", "nginx", "haproxy", "docker", "proxmox", "vmware", "postgres", "mysql", "redis", "node_exporter", "windows_exporter"):
+        eff_port = port or (9100 if ctype == "node_exporter" else (9182 if ctype == "windows_exporter" else 80))
         st, lat, det = check_host_connectivity(
             host=host_only,
             method="tcp",
-            port=port or 80,
-            timeout_sec=1.2,
+            port=eff_port,
+            timeout_sec=1.5,
             device_code=asset.code,
         )
-        if st == "online" or host_only.startswith(("10.20.", "172.16.")):
+        if st == "online":
             new_state = "OK"
-            chk.latency_ms = lat or round(2.1 + (chk.id % 5) * 0.8, 2)
-            if not chk.status_output or "CRITICAL" in chk.status_output:
-                chk.status_output = f"{ctype.upper()} OK - Respuesta en {chk.latency_ms} ms ({host_only}:{port})"
+            chk.latency_ms = lat
+            scraped = _scrape_real_exporter_metrics(host_only, eff_port, ctype)
+            if scraped:
+                merged_snap = dict(chk.metrics_snapshot or {})
+                merged_snap.update(scraped)
+                chk.metrics_snapshot = merged_snap
+            chk.status_output = f"{ctype.upper()} OK - {det} ({host_only}:{eff_port})"
         else:
             new_state = "CRITICAL"
             chk.latency_ms = None
-            chk.status_output = f"{ctype.upper()} CRITICAL - {det}"
+            chk.status_output = f"{ctype.upper()} CRITICAL - {det} ({host_only}:{eff_port})"
     else:
         st, lat, det = check_host_connectivity(
             host=host_only,
             method=ctype if ctype in ("icmp", "ssh", "tcp", "udp", "snmp") else "icmp",
             port=port,
-            timeout_sec=1.2,
+            timeout_sec=1.5,
             device_code=asset.code,
         )
-        if st == "online" or host_only.startswith(("10.20.", "172.16.", "52.214.")):
+        if st == "online":
             new_state = "OK"
-            chk.latency_ms = lat or round(0.9 + (chk.id % 7) * 0.3, 2)
-            chk.status_output = f"{ctype.upper()} OK - Latencia {chk.latency_ms} ms ({host_only})"
+            chk.latency_ms = lat
+            chk.status_output = f"{ctype.upper()} OK - {det}"
+        elif st == "warning":
+            new_state = "WARNING"
+            chk.latency_ms = lat
+            chk.status_output = f"{ctype.upper()} WARNING - {det}"
         else:
             new_state = "CRITICAL"
             chk.latency_ms = None
@@ -1497,15 +716,25 @@ def run_snmp_switch_discovery(
     sync_ports_to_rack_device: bool = True,
 ) -> Dict[str, Any]:
     """
-    Motor de Autodescubrimiento SNMP (estilo Observium + NetBox):
-    Interroga el Switch / Router / Firewall por SNMP, descubre sus bocas (IF-MIB),
-    velocidades, alias, VLANs y vecinos LLDP (LLDP-MIB) y los vuelca tanto a '4. Red & Host'
-    como a los puertos físicos del equipo en '3. Rack Editor' y a la 'CMDB'.
+    Motor de Autodescubrimiento SNMP real:
+    Interroga el Switch / Router / Firewall por SNMP en el puerto 161/UDP.
+    No inventa bocas ficticias si el equipo no responde por SNMP.
     """
     ensure_network_hosts_seeded(db)
     ip_clean = target_ip.strip()
+    if not ip_clean:
+        raise ValueError("Debes indicar una dirección IP válida para el sondeo SNMP.")
 
-    # Localizar o crear el activo CMDB correspondiente al Switch
+    # Sondeo SNMP real al puerto 161/UDP antes de crear/actualizar datos
+    st, lat, det = check_host_connectivity(
+        host=ip_clean,
+        method="snmp",
+        port=port,
+        timeout_sec=2.0,
+        extra_config={"snmp_community": community, "snmp_version": snmp_version},
+        device_code=f"SNMP-{ip_clean}",
+    )
+
     asset = None
     if asset_id:
         asset = db.query(CmdbAsset).filter(CmdbAsset.id == asset_id).first()
@@ -1515,7 +744,8 @@ def run_snmp_switch_discovery(
         ip_rec = db.query(CmdbIpAddress).filter(CmdbIpAddress.ip_address == ip_clean).first()
         if ip_rec and ip_rec.asset:
             asset = ip_rec.asset
-    if not asset:
+
+    if not asset and st == "online":
         code = f"SW-SNMP-{ip_clean.split('.')[-1]}"
         asset = CmdbAsset(
             code=code,
@@ -1523,17 +753,18 @@ def run_snmp_switch_discovery(
             hostname=code.lower(),
             asset_class="network_security",
             environment="production",
-            criticality="critical",
+            criticality="high",
             lifecycle_status="active",
-            os_or_firmware="Enterprise Switch OS (Descubierto por SNMPv2-MIB / IF-MIB)",
-            hypervisor_or_platform="Switching & VLANs (LLDP Activo)",
+            os_or_firmware=f"SNMP ({det})",
+            hypervisor_or_platform="Switching & VLANs",
             owner_team="Redes & Comunicaciones",
-            responsible_person="Roberto Navarro",
+            responsible_person="",
             sync_source="cmdb",
             monitoring_enabled=True,
             monitor_method="snmp",
             monitor_port=port,
             status="online",
+            last_ping_ms=lat,
             last_checked_at=datetime.utcnow(),
         )
         db.add(asset)
@@ -1547,9 +778,9 @@ def run_snmp_switch_discovery(
                 ip_address=ip_clean,
                 subnet_mask=matched_sub.subnet_mask if matched_sub else "255.255.255.0",
                 gateway=matched_sub.gateway if matched_sub else "",
-                vlan_id=matched_sub.vlan_id if matched_sub else 10,
+                vlan_id=matched_sub.vlan_id if matched_sub else None,
                 ip_role="mgmt_heartbeat",
-                interface_name="Vlan10 (Mgmt)",
+                interface_name="Mgmt",
                 is_heartbeat_ip=True,
                 allocation_status="assigned",
                 last_verification_status="active_in_network",
@@ -1558,73 +789,27 @@ def run_snmp_switch_discovery(
         )
         db.commit()
 
-    # Sondeo SNMP real al puerto 161/UDP
-    st, lat, det = check_host_connectivity(
-        host=ip_clean,
-        method="snmp",
-        port=port,
-        timeout_sec=1.5,
-        extra_config={"snmp_community": community, "snmp_version": snmp_version},
-        device_code=asset.code,
-    )
-    asset.last_ping_ms = lat or 1.8
+    if not asset:
+        return {
+            "asset_id": None,
+            "asset_code": "",
+            "target_ip": ip_clean,
+            "snmp_status": st,
+            "discovered_ports_count": 0,
+            "lldp_neighbors_count": 0,
+            "synced_rack_ports": 0,
+            "detail": f"Sin respuesta SNMP desde {ip_clean}:{port} ({det})",
+        }
+
+    asset.last_ping_ms = lat if st == "online" else None
     asset.last_checked_at = datetime.utcnow()
-    asset.status = "online"
+    asset.status = "online" if st == "online" else "offline"
+    db.commit()
 
     existing_ports = db.query(SwitchSnmpPort).filter(SwitchSnmpPort.asset_id == asset.id).order_by(SwitchSnmpPort.if_index).all()
-    if not existing_ports:
-        # Generar las 24 bocas descubiertas por IF-MIB + 4 uplinks 10G SFP+
-        all_assets = db.query(CmdbAsset).all()
-        servers = [a for a in all_assets if a.asset_class == "physical_server" and a.id != asset.id]
-        for idx in range(1, 29):
-            is_sfp = idx > 24
-            if_name = f"Te1/1/{idx - 24}" if is_sfp else f"Gi1/0/{idx}"
-            spd = 10000 if is_sfp else 1000
-            oper = "up" if (idx <= 8 or is_sfp) else "down"
-            nsys, nport, nip, nasset_id = "", "", "", None
-            if idx <= len(servers):
-                srv = servers[idx - 1]
-                nsys = srv.hostname or srv.code
-                nport = "eno1 (10GbE)"
-                nip = srv.ip_addresses[0].ip_address if srv.ip_addresses else ""
-                nasset_id = srv.id
-            alias = f"LLDP_{nsys.upper()}" if nsys else ("TRUNK_SFP_10G" if is_sfp else (f"HOST_VLAN20_{idx:02d}" if oper == "up" else "BOCA_LIBRE"))
-            db.add(
-                SwitchSnmpPort(
-                    asset_id=asset.id,
-                    rack_device_id=asset.rack_device_id,
-                    if_index=idx,
-                    if_name=if_name,
-                    if_alias=alias,
-                    if_type="ethernetCsmacd",
-                    admin_status="up",
-                    oper_status=oper,
-                    speed_mbps=spd,
-                    mac_address=f"00:25:90:AA:{asset.id:02X}:{idx:02X}",
-                    vlan_id=10 if is_sfp else 20,
-                    vlan_mode="trunk" if is_sfp else "access",
-                    in_mbps=round(85.0 + idx * 9.5, 1) if oper == "up" else 0.0,
-                    out_mbps=round(62.0 + idx * 7.2, 1) if oper == "up" else 0.0,
-                    lldp_neighbor_sysname=nsys,
-                    lldp_neighbor_port=nport,
-                    lldp_neighbor_ip=nip,
-                    lldp_neighbor_asset_id=nasset_id,
-                    last_polled_at=datetime.utcnow(),
-                )
-            )
-        db.commit()
-        existing_ports = db.query(SwitchSnmpPort).filter(SwitchSnmpPort.asset_id == asset.id).order_by(SwitchSnmpPort.if_index).all()
-    else:
-        for p in existing_ports:
-            p.last_polled_at = datetime.utcnow()
-            if p.oper_status == "up":
-                p.in_mbps = round(max(1.5, p.in_mbps + ((p.if_index % 5) - 2) * 3.1), 1)
-                p.out_mbps = round(max(1.0, p.out_mbps + ((p.if_index % 4) - 1.5) * 2.4), 1)
-        db.commit()
 
-    # Sincronizar las bocas descubiertas por SNMP con el dispositivo físico en el Rack Editor (Port)
     synced_rack_ports = 0
-    if sync_ports_to_rack_device and asset.rack_device_id:
+    if st == "online" and sync_ports_to_rack_device and asset.rack_device_id:
         rdev = db.query(RackDevice).filter(RackDevice.id == asset.rack_device_id).first()
         if rdev:
             existing_rports = {rp.name: rp for rp in db.query(Port).filter(Port.device_id == rdev.id).all()}
@@ -1661,19 +846,21 @@ def run_snmp_switch_discovery(
 def generate_prometheus_metrics_exposition(db: Session) -> str:
     """
     Genera la salida en formato oficial Prometheus Text Exposition Format (/api/v1/metrics)
-    con todas las métricas recolectadas en background por RackDoc:
-    - Estado de cada Host/VM/Switch/Contenedor (UP=1, DOWN=0, MAINTENANCE=2)
-    - Latencia de Heartbeat en milisegundos
-    - CPU %, RAM %, Disco % por máquina
-    - Estado Nagios de cada Servicio (OK=0, WARNING=1, CRITICAL=2, UNKNOWN=3) y si es HARD (1) o SOFT (0)
-    - Días restantes de cada certificado SSL/TLS en chequeos HTTPS
-    - Estado operativo y caudal In/Out (Mbps) de cada boca de Switch descubierta por SNMP
-    - Métricas de Apache, Nginx, Docker y PostgreSQL
+    únicamente con las métricas REALES medidas por RackDoc (sin ondas ni valores simulados):
+    - Estado real de cada Host/VM/Switch/Contenedor (UP=1, DOWN=0)
+    - Latencia real de Heartbeat en milisegundos (solo si el host ha respondido)
+    - CPU %, RAM %, Disco % reales (solo si un exporter real los ha reportado en metrics_snapshot)
+    - Estado Nagios real de cada Servicio (OK=0, WARNING=1, CRITICAL=2, UNKNOWN=3)
+    - Días restantes reales de certificados SSL/TLS en chequeos HTTPS
+    - Estado operativo y caudal real de bocas de Switch descubiertas por SNMP
     """
     ensure_network_hosts_seeded(db)
     assets = db.query(CmdbAsset).options(joinedload(CmdbAsset.ip_addresses)).all()
     assets_by_id = {a.id: a for a in assets}
     checks = db.query(MonitoredServiceCheck).all()
+    checks_by_asset: Dict[int, List[MonitoredServiceCheck]] = {}
+    for c in checks:
+        checks_by_asset.setdefault(c.asset_id, []).append(c)
     sw_ports = db.query(SwitchSnmpPort).all()
 
     lines: List[str] = [
@@ -1701,25 +888,38 @@ def generate_prometheus_metrics_exposition(db: Session) -> str:
         "# TYPE rackdoc_switch_port_tx_mbps gauge",
     ]
 
-    for idx, ast in enumerate(assets):
-        up_val = 0 if ast.status == "offline" else 1
-        lat_val = ast.last_ping_ms if ast.last_ping_ms is not None else round(0.8 + (idx * 0.2), 2)
-        cpu_val = round(20.0 + ((idx * 11) % 55) + math.sin(time.time() / 60.0 + idx) * 4.5, 1)
-        ram_val = round(35.0 + ((idx * 13) % 48) + math.cos(time.time() / 120.0 + idx) * 2.0, 1)
-        disk_val = round(28.0 + ((idx * 9) % 52), 1)
+    for ast in assets:
+        up_val = 1 if ast.status == "online" else 0
         lbl = f'asset_code="{ast.code}",hostname="{ast.hostname or ast.code}",asset_class="{ast.asset_class}",environment="{ast.environment}"'
         lines.append(f"rackdoc_host_up{{{lbl}}} {up_val}")
-        lines.append(f"rackdoc_host_ping_latency_ms{{{lbl}}} {lat_val}")
-        lines.append(f"rackdoc_host_cpu_usage_percent{{{lbl}}} {cpu_val}")
-        lines.append(f"rackdoc_host_ram_usage_percent{{{lbl}}} {ram_val}")
-        lines.append(f"rackdoc_host_disk_usage_percent{{{lbl}}} {disk_val}")
+        if ast.last_ping_ms is not None:
+            lines.append(f"rackdoc_host_ping_latency_ms{{{lbl}}} {round(float(ast.last_ping_ms), 2)}")
 
-    state_map = {"OK": 0, "WARNING": 1, "CRITICAL": 2, "UNKNOWN": 3, "PENDING": 0}
+        cpu_val: Optional[float] = None
+        ram_val: Optional[float] = None
+        disk_val: Optional[float] = None
+        for ch in checks_by_asset.get(ast.id, []):
+            snap = ch.metrics_snapshot or {}
+            if "cpu_pct" in snap and cpu_val is None:
+                cpu_val = float(snap["cpu_pct"])
+            if "ram_pct" in snap and ram_val is None:
+                ram_val = float(snap["ram_pct"])
+            if "disk_pct" in snap and disk_val is None:
+                disk_val = float(snap["disk_pct"])
+
+        if cpu_val is not None:
+            lines.append(f"rackdoc_host_cpu_usage_percent{{{lbl}}} {round(cpu_val, 1)}")
+        if ram_val is not None:
+            lines.append(f"rackdoc_host_ram_usage_percent{{{lbl}}} {round(ram_val, 1)}")
+        if disk_val is not None:
+            lines.append(f"rackdoc_host_disk_usage_percent{{{lbl}}} {round(disk_val, 1)}")
+
+    state_map = {"OK": 0, "WARNING": 1, "CRITICAL": 2, "UNKNOWN": 3, "PENDING": 3}
     for chk in checks:
         ast = assets_by_id.get(chk.asset_id)
         if not ast:
             continue
-        st_num = state_map.get(chk.nagios_state, 0)
+        st_num = state_map.get(chk.nagios_state, 3)
         srv_lbl = (
             f'asset_code="{ast.code}",service_name="{chk.service_name}",'
             f'check_type="{chk.check_type}",state_type="{chk.state_type}"'
@@ -1735,10 +935,32 @@ def generate_prometheus_metrics_exposition(db: Session) -> str:
         sw_code = ast.code if ast else f"SW-{sp.asset_id}"
         p_lbl = f'switch_code="{sw_code}",if_name="{sp.if_name}",if_alias="{sp.if_alias}",vlan="{sp.vlan_id or 1}"'
         lines.append(f"rackdoc_switch_port_oper_up{{{p_lbl}}} {1 if sp.oper_status == 'up' else 0}")
-        lines.append(f"rackdoc_switch_port_rx_mbps{{{p_lbl}}} {sp.in_mbps}")
-        lines.append(f"rackdoc_switch_port_tx_mbps{{{p_lbl}}} {sp.out_mbps}")
+        lines.append(f"rackdoc_switch_port_rx_mbps{{{p_lbl}}} {sp.in_mbps or 0.0}")
+        lines.append(f"rackdoc_switch_port_tx_mbps{{{p_lbl}}} {sp.out_mbps or 0.0}")
 
     return "\n".join(lines) + "\n"
+
+
+def _query_prom_range_series(promql: str, start_ts: int, end_ts: int, step_sec: int) -> Tuple[bool, Dict[int, float]]:
+    """Consulta una serie temporal real en Prometheus (/api/v1/query_range) y devuelve un mapa timestamp -> valor."""
+    values_by_ts: Dict[int, float] = {}
+    try:
+        q = urllib.parse.quote(promql)
+        url = f"{PROMETHEUS_URL}/api/v1/query_range?query={q}&start={start_ts}&end={end_ts}&step={step_sec}"
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            if resp.status == 200:
+                body = json.loads(resp.read().decode("utf-8"))
+                result_list = body.get("data", {}).get("result", [])
+                if result_list and result_list[0].get("values"):
+                    for ts_val, str_v in result_list[0]["values"]:
+                        v = float(str_v)
+                        if not math.isnan(v) and not math.isinf(v):
+                            values_by_ts[int(float(ts_val))] = round(v, 2)
+                return True, values_by_ts
+    except Exception:
+        pass
+    return False, values_by_ts
 
 
 def get_asset_telemetry_timeseries(
@@ -1747,15 +969,14 @@ def get_asset_telemetry_timeseries(
     range_hours: int = 6,
 ) -> Dict[str, Any]:
     """
-    Obtiene las series temporales de Prometheus para pintar las gráficas en '4. Red & Host':
+    Obtiene las series temporales REALES de Prometheus ('rackdoc-prometheus:9090') para pintar las gráficas en '4. Red & Host':
     - Latencia de Heartbeat (ms)
     - Uso de CPU (%) y Memoria RAM (%)
     - Uso de Almacenamiento (%)
     - Tráfico de Red Entrante / Saliente (Mbps) o Peticiones Web Apache/Nginx (req/s)
-    Consulta primero el contenedor 'rackdoc-prometheus' (:9090) y combina/completa con puntos de serie
-    para que las gráficas siempre se visualicen completas y sin huecos.
+    Si el host no tiene exporter instalado o no hay muestras en Prometheus para una métrica, devuelve 0.0 (sin ondas simuladas).
     """
-    asset = db.query(CmdbAsset).filter(CmdbAsset.id == asset_id).first()
+    asset = db.query(CmdbAsset).options(joinedload(CmdbAsset.ip_addresses)).filter(CmdbAsset.id == asset_id).first()
     if not asset:
         raise ValueError("Activo no encontrado.")
 
@@ -1764,53 +985,88 @@ def get_asset_telemetry_timeseries(
     step_sec = max(60, int((range_hours * 3600) / points_count))
     start_ts = now_ts - (points_count * step_sec)
 
-    prometheus_reachable = False
-    prom_cpu_points: List[Dict[str, Any]] = []
-    try:
-        q = urllib.parse.quote(f'rackdoc_host_cpu_usage_percent{{asset_code="{asset.code}"}}')
-        url = f"{PROMETHEUS_URL}/api/v1/query_range?query={q}&start={start_ts}&end={now_ts}&step={step_sec}"
-        req = urllib.request.Request(url, method="GET")
-        with urllib.request.urlopen(req, timeout=1.2) as resp:
-            if resp.status == 200:
-                prometheus_reachable = True
-                body = json.loads(resp.read().decode("utf-8"))
-                result_list = body.get("data", {}).get("result", [])
-                if result_list and result_list[0].get("values"):
-                    for ts_val, str_v in result_list[0]["values"]:
-                        prom_cpu_points.append({"ts": int(float(ts_val)), "value": round(float(str_v), 1)})
-    except Exception:
-        prometheus_reachable = False
+    hb_ip = next(
+        (ip.ip_address for ip in asset.ip_addresses if ip.is_heartbeat_ip),
+        asset.ip_addresses[0].ip_address if asset.ip_addresses else "",
+    )
+    inst_regex = f"{re.escape(hb_ip)}:.*" if hb_ip else f"{re.escape(asset.code)}.*"
 
-    seed = asset.id * 7
-    base_lat = asset.last_ping_ms or 1.4
+    ok_lat, lat_map = _query_prom_range_series(
+        f'rackdoc_host_ping_latency_ms{{asset_code="{asset.code}"}}',
+        start_ts,
+        now_ts,
+        step_sec,
+    )
+    ok_cpu, cpu_map = _query_prom_range_series(
+        f'100 - (avg(rate(node_cpu_seconds_total{{instance=~"{inst_regex}",mode="idle"}}[2m])) * 100) or rackdoc_host_cpu_usage_percent{{asset_code="{asset.code}"}}',
+        start_ts,
+        now_ts,
+        step_sec,
+    )
+    ok_ram, ram_map = _query_prom_range_series(
+        f'(1 - (node_memory_MemAvailable_bytes{{instance=~"{inst_regex}"}} / node_memory_MemTotal_bytes{{instance=~"{inst_regex}"}})) * 100 or rackdoc_host_ram_usage_percent{{asset_code="{asset.code}"}}',
+        start_ts,
+        now_ts,
+        step_sec,
+    )
+    ok_disk, disk_map = _query_prom_range_series(
+        f'(1 - (node_filesystem_avail_bytes{{instance=~"{inst_regex}",mountpoint="/"}} / node_filesystem_size_bytes{{instance=~"{inst_regex}",mountpoint="/"}})) * 100 or rackdoc_host_disk_usage_percent{{asset_code="{asset.code}"}}',
+        start_ts,
+        now_ts,
+        step_sec,
+    )
+    ok_rx, rx_map = _query_prom_range_series(
+        f'sum(rate(node_network_receive_bytes_total{{instance=~"{inst_regex}",device!~"lo|veth.*"}}[2m])) * 8 / 1000000 or sum(rackdoc_switch_port_rx_mbps{{switch_code="{asset.code}"}})',
+        start_ts,
+        now_ts,
+        step_sec,
+    )
+    ok_tx, tx_map = _query_prom_range_series(
+        f'sum(rate(node_network_transmit_bytes_total{{instance=~"{inst_regex}",device!~"lo|veth.*"}}[2m])) * 8 / 1000000 or sum(rackdoc_switch_port_tx_mbps{{switch_code="{asset.code}"}})',
+        start_ts,
+        now_ts,
+        step_sec,
+    )
+
+    prometheus_reachable = any([ok_lat, ok_cpu, ok_ram, ok_disk, ok_rx, ok_tx])
+    all_ts = sorted(set(lat_map.keys()) | set(cpu_map.keys()) | set(ram_map.keys()) | set(disk_map.keys()) | set(rx_map.keys()) | set(tx_map.keys()))
+
     series_points: List[Dict[str, Any]] = []
-    for i in range(points_count):
-        t = start_ts + (i * step_sec)
-        dt_label = datetime.utcfromtimestamp(t).strftime("%H:%M")
-        wave1 = math.sin((i / 4.5) + seed)
-        wave2 = math.cos((i / 6.0) + seed)
-
-        cpu_v = round(max(4.0, min(96.0, 28.0 + (seed % 35) + wave1 * 12.5 + wave2 * 4.0)), 1)
-        ram_v = round(max(12.0, min(94.0, 44.0 + (seed % 32) + wave2 * 5.2)), 1)
-        disk_v = round(max(10.0, min(92.0, 34.0 + (seed % 40) + (i * 0.05))), 1)
-        lat_v = round(max(0.3, base_lat + abs(wave1) * 1.1), 2)
-        rx_mbps = round(max(2.0, 120.0 + (seed % 180) + wave1 * 55.0), 1)
-        tx_mbps = round(max(1.5, 85.0 + (seed % 140) + wave2 * 42.0), 1)
-        web_rps = round(max(0.0, 210.0 + wave1 * 68.0), 1)
-
-        series_points.append(
-            {
-                "timestamp": t,
-                "time_label": dt_label,
-                "cpu_pct": cpu_v,
-                "ram_pct": ram_v,
-                "disk_pct": disk_v,
-                "latency_ms": lat_v,
-                "rx_mbps": rx_mbps,
-                "tx_mbps": tx_mbps,
-                "web_req_per_sec": web_rps,
-            }
-        )
+    if all_ts:
+        for t in all_ts:
+            dt_label = datetime.utcfromtimestamp(t).strftime("%H:%M")
+            series_points.append(
+                {
+                    "timestamp": t,
+                    "time_label": dt_label,
+                    "cpu_pct": round(cpu_map.get(t, 0.0), 1),
+                    "ram_pct": round(ram_map.get(t, 0.0), 1),
+                    "disk_pct": round(disk_map.get(t, 0.0), 1),
+                    "latency_ms": round(lat_map.get(t, float(asset.last_ping_ms or 0.0)), 2),
+                    "rx_mbps": round(rx_map.get(t, 0.0), 2),
+                    "tx_mbps": round(tx_map.get(t, 0.0), 2),
+                    "web_req_per_sec": 0.0,
+                }
+            )
+    else:
+        # Sin muestras históricas en Prometheus todavía: mostrar línea plana real (0.0 o latencia real medida)
+        cur_lat = round(float(asset.last_ping_ms or 0.0), 2)
+        for i in range(points_count):
+            t = start_ts + (i * step_sec)
+            dt_label = datetime.utcfromtimestamp(t).strftime("%H:%M")
+            series_points.append(
+                {
+                    "timestamp": t,
+                    "time_label": dt_label,
+                    "cpu_pct": 0.0,
+                    "ram_pct": 0.0,
+                    "disk_pct": 0.0,
+                    "latency_ms": cur_lat if i == points_count - 1 else 0.0,
+                    "rx_mbps": 0.0,
+                    "tx_mbps": 0.0,
+                    "web_req_per_sec": 0.0,
+                }
+            )
 
     return {
         "asset_id": asset.id,
@@ -1821,7 +1077,7 @@ def get_asset_telemetry_timeseries(
         "range_hours": range_hours,
         "prometheus_connected": prometheus_reachable,
         "prometheus_url": PROMETHEUS_PUBLIC_URL,
-        "scraped_points_in_tsdb": len(prom_cpu_points),
+        "scraped_points_in_tsdb": len(all_ts),
         "promql_examples": {
             "cpu": f'rackdoc_host_cpu_usage_percent{{asset_code="{asset.code}"}}',
             "ram": f'rackdoc_host_ram_usage_percent{{asset_code="{asset.code}"}}',
@@ -1917,15 +1173,17 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
             hg.code for hg in host_groups if ast.id in (hg.member_asset_ids or [])
         ]
 
-        cpu_pct = round(20.0 + ((idx * 11) % 55), 1)
-        ram_pct = round(35.0 + ((idx * 13) % 48), 1)
-        disk_pct = round(28.0 + ((idx * 9) % 52), 1)
+        cpu_pct = 0.0
+        ram_pct = 0.0
+        disk_pct = 0.0
         for ch in ast_checks:
-            if ch.metrics_snapshot and "cpu_pct" in ch.metrics_snapshot:
-                cpu_pct = float(ch.metrics_snapshot["cpu_pct"])
-                ram_pct = float(ch.metrics_snapshot.get("ram_pct", ram_pct))
-                disk_pct = float(ch.metrics_snapshot.get("disk_pct", disk_pct))
-                break
+            if ch.metrics_snapshot:
+                if "cpu_pct" in ch.metrics_snapshot:
+                    cpu_pct = float(ch.metrics_snapshot["cpu_pct"])
+                if "ram_pct" in ch.metrics_snapshot:
+                    ram_pct = float(ch.metrics_snapshot["ram_pct"])
+                if "disk_pct" in ch.metrics_snapshot:
+                    disk_pct = float(ch.metrics_snapshot["disk_pct"])
 
         serialized_checks = [
             {
@@ -2096,22 +1354,10 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
                 "web_https_url": web_https_url,
                 "connect_config": conn_cfg,
                 "mini_series": {
-                    "cpu": [
-                        round(max(4.0, min(96.0, cpu_pct + math.sin((i / 2.2) + ast.id) * 9.5)), 1)
-                        for i in range(12)
-                    ],
-                    "ram": [
-                        round(max(10.0, min(95.0, ram_pct + math.cos((i / 3.0) + ast.id) * 4.2)), 1)
-                        for i in range(12)
-                    ],
-                    "latency": [
-                        round(max(0.3, (ast.last_ping_ms or 1.2) + abs(math.sin(i + ast.id)) * 0.9), 2)
-                        for i in range(12)
-                    ],
-                    "traffic": [
-                        round(max(2.0, 95.0 + (ast.id * 9 % 140) + math.sin((i / 1.8) + ast.id) * 35.0), 1)
-                        for i in range(12)
-                    ],
+                    "cpu": [round(cpu_pct, 1) for _ in range(12)],
+                    "ram": [round(ram_pct, 1) for _ in range(12)],
+                    "latency": [round(float(ast.last_ping_ms or 0.0), 2) for _ in range(12)],
+                    "traffic": [0.0 for _ in range(12)],
                 },
                 "host_groups": member_group_codes,
                 "service_checks": serialized_checks,
@@ -2202,31 +1448,7 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
             )
         raw_boxes = getattr(st, "canvas_boxes", None)
         if raw_boxes is None:
-            if st.code == "STACK-PORTAL-ERP":
-                raw_boxes = [
-                    {
-                        "id": "BOX-DMZ-WEB",
-                        "title": "ZONA DMZ / FRONTALES WEB",
-                        "corner_data": "VLAN 20 • 10.28.20.0/24 • VIP .99",
-                        "pos_x": 0.02,
-                        "pos_y": 0.05,
-                        "width_px": 510.0,
-                        "height_px": 430.0,
-                        "color_hex": "#2563EB",
-                    },
-                    {
-                        "id": "BOX-CORE-ERP",
-                        "title": "CLÚSTER BACKEND ERP & BBDD HA",
-                        "corner_data": "VMware vSphere HA/DRS • PostgreSQL 16 Master/Replica",
-                        "pos_x": 0.50,
-                        "pos_y": 0.05,
-                        "width_px": 520.0,
-                        "height_px": 460.0,
-                        "color_hex": "#0D9488",
-                    },
-                ]
-            else:
-                raw_boxes = []
+            raw_boxes = []
             st.canvas_boxes = raw_boxes
             db.commit()
 
@@ -2943,11 +2165,11 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
                     check_type="icmp",
                     target_ip_or_url=primary_ip,
                     port=0,
-                    nagios_state="OK",
-                    state_type="HARD",
+                    nagios_state="PENDING",
+                    state_type="SOFT",
                     is_primary_heartbeat=True,
-                    latency_ms=1.1,
-                    status_output=f"PING OK - {primary_ip}",
+                    latency_ms=None,
+                    status_output=f"Pendiente de sondeo ICMP a {primary_ip}",
                     last_checked_at=datetime.utcnow(),
                 )
             )
@@ -2966,10 +2188,10 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
                         check_type=etype,
                         target_ip_or_url=str(exp.get("url") or primary_ip),
                         port=eport,
-                        nagios_state="OK",
-                        state_type="HARD",
-                        latency_ms=1.8,
-                        status_output=f"{etype.upper()} OK - Métricas activas en {primary_ip}:{eport}",
+                        nagios_state="PENDING",
+                        state_type="SOFT",
+                        latency_ms=None,
+                        status_output=f"Pendiente de sondeo en {primary_ip}:{eport}",
                         last_checked_at=datetime.utcnow(),
                     )
                 )
@@ -2991,16 +2213,20 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
                         expected_status_code=int(hb.get("expected_status_code") or 200),
                         expected_string=str(hb.get("expected_string") or ""),
                         check_config=dict(hb.get("check_config") or {}),
-                        nagios_state="OK",
-                        state_type="HARD",
-                        latency_ms=4.2 if htype in ("http", "https") else 1.6,
-                        ssl_days_remaining=88 if htype == "https" else None,
-                        status_output=f"{htype.upper()} OK - Monitorizado ({hurl}{f':{hport}' if hport and f':{hport}' not in hurl else ''})",
+                        nagios_state="PENDING",
+                        state_type="SOFT",
+                        latency_ms=None,
+                        ssl_days_remaining=None,
+                        status_output=f"Pendiente de sondeo ({hurl}{f':{hport}' if hport and f':{hport}' not in hurl else ''})",
                         last_checked_at=datetime.utcnow(),
                     )
                 )
 
     db.commit()
+    db.refresh(asset)
+    if monitoring_enabled:
+        for chk in db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.asset_id == asset.id, MonitoredServiceCheck.enabled == True).all():  # noqa: E712
+            run_single_service_check(db=db, chk=chk, asset=asset)
     prom_sync = sync_prometheus_targets_file(db)
     return {
         "status": "ok",
@@ -3354,9 +2580,9 @@ def execute_host_ssh_diagnostic(
     ssh_port: int = 22,
 ) -> Dict[str, Any]:
     """
-    Ejecuta o simula el diagnóstico remoto SSH sobre un Host/VM del Stack Tecnológico:
+    Ejecuta diagnóstico de conectividad real SSH sobre un Host/VM del Stack Tecnológico:
     - Comprueba la alcanzabilidad TCP al puerto SSH y obtiene el banner real si está accesible.
-    - Devuelve la salida de consola formateada con el estado de recursos Prometheus y servicios activos.
+    - Devuelve el estado real de las sondas y exporters monitorizados en RackDoc & Prometheus.
     """
     asset = db.query(CmdbAsset).options(joinedload(CmdbAsset.ip_addresses)).filter(CmdbAsset.id == asset_id).first()
     if not asset:
@@ -3370,7 +2596,7 @@ def execute_host_ssh_diagnostic(
         host=hb_ip,
         method="ssh",
         port=ssh_port,
-        timeout_sec=1.5,
+        timeout_sec=2.0,
         device_code=asset.code,
     )
     checks = db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.asset_id == asset.id).all()
@@ -3378,18 +2604,13 @@ def execute_host_ssh_diagnostic(
         f"  ● {c.service_name:<38} [{c.nagios_state} / {c.state_type}] -> {c.status_output}"
         for c in checks
     ]
-    now_str = datetime.utcnow().strftime("%H:%M:%S up 48 days,  6:14,  2 users,  load average: 0.42, 0.38, 0.31")
+    lat_str = f"{lat} ms" if lat is not None else "Sin respuesta"
     output = (
-        f"Conectado a {ssh_user}@{hb_ip}:{ssh_port} ({asset.hostname or asset.code} — {asset.os_or_firmware})\n"
-        f"Banner SSH / Sonda TCP: {det} (Latencia: {lat or asset.last_ping_ms or 1.2} ms)\n"
-        f"$ {command}\n"
+        f"Diagnóstico SSH hacia {ssh_user}@{hb_ip}:{ssh_port} ({asset.hostname or asset.code} — {asset.os_or_firmware})\n"
+        f"Estado Sonda TCP/SSH: {st.upper()} • Detalle/Banner: {det} • Latencia: {lat_str}\n"
+        f"Comando SSH para terminal local: ssh -p {ssh_port} {ssh_user}@{hb_ip}\n"
         f"--------------------------------------------------------------------------------\n"
-        f" {now_str}\n\n"
-        f"Filesystem      Size  Used Avail Use% Mounted on\n"
-        f"/dev/sda1       {int(asset.storage_gb or 120)}G   42G   {max(10, int((asset.storage_gb or 120) - 42))}G  35% /\n\n"
-        f"               total        used        free      shared  buff/cache   available\n"
-        f"Mem:           {int((asset.ram_gb or 16) * 1024):5d}        {int((asset.ram_gb or 16) * 520):5d}        {int((asset.ram_gb or 16) * 210):5d}          64        {int((asset.ram_gb or 16) * 294):5d}        {int((asset.ram_gb or 16) * 480):5d}\n\n"
-        f"Servicios y Exporters Monitorizados por RackDoc & Prometheus:\n"
+        f"Servicios y Exporters Reales Monitorizados por RackDoc & Prometheus:\n"
         + ("\n".join(services_lines) if services_lines else "  (Sin servicios adicionales registrados)")
         + "\n"
     )

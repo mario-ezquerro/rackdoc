@@ -4094,13 +4094,13 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
       return {
         'label': '${i * 5}m',
         'time_label': '${i * 5}m',
-        'cpu_pct': i < cpu.length ? cpu[i] : 20.0,
-        'ram_pct': i < ram.length ? ram[i] : 45.0,
-        'latency_ms': i < lat.length ? lat[i] : 1.2,
-        'rx_mbps': i < traf.length ? traf[i] : 30.0,
-        'tx_mbps': i < traf.length ? (traf[i] * 0.62) : 18.0,
-        'web_req_per_sec': 160.0 + ((i % 7) * 18.5),
-        'disk_pct': (host['disk_pct'] as num?)?.toDouble() ?? 38.0,
+        'cpu_pct': i < cpu.length ? cpu[i] : 0.0,
+        'ram_pct': i < ram.length ? ram[i] : 0.0,
+        'latency_ms': i < lat.length ? lat[i] : 0.0,
+        'rx_mbps': i < traf.length ? traf[i] : 0.0,
+        'tx_mbps': i < traf.length ? traf[i] : 0.0,
+        'web_req_per_sec': 0.0,
+        'disk_pct': (host['disk_pct'] as num?)?.toDouble() ?? 0.0,
       };
     });
   }
