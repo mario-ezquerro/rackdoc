@@ -3755,24 +3755,44 @@ def update_cmdb_asset_endpoint(
 @api_router.delete(
     "/cmdb/assets/{asset_id}",
     tags=["CMDB, Multi-IP & IP Verification"],
-    summary="Eliminar activo de la CMDB",
-    description="Elimina una máquina virtual, contenedor, cluster o activo de la CMDB y libera todas sus IPs asociadas.",
+    summary="Eliminar activo de la CMDB y liberar todas sus IPs",
+    description="Elimina una máquina virtual, contenedor, cluster o activo de la CMDB y deja libres todas sus IPs asociadas.",
 )
 def delete_cmdb_asset_endpoint(asset_id: int, db: Session = Depends(get_db)):
     asset = db.query(CmdbAsset).filter(CmdbAsset.id == asset_id).first()
     if not asset:
         raise HTTPException(status_code=404, detail="Activo CMDB no encontrado.")
+
+    # Si está vinculado a un equipo físico de Rack o Planta, limpiar la IP del equipo físico para que no se regenere
+    if asset.rack_device_id:
+        rdev = db.query(RackDevice).filter(RackDevice.id == asset.rack_device_id).first()
+        if rdev:
+            rdev.ip_address = None
+    if asset.floor_device_id:
+        fdev = db.query(FloorDevice).filter(FloorDevice.id == asset.floor_device_id).first()
+        if fdev:
+            fdev.ip_address = None
+
+    # Limpiar referencias en monitorización, topología y stack
+    db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.cmdb_asset_id == asset.id).delete()
+    db.query(SwitchSnmpPort).filter(SwitchSnmpPort.cmdb_asset_id == asset.id).delete()
+    db.query(LogicalTopologyLink).filter(
+        (LogicalTopologyLink.source_asset_id == asset.id) | (LogicalTopologyLink.target_asset_id == asset.id)
+    ).delete(synchronize_session=False)
+    for tnode in db.query(TechStackNode).filter(TechStackNode.cmdb_asset_id == asset.id).all():
+        tnode.cmdb_asset_id = None
+
+    # Eliminar todas las IPs asociadas para dejarlas libres en el mapa IPAM
+    db.query(CmdbIpAddress).filter(CmdbIpAddress.asset_id == asset.id).delete()
+
     if asset.sync_source in ("rack_device", "floor_device"):
-        # Si es un equipo físico de Rack o Planta, limpiamos sus IPs secundarias extra
-        db.query(CmdbIpAddress).filter(
-            CmdbIpAddress.asset_id == asset.id,
-            CmdbIpAddress.is_heartbeat_ip.is_(False),
-        ).delete()
         db.commit()
+        sync_prometheus_targets_file(db)
         return build_cmdb_overview(db)
 
     db.delete(asset)
     db.commit()
+    sync_prometheus_targets_file(db)
     return build_cmdb_overview(db)
 
 
@@ -3827,14 +3847,25 @@ def add_ip_to_cmdb_asset_endpoint(
 @api_router.delete(
     "/cmdb/ips/{ip_id}",
     tags=["CMDB, Multi-IP & IP Verification"],
-    summary="Liberar / eliminar una dirección IP de un activo CMDB",
+    summary="Liberar / eliminar una dirección IP de un activo CMDB (dejándola libre en IPAM)",
 )
 def delete_cmdb_ip_endpoint(ip_id: int, db: Session = Depends(get_db)):
     ip_rec = db.query(CmdbIpAddress).filter(CmdbIpAddress.id == ip_id).first()
     if not ip_rec:
         raise HTTPException(status_code=404, detail="Registro de IP no encontrado.")
+    ast = ip_rec.asset
+    if ast:
+        if ast.rack_device_id and ip_rec.is_heartbeat_ip:
+            rdev = db.query(RackDevice).filter(RackDevice.id == ast.rack_device_id).first()
+            if rdev and rdev.ip_address == ip_rec.ip_address:
+                rdev.ip_address = None
+        if ast.floor_device_id and ip_rec.is_heartbeat_ip:
+            fdev = db.query(FloorDevice).filter(FloorDevice.id == ast.floor_device_id).first()
+            if fdev and fdev.ip_address == ip_rec.ip_address:
+                fdev.ip_address = None
     db.delete(ip_rec)
     db.commit()
+    sync_prometheus_targets_file(db)
     return build_cmdb_overview(db)
 
 

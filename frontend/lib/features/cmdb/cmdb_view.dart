@@ -29,27 +29,31 @@ class _CmdbViewState extends State<CmdbView> {
   // 'inventory' | 'verifier' | 'subnets_ipam' | 'hypervisor_tree'
   String _activeTab = 'inventory';
 
-  // Filtros de '1. Inventario CMDB & Multi-IP'
+  // Filtros y Ordenación de '1. Inventario CMDB & Multi-IP' (Vista estilo Excel)
   final TextEditingController _searchCtrl = TextEditingController();
   String _classFilter = 'all';
   String _envFilter = 'all';
   bool _onlyMultiIp = false;
   int? _expandedAssetId;
+  int? _highlightedAssetId;
   int? _runningHeartbeatAssetId;
+  String _sortColumn = 'primary_ip';
+  bool _sortAscending = true;
+  final Set<int> _selectedInventoryAssetIds = {};
 
   // Estado de '2. Verificador Manual de IPs Libres y Escáner de Rangos CIDR (ej. 1.1.1.1/24)'
   final TextEditingController _verifyIpCtrl = TextEditingController(
-    text: '10.20.20.0/24',
+    text: '192.168.2.0/24',
   );
   int? _verifySelectedSubnetId;
   final int _verifyCountLimit = 254;
   bool _verifyingIp = false;
   Map<String, dynamic>? _verificationReport;
   String? _verifyError;
-  String _scanResultFilter = 'all';
+  String _scanResultFilter = 'detected_or_cmdb';
   final Set<String> _selectedDiscoveredIps = {};
   final Set<String> _dismissedScanIps = {};
-  String _bulkImportAssetClass = 'virtual_machine';
+  String _bulkImportAssetClass = 'other_machine';
   bool _alsoRegisterScannedSubnet = true;
   bool _importingDiscovered = false;
 
@@ -140,9 +144,49 @@ class _CmdbViewState extends State<CmdbView> {
     return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
+  int _ipToSortableInt(String ip) {
+    final parts = ip.trim().split('.');
+    if (parts.length != 4) return 0x7FFFFFFF;
+    int val = 0;
+    for (final p in parts) {
+      final n = int.tryParse(p);
+      if (n == null || n < 0 || n > 255) return 0x7FFFFFFF;
+      val = (val << 8) | n;
+    }
+    return val;
+  }
+
+  String _primaryIpOfAsset(Map<String, dynamic> a) {
+    final hb = (a['heartbeat_ip'] ?? '').toString().trim();
+    if (hb.isNotEmpty) return hb;
+    final ips = (a['ip_addresses'] as List?) ?? [];
+    if (ips.isNotEmpty) {
+      return ((ips.first as Map)['ip_address'] ?? '').toString().trim();
+    }
+    return '';
+  }
+
+  String _primaryMacOfAsset(Map<String, dynamic> a) {
+    final ips = (a['ip_addresses'] as List?) ?? [];
+    for (final item in ips) {
+      final m = ((item as Map)['mac_address'] ?? '').toString().trim();
+      if (m.isNotEmpty) return m;
+    }
+    return '';
+  }
+
+  String _primaryVlanOfAsset(Map<String, dynamic> a) {
+    final ips = (a['ip_addresses'] as List?) ?? [];
+    for (final item in ips) {
+      final v = (item as Map)['vlan_id'];
+      if (v != null && v.toString().isNotEmpty) return 'VLAN $v';
+    }
+    return '';
+  }
+
   List<Map<String, dynamic>> get _filteredAssets {
     final q = _searchCtrl.text.trim().toLowerCase();
-    return _assets.where((a) {
+    final filtered = _assets.where((a) {
       if (_classFilter != 'all') {
         final ac = (a['asset_class'] ?? '').toString();
         if (_classFilter == 'vms_only' &&
@@ -174,24 +218,104 @@ class _CmdbViewState extends State<CmdbView> {
         final os = (a['os_or_firmware'] ?? '').toString().toLowerCase();
         final plat = (a['hypervisor_or_platform'] ?? '').toString().toLowerCase();
         final loc = (a['physical_location_label'] ?? '').toString().toLowerCase();
+        final env = (a['environment'] ?? '').toString().toLowerCase();
+        final cls = (a['asset_class_label'] ?? _assetClassLabels[a['asset_class']] ?? '')
+            .toString()
+            .toLowerCase();
+        final status = (a['status'] ?? '').toString().toLowerCase();
+        final owner = (a['owner_team'] ?? '').toString().toLowerCase();
+        final resp = (a['responsible_person'] ?? '').toString().toLowerCase();
+        final notes = (a['notes'] ?? '').toString().toLowerCase();
+        final resources =
+            '${a['cpu_cores'] ?? ''}vcpu ${a['ram_gb'] ?? ''}gb ${a['storage_gb'] ?? ''}gb'
+                .toLowerCase();
         final ips = ((a['ip_addresses'] as List?) ?? [])
             .map((ip) =>
-                '${(ip as Map)['ip_address']} ${ip['fqdn']} ${ip['interface_name']} ${ip['mac_address']}'
+                '${(ip as Map)['ip_address']} ${ip['fqdn']} ${ip['interface_name']} ${ip['mac_address']} ${ip['ip_role_label']} vlan ${ip['vlan_id'] ?? ''}'
                     .toLowerCase())
             .join(' ');
-        if (!code.contains(q) &&
-            !name.contains(q) &&
-            !host.contains(q) &&
-            !fqdn.contains(q) &&
-            !os.contains(q) &&
-            !plat.contains(q) &&
-            !loc.contains(q) &&
-            !ips.contains(q)) {
+        final haystack =
+            '$code $name $host $fqdn $os $plat $loc $env $cls $status $owner $resp $notes $resources $ips';
+        if (!haystack.contains(q)) {
           return false;
         }
       }
       return true;
     }).toList();
+
+    filtered.sort((a, b) {
+      int cmp = 0;
+      switch (_sortColumn) {
+        case 'status':
+          cmp = (a['status'] ?? '').toString().compareTo((b['status'] ?? '').toString());
+          break;
+        case 'code':
+          cmp = (a['code'] ?? '').toString().compareTo((b['code'] ?? '').toString());
+          break;
+        case 'name':
+          cmp = (a['name'] ?? '').toString().toLowerCase().compareTo(
+                (b['name'] ?? '').toString().toLowerCase(),
+              );
+          break;
+        case 'hostname':
+          final ha = ((a['fqdn'] ?? '').toString().isNotEmpty
+                  ? a['fqdn']
+                  : (a['hostname'] ?? ''))
+              .toString()
+              .toLowerCase();
+          final hb = ((b['fqdn'] ?? '').toString().isNotEmpty
+                  ? b['fqdn']
+                  : (b['hostname'] ?? ''))
+              .toString()
+              .toLowerCase();
+          cmp = ha.compareTo(hb);
+          break;
+        case 'primary_ip':
+          cmp = _ipToSortableInt(_primaryIpOfAsset(a))
+              .compareTo(_ipToSortableInt(_primaryIpOfAsset(b)));
+          break;
+        case 'mac_vlan':
+          cmp = _primaryMacOfAsset(a).compareTo(_primaryMacOfAsset(b));
+          break;
+        case 'asset_class':
+          cmp = (a['asset_class_label'] ?? '').toString().compareTo(
+                (b['asset_class_label'] ?? '').toString(),
+              );
+          break;
+        case 'environment':
+          cmp = (a['environment'] ?? '').toString().compareTo(
+                (b['environment'] ?? '').toString(),
+              );
+          break;
+        case 'os_or_firmware':
+          cmp = (a['os_or_firmware'] ?? '').toString().toLowerCase().compareTo(
+                (b['os_or_firmware'] ?? '').toString().toLowerCase(),
+              );
+          break;
+        case 'resources':
+          final ra = ((a['cpu_cores'] as num?)?.toDouble() ?? 0) * 1000 +
+              ((a['ram_gb'] as num?)?.toDouble() ?? 0);
+          final rb = ((b['cpu_cores'] as num?)?.toDouble() ?? 0) * 1000 +
+              ((b['ram_gb'] as num?)?.toDouble() ?? 0);
+          cmp = ra.compareTo(rb);
+          break;
+        case 'location':
+          cmp = (a['physical_location_label'] ?? '').toString().toLowerCase().compareTo(
+                (b['physical_location_label'] ?? '').toString().toLowerCase(),
+              );
+          break;
+        case 'owner':
+          final oa = '${a['owner_team'] ?? ''} ${a['responsible_person'] ?? ''}'.toLowerCase();
+          final ob = '${b['owner_team'] ?? ''} ${b['responsible_person'] ?? ''}'.toLowerCase();
+          cmp = oa.compareTo(ob);
+          break;
+        default:
+          cmp = (a['code'] ?? '').toString().compareTo((b['code'] ?? '').toString());
+      }
+      return _sortAscending ? cmp : -cmp;
+    });
+
+    return filtered;
   }
 
   Future<void> _runManualVerification({
@@ -214,9 +338,14 @@ class _CmdbViewState extends State<CmdbView> {
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
       final autoSelected = <String>{};
+      int detectedOrCmdbCount = 0;
       for (final item in rawList) {
-        if (item['verdict'] == 'conflict_unregistered') {
+        final v = (item['verdict'] ?? '').toString();
+        if (v == 'conflict_unregistered') {
           autoSelected.add((item['ip_address'] ?? '').toString());
+        }
+        if (v != 'free_confirmed') {
+          detectedOrCmdbCount++;
         }
       }
       setState(() {
@@ -225,7 +354,13 @@ class _CmdbViewState extends State<CmdbView> {
         _selectedDiscoveredIps
           ..clear()
           ..addAll(autoSelected);
-        _scanResultFilter = 'all';
+        // En escaneos de rango (>1 IP), mostrar por defecto solo los dispositivos detectados/CMDB
+        // para no inundar la pantalla con las ~240 IPs vacías (salvo que sea búsqueda de libres o 0 detectados)
+        if (onlySuggestFree || rawList.length <= 1 || detectedOrCmdbCount == 0) {
+          _scanResultFilter = 'all';
+        } else {
+          _scanResultFilter = 'detected_or_cmdb';
+        }
         _verifyingIp = false;
       });
       await _loadOverview(silent: true);
@@ -239,17 +374,17 @@ class _CmdbViewState extends State<CmdbView> {
   }
 
   Future<void> _importSelectedDiscoveredToCmdb(
-    List<Map<String, dynamic>> allScanResults,
-  ) async {
-    final selectedRows = allScanResults
-        .where(
-          (r) =>
-              _selectedDiscoveredIps.contains(
-                (r['ip_address'] ?? '').toString(),
-              ) &&
-              r['documented_in_cmdb'] != true,
-        )
-        .toList();
+    List<Map<String, dynamic>> candidateRows, {
+    bool forceDirectRows = false,
+  }) async {
+    final selectedRows = candidateRows.where((r) {
+      if (r['documented_in_cmdb'] == true) return false;
+      if (r['verdict'] == 'free_confirmed' && !forceDirectRows) return false;
+      if (forceDirectRows) return true;
+      return _selectedDiscoveredIps.contains(
+        (r['ip_address'] ?? '').toString(),
+      );
+    }).toList();
     final String? scannedCidr =
         _verificationReport?['scanned_cidr'] as String?;
     final bool cidrAlreadyInCmdb =
@@ -264,7 +399,7 @@ class _CmdbViewState extends State<CmdbView> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Marca al menos una IP no registrada en la CMDB (o la casilla de crear subred) para añadirla.',
+            'Marca al menos un dispositivo detectado en red (en rojo) para añadirlo a la CMDB.',
           ),
         ),
       );
@@ -304,20 +439,71 @@ class _CmdbViewState extends State<CmdbView> {
       final int importedCount =
           (updatedOverview['imported_assets_count'] as int?) ??
               itemsPayload.length;
+      final List<String> importedIps =
+          ((updatedOverview['imported_ips'] as List?) ??
+                  itemsPayload.map((e) => e['ip_address']).toList())
+              .map((e) => e.toString())
+              .toList();
+      final Map<String, Map<String, dynamic>> importedInfoByIp = {};
+      for (final info in ((updatedOverview['imported_assets_info'] as List?) ?? [])) {
+        final m = Map<String, dynamic>.from(info as Map);
+        final ipKey = (m['ip_address'] ?? '').toString();
+        if (ipKey.isNotEmpty) {
+          importedInfoByIp[ipKey] = m;
+        }
+      }
+
+      // Actualizar en caliente las tarjetas del reporte para que pasen de ROJO a VERDE al instante
+      // sin relanzar un nuevo escaneo de las 254 IPs en segundo plano
+      if (_verificationReport != null) {
+        final currentResults = ((_verificationReport!['results'] as List?) ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        for (final r in currentResults) {
+          final rIp = (r['ip_address'] ?? '').toString();
+          if (importedIps.contains(rIp)) {
+            final ownerInfo = importedInfoByIp[rIp] ??
+                {
+                  'asset_code': 'DISC-${rIp.split('.').last}',
+                  'asset_name': 'Equipo Detectado ($rIp)',
+                  'ip_role_label': 'Gestión / Manager (Heartbeat)',
+                };
+            r['documented_in_cmdb'] = true;
+            r['verdict'] = 'active_in_network';
+            r['verdict_label'] = 'YA EN CMDB Y ACTIVA EN RED';
+            r['verdict_severity'] = 'success';
+            r['can_safely_assign'] = false;
+            r['cmdb_owners'] = [ownerInfo];
+            r['recommendation'] =
+                'Equipo añadido correctamente a la CMDB [${ownerInfo['asset_code']}] y activo en la red.';
+            _selectedDiscoveredIps.remove(rIp);
+          }
+        }
+        _verificationReport!['results'] = currentResults;
+        if (shouldCreateSubnet) {
+          _verificationReport!['cidr_already_in_cmdb'] = true;
+        }
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: const Color(0xFF15803D),
           content: Text(
-            'Se han añadido $importedCount máquina(s)/IP(s) a la CMDB${shouldCreateSubnet ? ' y la subred $scannedCidr' : ''}.',
+            '✓ Añadido(s) $importedCount equipo(s) a la CMDB (estado actualizado en verde)${shouldCreateSubnet ? ' y registrada la subred $scannedCidr' : ''}.',
             style: const TextStyle(fontWeight: FontWeight.w800),
           ),
         ),
       );
+      final subnets = (updatedOverview['subnets'] as List? ?? []);
       setState(() {
         _overview = updatedOverview;
+        if (subnets.isNotEmpty) {
+          final firstSubId = (subnets.first as Map)['id'] as int?;
+          _verifySelectedSubnetId ??= firstSubId;
+          _selectedIpamSubnetId ??= firstSubId;
+        }
         _importingDiscovered = false;
       });
-      await _runManualVerification(onlySuggestFree: false);
     } catch (e) {
       if (!mounted) return;
       setState(() => _importingDiscovered = false);
@@ -702,18 +888,99 @@ class _CmdbViewState extends State<CmdbView> {
   }
 
   // ===========================================================================
-  // PESTAÑA 1: INVENTARIO CMDB & MULTI-IP (FÍSICOS, VMs, CONTENEDORES, CLUSTERS)
+  // PESTAÑA 1: INVENTARIO CMDB & MULTI-IP (VISTA TABLA ESTILO EXCEL ORDENABLE)
   // ===========================================================================
+  void _onSortInventoryBy(String colKey) {
+    setState(() {
+      if (_sortColumn == colKey) {
+        _sortAscending = !_sortAscending;
+      } else {
+        _sortColumn = colKey;
+        _sortAscending = true;
+      }
+    });
+  }
+
+  Future<void> _deleteSelectedInventoryAssets() async {
+    if (_selectedInventoryAssetIds.isEmpty) return;
+    final count = _selectedInventoryAssetIds.length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Eliminar $count equipo(s) y liberar sus IPs'),
+        content: Text(
+          '¿Confirmas que deseas eliminar los $count equipo(s) seleccionados de la CMDB y dejar todas sus direcciones IP como NO OCUPADAS (Libres) en el mapa IPAM?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Sí, Eliminar y Liberar IPs'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final ids = _selectedInventoryAssetIds.toList();
+    for (final id in ids) {
+      try {
+        await widget.api.deleteCmdbAsset(id);
+      } catch (_) {}
+    }
+    setState(() {
+      _selectedInventoryAssetIds.clear();
+    });
+    await _loadOverview(silent: true);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: const Color(0xFF15803D),
+        content: Text(
+          'Se han eliminado $count equipo(s) y sus IPs han quedado libres.',
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+      ),
+    );
+  }
+
+  void _jumpToIpInIpamMap(String ipAddr) {
+    if (ipAddr.isEmpty) return;
+    int? targetSubnetId = _selectedIpamSubnetId;
+    final prefix3 = ipAddr.rsplitThreeOctets();
+    for (final s in _subnets) {
+      final cidr = (s['cidr'] ?? '').toString();
+      if (cidr.startsWith('$prefix3.')) {
+        targetSubnetId = s['id'] as int?;
+        break;
+      }
+    }
+    setState(() {
+      if (targetSubnetId != null) {
+        _selectedIpamSubnetId = targetSubnetId;
+      }
+      _activeTab = 'subnets_ipam';
+    });
+  }
+
   Widget _buildInventoryTab() {
     final items = _filteredAssets;
+    final allVisibleSelected = items.isNotEmpty &&
+        items.every((a) => _selectedInventoryAssetIds.contains(a['id'] as int));
+
     return Column(
       children: [
-        // Barra de búsqueda y filtros por tipo de máquina
+        // Barra superior de búsqueda universal, filtros y acciones en lote (estilo Excel)
         Container(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
           decoration: const BoxDecoration(
             color: Colors.white,
-            border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+            border: Border(bottom: BorderSide(color: Color(0xFFCBD5E1))),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -723,14 +990,14 @@ class _CmdbViewState extends State<CmdbView> {
                   Expanded(
                     flex: 3,
                     child: SizedBox(
-                      height: 38,
+                      height: 36,
                       child: TextField(
                         controller: _searchCtrl,
                         onChanged: (_) => setState(() {}),
                         style: const TextStyle(fontSize: 12.5),
                         decoration: InputDecoration(
                           hintText:
-                              'Buscar por Hostname, FQDN, cualquier IP (Gestión, Servicio, VIP, iDRAC), MAC, SO o Hipervisor...',
+                              'Buscar por cualquier dato (Código, Nombre, Hostname, FQDN, IP, MAC, VLAN, Clase, SO, Puertos, Ubicación, Responsable, Notas)...',
                           prefixIcon: const Icon(Icons.search, size: 18),
                           suffixIcon: _searchCtrl.text.isNotEmpty
                               ? IconButton(
@@ -743,40 +1010,41 @@ class _CmdbViewState extends State<CmdbView> {
                               : null,
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 12,
-                            vertical: 8,
+                            vertical: 6,
                           ),
                           border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(7),
                           ),
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 10),
                   FilterChip(
                     selected: _onlyMultiIp,
+                    visualDensity: VisualDensity.compact,
                     label: const Text(
-                      'Solo Hosts Multi-IP (>1 IP)',
+                      'Multi-IP (>1 IP)',
                       style: TextStyle(
-                        fontSize: 11.5,
+                        fontSize: 11,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                     onSelected: (v) => setState(() => _onlyMultiIp = v),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   DropdownButtonHideUnderline(
                     child: Container(
-                      height: 38,
+                      height: 36,
                       padding: const EdgeInsets.symmetric(horizontal: 10),
                       decoration: BoxDecoration(
                         border: Border.all(color: const Color(0xFFCBD5E1)),
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(7),
                       ),
                       child: DropdownButton<String>(
                         value: _envFilter,
                         style: const TextStyle(
-                          fontSize: 12,
+                          fontSize: 11.5,
                           color: Color(0xFF0F172A),
                           fontWeight: FontWeight.w700,
                         ),
@@ -812,62 +1080,757 @@ class _CmdbViewState extends State<CmdbView> {
                       ),
                     ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    _buildClassFilterPill('all', 'Todos (${_assets.length})'),
-                    _buildClassFilterPill(
-                      'vms_only',
-                      'Máquinas Virtuales (VMs)',
-                    ),
-                    _buildClassFilterPill(
-                      'containers_clusters',
-                      'Contenedores & Clusters VIP',
-                    ),
-                    _buildClassFilterPill(
-                      'physical_server',
-                      'Servidores Físicos (Rack)',
-                    ),
-                    _buildClassFilterPill(
-                      'cloud_instance',
-                      'Cloud / VPS Externos',
-                    ),
-                    _buildClassFilterPill(
-                      'network_security',
-                      'Switches, Routers & Firewalls',
-                    ),
-                    _buildClassFilterPill(
-                      'storage_san_nas',
-                      'Cabinas SAN / NAS',
-                    ),
-                    _buildClassFilterPill(
-                      'floor_endpoint',
-                      'Equipos de Planta',
+                  if (widget.canEdit && _selectedInventoryAssetIds.isNotEmpty) ...[
+                    const SizedBox(width: 10),
+                    FilledButton.icon(
+                      onPressed: _deleteSelectedInventoryAssets,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFDC2626),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      icon: const Icon(Icons.delete_sweep_rounded, size: 16),
+                      label: Text(
+                        'Eliminar y Liberar IPs (${_selectedInventoryAssetIds.length})',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
                     ),
                   ],
-                ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          _buildClassFilterPill(
+                            'all',
+                            'Todos (${_assets.length})',
+                          ),
+                          _buildClassFilterPill(
+                            'vms_only',
+                            'Máquinas Virtuales (VMs)',
+                          ),
+                          _buildClassFilterPill(
+                            'containers_clusters',
+                            'Contenedores & Clusters VIP',
+                          ),
+                          _buildClassFilterPill(
+                            'physical_server',
+                            'Servidores Físicos (Rack)',
+                          ),
+                          _buildClassFilterPill(
+                            'network_security',
+                            'Switches, Routers & Firewalls',
+                          ),
+                          _buildClassFilterPill(
+                            'storage_san_nas',
+                            'Cabinas SAN / NAS',
+                          ),
+                          _buildClassFilterPill(
+                            'floor_endpoint',
+                            'Equipos de Planta',
+                          ),
+                          _buildClassFilterPill(
+                            'other_machine',
+                            'Otros Equipos Detectados',
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Mostrando ${items.length} de ${_assets.length} filas • Clic en cualquier cabecera para ordenar ▲▼',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF475569),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
         ),
+        // Cabecera fija estilo Hoja de Cálculo Excel
+        Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFFE2E8F0),
+            border: Border(
+              bottom: BorderSide(color: Color(0xFF94A3B8), width: 1.5),
+            ),
+          ),
+          child: Row(
+            children: [
+              if (widget.canEdit)
+                Container(
+                  width: 38,
+                  alignment: Alignment.center,
+                  decoration: const BoxDecoration(
+                    border: Border(right: BorderSide(color: Color(0xFFCBD5E1))),
+                  ),
+                  child: Checkbox(
+                    value: allVisibleSelected,
+                    visualDensity: VisualDensity.compact,
+                    onChanged: (v) {
+                      setState(() {
+                        if (v == true) {
+                          for (final a in items) {
+                            _selectedInventoryAssetIds.add(a['id'] as int);
+                          }
+                        } else {
+                          _selectedInventoryAssetIds.clear();
+                        }
+                      });
+                    },
+                  ),
+                ),
+              _buildExcelSortableHeaderCell('#', null, width: 38),
+              _buildExcelSortableHeaderCell('Estado / Ping', 'status', width: 108),
+              _buildExcelSortableHeaderCell('Código', 'code', width: 116),
+              _buildExcelSortableHeaderCell(
+                'IP Principal (Gestión)',
+                'primary_ip',
+                width: 146,
+              ),
+              _buildExcelSortableHeaderCell(
+                'Nombre del Equipo',
+                'name',
+                flex: 16,
+              ),
+              _buildExcelSortableHeaderCell(
+                'Hostname / FQDN',
+                'hostname',
+                flex: 15,
+              ),
+              _buildExcelSortableHeaderCell(
+                'MAC / VLAN / +IPs',
+                'mac_vlan',
+                flex: 14,
+              ),
+              _buildExcelSortableHeaderCell(
+                'Clase / Tipo',
+                'asset_class',
+                flex: 13,
+              ),
+              _buildExcelSortableHeaderCell(
+                'Entorno',
+                'environment',
+                width: 82,
+              ),
+              _buildExcelSortableHeaderCell(
+                'SO / Firmware / Puertos',
+                'os_or_firmware',
+                flex: 16,
+              ),
+              _buildExcelSortableHeaderCell(
+                'vCPU / RAM / Disco',
+                'resources',
+                width: 122,
+              ),
+              _buildExcelSortableHeaderCell(
+                'Ubicación / Hipervisor',
+                'location',
+                flex: 14,
+              ),
+              _buildExcelSortableHeaderCell(
+                'Propietario / Resp.',
+                'owner',
+                flex: 12,
+              ),
+              _buildExcelSortableHeaderCell(
+                'Acciones',
+                null,
+                width: widget.canEdit ? 156 : 78,
+              ),
+            ],
+          ),
+        ),
+        // Cuerpo de filas estilo Excel con líneas de cuadrícula
         Expanded(
           child: items.isEmpty
               ? const Center(
                   child: Text(
-                    'No hay máquinas o activos que coincidan con el filtro actual.',
+                    'No hay equipos o activos en la CMDB que coincidan con la búsqueda o filtro actual.',
                     style: TextStyle(color: Color(0xFF64748B), fontSize: 13),
                   ),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.all(16),
                   itemCount: items.length,
-                  itemBuilder: (ctx, idx) => _buildAssetCard(items[idx]),
+                  itemBuilder: (ctx, idx) =>
+                      _buildExcelAssetRow(items[idx], idx),
                 ),
         ),
+      ],
+    );
+  }
+
+  Widget _buildExcelSortableHeaderCell(
+    String label,
+    String? colKey, {
+    double? width,
+    int? flex,
+  }) {
+    final bool isSorted = colKey != null && _sortColumn == colKey;
+    final Widget content = InkWell(
+      onTap: colKey != null ? () => _onSortInventoryBy(colKey) : null,
+      child: Container(
+        height: 34,
+        padding: const EdgeInsets.symmetric(horizontal: 7),
+        alignment: Alignment.centerLeft,
+        decoration: BoxDecoration(
+          color: isSorted ? const Color(0xFFDBEAFE) : Colors.transparent,
+          border: const Border(right: BorderSide(color: Color(0xFFCBD5E1))),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  color: isSorted
+                      ? const Color(0xFF1E3A8A)
+                      : const Color(0xFF1E293B),
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (colKey != null)
+              Icon(
+                isSorted
+                    ? (_sortAscending
+                        ? Icons.arrow_drop_up_rounded
+                        : Icons.arrow_drop_down_rounded)
+                    : Icons.unfold_more_rounded,
+                size: isSorted ? 18 : 13,
+                color: isSorted
+                    ? const Color(0xFF1E3A8A)
+                    : const Color(0xFF64748B),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (width != null) {
+      return SizedBox(width: width, child: content);
+    }
+    return Expanded(flex: flex ?? 10, child: content);
+  }
+
+  Widget _buildExcelBodyCell(
+    Widget child, {
+    double? width,
+    int? flex,
+    Alignment alignment = Alignment.centerLeft,
+  }) {
+    final cell = Container(
+      constraints: const BoxConstraints(minHeight: 34),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+      alignment: alignment,
+      decoration: const BoxDecoration(
+        border: Border(right: BorderSide(color: Color(0xFFE2E8F0))),
+      ),
+      child: child,
+    );
+    if (width != null) {
+      return SizedBox(width: width, child: cell);
+    }
+    return Expanded(flex: flex ?? 10, child: cell);
+  }
+
+  Widget _buildExcelAssetRow(Map<String, dynamic> asset, int rowIndex) {
+    final int assetId = asset['id'] as int;
+    final String code = (asset['code'] ?? '').toString();
+    final String name = (asset['name'] ?? '').toString();
+    final String hostname = (asset['hostname'] ?? '').toString();
+    final String fqdn = (asset['fqdn'] ?? '').toString();
+    final String assetClass = (asset['asset_class'] ?? '').toString();
+    final String classLabel =
+        (asset['asset_class_label'] ?? _assetClassLabels[assetClass] ?? assetClass)
+            .toString();
+    final String env = (asset['environment'] ?? 'production').toString().toUpperCase();
+    final String status = (asset['status'] ?? 'unmonitored').toString();
+    final double? pingMs = (asset['last_ping_ms'] as num?)?.toDouble();
+    final List<Map<String, dynamic>> ips = ((asset['ip_addresses'] as List?) ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final String primaryIp = _primaryIpOfAsset(asset);
+    final String primaryMac = _primaryMacOfAsset(asset);
+    final String primaryVlan = _primaryVlanOfAsset(asset);
+    final int extraIpsCount = ips.length > 1 ? ips.length - 1 : 0;
+
+    final int cores = (asset['cpu_cores'] as int?) ?? 0;
+    final double ramGb = (asset['ram_gb'] as num?)?.toDouble() ?? 0.0;
+    final double storageGb = (asset['storage_gb'] as num?)?.toDouble() ?? 0.0;
+    final String resourcesStr = (cores > 0 || ramGb > 0 || storageGb > 0)
+        ? '${cores}C / ${ramGb.toStringAsFixed(0)}G / ${storageGb.toStringAsFixed(0)}G'
+        : '-';
+    final String os = (asset['os_or_firmware'] ?? '-').toString();
+    final String locLabel =
+        (asset['physical_location_label'] ?? asset['hypervisor_or_platform'] ?? '-')
+            .toString();
+    final String ownerTeam = (asset['owner_team'] ?? '').toString();
+    final String respPerson = (asset['responsible_person'] ?? '').toString();
+    final String ownerDisplay = respPerson.isNotEmpty
+        ? '$ownerTeam ($respPerson)'
+        : (ownerTeam.isNotEmpty ? ownerTeam : '-');
+
+    final bool isExpanded = _expandedAssetId == assetId;
+    final bool isHighlighted = _highlightedAssetId == assetId;
+    final bool isSelected = _selectedInventoryAssetIds.contains(assetId);
+    final Color badgeColor = _classBadgeColor(assetClass);
+
+    Color statusColor = const Color(0xFF64748B);
+    String statusText = 'N/A';
+    if (status == 'online') {
+      statusColor = const Color(0xFF16A34A);
+      statusText =
+          'ONLINE${pingMs != null ? ' ${pingMs.toStringAsFixed(0)}ms' : ''}';
+    } else if (status == 'offline') {
+      statusColor = const Color(0xFFDC2626);
+      statusText = 'OFFLINE';
+    } else if (status == 'warning') {
+      statusColor = const Color(0xFFD97706);
+      statusText = 'WARN';
+    }
+
+    final Color rowBg = isHighlighted
+        ? const Color(0xFFFEF9C3)
+        : isSelected
+            ? const Color(0xFFE0F2FE)
+            : isExpanded
+                ? const Color(0xFFF0F9FF)
+                : (rowIndex.isEven ? Colors.white : const Color(0xFFF8FAFC));
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        InkWell(
+          onTap: () {
+            setState(() {
+              _highlightedAssetId = assetId;
+              _expandedAssetId = isExpanded ? null : assetId;
+            });
+          },
+          child: Container(
+            decoration: BoxDecoration(
+              color: rowBg,
+              border: Border(
+                bottom: BorderSide(
+                  color: isHighlighted
+                      ? const Color(0xFFEAB308)
+                      : const Color(0xFFCBD5E1),
+                  width: isHighlighted ? 1.5 : 0.8,
+                ),
+              ),
+            ),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (widget.canEdit)
+                    Container(
+                      width: 38,
+                      alignment: Alignment.center,
+                      decoration: const BoxDecoration(
+                        border: Border(
+                          right: BorderSide(color: Color(0xFFE2E8F0)),
+                        ),
+                      ),
+                      child: Checkbox(
+                        value: isSelected,
+                        visualDensity: VisualDensity.compact,
+                        onChanged: (v) {
+                          setState(() {
+                            if (v == true) {
+                              _selectedInventoryAssetIds.add(assetId);
+                            } else {
+                              _selectedInventoryAssetIds.remove(assetId);
+                            }
+                          });
+                        },
+                      ),
+                    ),
+                  _buildExcelBodyCell(
+                    Text(
+                      '${rowIndex + 1}',
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        fontFamily: 'monospace',
+                        color: Color(0xFF64748B),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    width: 38,
+                    alignment: Alignment.center,
+                  ),
+                  _buildExcelBodyCell(
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: statusColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: statusColor.withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              color: statusColor,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              statusText,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w900,
+                                color: statusColor,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    width: 108,
+                  ),
+                  _buildExcelBodyCell(
+                    SelectableText(
+                      code,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w900,
+                        fontFamily: 'monospace',
+                        color: Color(0xFF0F172A),
+                      ),
+                    ),
+                    width: 116,
+                  ),
+                  _buildExcelBodyCell(
+                    primaryIp.isEmpty
+                        ? const Text(
+                            'Sin IP',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF94A3B8),
+                            ),
+                          )
+                        : InkWell(
+                            onTap: () => _jumpToIpInIpamMap(primaryIp),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.lan_outlined,
+                                  size: 13,
+                                  color: Color(0xFF0284C7),
+                                ),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    primaryIp,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w900,
+                                      fontFamily: 'monospace',
+                                      color: Color(0xFF0369A1),
+                                      decoration: TextDecoration.underline,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                    width: 146,
+                  ),
+                  _buildExcelBodyCell(
+                    Text(
+                      name,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF1E293B),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    flex: 16,
+                  ),
+                  _buildExcelBodyCell(
+                    Text(
+                      fqdn.isNotEmpty
+                          ? fqdn
+                          : (hostname.isNotEmpty ? hostname : '-'),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                        color: Color(0xFF334155),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    flex: 15,
+                  ),
+                  _buildExcelBodyCell(
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            [
+                              if (primaryMac.isNotEmpty) primaryMac,
+                              if (primaryVlan.isNotEmpty) primaryVlan,
+                            ].join(' • ').isEmpty
+                                ? '-'
+                                : [
+                                    if (primaryMac.isNotEmpty) primaryMac,
+                                    if (primaryVlan.isNotEmpty) primaryVlan,
+                                  ].join(' • '),
+                            style: const TextStyle(
+                              fontSize: 10.5,
+                              fontFamily: 'monospace',
+                              color: Color(0xFF475569),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (extraIpsCount > 0)
+                          Container(
+                            margin: const EdgeInsets.only(left: 4),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFDBEAFE),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              '+$extraIpsCount IP',
+                              style: const TextStyle(
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF1E3A8A),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    flex: 14,
+                  ),
+                  _buildExcelBodyCell(
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: badgeColor.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        classLabel,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: badgeColor,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    flex: 13,
+                  ),
+                  _buildExcelBodyCell(
+                    Text(
+                      env,
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF475569),
+                      ),
+                    ),
+                    width: 82,
+                  ),
+                  _buildExcelBodyCell(
+                    Text(
+                      os,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF334155),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    flex: 16,
+                  ),
+                  _buildExcelBodyCell(
+                    Text(
+                      resourcesStr,
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF334155),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    width: 122,
+                  ),
+                  _buildExcelBodyCell(
+                    Text(
+                      locLabel,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF475569),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    flex: 14,
+                  ),
+                  _buildExcelBodyCell(
+                    Text(
+                      ownerDisplay,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF475569),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    flex: 12,
+                  ),
+                  _buildExcelBodyCell(
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'Comprobar Heartbeat ahora',
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 26,
+                            minHeight: 26,
+                          ),
+                          onPressed: _runningHeartbeatAssetId == assetId
+                              ? null
+                              : () => _triggerAssetHeartbeat(asset),
+                          icon: _runningHeartbeatAssetId == assetId
+                              ? const SizedBox(
+                                  width: 13,
+                                  height: 13,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.network_ping_rounded,
+                                  size: 16,
+                                  color: Color(0xFF0284C7),
+                                ),
+                        ),
+                        if (widget.canEdit) ...[
+                          IconButton(
+                            tooltip: 'Añadir otra IP a este equipo',
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 26,
+                              minHeight: 26,
+                            ),
+                            onPressed: () => _openAddSingleIpDialog(asset),
+                            icon: const Icon(
+                              Icons.add_link_rounded,
+                              size: 16,
+                              color: Color(0xFF15803D),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Editar equipo y sus IPs',
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 26,
+                              minHeight: 26,
+                            ),
+                            onPressed: () =>
+                                _openAssetEditorDialog(existing: asset),
+                            icon: const Icon(
+                              Icons.edit_outlined,
+                              size: 16,
+                              color: Color(0xFF1E3A8A),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip:
+                                'Eliminar equipo de la CMDB y dejar su IP libre (no ocupada)',
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 26,
+                              minHeight: 26,
+                            ),
+                            onPressed: () => _confirmDeleteAsset(asset),
+                            icon: const Icon(
+                              Icons.delete_outline_rounded,
+                              size: 16,
+                              color: Color(0xFFDC2626),
+                            ),
+                          ),
+                        ],
+                        IconButton(
+                          tooltip: isExpanded
+                              ? 'Ocultar desglose de interfaces IP'
+                              : 'Desplegar todas las IPs y detalles',
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 26,
+                            minHeight: 26,
+                          ),
+                          onPressed: () => setState(
+                            () => _expandedAssetId = isExpanded ? null : assetId,
+                          ),
+                          icon: Icon(
+                            isExpanded
+                                ? Icons.expand_less_rounded
+                                : Icons.expand_more_rounded,
+                            size: 17,
+                          ),
+                        ),
+                      ],
+                    ),
+                    width: widget.canEdit ? 156 : 78,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (isExpanded)
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: const BoxDecoration(
+              color: Color(0xFFF8FAFC),
+              border: Border(
+                bottom: BorderSide(color: Color(0xFF94A3B8), width: 1.2),
+              ),
+            ),
+            child: _buildExpandedIpTableForAsset(asset, ips),
+          ),
       ],
     );
   }
@@ -1509,17 +2472,30 @@ class _CmdbViewState extends State<CmdbView> {
                             _runManualVerification(customIp: addr);
                           },
                         ),
-                        if (widget.canEdit && ipId != null && ips.length > 1)
+                        if (widget.canEdit && ipId != null)
                           IconButton(
-                            tooltip: 'Liberar / Quitar esta IP secundaria',
+                            tooltip:
+                                'Liberar esta IP (dejar como NO OCUPADA en el mapa IPAM)',
                             icon: const Icon(
-                              Icons.remove_circle_outline,
+                              Icons.link_off_rounded,
                               size: 16,
                               color: Colors.redAccent,
                             ),
                             onPressed: () async {
                               await widget.api.deleteCmdbIp(ipId);
                               await _loadOverview(silent: true);
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  backgroundColor: const Color(0xFF15803D),
+                                  content: Text(
+                                    'IP $addr liberada (marcada como No Ocupada en el mapa IPAM).',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                              );
                             },
                           ),
                       ],
@@ -1556,8 +2532,14 @@ class _CmdbViewState extends State<CmdbView> {
         .where((r) => r['verdict'] == 'no_response')
         .length;
 
+    final int detectedOrCmdbCount =
+        conflictCount + activeInCmdbCount + noResponseCount;
+
     final filteredResults = allResults.where((r) {
       if (_scanResultFilter == 'all') return true;
+      if (_scanResultFilter == 'detected_or_cmdb') {
+        return (r['verdict'] ?? '').toString() != 'free_confirmed';
+      }
       return (r['verdict'] ?? '').toString() == _scanResultFilter;
     }).toList();
 
@@ -1823,29 +2805,34 @@ class _CmdbViewState extends State<CmdbView> {
                         ),
                       ),
                       _buildScanFilterChip(
-                        'all',
-                        'Todos (${allResults.length})',
+                        'detected_or_cmdb',
+                        'Equipos Detectados / En CMDB ($detectedOrCmdbCount)',
                         const Color(0xFF0F172A),
                       ),
                       _buildScanFilterChip(
                         'conflict_unregistered',
-                        'Detectados en Red NO en CMDB ($conflictCount)',
+                        'Detectados NO en CMDB - Rojo ($conflictCount)',
                         const Color(0xFFB91C1C),
                       ),
                       _buildScanFilterChip(
-                        'free_confirmed',
-                        'IPs Libres Confirmadas ($freeCount)',
-                        const Color(0xFF15803D),
-                      ),
-                      _buildScanFilterChip(
                         'active_in_network',
-                        'Ya en CMDB y Activos ($activeInCmdbCount)',
-                        const Color(0xFF1D4ED8),
+                        'En CMDB y Activos - Verde ($activeInCmdbCount)',
+                        const Color(0xFF15803D),
                       ),
                       _buildScanFilterChip(
                         'no_response',
                         'En CMDB Sin Respuesta ($noResponseCount)',
                         const Color(0xFFB45309),
+                      ),
+                      _buildScanFilterChip(
+                        'free_confirmed',
+                        'IPs Libres / No Ocupadas ($freeCount)',
+                        const Color(0xFF0284C7),
+                      ),
+                      _buildScanFilterChip(
+                        'all',
+                        'Ver Rango Completo (${allResults.length})',
+                        const Color(0xFF475569),
                       ),
                     ],
                   ),
@@ -2070,21 +3057,24 @@ class _CmdbViewState extends State<CmdbView> {
             .map((e) => Map<String, dynamic>.from(e as Map))
             .toList();
 
-    Color borderCol = const Color(0xFF86EFAC);
-    Color headerBg = const Color(0xFFF0FDF4);
-    Color badgeCol = const Color(0xFF15803D);
-    IconData vIcon = Icons.check_circle_rounded;
+    // Por defecto (free_confirmed): azul/pizarra informativo (IP libre, sin equipo en red)
+    Color borderCol = const Color(0xFFBAE6FD);
+    Color headerBg = const Color(0xFFF0F9FF);
+    Color badgeCol = const Color(0xFF0284C7);
+    IconData vIcon = Icons.check_circle_outline_rounded;
 
     if (verdict == 'conflict_unregistered') {
+      // ROJO: Dispositivo detectado en red pendiente de añadir a CMDB
       borderCol = const Color(0xFFFCA5A5);
       headerBg = const Color(0xFFFEF2F2);
       badgeCol = const Color(0xFFB91C1C);
       vIcon = Icons.warning_amber_rounded;
     } else if (verdict == 'active_in_network') {
-      borderCol = const Color(0xFF93C5FD);
-      headerBg = const Color(0xFFEFF6FF);
-      badgeCol = const Color(0xFF1D4ED8);
-      vIcon = Icons.info_rounded;
+      // VERDE: Dispositivo añadido a la CMDB y activo en red
+      borderCol = const Color(0xFF86EFAC);
+      headerBg = const Color(0xFFF0FDF4);
+      badgeCol = const Color(0xFF15803D);
+      vIcon = Icons.check_circle_rounded;
     } else if (verdict == 'no_response') {
       borderCol = const Color(0xFFFCD34D);
       headerBg = const Color(0xFFFFFBEB);
@@ -2115,7 +3105,9 @@ class _CmdbViewState extends State<CmdbView> {
               runSpacing: 6,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                if (widget.canEdit && !documentedInCmdb)
+                if (widget.canEdit &&
+                    !documentedInCmdb &&
+                    verdict == 'conflict_unregistered')
                   Checkbox(
                     value: isSelectedForImport,
                     activeColor: const Color(0xFF1E3A8A),
@@ -2165,21 +3157,29 @@ class _CmdbViewState extends State<CmdbView> {
                     color: Color(0xFF475569),
                   ),
                 ),
-                if (widget.canEdit && !documentedInCmdb) ...[
+                if (widget.canEdit &&
+                    !documentedInCmdb &&
+                    verdict == 'conflict_unregistered') ...[
                   FilledButton.icon(
-                    onPressed: () async {
-                      await _importSelectedDiscoveredToCmdb([r]);
-                    },
+                    onPressed: _importingDiscovered
+                        ? null
+                        : () async {
+                            await _importSelectedDiscoveredToCmdb(
+                              [r],
+                              forceDirectRows: true,
+                            );
+                          },
                     style: FilledButton.styleFrom(
-                      backgroundColor: verdict == 'conflict_unregistered'
-                          ? const Color(0xFFB91C1C)
-                          : const Color(0xFF1E3A8A),
+                      backgroundColor: const Color(0xFFB91C1C),
                       visualDensity: VisualDensity.compact,
                     ),
                     icon: const Icon(Icons.add_task_rounded, size: 15),
                     label: const Text(
-                      'Añadir a CMDB (1 clic)',
-                      style: TextStyle(fontSize: 11.5),
+                      'Añadir a CMDB (Pasa a Verde)',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
                   OutlinedButton.icon(
@@ -2209,6 +3209,46 @@ class _CmdbViewState extends State<CmdbView> {
                       style: TextStyle(fontSize: 11.5),
                     ),
                   ),
+                ] else if (widget.canEdit &&
+                    !documentedInCmdb &&
+                    verdict == 'free_confirmed') ...[
+                  OutlinedButton.icon(
+                    onPressed: () => _openAssetEditorDialog(prefilledIp: ip),
+                    style: OutlinedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    icon: const Icon(Icons.add_box_outlined, size: 15),
+                    label: const Text(
+                      'Asignar IP Libre a Nueva VM/Host',
+                      style: TextStyle(fontSize: 11.5),
+                    ),
+                  ),
+                ] else if (documentedInCmdb && owners.isNotEmpty) ...[
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      final aid = owners.first['asset_id'] as int?;
+                      setState(() {
+                        _activeTab = 'inventory';
+                        if (aid != null) {
+                          _highlightedAssetId = aid;
+                          _expandedAssetId = aid;
+                        }
+                      });
+                    },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF15803D),
+                      side: const BorderSide(color: Color(0xFF86EFAC)),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    icon: const Icon(Icons.table_chart_outlined, size: 15),
+                    label: const Text(
+                      'Ver en Inventario CMDB',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
                 ],
                 TextButton.icon(
                   onPressed: () {
@@ -2223,7 +3263,7 @@ class _CmdbViewState extends State<CmdbView> {
                   ),
                   icon: const Icon(Icons.close_rounded, size: 15),
                   label: const Text(
-                    'Descartar / No añadir',
+                    'Ocultar de la lista',
                     style: TextStyle(fontSize: 11),
                   ),
                 ),
@@ -3075,6 +4115,40 @@ class _CmdbViewState extends State<CmdbView> {
     );
   }
 
+  Widget _buildDetailInfoRow(String label, String value, {bool mono = false}) {
+    if (value.trim().isEmpty || value == '-') return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 155,
+            child: Text(
+              '$label:',
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF475569),
+              ),
+            ),
+          ),
+          Expanded(
+            child: SelectableText(
+              value,
+              style: TextStyle(
+                fontSize: 12,
+                fontFamily: mono ? 'monospace' : null,
+                fontWeight: mono ? FontWeight.w800 : FontWeight.w600,
+                color: const Color(0xFF0F172A),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _onTapIpamCell({
     required String ipStr,
     required Map<String, dynamic> subnet,
@@ -3083,78 +4157,396 @@ class _CmdbViewState extends State<CmdbView> {
     bool isNetworkAddress = false,
     bool isBroadcastAddress = false,
   }) {
+    final int? assetId = allocated?['asset_id'] as int?;
+    final int? ipId = allocated?['ip_id'] as int?;
+    final Map<String, dynamic>? fullAsset = assetId != null
+        ? _assets.cast<Map<String, dynamic>?>().firstWhere(
+              (a) => a?['id'] == assetId,
+              orElse: () => null,
+            )
+        : null;
+
+    final String status =
+        (fullAsset?['status'] ?? allocated?['status'] ?? 'unknown').toString();
+    final double? pingMs = ((fullAsset?['last_ping_ms'] ?? allocated?['last_ping_ms']) as num?)
+        ?.toDouble();
+    final int cores = (fullAsset?['cpu_cores'] ?? allocated?['cpu_cores'] ?? 0) as int? ?? 0;
+    final double ramGb =
+        ((fullAsset?['ram_gb'] ?? allocated?['ram_gb']) as num?)?.toDouble() ?? 0.0;
+    final double storageGb =
+        ((fullAsset?['storage_gb'] ?? allocated?['storage_gb']) as num?)?.toDouble() ?? 0.0;
+    final String resourcesStr = (cores > 0 || ramGb > 0 || storageGb > 0)
+        ? '$cores vCPU • ${ramGb.toStringAsFixed(0)} GB RAM • ${storageGb.toStringAsFixed(0)} GB Disco'
+        : '';
+    final List<Map<String, dynamic>> allAssetIps =
+        ((fullAsset?['ip_addresses'] as List?) ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Dirección IP $ipStr (${subnet['cidr']})'),
+        title: Row(
+          children: [
+            Icon(
+              allocated != null
+                  ? Icons.computer_rounded
+                  : Icons.check_box_outline_blank_rounded,
+              color: allocated != null
+                  ? const Color(0xFF0284C7)
+                  : const Color(0xFF15803D),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                allocated != null
+                    ? 'IP $ipStr — ${allocated['asset_code']} (${allocated['asset_name']})'
+                    : 'Dirección IP $ipStr (${subnet['cidr']})',
+                style: const TextStyle(
+                  fontSize: 15.5,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
+        ),
         content: SizedBox(
-          width: 480,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (isNetworkAddress)
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE0E7FF),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFF4338CA)),
-                  ),
-                  child: Text(
-                    'DIRECCIÓN DE RED (${subnet['cidr']} • Máscara ${subnet['subnet_mask']})\n\n'
-                    'La dirección $ipStr es la Dirección de Red del bloque CIDR (todos los bits de host a 0). '
-                    'Está reservada por el protocolo IPv4 para identificar la subred en las tablas de encaminamiento y NO debe asignarse a ninguna máquina.',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12.5,
-                      color: Color(0xFF312E81),
+          width: 600,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (isNetworkAddress)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE0E7FF),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF4338CA)),
+                    ),
+                    child: Text(
+                      'DIRECCIÓN DE RED (${subnet['cidr']} • Máscara ${subnet['subnet_mask']})\n\n'
+                      'La dirección $ipStr es la Dirección de Red del bloque CIDR (todos los bits de host a 0). '
+                      'Está reservada por el protocolo IPv4 para identificar la subred en las tablas de encaminamiento y NO debe asignarse a ninguna máquina.',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12.5,
+                        color: Color(0xFF312E81),
+                      ),
+                    ),
+                  )
+                else if (isBroadcastAddress)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFAE8FF),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFA21CAF)),
+                    ),
+                    child: Text(
+                      'DIRECCIÓN DE BROADCAST (${subnet['cidr']} • Máscara ${subnet['subnet_mask']})\n\n'
+                      'La dirección $ipStr es la Dirección de Difusión (Broadcast) del bloque CIDR (todos los bits de host a 1). '
+                      'Está reservada por el protocolo IPv4 para enviar paquetes a todos los nodos de la subred y NO debe asignarse a ninguna máquina.',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12.5,
+                        color: Color(0xFF701A75),
+                      ),
+                    ),
+                  )
+                else if (isGateway && allocated == null)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF3C7),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFF59E0B)),
+                    ),
+                    child: const Text(
+                      'Esta IP es la Puerta de Enlace (Gateway) configurada para esta subred.',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  )
+                else if (allocated != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFCBD5E1)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: status == 'online'
+                                    ? const Color(0xFFDCFCE7)
+                                    : const Color(0xFFFEE2E2),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                status == 'online'
+                                    ? 'ONLINE${pingMs != null ? ' (${pingMs.toStringAsFixed(1)} ms)' : ''}'
+                                    : status.toUpperCase(),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w900,
+                                  color: status == 'online'
+                                      ? const Color(0xFF15803D)
+                                      : const Color(0xFFB91C1C),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE0F2FE),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                (fullAsset?['asset_class_label'] ??
+                                        allocated['asset_class_label'] ??
+                                        allocated['asset_class'] ??
+                                        'Equipo')
+                                    .toString(),
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF0369A1),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const Divider(height: 18),
+                        _buildDetailInfoRow(
+                          'Código CMDB',
+                          (allocated['asset_code'] ?? '').toString(),
+                          mono: true,
+                        ),
+                        _buildDetailInfoRow(
+                          'Nombre del Equipo',
+                          (allocated['asset_name'] ?? '').toString(),
+                        ),
+                        _buildDetailInfoRow(
+                          'Hostname',
+                          (fullAsset?['hostname'] ?? allocated['hostname'] ?? '')
+                              .toString(),
+                          mono: true,
+                        ),
+                        _buildDetailInfoRow(
+                          'FQDN / DNS',
+                          (allocated['fqdn'] ?? fullAsset?['fqdn'] ?? '')
+                              .toString(),
+                          mono: true,
+                        ),
+                        _buildDetailInfoRow(
+                          'Dirección IP Actual',
+                          '$ipStr (${allocated['ip_role_label']})',
+                          mono: true,
+                        ),
+                        _buildDetailInfoRow(
+                          'Interfaz / VLAN',
+                          '${allocated['interface_name'] ?? 'eth0'}${allocated['vlan_id'] != null ? ' • VLAN ${allocated['vlan_id']}' : ''}',
+                          mono: true,
+                        ),
+                        _buildDetailInfoRow(
+                          'MAC Address',
+                          (allocated['mac_address'] ?? '').toString(),
+                          mono: true,
+                        ),
+                        _buildDetailInfoRow(
+                          'SO / Firmware / Puertos',
+                          (fullAsset?['os_or_firmware'] ??
+                                  allocated['os_or_firmware'] ??
+                                  '')
+                              .toString(),
+                        ),
+                        _buildDetailInfoRow('Recursos Hardware', resourcesStr),
+                        _buildDetailInfoRow(
+                          'Ubicación / Hipervisor',
+                          (fullAsset?['physical_location_label'] ??
+                                  fullAsset?['hypervisor_or_platform'] ??
+                                  allocated['hypervisor_or_platform'] ??
+                                  '')
+                              .toString(),
+                        ),
+                        _buildDetailInfoRow(
+                          'Entorno',
+                          (fullAsset?['environment'] ??
+                                  allocated['environment'] ??
+                                  '')
+                              .toString()
+                              .toUpperCase(),
+                        ),
+                        _buildDetailInfoRow(
+                          'Equipo / Responsable',
+                          [
+                            (fullAsset?['owner_team'] ??
+                                    allocated['owner_team'] ??
+                                    '')
+                                .toString(),
+                            (fullAsset?['responsible_person'] ??
+                                    allocated['responsible_person'] ??
+                                    '')
+                                .toString(),
+                          ].where((s) => s.trim().isNotEmpty).join(' • '),
+                        ),
+                        _buildDetailInfoRow(
+                          'Notas',
+                          (fullAsset?['notes'] ?? allocated['notes'] ?? '')
+                              .toString(),
+                        ),
+                        if (allAssetIps.length > 1) ...[
+                          const Divider(height: 16),
+                          const Text(
+                            'Todas las IPs configuradas en este equipo:',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF334155),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: allAssetIps.map((ipItem) {
+                              return Chip(
+                                visualDensity: VisualDensity.compact,
+                                label: Text(
+                                  '${ipItem['ip_address']} (${ipItem['interface_name']} • ${ipItem['ip_role_label'] ?? ipItem['ip_role']})',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontFamily: 'monospace',
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                )
-              else if (isBroadcastAddress)
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFAE8FF),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFA21CAF)),
-                  ),
-                  child: Text(
-                    'DIRECCIÓN DE BROADCAST (${subnet['cidr']} • Máscara ${subnet['subnet_mask']})\n\n'
-                    'La dirección $ipStr es la Dirección de Difusión (Broadcast) del bloque CIDR (todos los bits de host a 1). '
-                    'Está reservada por el protocolo IPv4 para enviar paquetes a todos los nodos de la subred y NO debe asignarse a ninguna máquina.',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12.5,
-                      color: Color(0xFF701A75),
+                  if (widget.canEdit) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF2F2),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFFECACA)),
+                      ),
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.cleaning_services_rounded,
+                            size: 16,
+                            color: Color(0xFFB91C1C),
+                          ),
+                          const Text(
+                            '¿El equipo ya no está o quieres liberar esta IP?',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF991B1B),
+                            ),
+                          ),
+                          if (ipId != null)
+                            OutlinedButton.icon(
+                              onPressed: () async {
+                                Navigator.pop(ctx);
+                                await widget.api.deleteCmdbIp(ipId);
+                                await _loadOverview(silent: true);
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    backgroundColor: const Color(0xFF15803D),
+                                    content: Text(
+                                      'La IP $ipStr ha quedado marcada como NO OCUPADA (Libre) en el mapa IPAM.',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFFB91C1C),
+                                side: const BorderSide(color: Color(0xFFFCA5A5)),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              icon: const Icon(Icons.link_off_rounded, size: 15),
+                              label: const Text(
+                                'Dejar IP como No Ocupada (Liberar IP)',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                          if (assetId != null)
+                            FilledButton.icon(
+                              onPressed: () async {
+                                Navigator.pop(ctx);
+                                await widget.api.deleteCmdbAsset(assetId);
+                                await _loadOverview(silent: true);
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    backgroundColor: const Color(0xFF15803D),
+                                    content: Text(
+                                      'Equipo ${allocated['asset_code']} eliminado e IP $ipStr marcada como NO OCUPADA (Libre).',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFFDC2626),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              icon: const Icon(
+                                Icons.delete_forever_rounded,
+                                size: 15,
+                              ),
+                              label: const Text(
+                                'Quitar Equipo de CMDB y Liberar IP',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
+                  ],
+                ] else
+                  const Text(
+                    'Esta dirección IP de host figura como LIBRE (No Ocupada) en la CMDB.\n'
+                    'Puedes verificarla ahora en la red (Ping + Puertos TCP + ARP + DNS) o asignarla directamente a un equipo.',
                   ),
-                )
-              else if (isGateway)
-                const Text(
-                  'Esta IP es la Puerta de Enlace (Gateway) configurada para esta subred.',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                )
-              else if (allocated != null) ...[
-                Text(
-                  'Asignada en CMDB a: ${allocated['asset_code']} — ${allocated['asset_name']}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 13.5,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text('Rol de la IP: ${allocated['ip_role_label']}'),
-                Text('Interfaz: ${allocated['interface_name']}'),
-                if ((allocated['fqdn'] ?? '').toString().isNotEmpty)
-                  Text('FQDN / DNS: ${allocated['fqdn']}'),
-              ] else
-                const Text(
-                  'Esta dirección IP de host figura como LIBRE en la CMDB.\n'
-                  'Antes de asignarla a una máquina, te recomendamos lanzar el Verificador Manual (Ping + Puertos TCP + ARP + DNS) para confirmar que nadie la esté usando sin documentar.',
-                ),
-            ],
+              ],
+            ),
           ),
         ),
         actions: [
@@ -3171,8 +4563,38 @@ class _CmdbViewState extends State<CmdbView> {
                 _runManualVerification(customIp: ipStr);
               },
               icon: const Icon(Icons.radar_rounded, size: 16),
-              label: const Text('Verificar ahora en Red (Ping + TCP + ARP)'),
+              label: const Text('Verificar en Red'),
             ),
+          if (allocated != null && assetId != null) ...[
+            if (widget.canEdit && fullAsset != null)
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _openAssetEditorDialog(existing: fullAsset);
+                },
+                icon: const Icon(Icons.edit_outlined, size: 16),
+                label: const Text('Editar Equipo'),
+              ),
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.pop(ctx);
+                setState(() {
+                  _classFilter = 'all';
+                  _envFilter = 'all';
+                  _onlyMultiIp = false;
+                  _searchCtrl.clear();
+                  _highlightedAssetId = assetId;
+                  _expandedAssetId = assetId;
+                  _activeTab = 'inventory';
+                });
+              },
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF1E3A8A),
+              ),
+              icon: const Icon(Icons.table_rows_rounded, size: 16),
+              label: const Text('Ir a su Casilla en Inventario CMDB'),
+            ),
+          ],
           if (widget.canEdit &&
               allocated == null &&
               !isGateway &&

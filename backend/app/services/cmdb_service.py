@@ -316,17 +316,14 @@ def _probe_single_tcp_port(target_ip: str, port: int, timeout_sec: float = 0.65)
     Intenta abrir una conexión TCP a target_ip:port.
     Devuelve (port, state) donde state puede ser:
     - 'open': El puerto aceptó el handshake TCP (SYN-ACK).
-    - 'refused_alive': El host devolvió un paquete TCP RST inmediato (ConnectionRefusedError),
-      lo cual demuestra al 100% que la IP está viva en la red aunque ese puerto esté cerrado.
-    - 'filtered_or_down': Timeout o inalcanzable.
+    - 'filtered_or_down': Puerto cerrado, timeout o inalcanzable (Nota: en Docker Desktop / NAT proxy,
+      ConnectionRefusedError también ocurre para IPs inexistentes, por lo que solo 'open' cuenta como TCP vivo).
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(timeout_sec)
     try:
         sock.connect((target_ip, port))
         return port, "open"
-    except ConnectionRefusedError:
-        return port, "refused_alive"
     except Exception:
         return port, "filtered_or_down"
     finally:
@@ -404,19 +401,15 @@ def _probe_ip_network_only(
         p_num, p_state = _probe_single_tcp_port(ip_clean, p, eff_tcp_timeout)
         if p_state == "open":
             open_ports.append(p_num)
-        elif p_state == "refused_alive":
-            refused_ports.append(p_num)
 
-    # Si en modo masivo respondió a ping o algún puerto, probamos el resto de puertos para dar el informe completo
-    if is_bulk_scan and (icmp_alive or open_ports or refused_ports) and len(probe_ports) > 4:
+    # Si en modo masivo respondió a ping o algún puerto abierto, probamos el resto de puertos para dar el informe completo
+    if is_bulk_scan and (icmp_alive or open_ports) and len(probe_ports) > 4:
         for p in probe_ports[4:]:
             p_num, p_state = _probe_single_tcp_port(ip_clean, p, eff_tcp_timeout)
             if p_state == "open":
                 open_ports.append(p_num)
-            elif p_state == "refused_alive":
-                refused_ports.append(p_num)
 
-    tcp_alive = len(open_ports) > 0 or len(refused_ports) > 0
+    tcp_alive = len(open_ports) > 0
     arp_mac = _lookup_arp_mac(ip_clean) if (not is_bulk_scan or icmp_alive or tcp_alive) else None
     if not arp_mac and not is_bulk_scan:
         arp_mac = _lookup_arp_mac(ip_clean)
@@ -471,18 +464,19 @@ def _assemble_ip_verification_result(
     documented_in_cmdb = len(cmdb_owners) > 0
     network_responding = icmp_alive or tcp_alive or arp_alive
 
-    if not documented_in_cmdb and not network_responding and not has_ptr:
+    if not documented_in_cmdb and not network_responding:
         verdict = "free_confirmed"
-        verdict_label = "LIBRE CONFIRMADA (Segura para asignar)"
-        verdict_severity = "success"
+        verdict_label = "LIBRE CONFIRMADA (No ocupada en red)"
+        verdict_severity = "info"
         can_safely_assign = True
+        ptr_note = f" (Nota: existe un PTR antiguo en DNS '{ptr_hostname}', pero ningún equipo responde)." if has_ptr else ""
         recommendation = (
-            "La IP no figura en la CMDB y ninguna de las 4 sondas (Ping ICMP, Puertos TCP, ARP L2 ni DNS PTR) "
-            "ha detectado actividad. Puedes asignarla con seguridad a una nueva máquina."
+            "La IP no figura en la CMDB y ningún equipo ha respondido a Ping ICMP, Puertos TCP ni ARP L2."
+            + ptr_note
         )
-    elif not documented_in_cmdb and (network_responding or has_ptr):
+    elif not documented_in_cmdb and network_responding:
         verdict = "conflict_unregistered"
-        verdict_label = "DETECTADO EN RED (No registrado en CMDB)"
+        verdict_label = "DETECTADO EN RED (Pendiente de añadir a CMDB)"
         verdict_severity = "danger"
         can_safely_assign = False
         reasons = []
@@ -490,24 +484,22 @@ def _assemble_ip_verification_result(
             reasons.append(f"responde a Ping ({icmp_ms} ms)")
         if open_ports:
             reasons.append(f"tiene puertos TCP abiertos ({', '.join(map(str, open_ports))})")
-        elif refused_ports:
-            reasons.append(f"su pila TCP/IP rechaza activamente paquetes RST ({', '.join(map(str, refused_ports[:3]))})")
         if arp_mac:
             reasons.append(f"resuelve MAC en tabla ARP ({arp_mac})")
         if has_ptr:
-            reasons.append(f"tiene DNS PTR ({ptr_hostname})")
+            reasons.append(f"resuelve DNS PTR ({ptr_hostname})")
         recommendation = (
             f"Equipo activo detectado en la red ({', '.join(reasons)}) que aún NO está registrado en la CMDB. "
-            "Puedes seleccionarlo y añadirlo a la CMDB directamente desde aquí (y no debes asignar su IP a otra máquina)."
+            "Pulsa 'Añadir a CMDB' para registrarlo y pasarlo a verde."
         )
     elif documented_in_cmdb and network_responding:
         verdict = "active_in_network"
         verdict_label = "YA EN CMDB Y ACTIVA EN RED"
-        verdict_severity = "info"
+        verdict_severity = "success"
         can_safely_assign = False
         owner_names = ", ".join(f"{o['asset_code']} ({o['ip_role_label']})" for o in cmdb_owners)
         recommendation = (
-            f"La IP ya está asignada en la CMDB a [{owner_names}] y responde activamente en la red."
+            f"La IP ya está registrada en la CMDB [{owner_names}] y el equipo responde activamente en la red."
         )
     else:
         verdict = "no_response"
@@ -517,12 +509,12 @@ def _assemble_ip_verification_result(
         owner_names = ", ".join(f"{o['asset_code']} ({o['ip_role_label']})" for o in cmdb_owners)
         recommendation = (
             f"La IP figura asignada en la CMDB a [{owner_names}], pero actualmente no responde a Ping, TCP ni ARP. "
-            "Puede tratarse de una máquina apagada por mantenimiento o de un registro obsoleto que conviene auditar/liberar."
+            "Puede tratarse de una máquina apagada o de una IP que puedes liberar desde Subredes/IPAM o Inventario."
         )
 
     probe_summary_parts = [
         f"ICMP: {'OK (' + str(icmp_ms) + ' ms)' if icmp_alive else 'Sin respuesta'}",
-        f"TCP: {'Abiertos ' + str(open_ports) if open_ports else ('Activo RST ' + str(refused_ports[:3]) if refused_ports else '0 puertos')}",
+        f"TCP: {'Abiertos ' + str(open_ports) if open_ports else '0 puertos abiertos'}",
         f"ARP: {arp_mac or 'Sin MAC local'}",
         f"DNS PTR: {ptr_hostname or 'Sin PTR'}",
     ]
@@ -738,8 +730,8 @@ def verify_ip_target_or_find_free(
 
     subnets = db.query(CmdbSubnet).all()
 
-    # 2. Ejecutar el sondeo de red en paralelo (alta velocidad para rangos /24)
-    max_workers = min(48, max(1, len(ips_to_test)))
+    # 2. Ejecutar el sondeo de red en paralelo (alta velocidad para rangos /24 sin saturar NAT proxy)
+    max_workers = min(24, max(1, len(ips_to_test)))
     probe_outputs_by_ip: Dict[str, Dict[str, Any]] = {}
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         fut_map = {
@@ -854,6 +846,8 @@ def import_discovered_hosts_to_cmdb(
 
     subnets = db.query(CmdbSubnet).all()
     created_assets_count = 0
+    imported_ips_list: List[str] = []
+    imported_assets_info: List[Dict[str, Any]] = []
     for item in (items or []):
         ip_str = str(item.get("ip_address") or "").strip()
         if not ip_str:
@@ -861,6 +855,22 @@ def import_discovered_hosts_to_cmdb(
         # Comprobar si ya existe la IP en la CMDB
         existing_ip = db.query(CmdbIpAddress).filter(CmdbIpAddress.ip_address == ip_str).first()
         if existing_ip:
+            ast_ex = existing_ip.asset
+            imported_ips_list.append(ip_str)
+            imported_assets_info.append({
+                "ip_address": ip_str,
+                "ip_id": existing_ip.id,
+                "asset_id": ast_ex.id if ast_ex else None,
+                "asset_code": ast_ex.code if ast_ex else "RESERVA-IPAM",
+                "asset_name": ast_ex.name if ast_ex else "IP Reservada",
+                "asset_class": ast_ex.asset_class if ast_ex else "other_machine",
+                "ip_role": existing_ip.ip_role,
+                "ip_role_label": IP_ROLE_LABELS.get(existing_ip.ip_role, existing_ip.ip_role),
+                "interface_name": existing_ip.interface_name,
+                "is_heartbeat_ip": existing_ip.is_heartbeat_ip,
+                "fqdn": existing_ip.fqdn or (ast_ex.fqdn if ast_ex else ""),
+                "allocation_status": existing_ip.allocation_status,
+            })
             continue
 
         last_oct = ip_str.replace(".", "-")
@@ -904,7 +914,7 @@ def import_discovered_hosts_to_cmdb(
             os_or_firmware=f"Detectado en escaneo (Puertos: {open_ports})" if open_ports else "Detectado por Sondeo de Red",
             hypervisor_or_platform="Descubrimiento Manual CMDB",
             owner_team="Sistemas & Redes",
-            responsible_person="Alex Geng",
+            responsible_person="",
             sync_source="cmdb",
             monitoring_enabled=True,
             monitor_method=mon_method,
@@ -916,30 +926,48 @@ def import_discovered_hosts_to_cmdb(
         db.add(asset)
         db.flush()
 
-        db.add(
-            CmdbIpAddress(
-                asset_id=asset.id,
-                subnet_id=matched_sub.id if matched_sub else None,
-                ip_address=ip_str,
-                subnet_mask=matched_sub.subnet_mask if matched_sub else "255.255.255.0",
-                gateway=matched_sub.gateway if matched_sub else "",
-                vlan_id=matched_sub.vlan_id if matched_sub else vlan_id,
-                ip_role="mgmt_heartbeat",
-                interface_name="eth0",
-                mac_address=str(item.get("mac_address") or "").strip(),
-                fqdn=ptr_fqdn,
-                is_heartbeat_ip=True,
-                allocation_status="assigned",
-                last_verification_status="active_in_network",
-                last_verified_at=datetime.utcnow(),
-                last_verification_detail="Añadido tras verificación de rango IP en CMDB",
-            )
+        new_ip_rec = CmdbIpAddress(
+            asset_id=asset.id,
+            subnet_id=matched_sub.id if matched_sub else None,
+            ip_address=ip_str,
+            subnet_mask=matched_sub.subnet_mask if matched_sub else "255.255.255.0",
+            gateway=matched_sub.gateway if matched_sub else "",
+            vlan_id=matched_sub.vlan_id if matched_sub else vlan_id,
+            ip_role="mgmt_heartbeat",
+            interface_name="eth0",
+            mac_address=str(item.get("mac_address") or "").strip(),
+            fqdn=ptr_fqdn,
+            is_heartbeat_ip=True,
+            allocation_status="assigned",
+            last_verification_status="active_in_network",
+            last_verified_at=datetime.utcnow(),
+            last_verification_detail="Añadido tras verificación de rango IP en CMDB",
         )
+        db.add(new_ip_rec)
+        db.flush()
+
+        imported_ips_list.append(ip_str)
+        imported_assets_info.append({
+            "ip_address": ip_str,
+            "ip_id": new_ip_rec.id,
+            "asset_id": asset.id,
+            "asset_code": asset.code,
+            "asset_name": asset.name,
+            "asset_class": asset.asset_class,
+            "ip_role": new_ip_rec.ip_role,
+            "ip_role_label": IP_ROLE_LABELS.get(new_ip_rec.ip_role, new_ip_rec.ip_role),
+            "interface_name": new_ip_rec.interface_name,
+            "is_heartbeat_ip": True,
+            "fqdn": ptr_fqdn,
+            "allocation_status": "assigned",
+        })
         created_assets_count += 1
 
     db.commit()
     overview = build_cmdb_overview(db)
     overview["imported_assets_count"] = created_assets_count
+    overview["imported_ips"] = imported_ips_list
+    overview["imported_assets_info"] = imported_assets_info
     overview["created_subnet"] = created_subnet
     return overview
 
@@ -1265,6 +1293,21 @@ def build_cmdb_overview(db: Session) -> Dict[str, Any]:
                 "asset_code": ast.code if ast else "RESERVA",
                 "asset_name": ast.name if ast else "Reservada",
                 "asset_class": ast.asset_class if ast else "reserved",
+                "asset_class_label": ASSET_CLASS_LABELS.get(ast.asset_class, ast.asset_class) if ast else "Reservada",
+                "hostname": ast.hostname if ast else "",
+                "os_or_firmware": ast.os_or_firmware if ast else "",
+                "environment": ast.environment if ast else "",
+                "status": ast.status if ast else "unknown",
+                "last_ping_ms": ast.last_ping_ms if ast else None,
+                "cpu_cores": ast.cpu_cores if ast else None,
+                "ram_gb": ast.ram_gb if ast else None,
+                "storage_gb": ast.storage_gb if ast else None,
+                "owner_team": ast.owner_team if ast else "",
+                "responsible_person": ast.responsible_person if ast else "",
+                "hypervisor_or_platform": ast.hypervisor_or_platform if ast else "",
+                "notes": (ip_rec.notes or (ast.notes if ast else "")) or "",
+                "mac_address": ip_rec.mac_address or "",
+                "vlan_id": ip_rec.vlan_id if ip_rec.vlan_id is not None else sub.vlan_id,
                 "ip_role": ip_rec.ip_role,
                 "ip_role_label": IP_ROLE_LABELS.get(ip_rec.ip_role, ip_rec.ip_role),
                 "interface_name": ip_rec.interface_name,
