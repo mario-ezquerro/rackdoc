@@ -42,6 +42,8 @@ La barra lateral izquierda estructura el flujo completo de extremo a extremo en 
   - Al montar un equipo en el Rack o editar su IP en el panel derecho, RackDoc8 verifica en tiempo real si esa IP ya existe en la CMDB (por ejemplo, si fue descubierta previamente con el escáner de red).
   - Si detecta coincidencia, muestra un asistente interactivo permitiendo **unificar ambos registros en un único activo** (conservando la posición `U` del Rack y fusionando estado Online, latencia, MAC, FQDN e IPs secundarias) o **reasignar la IP** sin duplicar dispositivos.
 
+![3. Rack Editor 42U - Vista Dual Front & Back, Cableado Punto a Punto y Equipos de Planta](docs/screenshots/03_rack_editor_dual_front_back.png)
+
 ![3. Rack Editor 42U - Librerías y Tomas Exteriores](docs/screenshots/03_rack_editor_schuko.png)
 
 ---
@@ -91,6 +93,8 @@ Dividido en **4 sub-apartados**:
   - Permite **activar o desactivar el Heartbeat** con un clic directamente desde la fila del inventario o desde el editor del activo/IP, diferenciando el rol de cada IP (`mgmt_heartbeat`, `primary_service`, `vip_cluster`, `storage`, `backup`, `ilo_idrac`, etc.) y su **Máscara de Red**.
 - **Banner y Asistente de Resolución de Colisiones de IP (`Rack Editor <-> CMDB`)**:
   - Si dos activos comparten la misma IP (por ejemplo, un router detectado en un escaneo CMDB como `DISC-2-1` y dado de alta también en el Rack Editor como `RK001_M-ROU5`), aparece un **Banner Rojo de Colisión de IP** y un botón **«Resolver Colisión»** en las filas afectadas para **unificarlos en un solo equipo**, **cambiar/liberar la IP** o **eliminar el duplicado**.
+
+![6. CMDB & Control IPs - Tabla Inventario Estilo Excel, Multi-IP y Detección de Colisiones](docs/screenshots/06_cmdb_inventario_excel_multi_ip.png)
 
 #### 6.2. `2. Verificador Manual de IPs Libres` ("Deep IP Probe" & Escáner de Red)
 - **Comprobación Individual de IP** y **Escáner de Rango Completo CIDR (`/24`, `/23`, `/25`, etc.)**:
