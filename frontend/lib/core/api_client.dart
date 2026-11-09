@@ -61,6 +61,52 @@ class RackDocApiClient {
         if (hasSession) 'Authorization': 'Bearer $_accessToken',
       };
 
+  /// Construye la URL absoluta de una ruta de la API.
+  Uri _url(String ruta, [Map<String, dynamic>? query]) {
+    final uri = Uri.parse('$baseUrl$ruta');
+    if (query == null || query.isEmpty) return uri;
+    return uri.replace(
+      queryParameters: query.map((k, v) => MapEntry(k, '$v')),
+    );
+  }
+
+  /// Punto único por el que pasan todas las llamadas a la API: pone las
+  /// cabeceras (token incluido), serializa el cuerpo y decodifica la respuesta.
+  /// Antes este mismo bloque estaba repetido en los 107 métodos del cliente.
+  Future<dynamic> _enviar(String metodo, Uri uri, [Object? cuerpo]) async {
+    final codificado = cuerpo == null ? null : jsonEncode(cuerpo);
+    final http.Response respuesta;
+    switch (metodo) {
+      case 'GET':
+        respuesta = await http.get(uri, headers: _headers);
+        break;
+      case 'POST':
+        respuesta = await http.post(uri, headers: _headers, body: codificado);
+        break;
+      case 'PUT':
+        respuesta = await http.put(uri, headers: _headers, body: codificado);
+        break;
+      case 'DELETE':
+        respuesta = await http.delete(uri, headers: _headers, body: codificado);
+        break;
+      default:
+        throw ArgumentError('Método HTTP no soportado: $metodo');
+    }
+    return _decodeResponse(respuesta);
+  }
+
+  Future<dynamic> _get(String ruta, [Map<String, dynamic>? query]) =>
+      _enviar('GET', _url(ruta, query));
+
+  Future<dynamic> _post(String ruta, [Object? cuerpo]) =>
+      _enviar('POST', _url(ruta), cuerpo);
+
+  Future<dynamic> _put(String ruta, [Object? cuerpo]) =>
+      _enviar('PUT', _url(ruta), cuerpo);
+
+  Future<dynamic> _delete(String ruta, [Object? cuerpo]) =>
+      _enviar('DELETE', _url(ruta), cuerpo);
+
   dynamic _decodeResponse(http.Response response) {
     final bodyStr = utf8.decode(response.bodyBytes);
     if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -90,8 +136,7 @@ class RackDocApiClient {
   }
 
   Future<List<LocationNode>> getLocations() async {
-    final res = await http.get(Uri.parse('$baseUrl/locations'), headers: _headers);
-    final data = _decodeResponse(res) as List;
+    final data = await _get('/locations') as List;
     return data
         .map((e) => LocationNode.fromJson(Map<String, dynamic>.from(e as Map)))
         .toList();
@@ -104,18 +149,13 @@ class RackDocApiClient {
     required double longitude,
     String address = '',
   }) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/locations'),
-      headers: _headers,
-      body: jsonEncode({
+    return Map<String, dynamic>.from(await _post('/locations', {
         'code': code,
         'name': name,
         'latitude': latitude,
         'longitude': longitude,
         'address': address,
-      }),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+      }) as Map);
   }
 
   Future<void> createFloor({
@@ -123,71 +163,43 @@ class RackDocApiClient {
     required String name,
     required int levelNumber,
   }) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/floors'),
-      headers: _headers,
-      body: jsonEncode({
+    await _post('/floors', {
         'location_id': locationId,
         'name': name,
         'level_number': levelNumber,
-      }),
-    );
-    _decodeResponse(res);
+      });
   }
 
   Future<void> updateLocation(
     int locationId,
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.put(
-      Uri.parse('$baseUrl/locations/$locationId'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    _decodeResponse(res);
+    await _put('/locations/$locationId', payload);
   }
 
   Future<void> deleteLocation(int locationId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/locations/$locationId'),
-      headers: _headers,
-    );
-    _decodeResponse(res);
+    await _delete('/locations/$locationId');
   }
 
   Future<void> updateFloor(
     int floorId,
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.put(
-      Uri.parse('$baseUrl/floors/$floorId'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    _decodeResponse(res);
+    await _put('/floors/$floorId', payload);
   }
 
   Future<void> deleteFloor(int floorId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/floors/$floorId'),
-      headers: _headers,
-    );
-    _decodeResponse(res);
+    await _delete('/floors/$floorId');
   }
 
   Future<void> createRoom({
     required int floorId,
     required String name,
   }) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/rooms'),
-      headers: _headers,
-      body: jsonEncode({
+    await _post('/rooms', {
         'floor_id': floorId,
         'name': name,
-      }),
-    );
-    _decodeResponse(res);
+      });
   }
 
   Future<void> createAisle({
@@ -196,17 +208,12 @@ class RackDocApiClient {
     required String name,
     required String aisleType,
   }) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/aisles'),
-      headers: _headers,
-      body: jsonEncode({
+    await _post('/aisles', {
         'room_id': roomId,
         'code': code,
         'name': name,
         'aisle_type': aisleType,
-      }),
-    );
-    _decodeResponse(res);
+      });
   }
 
   Future<int> createRack({
@@ -218,10 +225,7 @@ class RackDocApiClient {
     String manufacturer = 'Rittal',
     String responsiblePerson = 'Alex Geng',
   }) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/racks'),
-      headers: _headers,
-      body: jsonEncode({
+    final data = await _post('/racks', {
         'room_id': roomId,
         'aisle_id': aisleId,
         'code': code,
@@ -229,9 +233,7 @@ class RackDocApiClient {
         'total_units': totalUnits,
         'manufacturer': manufacturer,
         'responsible_person': responsiblePerson,
-      }),
-    );
-    final data = _decodeResponse(res) as Map;
+      }) as Map;
     return data['id'] as int;
   }
 
@@ -239,77 +241,44 @@ class RackDocApiClient {
     int floorId,
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/floors/$floorId/floor-devices'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/floors/$floorId/floor-devices', payload) as Map);
   }
 
   Future<void> updateFloorDevice(
     int deviceId,
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.put(
-      Uri.parse('$baseUrl/floor-devices/$deviceId'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    _decodeResponse(res);
+    await _put('/floor-devices/$deviceId', payload);
   }
 
   Future<void> deleteFloorDevice(int deviceId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/floor-devices/$deviceId'),
-      headers: _headers,
-    );
-    _decodeResponse(res);
+    await _delete('/floor-devices/$deviceId');
   }
 
   Future<List<Map<String, dynamic>>> fetchCustomFloorDeviceTypes() async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/floor-device-types'),
-      headers: _headers,
-    );
-    final data = _decodeResponse(res) as List;
+    final data = await _get('/floor-device-types') as List;
     return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
   Future<Map<String, dynamic>> createCustomFloorDeviceType(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/floor-device-types'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/floor-device-types', payload) as Map);
   }
 
   Future<void> deleteCustomFloorDeviceType(int typeId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/floor-device-types/$typeId'),
-      headers: _headers,
-    );
-    _decodeResponse(res);
+    await _delete('/floor-device-types/$typeId');
   }
 
   Future<List<DeviceTemplateModel>> getTemplates() async {
-    final res = await http.get(Uri.parse('$baseUrl/templates'), headers: _headers);
-    final data = _decodeResponse(res) as List;
+    final data = await _get('/templates') as List;
     return data
         .map((e) => DeviceTemplateModel.fromJson(Map<String, dynamic>.from(e as Map)))
         .toList();
   }
 
   Future<DeviceTemplateModel> createTemplate(Map<String, dynamic> payload) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/templates'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    final data = _decodeResponse(res) as Map;
+    final data = await _post('/templates', payload) as Map;
     return DeviceTemplateModel.fromJson(Map<String, dynamic>.from(data));
   }
 
@@ -317,12 +286,7 @@ class RackDocApiClient {
     int templateId,
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.put(
-      Uri.parse('$baseUrl/templates/$templateId'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    final data = _decodeResponse(res) as Map;
+    final data = await _put('/templates/$templateId', payload) as Map;
     return DeviceTemplateModel.fromJson(Map<String, dynamic>.from(data));
   }
 
@@ -330,54 +294,34 @@ class RackDocApiClient {
     final uri = Uri.parse('$baseUrl/templates/search-photo').replace(
       queryParameters: {'q': query},
     );
-    final res = await http.get(uri, headers: _headers);
-    final data = _decodeResponse(res) as Map;
+    final data = await _enviar('GET', uri) as Map;
     final list = (data['results'] ?? []) as List;
     return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
   Future<List<Map<String, dynamic>>> getInterRackTargets(int rackId) async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/racks/$rackId/inter-rack-targets'),
-      headers: _headers,
-    );
-    final data = _decodeResponse(res) as List;
+    final data = await _get('/racks/$rackId/inter-rack-targets') as List;
     return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
   Future<RackDetailModel> getRackDetail(int rackId) async {
-    final res = await http.get(Uri.parse('$baseUrl/racks/$rackId'), headers: _headers);
-    final data = _decodeResponse(res) as Map;
+    final data = await _get('/racks/$rackId') as Map;
     return RackDetailModel.fromJson(Map<String, dynamic>.from(data));
   }
 
   Future<void> updateRack(int rackId, Map<String, dynamic> payload) async {
-    final res = await http.put(
-      Uri.parse('$baseUrl/racks/$rackId'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    _decodeResponse(res);
+    await _put('/racks/$rackId', payload);
   }
 
   Future<void> deleteRack(int rackId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/racks/$rackId'),
-      headers: _headers,
-    );
-    _decodeResponse(res);
+    await _delete('/racks/$rackId');
   }
 
   Future<RackDeviceModel> addDeviceToRack(
     int rackId,
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/racks/$rackId/devices'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    final data = _decodeResponse(res) as Map;
+    final data = await _post('/racks/$rackId/devices', payload) as Map;
     return RackDeviceModel.fromJson(Map<String, dynamic>.from(data));
   }
 
@@ -385,77 +329,43 @@ class RackDocApiClient {
     int deviceId,
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.put(
-      Uri.parse('$baseUrl/devices/$deviceId'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    final data = _decodeResponse(res) as Map;
+    final data = await _put('/devices/$deviceId', payload) as Map;
     return RackDeviceModel.fromJson(Map<String, dynamic>.from(data));
   }
 
   Future<void> deleteDevice(int deviceId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/devices/$deviceId'),
-      headers: _headers,
-    );
-    _decodeResponse(res);
+    await _delete('/devices/$deviceId');
   }
 
   Future<Map<String, dynamic>> pingDevice(int deviceId) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/devices/$deviceId/ping'),
-      headers: _headers,
-    );
-    final data = _decodeResponse(res) as Map;
+    final data = await _post('/devices/$deviceId/ping') as Map;
     return Map<String, dynamic>.from(data);
   }
 
   Future<Map<String, dynamic>> pingFloorDevice(int deviceId) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/floor-devices/$deviceId/ping'),
-      headers: _headers,
-    );
-    final data = _decodeResponse(res) as Map;
+    final data = await _post('/floor-devices/$deviceId/ping') as Map;
     return Map<String, dynamic>.from(data);
   }
 
   Future<Map<String, dynamic>> getMonitoringSettings() async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/settings/monitoring'),
-      headers: _headers,
-    );
-    final data = _decodeResponse(res) as Map;
+    final data = await _get('/settings/monitoring') as Map;
     return Map<String, dynamic>.from(data);
   }
 
   Future<Map<String, dynamic>> updateMonitoringSettings(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.put(
-      Uri.parse('$baseUrl/settings/monitoring'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    final data = _decodeResponse(res) as Map;
+    final data = await _put('/settings/monitoring', payload) as Map;
     return Map<String, dynamic>.from(data);
   }
 
   Future<Map<String, dynamic>> runMonitoringNow() async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/settings/monitoring/run-now'),
-      headers: _headers,
-    );
-    final data = _decodeResponse(res) as Map;
+    final data = await _post('/settings/monitoring/run-now') as Map;
     return Map<String, dynamic>.from(data);
   }
 
   Future<List<Map<String, dynamic>>> pingAllRackDevices(int rackId) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/racks/$rackId/ping-all'),
-      headers: _headers,
-    );
-    final data = _decodeResponse(res) as List;
+    final data = await _post('/racks/$rackId/ping-all') as List;
     return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
@@ -463,22 +373,12 @@ class RackDocApiClient {
     int deviceId,
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/devices/$deviceId/remote-console'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    final data = _decodeResponse(res) as Map;
+    final data = await _post('/devices/$deviceId/remote-console', payload) as Map;
     return Map<String, dynamic>.from(data);
   }
 
   Future<ConnectionModel> createConnection(Map<String, dynamic> payload) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/connections'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    final data = _decodeResponse(res) as Map;
+    final data = await _post('/connections', payload) as Map;
     return ConnectionModel.fromJson(Map<String, dynamic>.from(data));
   }
 
@@ -486,21 +386,12 @@ class RackDocApiClient {
     int connectionId,
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.put(
-      Uri.parse('$baseUrl/connections/$connectionId'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    final data = _decodeResponse(res) as Map;
+    final data = await _put('/connections/$connectionId', payload) as Map;
     return ConnectionModel.fromJson(Map<String, dynamic>.from(data));
   }
 
   Future<void> deleteConnection(int connectionId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/connections/$connectionId'),
-      headers: _headers,
-    );
-    _decodeResponse(res);
+    await _delete('/connections/$connectionId');
   }
 
   Future<Map<String, dynamic>> fetchDashboardInventory({
@@ -513,8 +404,7 @@ class RackDocApiClient {
     final uri = Uri.parse('$baseUrl/reports/dashboard-inventory').replace(
       queryParameters: params.isEmpty ? null : params,
     );
-    final res = await http.get(uri, headers: _headers);
-    final data = _decodeResponse(res) as Map;
+    final data = await _enviar('GET', uri) as Map;
     return Map<String, dynamic>.from(data);
   }
 
@@ -589,11 +479,7 @@ class RackDocApiClient {
     required String targetType,
     required int targetId,
   }) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/upload-plan/$targetType/$targetId'),
-      headers: _headers,
-    );
-    _decodeResponse(res);
+    await _delete('/upload-plan/$targetType/$targetId');
   }
 
   /// Busca direcciones, calles, ciudades o edificios en OpenStreetMap (Nominatim)
@@ -634,31 +520,21 @@ class RackDocApiClient {
     final uri = Uri.parse('$baseUrl/templates/export').replace(
       queryParameters: params.isEmpty ? null : params,
     );
-    final res = await http.get(uri, headers: _headers);
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _enviar('GET', uri) as Map);
   }
 
   Future<Map<String, dynamic>> importTemplates({
     String? libraryGroup,
     required List<Map<String, dynamic>> templates,
   }) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/templates/import'),
-      headers: _headers,
-      body: jsonEncode({
+    return Map<String, dynamic>.from(await _post('/templates/import', {
         'library_group': libraryGroup,
         'templates': templates,
-      }),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+      }) as Map);
   }
 
   Future<void> deleteTemplate(int templateId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/templates/$templateId'),
-      headers: _headers,
-    );
-    _decodeResponse(res);
+    await _delete('/templates/$templateId');
   }
 
   // --- Tomas / Enchufes Schuko Exteriores al Rack ---
@@ -667,12 +543,7 @@ class RackDocApiClient {
     int rackId,
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/racks/$rackId/external-outlets'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    final data = _decodeResponse(res) as Map;
+    final data = await _post('/racks/$rackId/external-outlets', payload) as Map;
     return RackDeviceModel.fromJson(Map<String, dynamic>.from(data));
   }
 
@@ -680,35 +551,21 @@ class RackDocApiClient {
     int deviceId,
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.put(
-      Uri.parse('$baseUrl/external-outlets/$deviceId'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    final data = _decodeResponse(res) as Map;
+    final data = await _put('/external-outlets/$deviceId', payload) as Map;
     return RackDeviceModel.fromJson(Map<String, dynamic>.from(data));
   }
 
   Future<void> deleteExternalOutlet(int deviceId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/external-outlets/$deviceId'),
-      headers: _headers,
-    );
-    _decodeResponse(res);
+    await _delete('/external-outlets/$deviceId');
   }
 
   // --- Autenticación, Usuarios (RBAC) y Active Directory (Multi-AD) ---
 
   Future<UserModel> login(String username, String password) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/auth/login'),
-      headers: _headers,
-      body: jsonEncode({
+    final data = await _post('/auth/login', {
         'username': username,
         'password': password,
-      }),
-    );
-    final data = _decodeResponse(res) as Map;
+      }) as Map;
     final token = (data['token'] ?? '').toString();
     if (token.isEmpty) {
       throw Exception('El backend no devolvió un token de sesión.');
@@ -718,57 +575,35 @@ class RackDocApiClient {
   }
 
   Future<List<UserModel>> getUsers() async {
-    final res = await http.get(Uri.parse('$baseUrl/users'), headers: _headers);
-    final data = _decodeResponse(res) as List;
+    final data = await _get('/users') as List;
     return data
         .map((e) => UserModel.fromJson(Map<String, dynamic>.from(e as Map)))
         .toList();
   }
 
   Future<UserModel> createUser(Map<String, dynamic> payload) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/users'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    final data = _decodeResponse(res) as Map;
+    final data = await _post('/users', payload) as Map;
     return UserModel.fromJson(Map<String, dynamic>.from(data));
   }
 
   Future<UserModel> updateUser(int userId, Map<String, dynamic> payload) async {
-    final res = await http.put(
-      Uri.parse('$baseUrl/users/$userId'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    final data = _decodeResponse(res) as Map;
+    final data = await _put('/users/$userId', payload) as Map;
     return UserModel.fromJson(Map<String, dynamic>.from(data));
   }
 
   Future<void> deleteUser(int userId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/users/$userId'),
-      headers: _headers,
-    );
-    _decodeResponse(res);
+    await _delete('/users/$userId');
   }
 
   Future<List<ADServerModel>> getAdServers() async {
-    final res =
-        await http.get(Uri.parse('$baseUrl/ad-servers'), headers: _headers);
-    final data = _decodeResponse(res) as List;
+    final data = await _get('/ad-servers') as List;
     return data
         .map((e) => ADServerModel.fromJson(Map<String, dynamic>.from(e as Map)))
         .toList();
   }
 
   Future<ADServerModel> createAdServer(Map<String, dynamic> payload) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/ad-servers'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    final data = _decodeResponse(res) as Map;
+    final data = await _post('/ad-servers', payload) as Map;
     return ADServerModel.fromJson(Map<String, dynamic>.from(data));
   }
 
@@ -776,142 +611,78 @@ class RackDocApiClient {
     int adId,
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.put(
-      Uri.parse('$baseUrl/ad-servers/$adId'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    final data = _decodeResponse(res) as Map;
+    final data = await _put('/ad-servers/$adId', payload) as Map;
     return ADServerModel.fromJson(Map<String, dynamic>.from(data));
   }
 
   Future<void> deleteAdServer(int adId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/ad-servers/$adId'),
-      headers: _headers,
-    );
-    _decodeResponse(res);
+    await _delete('/ad-servers/$adId');
   }
 
   Future<Map<String, dynamic>> searchAdUsers(int adId, String query) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/ad-servers/$adId/search-users'),
-      headers: _headers,
-      body: jsonEncode({'query': query}),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/ad-servers/$adId/search-users', {'query': query}) as Map);
   }
 
   Future<Map<String, dynamic>> importAdUsers(
     int adId,
     List<Map<String, dynamic>> users,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/ad-servers/$adId/import-users'),
-      headers: _headers,
-      body: jsonEncode({'users': users}),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/ad-servers/$adId/import-users', {'users': users}) as Map);
   }
 
   // --- CMDB & IPAM + Verificador Manual Multi-Sonda de IPs ---
 
   Future<Map<String, dynamic>> fetchCmdbOverview() async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/cmdb/overview'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _get('/cmdb/overview') as Map);
   }
 
   Future<Map<String, dynamic>> createCmdbAsset(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/cmdb/assets'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/cmdb/assets', payload) as Map);
   }
 
   Future<Map<String, dynamic>> updateCmdbAsset(
     int assetId,
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.put(
-      Uri.parse('$baseUrl/cmdb/assets/$assetId'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _put('/cmdb/assets/$assetId', payload) as Map);
   }
 
   Future<Map<String, dynamic>> deleteCmdbAsset(int assetId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/cmdb/assets/$assetId'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _delete('/cmdb/assets/$assetId') as Map);
   }
 
   Future<Map<String, dynamic>> addCmdbAssetIp(
     int assetId,
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/cmdb/assets/$assetId/ips'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/cmdb/assets/$assetId/ips', payload) as Map);
   }
 
   Future<Map<String, dynamic>> deleteCmdbIp(int ipId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/cmdb/ips/$ipId'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _delete('/cmdb/ips/$ipId') as Map);
   }
 
   Future<Map<String, dynamic>> runCmdbAssetHeartbeat(int assetId) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/cmdb/assets/$assetId/heartbeat'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/cmdb/assets/$assetId/heartbeat') as Map);
   }
 
   Future<Map<String, dynamic>> createCmdbSubnet(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/cmdb/subnets'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/cmdb/subnets', payload) as Map);
   }
 
   Future<Map<String, dynamic>> updateCmdbSubnet(
     int subnetId,
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.put(
-      Uri.parse('$baseUrl/cmdb/subnets/$subnetId'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _put('/cmdb/subnets/$subnetId', payload) as Map);
   }
 
   Future<Map<String, dynamic>> deleteCmdbSubnet(int subnetId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/cmdb/subnets/$subnetId'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _delete('/cmdb/subnets/$subnetId') as Map);
   }
 
   Future<Map<String, dynamic>> verifyCmdbIp({
@@ -922,19 +693,14 @@ class RackDocApiClient {
     int countLimit = 254,
     bool onlySuggestFree = false,
   }) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/cmdb/verify-ip'),
-      headers: _headers,
-      body: jsonEncode({
+    return Map<String, dynamic>.from(await _post('/cmdb/verify-ip', {
         'target_ip': targetIp,
         'subnet_id': subnetId,
         'ports': ports ?? [22, 80, 443, 3389, 445, 8006, 902, 161],
         'timeout_sec': timeoutSec,
         'count_limit': countLimit,
         'only_suggest_free': onlySuggestFree,
-      }),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+      }) as Map);
   }
 
   Future<Map<String, dynamic>> importDiscoveredCmdbHosts({
@@ -944,18 +710,13 @@ class RackDocApiClient {
     int? locationId,
     required List<Map<String, dynamic>> items,
   }) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/cmdb/import-discovered'),
-      headers: _headers,
-      body: jsonEncode({
+    return Map<String, dynamic>.from(await _post('/cmdb/import-discovered', {
         'register_subnet_cidr': registerSubnetCidr,
         'subnet_name': subnetName,
         'vlan_id': vlanId,
         'location_id': locationId,
         'items': items,
-      }),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+      }) as Map);
   }
 
   Future<Map<String, dynamic>> checkCmdbIpOwner({
@@ -977,19 +738,13 @@ class RackDocApiClient {
     final uri = Uri.parse(
       '$baseUrl/cmdb/check-ip-owner',
     ).replace(queryParameters: params);
-    final res = await http.get(uri, headers: _headers);
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _enviar('GET', uri) as Map);
   }
 
   Future<Map<String, dynamic>> resolveCmdbIpCollision(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/cmdb/resolve-ip-collision'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/cmdb/resolve-ip-collision', payload) as Map);
   }
 
   // ---------------------------------------------------------------------------
@@ -997,352 +752,195 @@ class RackDocApiClient {
   // ---------------------------------------------------------------------------
 
   Future<Map<String, dynamic>> getNetworkHostsOverview() async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/network-hosts/overview'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _get('/network-hosts/overview') as Map);
   }
 
   Future<Map<String, dynamic>> getNetworkHostTelemetry(
     int assetId, {
     int rangeHours = 6,
   }) async {
-    final res = await http.get(
-      Uri.parse(
-        '$baseUrl/network-hosts/telemetry/$assetId?range_hours=$rangeHours',
-      ),
-      headers: _headers,
+    return Map<String, dynamic>.from(
+      await _get('/network-hosts/telemetry/$assetId',
+              {'range_hours': rangeHours})
+          as Map,
     );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
   }
 
   Future<Map<String, dynamic>> createNetworkHostWithServices(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/network-hosts/hosts'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/network-hosts/hosts', payload) as Map);
   }
 
   Future<Map<String, dynamic>> createNetworkServiceCheck(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/network-hosts/service-checks'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/network-hosts/service-checks', payload) as Map);
   }
 
   Future<Map<String, dynamic>> deleteNetworkServiceCheck(int checkId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/network-hosts/service-checks/$checkId'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _delete('/network-hosts/service-checks/$checkId') as Map);
   }
 
   Future<Map<String, dynamic>> runSingleNetworkServiceCheck(int checkId) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/network-hosts/service-checks/$checkId/run'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/network-hosts/service-checks/$checkId/run') as Map);
   }
 
   Future<Map<String, dynamic>> runAllNetworkServiceChecks() async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/network-hosts/run-all-checks'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/network-hosts/run-all-checks') as Map);
   }
 
   Future<Map<String, dynamic>> runSnmpSwitchDiscovery(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/network-hosts/snmp-discover'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/network-hosts/snmp-discover', payload) as Map);
   }
 
   Future<Map<String, dynamic>> createLogicalLink(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/network-hosts/logical-links'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/network-hosts/logical-links', payload) as Map);
   }
 
   Future<Map<String, dynamic>> deleteLogicalLink(int linkId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/network-hosts/logical-links/$linkId'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _delete('/network-hosts/logical-links/$linkId') as Map);
   }
 
   Future<Map<String, dynamic>> createInfraConnector(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/network-hosts/connectors'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/network-hosts/connectors', payload) as Map);
   }
 
   Future<Map<String, dynamic>> syncInfraConnector(int connectorId) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/network-hosts/connectors/$connectorId/sync'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/network-hosts/connectors/$connectorId/sync') as Map);
   }
 
   Future<Map<String, dynamic>> deleteInfraConnector(int connectorId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/network-hosts/connectors/$connectorId'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _delete('/network-hosts/connectors/$connectorId') as Map);
   }
 
   Future<Map<String, dynamic>> upsertHostGroup(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/network-hosts/host-groups'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/network-hosts/host-groups', payload) as Map);
   }
 
   Future<Map<String, dynamic>> deleteHostGroup(int groupId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/network-hosts/host-groups/$groupId'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _delete('/network-hosts/host-groups/$groupId') as Map);
   }
 
   Future<Map<String, dynamic>> upsertAlertContact(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/network-hosts/alert-contacts'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/network-hosts/alert-contacts', payload) as Map);
   }
 
   Future<Map<String, dynamic>> deleteAlertContact(int contactId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/network-hosts/alert-contacts/$contactId'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _delete('/network-hosts/alert-contacts/$contactId') as Map);
   }
 
   Future<Map<String, dynamic>> upsertAlertContactGroup(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/network-hosts/alert-contact-groups'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/network-hosts/alert-contact-groups', payload) as Map);
   }
 
   Future<Map<String, dynamic>> deleteAlertContactGroup(int groupId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/network-hosts/alert-contact-groups/$groupId'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _delete('/network-hosts/alert-contact-groups/$groupId') as Map);
   }
 
   Future<Map<String, dynamic>> createNotificationRule(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/network-hosts/notification-rules'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/network-hosts/notification-rules', payload) as Map);
   }
 
   Future<Map<String, dynamic>> deleteNotificationRule(int ruleId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/network-hosts/notification-rules/$ruleId'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _delete('/network-hosts/notification-rules/$ruleId') as Map);
   }
 
   Future<Map<String, dynamic>> createMaintenanceWindow(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/network-hosts/maintenance-windows'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/network-hosts/maintenance-windows', payload) as Map);
   }
 
   Future<Map<String, dynamic>> stopMaintenanceWindow(int windowId) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/network-hosts/maintenance-windows/$windowId/stop'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/network-hosts/maintenance-windows/$windowId/stop') as Map);
   }
 
   Future<Map<String, dynamic>> updateSmtpAlertConfig(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.put(
-      Uri.parse('$baseUrl/network-hosts/smtp-config'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _put('/network-hosts/smtp-config', payload) as Map);
   }
 
   Future<Map<String, dynamic>> triggerTestAlert({int? assetId}) async {
     final uri = assetId != null
         ? Uri.parse('$baseUrl/network-hosts/test-alert?asset_id=$assetId')
         : Uri.parse('$baseUrl/network-hosts/test-alert');
-    final res = await http.post(uri, headers: _headers);
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _enviar('POST', uri) as Map);
   }
 
   Future<Map<String, dynamic>> getAiAgentContextManifest() async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/automation/ai-context'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _get('/automation/ai-context') as Map);
   }
 
   Future<Map<String, dynamic>> upsertTechStackDiagram(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/network-hosts/tech-stacks'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/network-hosts/tech-stacks', payload) as Map);
   }
 
   Future<Map<String, dynamic>> updateTechStackDiagram(
     int stackId,
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.put(
-      Uri.parse('$baseUrl/network-hosts/tech-stacks/$stackId'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _put('/network-hosts/tech-stacks/$stackId', payload) as Map);
   }
 
   Future<Map<String, dynamic>> deleteTechStackDiagram(int stackId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/network-hosts/tech-stacks/$stackId'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _delete('/network-hosts/tech-stacks/$stackId') as Map);
   }
 
   Future<Map<String, dynamic>> createTechStackNode(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/network-hosts/tech-stacks/nodes'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/network-hosts/tech-stacks/nodes', payload) as Map);
   }
 
   Future<Map<String, dynamic>> moveTechStackNode(
     int nodeId,
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.put(
-      Uri.parse('$baseUrl/network-hosts/tech-stacks/nodes/$nodeId'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _put('/network-hosts/tech-stacks/nodes/$nodeId', payload) as Map);
   }
 
   Future<Map<String, dynamic>> deleteTechStackNode(int nodeId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/network-hosts/tech-stacks/nodes/$nodeId'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _delete('/network-hosts/tech-stacks/nodes/$nodeId') as Map);
   }
 
   Future<Map<String, dynamic>> createTechStackEdge(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/network-hosts/tech-stacks/edges'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/network-hosts/tech-stacks/edges', payload) as Map);
   }
 
   Future<Map<String, dynamic>> updateTechStackEdge(
     int edgeId,
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.put(
-      Uri.parse('$baseUrl/network-hosts/tech-stacks/edges/$edgeId'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _put('/network-hosts/tech-stacks/edges/$edgeId', payload) as Map);
   }
 
   Future<Map<String, dynamic>> deleteTechStackEdge(int edgeId) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl/network-hosts/tech-stacks/edges/$edgeId'),
-      headers: _headers,
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _delete('/network-hosts/tech-stacks/edges/$edgeId') as Map);
   }
 
   Future<Map<String, dynamic>> executeHostSshConsole(
     Map<String, dynamic> payload,
   ) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/network-hosts/ssh-console'),
-      headers: _headers,
-      body: jsonEncode(payload),
-    );
-    return Map<String, dynamic>.from(_decodeResponse(res) as Map);
+    return Map<String, dynamic>.from(await _post('/network-hosts/ssh-console', payload) as Map);
   }
 }
