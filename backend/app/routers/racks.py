@@ -4,13 +4,14 @@ from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..database import get_db
-from ..models import CmdbAsset, Connection, DeviceTemplate, Floor, FloorDevice, Port, Rack, RackDevice, Room
+from ..models import CmdbAsset, Connection, DeviceTemplate, Floor, FloorDevice, Port, Rack, RackDevice, Room, TlsCertificate
 from ..rack_sync import _extract_floor_device_id_from_port, _sync_rack_floor_devices_box
 from ..schemas import ConnectionCreate, ConnectionSchema, ConnectionUpdate, ExternalOutletCreate, ExternalOutletUpdate, RackCreate, RackDeviceCreate, RackDeviceSchema, RackDeviceUpdate, RackUpdate
 from ..seed import create_ports_from_template, ensure_rack_external_outlets, get_or_create_external_feed_template, sync_external_outlet_ports
 from ..routers._common import _check_u_collision, _delete_connections_for_port_ids, _effective_device_u_height, _serialize_connection, api_router
 from ..services.cmdb_service import resolve_cmdb_ip_collision, sync_physical_devices_to_cmdb
 from ..services.monitor import check_all_monitored_devices, check_single_device, run_device_remote_console
+from ..services.certscope_service import sync_or_probe_device_certificate
 
 @api_router.post(
     "/racks",
@@ -400,6 +401,23 @@ def add_device_to_rack(rack_id: int, payload: RackDeviceCreate, db: Session = De
                 db.refresh(device)
             except Exception:
                 pass
+    if payload.certscope_enabled:
+        target_host = (device.ip_address or "").strip() or (device.fqdn or "").strip() or (device.hostname or "").strip()
+        if target_host:
+            my_asset = db.query(CmdbAsset).filter(CmdbAsset.rack_device_id == device.id).first()
+            sync_or_probe_device_certificate(
+                db,
+                name=f"Certificado TLS {device.name}",
+                target_host=target_host,
+                port=payload.certscope_port or 443,
+                sni_hostname=payload.certscope_sni or device.fqdn or "",
+                renewal_type=payload.certscope_renewal_type or "manual",
+                asset_id=my_asset.id if my_asset else None,
+                rack_device_id=device.id,
+                location_id=rack.room.floor.location_id if (rack.room and rack.room.floor) else None,
+            )
+            db.commit()
+            db.refresh(device)
     return device
 
 
@@ -591,6 +609,10 @@ def update_rack_device(device_id: int, payload: RackDeviceUpdate, db: Session = 
         raise HTTPException(status_code=404, detail="Dispositivo no encontrado")
 
     updates = payload.model_dump(exclude_unset=True)
+    certscope_enabled = updates.pop("certscope_enabled", None)
+    certscope_port = updates.pop("certscope_port", None)
+    certscope_renewal_type = updates.pop("certscope_renewal_type", None)
+    certscope_sni = updates.pop("certscope_sni", None)
     new_start_u = updates.get("start_u", device.start_u)
     new_face = updates.get("mounted_face", device.mounted_face)
     new_custom_fields = updates.get("custom_fields", device.custom_fields)
@@ -660,6 +682,25 @@ def update_rack_device(device_id: int, payload: RackDeviceUpdate, db: Session = 
             except Exception:
                 pass
 
+    if certscope_enabled:
+        target_host = (device.ip_address or "").strip() or (device.fqdn or "").strip() or (device.hostname or "").strip()
+        if target_host:
+            my_asset = db.query(CmdbAsset).filter(CmdbAsset.rack_device_id == device.id).first()
+            rk = device.rack
+            sync_or_probe_device_certificate(
+                db,
+                name=f"Certificado TLS {device.name}",
+                target_host=target_host,
+                port=certscope_port or 443,
+                sni_hostname=certscope_sni or device.fqdn or "",
+                renewal_type=certscope_renewal_type or "manual",
+                asset_id=my_asset.id if my_asset else None,
+                rack_device_id=device.id,
+                location_id=rk.room.floor.location_id if (rk and rk.room and rk.room.floor) else None,
+            )
+            db.commit()
+            db.refresh(device)
+
     return device
 
 
@@ -680,6 +721,14 @@ def delete_rack_device(device_id: int, db: Session = Depends(get_db)):
             (Connection.source_port_id.in_(port_ids))
             | (Connection.target_port_id.in_(port_ids))
         ).delete(synchronize_session=False)
+
+    db.query(TlsCertificate).filter(TlsCertificate.rack_device_id == device_id).update(
+        {"rack_device_id": None}
+    )
+    for ast in db.query(CmdbAsset).filter(CmdbAsset.rack_device_id == device_id).all():
+        ast.rack_device_id = None
+    for ast in db.query(CmdbAsset).filter(CmdbAsset.host_rack_device_id == device_id).all():
+        ast.host_rack_device_id = None
 
     db.delete(device)
     db.commit()

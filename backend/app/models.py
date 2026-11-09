@@ -713,6 +713,76 @@ class TechStackEdge(Base):
     notes = Column(Text, default="")
 
 
+class TlsCertificate(Base):
+    """
+    CertScope — Auditoría y Control de Caducidad de Certificados SSL/TLS (Automáticos por Red HTTPS y Manuales/Offline).
+    Vinculado opcionalmente a activos de CMDB, equipos de Rack 42U, dispositivos de Planta y Sedes (Locations),
+    con alertas preventivas a Personas y Grupos de Personas antes de su vencimiento.
+    """
+    __tablename__ = "certscope_certificates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(80), unique=True, index=True, nullable=False)  # Ej: CERT-ROU01-443, CERT-ERP-WEB, CERT-MAN-01
+    name = Column(String(180), nullable=False)
+    # check_mode: 'https_live' (sonda TLS automática a host:port) | 'manual' (fecha manual o certificado PEM pegado sin acceso directo)
+    check_mode = Column(String(32), default="https_live")
+    # renewal_type: 'manual' (renovación manual por operario: avisar antes de caducar) | 'auto_acme' (Let's Encrypt / ACME / Auto-enrollment)
+    renewal_type = Column(String(32), default="manual")
+
+    target_host = Column(String(255), default="")  # IP, Hostname o Dominio FQDN (ej. 192.168.2.1 o portal.empresa.com)
+    port = Column(Integer, default=443)  # 443, 8443, 8006, 9443, 636, etc.
+    sni_hostname = Column(String(255), default="")  # SNI opcional si target_host es una IP
+    environment = Column(String(32), default="production")  # production | staging | development | dr
+
+    # Vínculos directos para navegar con 1 clic al Rack, Planta, Máquina CMDB o Sede
+    asset_id = Column(Integer, ForeignKey("cmdb_assets.id", ondelete="SET NULL"), nullable=True, index=True)
+    rack_device_id = Column(Integer, ForeignKey("rack_devices.id", ondelete="SET NULL"), nullable=True, index=True)
+    floor_device_id = Column(Integer, ForeignKey("floor_devices.id", ondelete="SET NULL"), nullable=True, index=True)
+    location_id = Column(Integer, ForeignKey("locations.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # Atributos X.509 extraídos por TLS/PEM o cumplimentados manualmente
+    common_name = Column(String(255), default="")
+    issuer_cn = Column(String(255), default="")
+    issuer_org = Column(String(255), default="")
+    san_domains = Column(JSON, default=list)
+    serial_number = Column(String(160), default="")
+    fingerprint_sha256 = Column(String(180), default="")
+    tls_version = Column(String(64), default="")
+    cipher_suite = Column(String(128), default="")
+    is_self_signed = Column(Boolean, default=False)
+    valid_from = Column(DateTime, nullable=True)
+    valid_until = Column(DateTime, nullable=True)
+    days_remaining = Column(Integer, nullable=True)
+    pem_certificate = Column(Text, default="")
+
+    # Semáforo y Avisos a Personas / Grupos
+    # status: 'valid' (>warn_days_before) | 'expiring_soon' (<=warn_days_before) | 'critical' (<=critical_days_before) | 'expired' (<=0d) | 'unreachable' | 'unknown'
+    status = Column(String(32), default="unknown")
+    warn_days_before = Column(Integer, default=30)
+    critical_days_before = Column(Integer, default=7)
+    auto_probe_enabled = Column(Boolean, default=True)
+    notify_enabled = Column(Boolean, default=True)
+    owner_team = Column(String(140), default="Seguridad & Sistemas")
+    responsible_person = Column(String(140), default="Alex Geng")
+    notify_emails = Column(String(500), default="")
+    contact_group_ids = Column(JSON, default=list)
+    contact_ids = Column(JSON, default=list)
+
+    last_checked_at = Column(DateTime, nullable=True)
+    last_probe_error = Column(Text, default="")
+    last_notified_at = Column(DateTime, nullable=True)
+    last_notified_severity = Column(String(32), default="")
+    renewal_notes = Column(Text, default="")
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    asset = relationship("CmdbAsset")
+    rack_device = relationship("RackDevice")
+    floor_device = relationship("FloorDevice")
+    location = relationship("Location")
+
+
 
 
 

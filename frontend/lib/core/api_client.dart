@@ -943,4 +943,53 @@ class RackDocApiClient {
   ) async {
     return Map<String, dynamic>.from(await _post('/network-hosts/ssh-console', payload) as Map);
   }
+
+  // ===========================================================================
+  // 7. CERTSCOPE — AUDITORÍA Y CADUCIDAD DE CERTIFICADOS SSL/TLS & GUÍA API
+  // ===========================================================================
+  Future<Map<String, dynamic>> getCertScopeOverview() async {
+    return Map<String, dynamic>.from(await _get('/certscope/overview') as Map);
+  }
+
+  Future<Map<String, dynamic>> getApiOnboardingGuide() async {
+    return Map<String, dynamic>.from(await _get('/certscope/api-onboarding-guide') as Map);
+  }
+
+  Future<Map<String, dynamic>> probeCertificate(
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(await _post('/certscope/probe', payload) as Map);
+  }
+
+  Future<Map<String, dynamic>> createCertificate(
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(await _post('/certscope/certificates', payload) as Map);
+  }
+
+  Future<Map<String, dynamic>> updateCertificate(
+    int certId,
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(await _put('/certscope/certificates/$certId', payload) as Map);
+  }
+
+  Future<Map<String, dynamic>> deleteCertificate(int certId) async {
+    return Map<String, dynamic>.from(await _delete('/certscope/certificates/$certId') as Map);
+  }
+
+  Future<Map<String, dynamic>> verifyCertificate(int certId) async {
+    return Map<String, dynamic>.from(await _post('/certscope/certificates/$certId/verify') as Map);
+  }
+
+  Future<Map<String, dynamic>> verifyAllCertificates() async {
+    return Map<String, dynamic>.from(await _post('/certscope/verify-all') as Map);
+  }
+
+  Future<Map<String, dynamic>> notifyCertificateContacts(
+    int certId,
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(await _post('/certscope/certificates/$certId/notify', payload) as Map);
+  }
 }

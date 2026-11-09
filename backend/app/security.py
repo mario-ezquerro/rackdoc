@@ -187,6 +187,10 @@ _OPERATOR_ACTION_SUFFIXES = (
     "/snmp-discover",
     "/verify-ip",
     "/test-alert",
+    "/probe",
+    "/verify",
+    "/verify-all",
+    "/notify",
 )
 
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})

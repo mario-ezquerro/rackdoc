@@ -3,6 +3,7 @@ import '../../core/widgets/avisos.dart';
 import '../../core/theme.dart';
 import 'package:flutter/services.dart';
 import '../../core/api_client.dart';
+import 'api_onboarding_dialog.dart';
 
 class CmdbView extends StatefulWidget {
   final RackDocApiClient api;
@@ -708,6 +709,27 @@ class _CmdbViewState extends State<CmdbView> {
                 ),
               ),
               const SizedBox(width: 10),
+              OutlinedButton.icon(
+                onPressed: () => showApiOnboardingGuideDialog(
+                  context,
+                  api: widget.api,
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppPalette.blue900,
+                  side: const BorderSide(color: AppPalette.blue300, width: 1.4),
+                  backgroundColor: AppPalette.blue50,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                ),
+                icon: const Icon(Icons.terminal_rounded, size: 17),
+                label: const Text(
+                  'Alta vía API (cURL / Ansible / Puppet)',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+                ),
+              ),
+              const SizedBox(width: 8),
               OutlinedButton.icon(
                 onPressed: () {
                   setState(() => _activeTab = 'verifier');
@@ -6389,6 +6411,9 @@ class _CmdbViewState extends State<CmdbView> {
     final monitorPortCtrl = TextEditingController(
       text: '${existing?['monitor_port'] ?? 22}',
     );
+    bool certscopeEnabled = false;
+    final certscopePortCtrl = TextEditingController(text: '443');
+    String certscopeRenewalType = 'manual';
 
     List<Map<String, dynamic>> ipDrafts = [];
     if (isEdit && existing['ip_addresses'] is List) {
@@ -6967,6 +6992,89 @@ class _CmdbViewState extends State<CmdbView> {
                       ],
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: certscopeEnabled
+                          ? AppPalette.blue50
+                          : AppPalette.slate50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: certscopeEnabled
+                            ? AppPalette.blue300
+                            : AppPalette.slate300,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: SwitchListTile(
+                            value: certscopeEnabled,
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              '7. CertScope: Verificar y registrar caducidad de Certificado HTTPS/TLS al guardar',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w900,
+                                color: AppPalette.blue900,
+                              ),
+                            ),
+                            onChanged: (v) =>
+                                setModalState(() => certscopeEnabled = v),
+                          ),
+                        ),
+                        if (certscopeEnabled) ...[
+                          const SizedBox(width: 8),
+                          SizedBox(
+                            width: 110,
+                            child: TextField(
+                              controller: certscopePortCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'Puerto HTTPS',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          SizedBox(
+                            width: 190,
+                            child: DropdownButtonFormField<String>(
+                              initialValue: certscopeRenewalType,
+                              decoration: const InputDecoration(
+                                labelText: 'Renovación Certificado',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'manual',
+                                  child: Text('Manual (Avisar)'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'auto_acme',
+                                  child: Text('Automática ACME'),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                if (v != null) {
+                                  setModalState(
+                                    () => certscopeRenewalType = v,
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
                   const Divider(height: 22),
                   Row(
                     children: [
@@ -7375,6 +7483,9 @@ class _CmdbViewState extends State<CmdbView> {
                   'monitoring_enabled': monitoringEnabled,
                   'monitor_method': monitorMethod,
                   'monitor_port': int.tryParse(monitorPortCtrl.text.trim()) ?? 22,
+                  'certscope_enabled': certscopeEnabled,
+                  'certscope_port': int.tryParse(certscopePortCtrl.text.trim()) ?? 443,
+                  'certscope_renewal_type': certscopeRenewalType,
                   'custom_fields': existingCf,
                   'notes': notesCtrl.text.trim(),
                   'ip_addresses': validIps,

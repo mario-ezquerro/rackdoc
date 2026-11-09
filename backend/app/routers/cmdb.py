@@ -6,12 +6,13 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from ..database import get_db
-from ..models import CmdbAsset, CmdbIpAddress, CmdbSubnet, Floor, FloorDevice, LogicalTopologyLink, MonitoredServiceCheck, Rack, RackDevice, SwitchSnmpPort, TechStackNode
+from ..models import CmdbAsset, CmdbIpAddress, CmdbSubnet, Floor, FloorDevice, LogicalTopologyLink, MonitoredServiceCheck, Rack, RackDevice, SwitchSnmpPort, TechStackNode, TlsCertificate
 from ..rack_sync import _sync_rack_floor_devices_box
 from ..schemas import CmdbAssetCreate, CmdbAssetUpdate, CmdbImportDiscoveredRequest, CmdbIpAddressInput, CmdbSubnetCreate, CmdbSubnetUpdate, CmdbVerifyIpRequest
 from ..routers._common import api_router
 from ..services.cmdb_service import _match_subnet_for_ip, build_cmdb_overview, check_cmdb_asset_heartbeat, check_ip_collision_in_cmdb, ensure_cmdb_seed_data, import_discovered_hosts_to_cmdb, resolve_cmdb_ip_collision, verify_ip_target_or_find_free
 from ..services.network_host_service import sync_prometheus_targets_file
+from ..services.certscope_service import sync_or_probe_device_certificate
 
 
 def _align_cmdb_asset_with_floor_device(
@@ -240,6 +241,27 @@ def create_cmdb_asset_endpoint(payload: CmdbAssetCreate, db: Session = Depends(g
         linked_rack_id=payload.linked_rack_id,
         room_code=payload.room_code,
     )
+    if payload.certscope_enabled:
+        hb_ip_rec = next(
+            (ip for ip in asset.ip_addresses if ip.is_heartbeat_ip or ip.ip_role == "mgmt_heartbeat"),
+            asset.ip_addresses[0] if asset.ip_addresses else None,
+        )
+        target_host = (hb_ip_rec.ip_address if hb_ip_rec else "") or asset.fqdn or asset.hostname
+        if target_host:
+            sync_or_probe_device_certificate(
+                db,
+                name=f"Certificado TLS {asset.name}",
+                target_host=target_host,
+                port=payload.certscope_port or 443,
+                sni_hostname=payload.certscope_sni or asset.fqdn or "",
+                renewal_type=payload.certscope_renewal_type or "manual",
+                environment=asset.environment or "production",
+                responsible_person=asset.responsible_person or "Alex Geng",
+                owner_team=asset.owner_team or "Seguridad & Sistemas",
+                asset_id=asset.id,
+                rack_device_id=asset.rack_device_id or asset.host_rack_device_id,
+                floor_device_id=asset.floor_device_id,
+            )
     db.commit()
     return build_cmdb_overview(db)
 
@@ -265,6 +287,10 @@ def update_cmdb_asset_endpoint(
     floor_device_type = data.pop("floor_device_type", None)
     linked_rack_id = data.pop("linked_rack_id", None)
     room_code = data.pop("room_code", None)
+    certscope_enabled = data.pop("certscope_enabled", None)
+    certscope_port = data.pop("certscope_port", None)
+    certscope_renewal_type = data.pop("certscope_renewal_type", None)
+    certscope_sni = data.pop("certscope_sni", None)
 
     for k, v in data.items():
         if k == "code" and isinstance(v, str) and v.strip():
@@ -337,6 +363,24 @@ def update_cmdb_asset_endpoint(
             room_code=room_code,
         )
 
+    if certscope_enabled:
+        target_host = (hb_ip_rec.ip_address if hb_ip_rec else "") or asset.fqdn or asset.hostname
+        if target_host:
+            sync_or_probe_device_certificate(
+                db,
+                name=f"Certificado TLS {asset.name}",
+                target_host=target_host,
+                port=certscope_port or 443,
+                sni_hostname=certscope_sni or asset.fqdn or "",
+                renewal_type=certscope_renewal_type or "manual",
+                environment=asset.environment or "production",
+                responsible_person=asset.responsible_person or "Alex Geng",
+                owner_team=asset.owner_team or "Seguridad & Sistemas",
+                asset_id=asset.id,
+                rack_device_id=asset.rack_device_id or asset.host_rack_device_id,
+                floor_device_id=asset.floor_device_id,
+            )
+
     db.commit()
     return build_cmdb_overview(db)
 
@@ -362,7 +406,7 @@ def delete_cmdb_asset_endpoint(asset_id: int, db: Session = Depends(get_db)):
         if fdev:
             fdev.ip_address = None
 
-    # Limpiar referencias en monitorización, topología y stack
+    # Limpiar referencias en monitorización, topología, stack y CertScope
     db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.asset_id == asset.id).delete()
     db.query(SwitchSnmpPort).filter(SwitchSnmpPort.asset_id == asset.id).delete()
     db.query(LogicalTopologyLink).filter(
@@ -370,6 +414,8 @@ def delete_cmdb_asset_endpoint(asset_id: int, db: Session = Depends(get_db)):
     ).delete(synchronize_session=False)
     for tnode in db.query(TechStackNode).filter(TechStackNode.asset_id == asset.id).all():
         tnode.asset_id = None
+    for cert in db.query(TlsCertificate).filter(TlsCertificate.asset_id == asset.id).all():
+        cert.asset_id = None
 
     # Eliminar todas las IPs asociadas para dejarlas libres en el mapa IPAM
     db.query(CmdbIpAddress).filter(CmdbIpAddress.asset_id == asset.id).delete()

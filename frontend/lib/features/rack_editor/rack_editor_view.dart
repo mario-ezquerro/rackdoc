@@ -2241,6 +2241,8 @@ class _RackEditorViewState extends State<RackEditorView> {
     );
 
     int chosenUHeight = tpl.uHeight;
+    bool certscopeEnabled = false;
+    final certscopePortCtrl = TextEditingController(text: '443');
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -2366,6 +2368,59 @@ class _RackEditorViewState extends State<RackEditorView> {
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: certscopeEnabled
+                          ? AppPalette.blue50
+                          : AppPalette.slate50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: certscopeEnabled
+                            ? AppPalette.blue300
+                            : AppPalette.slate300,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: CheckboxListTile(
+                            value: certscopeEnabled,
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              '7. CertScope: Verificar caducidad de Certificado HTTPS al guardar',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w800,
+                                color: AppPalette.blue900,
+                              ),
+                            ),
+                            onChanged: (v) =>
+                                setModal(() => certscopeEnabled = v ?? false),
+                          ),
+                        ),
+                        if (certscopeEnabled) ...[
+                          const SizedBox(width: 8),
+                          SizedBox(
+                            width: 95,
+                            child: TextField(
+                              controller: certscopePortCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'Puerto TLS',
+                                isDense: true,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                   if (!tpl.isRackTray && !tpl.isRoofFan) ...[
                     const Divider(height: 22),
@@ -2664,6 +2719,8 @@ class _RackEditorViewState extends State<RackEditorView> {
         'subnet_mask': maskCtrl.text.trim(),
         'gateway': gwCtrl.text.trim(),
         'monitoring_enabled': targetIp.isNotEmpty,
+        'certscope_enabled': certscopeEnabled,
+        'certscope_port': int.tryParse(certscopePortCtrl.text.trim()) ?? 443,
         'custom_fields': {
           if (chosenUHeight != tpl.uHeight) 'u_height_override': chosenUHeight,
           if (collisionAction != null && collisionTargetAssetId != null) ...{

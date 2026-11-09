@@ -4,12 +4,13 @@ from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..database import get_db
-from ..models import Aisle, CmdbAsset, CmdbIpAddress, Connection, Floor, FloorDevice, FloorDeviceCustomType, Location, Port, Rack, RackDevice, Room
+from ..models import Aisle, CmdbAsset, CmdbIpAddress, Connection, Floor, FloorDevice, FloorDeviceCustomType, Location, Port, Rack, RackDevice, Room, TlsCertificate
 from ..rack_sync import _rack_ids_vinculados_a_floor_devices, _resync_rack_boxes, _sync_rack_floor_devices_box
 from ..schemas import AisleCreate, FloorCreate, FloorDeviceCreate, FloorDeviceCustomTypeCreate, FloorDeviceUpdate, FloorUpdate, LocationCreate, LocationUpdate, RoomCreate
 from ..routers._common import _delete_connections_for_port_ids, _effective_device_u_height, api_router
 from ..services.cmdb_service import sync_physical_devices_to_cmdb
 from ..services.monitor import check_single_device
+from ..services.certscope_service import sync_or_probe_device_certificate
 
 @api_router.get(
     "/locations",
@@ -622,6 +623,10 @@ def create_floor_device(
         raise HTTPException(status_code=404, detail="Planta no encontrada")
     data = payload.model_dump()
     cmdb_asset_id = data.pop("cmdb_asset_id", None)
+    certscope_enabled = data.pop("certscope_enabled", False)
+    certscope_port = data.pop("certscope_port", 443)
+    certscope_renewal_type = data.pop("certscope_renewal_type", "manual")
+    certscope_sni = data.pop("certscope_sni", "")
     if data.get("room_id") is None and fl.rooms:
         data["room_id"] = fl.rooms[0].id
     if data.get("linked_rack_id") == 0:
@@ -675,6 +680,23 @@ def create_floor_device(
 
     sync_physical_devices_to_cmdb(db)
 
+    if certscope_enabled:
+        target_host = (fd.ip_address or "").strip() or (fd.fqdn or "").strip()
+        if target_host:
+            sync_or_probe_device_certificate(
+                db,
+                name=f"Certificado TLS {fd.name}",
+                target_host=target_host,
+                port=certscope_port or 443,
+                sni_hostname=certscope_sni or fd.fqdn or "",
+                renewal_type=certscope_renewal_type or "manual",
+                responsible_person=fd.responsible_person or "Alex Geng",
+                asset_id=linked_ast.id if linked_ast else None,
+                floor_device_id=fd.id,
+                location_id=fl.location_id,
+            )
+            db.commit()
+
     if fd.monitoring_enabled:
         check_single_device(db, fd)
     if fd.linked_rack_id:
@@ -723,6 +745,10 @@ def update_floor_device(
     was_monitored = bool(getattr(fd, "monitoring_enabled", False))
     updates = payload.model_dump(exclude_unset=True)
     cmdb_asset_id = updates.pop("cmdb_asset_id", None)
+    certscope_enabled = updates.pop("certscope_enabled", None)
+    certscope_port = updates.pop("certscope_port", None)
+    certscope_renewal_type = updates.pop("certscope_renewal_type", None)
+    certscope_sni = updates.pop("certscope_sni", None)
     if "linked_rack_id" in updates and updates["linked_rack_id"] == 0:
         updates["linked_rack_id"] = None
     if "linked_outlet_id" in updates and updates["linked_outlet_id"] == 0:
@@ -755,6 +781,23 @@ def update_floor_device(
             db.commit()
 
     sync_physical_devices_to_cmdb(db)
+
+    if certscope_enabled:
+        target_host = (fd.ip_address or "").strip() or (fd.fqdn or "").strip()
+        if target_host:
+            sync_or_probe_device_certificate(
+                db,
+                name=f"Certificado TLS {fd.name}",
+                target_host=target_host,
+                port=certscope_port or 443,
+                sni_hostname=certscope_sni or fd.fqdn or "",
+                renewal_type=certscope_renewal_type or "manual",
+                responsible_person=fd.responsible_person or "Alex Geng",
+                asset_id=fd.cmdb_asset_id,
+                floor_device_id=fd.id,
+                location_id=fd.floor.location_id if fd.floor else None,
+            )
+            db.commit()
 
     if fd.monitoring_enabled and (
         not was_monitored
@@ -822,6 +865,9 @@ def delete_floor_device(device_id: int, db: Session = Depends(get_db)):
     # Desvincular otros dispositivos que apuntasen a esta roseta
     db.query(FloorDevice).filter(FloorDevice.linked_outlet_id == device_id).update(
         {"linked_outlet_id": None}
+    )
+    db.query(TlsCertificate).filter(TlsCertificate.floor_device_id == device_id).update(
+        {"floor_device_id": None}
     )
     db.delete(fd)
     db.commit()

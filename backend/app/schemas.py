@@ -238,6 +238,10 @@ class RackDeviceCreate(BaseModel):
     serial_number: str = ""
     custom_fields: Dict[str, Any] = {}
     notes: str = ""
+    certscope_enabled: Optional[bool] = False
+    certscope_port: int = 443
+    certscope_renewal_type: str = "manual"
+    certscope_sni: str = ""
 
 
 class RackDeviceUpdate(BaseModel):
@@ -259,6 +263,10 @@ class RackDeviceUpdate(BaseModel):
     serial_number: Optional[str] = None
     custom_fields: Optional[Dict[str, Any]] = None
     notes: Optional[str] = None
+    certscope_enabled: Optional[bool] = None
+    certscope_port: Optional[int] = None
+    certscope_renewal_type: Optional[str] = None
+    certscope_sni: Optional[str] = None
 
 
 class ConnectionEndpointInfo(BaseModel):
@@ -424,6 +432,10 @@ class FloorDeviceCreate(BaseModel):
     contact_job_title: str = ""
     contact_department: str = ""
     notes: str = ""
+    certscope_enabled: Optional[bool] = False
+    certscope_port: int = 443
+    certscope_renewal_type: str = "manual"
+    certscope_sni: str = ""
 
 
 class FloorDeviceUpdate(BaseModel):
@@ -455,6 +467,10 @@ class FloorDeviceUpdate(BaseModel):
     contact_job_title: Optional[str] = None
     contact_department: Optional[str] = None
     notes: Optional[str] = None
+    certscope_enabled: Optional[bool] = None
+    certscope_port: Optional[int] = None
+    certscope_renewal_type: Optional[str] = None
+    certscope_sni: Optional[str] = None
 
 
 class FloorDeviceCustomTypeCreate(BaseModel):
@@ -544,6 +560,10 @@ class CmdbAssetCreate(BaseModel):
     custom_fields: Dict[str, Any] = {}
     notes: str = ""
     ip_addresses: List[CmdbIpAddressInput] = []
+    certscope_enabled: Optional[bool] = False
+    certscope_port: int = 443
+    certscope_renewal_type: str = "manual"
+    certscope_sni: str = ""
 
 
 class CmdbAssetUpdate(BaseModel):
@@ -576,6 +596,10 @@ class CmdbAssetUpdate(BaseModel):
     custom_fields: Optional[Dict[str, Any]] = None
     notes: Optional[str] = None
     ip_addresses: Optional[List[CmdbIpAddressInput]] = None
+    certscope_enabled: Optional[bool] = None
+    certscope_port: Optional[int] = None
+    certscope_renewal_type: Optional[str] = None
+    certscope_sni: Optional[str] = None
 
 
 class CmdbVerifyIpRequest(BaseModel):
@@ -759,7 +783,16 @@ class AnsibleHostUpsertWebhook(BaseModel):
     parent_asset_code: Optional[str] = None
     owner_team: str = "Sistemas & DevOps"
     responsible_person: str = "Alex Geng"
+    serial_or_uuid: str = ""
+    floor_id: Optional[int] = None
+    floor_device_type: Optional[str] = None
+    room_code: Optional[str] = None
+    linked_rack_id: Optional[int] = None
     primary_ip: str
+    primary_subnet_mask: str = "255.255.255.0"
+    primary_gateway: str = ""
+    primary_vlan_id: Optional[int] = None
+    primary_mac_address: str = ""
     additional_ips: List[Dict[str, Any]] = []
     host_groups: List[str] = []  # Lista de códigos de HostGroup (se crean si no existen)
     # Sección 1: Healthchecks, Monitorización en Background & Prometheus (Activable / Desactivable)
@@ -780,6 +813,14 @@ class AnsibleHostUpsertWebhook(BaseModel):
     web_https_enabled: bool = False
     web_https_url: str = ""
     connect_config: Optional[Dict[str, Any]] = None
+    # Sección 3: CertScope — Auditoría y Caducidad de Certificados SSL/TLS
+    certscope_enabled: Optional[bool] = False
+    certscope_port: int = 443
+    certscope_sni: str = ""
+    certscope_renewal_type: str = "manual"
+    certscope_contact_group_ids: List[int] = []
+    certscope_contact_ids: List[int] = []
+    certscope_notify_emails: str = ""
     notes: str = "Registrado/actualizado en Red & Host y CMDB"
 
 
@@ -877,6 +918,97 @@ class HostSshCommandInput(BaseModel):
     command: str = "uptime && df -h / && free -m"
     ssh_user: str = "root"
     ssh_port: int = 22
+
+
+# ==============================================================================
+# ESQUEMAS DE '7. CERTSCOPE — AUDITORÍA Y CADUCIDAD DE CERTIFICADOS SSL/TLS'
+# ==============================================================================
+
+class TlsCertificateProbeRequest(BaseModel):
+    target_host: str = ""
+    port: int = 443
+    sni_hostname: str = ""
+    pem_text: str = ""
+    timeout_sec: float = 4.0
+
+
+class TlsCertificateCreate(BaseModel):
+    code: Optional[str] = None
+    name: str
+    check_mode: str = "https_live"  # https_live | manual
+    target_host: str = ""
+    port: int = 443
+    sni_hostname: str = ""
+    environment: str = "production"
+    # Campos manuales u obtenidos tras verificación / PEM
+    common_name: str = ""
+    issuer_cn: str = ""
+    issuer_org: str = ""
+    san_domains: List[str] = []
+    serial_number: str = ""
+    fingerprint_sha256: str = ""
+    valid_from: Optional[str] = None
+    valid_until: Optional[str] = None
+    pem_text: str = ""
+    # Renovación y Alertas
+    renewal_type: str = "manual"  # manual | auto_acme
+    warn_days_before: int = 30
+    critical_days_before: int = 7
+    auto_probe_enabled: bool = True
+    notify_enabled: bool = True
+    contact_group_ids: List[int] = []
+    contact_ids: List[int] = []
+    notify_emails: str = ""
+    owner_team: str = "Seguridad & Sistemas"
+    responsible_person: str = "Alex Geng"
+    # Enlaces cruzados con CMDB, Rack Editor, Datacenter Planta y Sede
+    asset_id: Optional[int] = None
+    rack_device_id: Optional[int] = None
+    floor_device_id: Optional[int] = None
+    location_id: Optional[int] = None
+    renewal_notes: str = ""
+    notes: str = ""
+
+
+class TlsCertificateUpdate(BaseModel):
+    code: Optional[str] = None
+    name: Optional[str] = None
+    check_mode: Optional[str] = None
+    target_host: Optional[str] = None
+    port: Optional[int] = None
+    sni_hostname: Optional[str] = None
+    environment: Optional[str] = None
+    common_name: Optional[str] = None
+    issuer_cn: Optional[str] = None
+    issuer_org: Optional[str] = None
+    san_domains: Optional[List[str]] = None
+    serial_number: Optional[str] = None
+    fingerprint_sha256: Optional[str] = None
+    valid_from: Optional[str] = None
+    valid_until: Optional[str] = None
+    pem_text: Optional[str] = None
+    renewal_type: Optional[str] = None
+    warn_days_before: Optional[int] = None
+    critical_days_before: Optional[int] = None
+    auto_probe_enabled: Optional[bool] = None
+    notify_enabled: Optional[bool] = None
+    contact_group_ids: Optional[List[int]] = None
+    contact_ids: Optional[List[int]] = None
+    notify_emails: Optional[str] = None
+    owner_team: Optional[str] = None
+    responsible_person: Optional[str] = None
+    asset_id: Optional[int] = None
+    rack_device_id: Optional[int] = None
+    floor_device_id: Optional[int] = None
+    location_id: Optional[int] = None
+    renewal_notes: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class TlsCertificateNotifyRequest(BaseModel):
+    custom_message: str = ""
+    force_send: bool = True
+
 
 
 

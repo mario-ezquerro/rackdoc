@@ -38,6 +38,7 @@ from .routers import (  # noqa: F401
     cmdb,
     network_hosts,
     automation,
+    certscope,
 )
 
 OPENAPI_TAGS_METADATA = [

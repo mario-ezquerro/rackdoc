@@ -1975,6 +1975,8 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
     asset.ram_gb = float(payload.get("ram_gb") or 16.0)
     asset.storage_gb = float(payload.get("storage_gb") or 100.0)
     asset.hypervisor_or_platform = hypervisor_platform
+    if payload.get("serial_or_uuid"):
+        asset.serial_or_uuid = str(payload.get("serial_or_uuid")).strip()
     asset.owner_team = str(payload.get("owner_team") or "Sistemas & DevOps").strip()
     asset.responsible_person = str(payload.get("responsible_person") or "Alex Geng").strip()
     asset.monitoring_enabled = monitoring_enabled
@@ -2098,6 +2100,11 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
     # Sincronizar IP primaria y adicionales en CMDB
     subnets = db.query(CmdbSubnet).all()
     existing_ips = {ip.ip_address: ip for ip in asset.ip_addresses}
+    primary_mask = str(payload.get("primary_subnet_mask") or "").strip()
+    primary_gw = str(payload.get("primary_gateway") or "").strip()
+    primary_vlan = payload.get("primary_vlan_id")
+    primary_mac = str(payload.get("primary_mac_address") or "").strip()
+
     if primary_ip not in existing_ips:
         matched_sub = _match_subnet_for_ip(primary_ip, subnets)
         db.add(
@@ -2105,9 +2112,10 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
                 asset_id=asset.id,
                 subnet_id=matched_sub.id if matched_sub else None,
                 ip_address=primary_ip,
-                subnet_mask=matched_sub.subnet_mask if matched_sub else "255.255.255.0",
-                gateway=matched_sub.gateway if matched_sub else "",
-                vlan_id=matched_sub.vlan_id if matched_sub else 20,
+                subnet_mask=primary_mask or (matched_sub.subnet_mask if matched_sub else "255.255.255.0"),
+                gateway=primary_gw or (matched_sub.gateway if matched_sub else ""),
+                vlan_id=primary_vlan if primary_vlan is not None else (matched_sub.vlan_id if matched_sub else 20),
+                mac_address=primary_mac,
                 ip_role="mgmt_heartbeat",
                 interface_name="eth0",
                 fqdn=asset.fqdn,
@@ -2117,6 +2125,16 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
                 last_verified_at=datetime.utcnow(),
             )
         )
+    else:
+        ep_ip = existing_ips[primary_ip]
+        if primary_mask:
+            ep_ip.subnet_mask = primary_mask
+        if primary_gw:
+            ep_ip.gateway = primary_gw
+        if primary_vlan is not None:
+            ep_ip.vlan_id = primary_vlan
+        if primary_mac:
+            ep_ip.mac_address = primary_mac
 
     for extra_ip in (payload.get("additional_ips") or []):
         ip_str = str(extra_ip.get("ip_address") or "").strip()
@@ -2128,13 +2146,14 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
                 asset_id=asset.id,
                 subnet_id=matched_sub.id if matched_sub else None,
                 ip_address=ip_str,
-                subnet_mask=matched_sub.subnet_mask if matched_sub else "255.255.255.0",
-                gateway=matched_sub.gateway if matched_sub else "",
-                vlan_id=extra_ip.get("vlan_id") or (matched_sub.vlan_id if matched_sub else None),
+                subnet_mask=str(extra_ip.get("subnet_mask") or (matched_sub.subnet_mask if matched_sub else "255.255.255.0")),
+                gateway=str(extra_ip.get("gateway") or (matched_sub.gateway if matched_sub else "")),
+                vlan_id=extra_ip.get("vlan_id") if extra_ip.get("vlan_id") is not None else (matched_sub.vlan_id if matched_sub else None),
+                mac_address=str(extra_ip.get("mac_address") or "").strip(),
                 ip_role=str(extra_ip.get("ip_role") or "primary_service"),
                 interface_name=str(extra_ip.get("interface_name") or "eth1"),
                 fqdn=str(extra_ip.get("fqdn") or asset.fqdn),
-                is_heartbeat_ip=False,
+                is_heartbeat_ip=bool(extra_ip.get("is_heartbeat_ip", False)),
                 allocation_status="assigned",
                 last_verification_status="active_in_network",
                 last_verified_at=datetime.utcnow(),
@@ -2243,6 +2262,38 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
     if monitoring_enabled:
         for chk in db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.asset_id == asset.id, MonitoredServiceCheck.enabled == True).all():  # noqa: E712
             run_single_service_check(db=db, chk=chk, asset=asset)
+
+    certscope_summary = None
+    if payload.get("certscope_enabled"):
+        from .certscope_service import sync_or_probe_device_certificate
+        cert = sync_or_probe_device_certificate(
+            db,
+            name=f"Certificado TLS {asset.name}",
+            target_host=primary_ip or asset.fqdn or asset.hostname,
+            port=int(payload.get("certscope_port") or 443),
+            sni_hostname=str(payload.get("certscope_sni") or asset.fqdn or "").strip(),
+            renewal_type=str(payload.get("certscope_renewal_type") or "manual").strip(),
+            environment=asset.environment or "production",
+            responsible_person=asset.responsible_person or "Alex Geng",
+            owner_team=asset.owner_team or "Seguridad & Sistemas",
+            asset_id=asset.id,
+            rack_device_id=asset.rack_device_id or asset.host_rack_device_id,
+            floor_device_id=asset.floor_device_id,
+            contact_group_ids=list(payload.get("certscope_contact_group_ids") or []),
+            contact_ids=list(payload.get("certscope_contact_ids") or []),
+            notify_emails=str(payload.get("certscope_notify_emails") or "").strip(),
+        )
+        db.commit()
+        if cert:
+            certscope_summary = {
+                "id": cert.id,
+                "code": cert.code,
+                "status": cert.status,
+                "days_remaining": cert.days_remaining,
+                "common_name": cert.common_name,
+                "valid_until": cert.valid_until.isoformat() if cert.valid_until else None,
+            }
+
     prom_sync = sync_prometheus_targets_file(db)
     return {
         "status": "ok",
@@ -2251,6 +2302,7 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
         "code": asset.code,
         "hostname": asset.hostname,
         "primary_ip": primary_ip,
+        "certscope": certscope_summary,
         "prometheus_sd_sync": prom_sync,
     }
 

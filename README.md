@@ -6,9 +6,9 @@ Diseñada para operar sobre **infraestructura real (modo POC / Producción limpi
 
 ---
 
-## 🧭 Los 7 Módulos Principales de RackDoc8
+## 🧭 Los 8 Módulos Principales de RackDoc8
 
-La barra lateral izquierda estructura el flujo completo de extremo a extremo en **7 módulos**:
+La barra lateral izquierda estructura el flujo completo de extremo a extremo en **8 módulos**:
 
 ### 1. 📍 `1. Locations (Mapa)` — Mapa Geográfico OpenStreetMap y Planos Personalizados
 - Visualización interactiva sobre **OpenStreetMap** sin necesidad de API Keys (*OSM Estándar*, *OSM Claro* y *Topográfico*) con buscador mundial de direcciones y coordenadas (**Nominatim**).
@@ -111,11 +111,32 @@ Dividido en **4 sub-apartados**:
 
 ---
 
-### 7. ⚙️ `7. Configuración (Usuarios / AD)` — Login, 4 Roles RBAC y Multi-Active Directory
+### 7. 🔐 `7. CertScope (SSL/TLS)` — Auditoría, Verificación Automática y Alertas de Caducidad de Certificados
+Ubicado justo debajo de `6. CMDB & Control IPs`, proporciona un inventario centralizado estilo hoja de cálculo Excel para el ciclo de vida de **todos los certificados X.509 (HTTPS / TLS / PKI interna / Offline)** de la infraestructura:
+- **Doble Modo de Alta y Verificación**:
+  - **Modo Automático (`https_live`)**: conecta en vivo por TLS/SSL a `host:puerto` (`443`, `8443`, `8006`, `9443`, etc.), soportando tanto certificados públicos como autofirmados o de CA interna (`OpenSSL x509`), y extrae automáticamente `Common Name (CN)`, `Emisor (CA)`, `SANs`, `Serial`, `Huella SHA-256`, `Versión TLS`, `Fecha de Caducidad` y `Días Restantes`.
+  - **Modo Manual / Offline (`manual`)**: para certificados que no pueden sondearse por red (VPN IPsec, firmas, redes aisladas), permitiendo indicar manualmente la fecha de vencimiento o pegar el bloque `-----BEGIN CERTIFICATE-----` para extraer sus metadatos al instante.
+- **Integración Directa al Dar de Alta Dispositivos**:
+  - Desde **`3. Rack Editor`**, **`2. Datacenter (Plantas)`**, **`6. CMDB`** o vía **API (`cURL` / `Ansible` / `Puppet`)**, cualquier equipo puede marcarse con **`Comprobar caducidad de Certificado HTTPS en CertScope`** para registrarlo y verificarlo automáticamente al guardar.
+- **Enlaces Directos Interactivos y Avisos a Personas / Grupos**:
+  - Cada fila de CertScope incluye chips clicables que te llevan directamente a la posición del equipo en el **Rack (`U`)**, en el **Plano de Planta (`2. Datacenter`)**, en la **CMDB (`6. CMDB`)** o en el **Stack Tecnológico (`4. Red & Host`)**.
+  - Permite asignar **Grupos de Contacto / Personas** y correos para enviar avisos automáticos o bajo demanda cuando un certificado manual está próximo a caducar (`<=30 días`) o en estado crítico (`<=7 días`).
+
+---
+
+### 8. ⚙️ `8. Administración & Avisos (Usuarios / AD)` — Login, 4 Roles RBAC y Multi-Active Directory
 - Acceso protegido por pantalla de Login y verificación de contraseña al cambiar de usuario activo.
 - Gestión de usuarios locales, **4 roles RBAC** (`admin`, `editor`, `operator`, `viewer`), múltiples servidores **Active Directory (LDAP/LDAPS)** con mapeo de permisos para usuarios y grupos (`ADRoleMapping`), y ajuste en caliente del intervalo del motor Heartbeat.
 
 ![4. Administración - 4 Roles RBAC y Multi-AD](docs/screenshots/04_admin_rbac_ad.png)
+
+---
+
+## 🤖 Guía de Alta Automática vía API (`cURL`, `Ansible` y `Puppet`)
+
+RackDoc incluye una guía completa y un asistente interactivo en la propia interfaz web (**botón «Alta vía API (cURL / Ansible / Puppet)»** en `6. CMDB` y `7. CertScope`) con ejemplos funcionales listos para copiar que muestran cómo dar de alta un dispositivo con toda la información posible (Hardware, Multi-IP, Ubicación en Rack/Planta, Prometheus y Certificado SSL en CertScope):
+
+👉 **[Ver Guía Completa de Alta vía API REST (`cURL`, `Ansible` y `Puppet`) — `docs/API_ONBOARDING_CURL_ANSIBLE_PUPPET.md`](docs/API_ONBOARDING_CURL_ANSIBLE_PUPPET.md)**
 
 ---
 

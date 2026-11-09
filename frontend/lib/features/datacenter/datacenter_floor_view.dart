@@ -1674,6 +1674,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     String detectedMac = '';
     int? detectedVlan;
     bool enableHeartbeatFromCmdb = false;
+    bool certscopeEnabled = false;
+    final certscopePortCtrl = TextEditingController(text: '443');
 
     final codeCtrl = TextEditingController(
       text: _nextAutoCodeForCategory(floor, selectedCat),
@@ -2257,6 +2259,60 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                         onChanged: (v) => setModal(() => linkedOutletId = v),
                       ),
                     ],
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: certscopeEnabled
+                            ? AppPalette.blue50
+                            : AppPalette.slate50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: certscopeEnabled
+                              ? AppPalette.blue300
+                              : AppPalette.slate300,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: CheckboxListTile(
+                              value: certscopeEnabled,
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text(
+                                '7. CertScope: Verificar caducidad de Certificado HTTPS al guardar',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppPalette.blue900,
+                                ),
+                              ),
+                              onChanged: (v) =>
+                                  setModal(() => certscopeEnabled = v ?? false),
+                            ),
+                          ),
+                          if (certscopeEnabled) ...[
+                            const SizedBox(width: 8),
+                            SizedBox(
+                              width: 100,
+                              child: TextField(
+                                controller: certscopePortCtrl,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: 'Puerto TLS',
+                                  isDense: true,
+                                  border: OutlineInputBorder(),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -2308,6 +2364,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         'cmdb_asset_id': selectedCmdbAssetId,
         'responsible_person': respCtrl.text.trim(),
         'notes': notesCtrl.text.trim(),
+        'certscope_enabled': certscopeEnabled,
+        'certscope_port': int.tryParse(certscopePortCtrl.text.trim()) ?? 443,
       });
       final newId = (res['id'] as num?)?.toInt();
       if (newId != null) {

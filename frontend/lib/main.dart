@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'core/api_client.dart';
 import 'core/image_file_picker.dart';
 import 'features/admin/admin_view.dart';
+import 'features/certscope/certscope_view.dart';
 import 'features/cmdb/cmdb_view.dart';
 import 'features/datacenter/datacenter_floor_view.dart';
 import 'features/locations/locations_view.dart';
@@ -1270,8 +1271,14 @@ class _RackDocShellState extends State<RackDocShell> {
                   onTap: () => setState(() => _activeNav = 'cmdb'),
                 ),
                 _SidebarItem(
+                  icon: Icons.verified_user_rounded,
+                  label: '7. CertScope (SSL/TLS)',
+                  active: _activeNav == 'certscope',
+                  onTap: () => setState(() => _activeNav = 'certscope'),
+                ),
+                _SidebarItem(
                   icon: Icons.settings_rounded,
-                  label: '7. Configuración (Usuarios/AD)',
+                  label: '8. Configuración (Usuarios/AD)',
                   active: _activeNav == 'admin',
                   onTap: () => setState(() => _activeNav = 'admin'),
                 ),
@@ -1922,6 +1929,8 @@ class _RackDocShellState extends State<RackDocShell> {
                     _buildKioskQuickNavChip('5. Dashboard', 'dashboard'),
                     const SizedBox(width: 4),
                     _buildKioskQuickNavChip('6. CMDB', 'cmdb'),
+                    const SizedBox(width: 4),
+                    _buildKioskQuickNavChip('7. CertScope', 'certscope'),
                     Container(
                       width: 1,
                       height: 16,
@@ -2128,6 +2137,44 @@ class _RackDocShellState extends State<RackDocShell> {
         onExportExcel: () async {
           final url = _api.getExcelExportUrl();
           await launchUrl(Uri.parse(url));
+        },
+      );
+    }
+
+    if (_activeNav == 'certscope') {
+      return CertScopeView(
+        api: _api,
+        canEdit: _currentUser.canEdit,
+        canOperate: _currentUser.canEdit,
+        onNavigateToRack: (rackId, deviceId) {
+          _openRack(rackId, highlightDeviceId: deviceId);
+        },
+        onNavigateToFloor: (floorId, floorDeviceId) async {
+          await _refreshDataSilently();
+          if (!mounted) return;
+          setState(() {
+            for (final loc in _locations) {
+              if (loc.floors.any((fl) => fl.id == floorId)) {
+                _activeLocationId = loc.id;
+                _expandedLocationIds.add(loc.id);
+                break;
+              }
+            }
+            _activeFloorId = floorId;
+            _expandedFloorIds.add(floorId);
+            _highlightedFloorDeviceId = floorDeviceId;
+            _activeNav = 'datacenter';
+          });
+        },
+        onNavigateToStack: (stackId, nodeId) {
+          setState(() {
+            _highlightedStackId = stackId;
+            _highlightedStackNodeId = nodeId;
+            _activeNav = 'network_hosts';
+          });
+        },
+        onNavigateToCmdb: () {
+          setState(() => _activeNav = 'cmdb');
         },
       );
     }

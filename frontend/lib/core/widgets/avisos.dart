@@ -46,3 +46,27 @@ extension Avisos on ScaffoldMessengerState {
 /// que este cambio no altere nada visualmente. Unificarlo es una decisión de
 /// diseño, no de refactor.
 final Color _rojoError = Colors.red.shade700;
+
+enum TonoAviso { info, exito, alerta, advertencia, error }
+
+void mostrarAviso(
+  BuildContext context,
+  String mensaje, {
+  TonoAviso tono = TonoAviso.info,
+}) {
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  if (messenger == null) return;
+  switch (tono) {
+    case TonoAviso.exito:
+      messenger.avisoExito(mensaje);
+      break;
+    case TonoAviso.error:
+      messenger.avisoError(mensaje);
+      break;
+    case TonoAviso.alerta:
+    case TonoAviso.advertencia:
+    case TonoAviso.info:
+      messenger.aviso(mensaje);
+      break;
+  }
+}
