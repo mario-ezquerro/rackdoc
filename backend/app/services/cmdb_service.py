@@ -244,11 +244,12 @@ def sync_physical_devices_to_cmdb(db: Session) -> None:
                     rdev.vlan_mgmt = hb_ip_obj.vlan_id
 
     # 2. Sincronizar FloorDevices con IP
-    floor_devices = db.query(FloorDevice).all()
+    floor_devices = db.query(FloorDevice).options(joinedload(FloorDevice.floor)).all()
     existing_floor_assets = {
         a.floor_device_id: a
         for a in db.query(CmdbAsset)
-        .filter(CmdbAsset.floor_device_id.isnot(None), CmdbAsset.sync_source == "floor_device")
+        .options(joinedload(CmdbAsset.ip_addresses))
+        .filter(CmdbAsset.floor_device_id.isnot(None))
         .all()
     }
     for fdev in floor_devices:
@@ -259,21 +260,50 @@ def sync_physical_devices_to_cmdb(db: Session) -> None:
             continue
 
         asset = existing_floor_assets.get(fdev.id)
+        if not asset and f_ip:
+            # Si ya existe un activo en CMDB con esa misma IP (ej. descubierto por escaneo DISC-...) sin vincular a otro equipo físico, adoptarlo
+            ip_match = (
+                db.query(CmdbIpAddress)
+                .options(joinedload(CmdbIpAddress.asset).joinedload(CmdbAsset.ip_addresses))
+                .filter(CmdbIpAddress.ip_address == f_ip)
+                .first()
+            )
+            if ip_match and ip_match.asset and ip_match.asset.floor_device_id is None and ip_match.asset.rack_device_id is None:
+                asset = ip_match.asset
+                asset.floor_device_id = fdev.id
+                asset.sync_source = "floor_device"
+                asset.asset_class = "floor_endpoint"
+                existing_floor_assets[fdev.id] = asset
+                # Enriquecer el FloorDevice con los datos ya detectados en CMDB si aún estaban vacíos
+                if ip_match.mac_address and not fdev.mac_address:
+                    fdev.mac_address = ip_match.mac_address
+                if (ip_match.fqdn or asset.fqdn) and not fdev.fqdn:
+                    fdev.fqdn = ip_match.fqdn or asset.fqdn
+                if ip_match.vlan_id is not None and fdev.vlan is None:
+                    fdev.vlan = ip_match.vlan_id
+                if asset.status == "online" and fdev.status != "online":
+                    fdev.status = "online"
+                    fdev.last_ping_ms = asset.last_ping_ms
+                    fdev.last_checked_at = asset.last_checked_at
+                    fdev.monitoring_enabled = True
+                changed = True
+
         desired_code = f"FLR-{fdev.code}".upper()
+        fl_name = fdev.floor.name if getattr(fdev, "floor", None) else f"Sala {fdev.room_code}"
         if not asset:
             if db.query(CmdbAsset).filter(CmdbAsset.code == desired_code).first():
                 desired_code = f"{desired_code}-F{fdev.id}"
             asset = CmdbAsset(
                 code=desired_code,
                 name=fdev.name,
-                hostname=fdev.code.lower(),
+                hostname=(fdev.fqdn.split(".")[0] if fdev.fqdn else fdev.code.lower()),
                 fqdn=fdev.fqdn or "",
                 asset_class="floor_endpoint",
                 environment="production",
                 criticality="medium",
                 lifecycle_status="active",
                 os_or_firmware=f"Endpoint ({fdev.device_type})",
-                hypervisor_or_platform=f"Planta / Sala {fdev.room_code}",
+                hypervisor_or_platform=f"Planta: {fl_name} ({fdev.room_code})",
                 owner_team=fdev.contact_department or "Infraestructura Planta",
                 responsible_person=fdev.responsible_person or "Alex Geng",
                 sync_source="floor_device",
@@ -290,19 +320,40 @@ def sync_physical_devices_to_cmdb(db: Session) -> None:
             )
             db.add(asset)
             db.flush()
+            existing_floor_assets[fdev.id] = asset
             changed = True
         else:
-            asset.name = fdev.name
+            if fdev.name and not fdev.name.startswith("Equipo Detectado"):
+                asset.name = fdev.name
+            elif asset.name and not asset.name.startswith("Equipo Detectado"):
+                fdev.name = asset.name
+            if fdev.fqdn:
+                asset.fqdn = fdev.fqdn
+            elif asset.fqdn:
+                fdev.fqdn = asset.fqdn
+            asset.sync_source = "floor_device"
+            asset.asset_class = "floor_endpoint"
+            asset.os_or_firmware = f"Endpoint ({fdev.device_type})"
+            asset.hypervisor_or_platform = f"Planta: {fl_name} ({fdev.room_code})"
+            if fdev.responsible_person:
+                asset.responsible_person = fdev.responsible_person
+            if fdev.notes:
+                asset.notes = fdev.notes
             asset.monitoring_enabled = fdev.monitoring_enabled
+            asset.monitor_method = fdev.monitor_method or asset.monitor_method or "icmp"
+            asset.monitor_port = fdev.monitor_port or asset.monitor_port or 22
             asset.status = fdev.status or asset.status
-            asset.last_ping_ms = fdev.last_ping_ms
-            asset.last_checked_at = fdev.last_checked_at
+            asset.last_ping_ms = fdev.last_ping_ms if fdev.last_ping_ms is not None else asset.last_ping_ms
+            asset.last_checked_at = fdev.last_checked_at or asset.last_checked_at
 
         if f_ip:
             hb_ip_obj = next(
                 (ip for ip in asset.ip_addresses if ip.is_heartbeat_ip or ip.ip_role == "mgmt_heartbeat"),
                 None,
             )
+            if not hb_ip_obj and asset.ip_addresses:
+                hb_ip_obj = asset.ip_addresses[0]
+                hb_ip_obj.is_heartbeat_ip = True
             matched_sub = _match_subnet_for_ip(f_ip, subnets)
             if not hb_ip_obj:
                 hb_ip_obj = CmdbIpAddress(
@@ -322,10 +373,23 @@ def sync_physical_devices_to_cmdb(db: Session) -> None:
                 )
                 db.add(hb_ip_obj)
                 changed = True
-            elif hb_ip_obj.ip_address != f_ip:
-                hb_ip_obj.ip_address = f_ip
-                hb_ip_obj.subnet_id = matched_sub.id if matched_sub else hb_ip_obj.subnet_id
-                changed = True
+            else:
+                if hb_ip_obj.ip_address != f_ip:
+                    hb_ip_obj.ip_address = f_ip
+                    hb_ip_obj.subnet_id = matched_sub.id if matched_sub else hb_ip_obj.subnet_id
+                    changed = True
+                if fdev.mac_address and hb_ip_obj.mac_address != fdev.mac_address:
+                    hb_ip_obj.mac_address = fdev.mac_address
+                    changed = True
+                elif hb_ip_obj.mac_address and not fdev.mac_address:
+                    fdev.mac_address = hb_ip_obj.mac_address
+                    changed = True
+                if fdev.vlan is not None and hb_ip_obj.vlan_id != fdev.vlan:
+                    hb_ip_obj.vlan_id = fdev.vlan
+                    changed = True
+                elif hb_ip_obj.vlan_id is not None and fdev.vlan is None:
+                    fdev.vlan = hb_ip_obj.vlan_id
+                    changed = True
 
     if changed:
         db.commit()
@@ -1210,6 +1274,11 @@ def serialize_cmdb_asset(
     rack_id = None
     rack_code = ""
     start_u = None
+    floor_id = None
+    floor_name = ""
+    floor_device_type = ""
+    floor_room_code = ""
+    floor_linked_rack_id = None
     host_server_label = ""
     derived_loc_obj: Optional[Location] = None
 
@@ -1234,14 +1303,25 @@ def serialize_cmdb_asset(
             physical_location_label = f"Alojado en {host_dev.code} [Rack {rack_code} • U{host_dev.start_u}]"
             if rk and rk.room and rk.room.floor and rk.room.floor.location:
                 derived_loc_obj = rk.room.floor.location
-    elif asset.sync_source == "floor_device":
+    elif asset.sync_source == "floor_device" or asset.floor_device_id:
         physical_location_label = asset.hypervisor_or_platform or "Dispositivo en Planta"
         if floor_devs_by_id and asset.floor_device_id:
             fdev = floor_devs_by_id.get(asset.floor_device_id)
-            if fdev and fdev.floor and fdev.floor.location:
-                derived_loc_obj = fdev.floor.location
+            if fdev:
+                floor_id = fdev.floor_id
+                floor_device_type = fdev.device_type or ""
+                floor_room_code = fdev.room_code or ""
+                floor_linked_rack_id = fdev.linked_rack_id
+                if fdev.floor:
+                    floor_name = fdev.floor.name or ""
+                    physical_location_label = f"Planta: {floor_name} • {fdev.code} ({fdev.device_type})"
+                    if fdev.floor.location:
+                        derived_loc_obj = fdev.floor.location
     elif asset.asset_class == "cloud_instance":
         physical_location_label = asset.hypervisor_or_platform or "Cloud / Externo"
+
+    if not floor_device_type and isinstance(asset.custom_fields, dict):
+        floor_device_type = str(asset.custom_fields.get("floor_device_type") or "")
 
     # Resolver Location / Sede (1. custom_fields['location_id'], 2. Ubicación física Rack/Planta, 3. Subred de la IP)
     locs_map = locations_by_id or {}
@@ -1312,6 +1392,11 @@ def serialize_cmdb_asset(
         "rack_id": rack_id,
         "rack_code": rack_code,
         "start_u": start_u,
+        "floor_id": floor_id,
+        "floor_name": floor_name,
+        "floor_device_type": floor_device_type,
+        "floor_room_code": floor_room_code,
+        "floor_linked_rack_id": floor_linked_rack_id,
         "physical_location_label": physical_location_label,
         "location_id": location_id,
         "location_code": location_code,
@@ -1626,6 +1711,13 @@ def build_cmdb_overview(db: Session) -> Dict[str, Any]:
     multi_ip_hosts = sum(1 for a in serialized_assets if a["ip_count"] > 1)
     conflict_ips = sum(1 for ip in all_ips if ip.last_verification_status == "conflict_unregistered") + len(ip_collisions)
 
+    floors = (
+        db.query(Floor)
+        .options(joinedload(Floor.location))
+        .order_by(Floor.location_id, Floor.level_number, Floor.id)
+        .all()
+    )
+
     return {
         "summary": {
             "total_assets": len(serialized_assets),
@@ -1650,6 +1742,18 @@ def build_cmdb_overview(db: Session) -> Dict[str, Any]:
                 "address": loc.address or "",
             }
             for loc in locations
+        ],
+        "floors": [
+            {
+                "id": fl.id,
+                "name": fl.name,
+                "level_number": fl.level_number,
+                "location_id": fl.location_id,
+                "location_code": fl.location.code if fl.location else "",
+                "location_name": fl.location.name if fl.location else "",
+                "label": f"{fl.location.code} • {fl.name}" if fl.location else fl.name,
+            }
+            for fl in floors
         ],
     }
 
@@ -1827,6 +1931,24 @@ def resolve_cmdb_ip_collision(
                         rdev.subnet_mask = hb_ip.subnet_mask
                     if hb_ip.gateway:
                         rdev.gateway = hb_ip.gateway
+
+        # Si keep_ast está vinculado a un FloorDevice, propagar todos los datos alineados a Datacenter (Plantas)
+        if keep_ast.floor_device_id:
+            fdev = db.query(FloorDevice).filter(FloorDevice.id == keep_ast.floor_device_id).first()
+            if fdev:
+                fdev.name = keep_ast.name
+                fdev.fqdn = keep_ast.fqdn
+                fdev.status = keep_ast.status
+                fdev.last_ping_ms = keep_ast.last_ping_ms
+                fdev.last_checked_at = keep_ast.last_checked_at
+                fdev.monitoring_enabled = True
+                hb_ip = keep_ips_by_addr.get(ip_clean) or (keep_ast.ip_addresses[0] if keep_ast.ip_addresses else None)
+                if hb_ip:
+                    fdev.ip_address = hb_ip.ip_address
+                    if hb_ip.mac_address:
+                        fdev.mac_address = hb_ip.mac_address
+                    if hb_ip.vlan_id is not None:
+                        fdev.vlan = hb_ip.vlan_id
 
         db.flush()
         db.delete(other_ast)

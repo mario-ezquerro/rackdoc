@@ -4,10 +4,11 @@ from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..database import get_db
-from ..models import Aisle, Connection, Floor, FloorDevice, FloorDeviceCustomType, Location, Port, Rack, RackDevice, Room
+from ..models import Aisle, CmdbAsset, CmdbIpAddress, Connection, Floor, FloorDevice, FloorDeviceCustomType, Location, Port, Rack, RackDevice, Room
 from ..rack_sync import _rack_ids_vinculados_a_floor_devices, _resync_rack_boxes, _sync_rack_floor_devices_box
 from ..schemas import AisleCreate, FloorCreate, FloorDeviceCreate, FloorDeviceCustomTypeCreate, FloorDeviceUpdate, FloorUpdate, LocationCreate, LocationUpdate, RoomCreate
 from ..routers._common import _delete_connections_for_port_ids, _effective_device_u_height, api_router
+from ..services.cmdb_service import sync_physical_devices_to_cmdb
 from ..services.monitor import check_single_device
 
 @api_router.get(
@@ -116,6 +117,12 @@ def get_locations_tree(db: Session = Depends(get_db)):
         )
         enlaces_por_rack.setdefault(r1.id, []).append(indice)
         enlaces_por_rack.setdefault(r2.id, []).append(indice)
+
+    # Mapa de activos CMDB vinculados a FloorDevice para exponer cmdb_asset_id/code en el plano 2D
+    floor_cmdb_map = {
+        a.floor_device_id: a
+        for a in db.query(CmdbAsset).filter(CmdbAsset.floor_device_id.isnot(None)).all()
+    }
 
     result = []
     for loc in locations:
@@ -332,6 +339,8 @@ def get_locations_tree(db: Session = Depends(get_db)):
                     "linked_rack_id": fd.linked_rack_id,
                     "linked_rack_device_code": fd.linked_rack_device_code or "",
                     "linked_outlet_id": fd.linked_outlet_id,
+                    "cmdb_asset_id": floor_cmdb_map[fd.id].id if fd.id in floor_cmdb_map else None,
+                    "cmdb_asset_code": floor_cmdb_map[fd.id].code if fd.id in floor_cmdb_map else "",
                     "responsible_person": fd.responsible_person or "Alex Geng",
                     "contact_first_name": fd.contact_first_name or "",
                     "contact_last_name": fd.contact_last_name or "",
@@ -612,18 +621,60 @@ def create_floor_device(
     if not fl:
         raise HTTPException(status_code=404, detail="Planta no encontrada")
     data = payload.model_dump()
+    cmdb_asset_id = data.pop("cmdb_asset_id", None)
     if data.get("room_id") is None and fl.rooms:
         data["room_id"] = fl.rooms[0].id
     if data.get("linked_rack_id") == 0:
         data["linked_rack_id"] = None
     if data.get("linked_outlet_id") == 0:
         data["linked_outlet_id"] = None
+
+    linked_ast = None
+    if cmdb_asset_id:
+        linked_ast = (
+            db.query(CmdbAsset)
+            .options(joinedload(CmdbAsset.ip_addresses))
+            .filter(CmdbAsset.id == cmdb_asset_id)
+            .first()
+        )
+        if linked_ast:
+            hb_ip = next(
+                (ip for ip in linked_ast.ip_addresses if ip.is_heartbeat_ip or ip.ip_role == "mgmt_heartbeat"),
+                linked_ast.ip_addresses[0] if linked_ast.ip_addresses else None,
+            )
+            if not (data.get("ip_address") or "").strip() and hb_ip:
+                data["ip_address"] = hb_ip.ip_address
+            if not (data.get("mac_address") or "").strip() and hb_ip and hb_ip.mac_address:
+                data["mac_address"] = hb_ip.mac_address
+            if not (data.get("fqdn") or "").strip():
+                data["fqdn"] = (hb_ip.fqdn if hb_ip and hb_ip.fqdn else "") or linked_ast.fqdn or ""
+            if data.get("vlan") is None and hb_ip and hb_ip.vlan_id is not None:
+                data["vlan"] = hb_ip.vlan_id
+            if linked_ast.status == "online":
+                data["monitoring_enabled"] = True
+                data["status"] = "online"
+
     if not data.get("monitoring_enabled"):
         data["status"] = "unmonitored"
     fd = FloorDevice(floor_id=floor_id, **data)
     db.add(fd)
     db.commit()
     db.refresh(fd)
+
+    if linked_ast:
+        linked_ast.floor_device_id = fd.id
+        linked_ast.sync_source = "floor_device"
+        linked_ast.asset_class = "floor_endpoint"
+        linked_ast.name = fd.name
+        linked_ast.os_or_firmware = f"Endpoint ({fd.device_type})"
+        linked_ast.hypervisor_or_platform = f"Planta: {fl.name} ({fd.room_code})"
+        if linked_ast.last_ping_ms is not None and fd.last_ping_ms is None:
+            fd.last_ping_ms = linked_ast.last_ping_ms
+            fd.last_checked_at = linked_ast.last_checked_at
+        db.commit()
+
+    sync_physical_devices_to_cmdb(db)
+
     if fd.monitoring_enabled:
         check_single_device(db, fd)
     if fd.linked_rack_id:
@@ -671,6 +722,7 @@ def update_floor_device(
     old_rack_id = fd.linked_rack_id
     was_monitored = bool(getattr(fd, "monitoring_enabled", False))
     updates = payload.model_dump(exclude_unset=True)
+    cmdb_asset_id = updates.pop("cmdb_asset_id", None)
     if "linked_rack_id" in updates and updates["linked_rack_id"] == 0:
         updates["linked_rack_id"] = None
     if "linked_outlet_id" in updates and updates["linked_outlet_id"] == 0:
@@ -682,6 +734,27 @@ def update_floor_device(
         fd.last_ping_ms = None
     db.commit()
     db.refresh(fd)
+
+    if cmdb_asset_id:
+        linked_ast = (
+            db.query(CmdbAsset)
+            .options(joinedload(CmdbAsset.ip_addresses))
+            .filter(CmdbAsset.id == cmdb_asset_id)
+            .first()
+        )
+        if linked_ast:
+            # Desvincular cualquier otro CmdbAsset previo de este FloorDevice si era distinto
+            for prev_ast in db.query(CmdbAsset).filter(CmdbAsset.floor_device_id == fd.id, CmdbAsset.id != linked_ast.id).all():
+                prev_ast.floor_device_id = None
+                if prev_ast.code.startswith("FLR-"):
+                    db.query(CmdbIpAddress).filter(CmdbIpAddress.asset_id == prev_ast.id).delete()
+                    db.delete(prev_ast)
+            linked_ast.floor_device_id = fd.id
+            linked_ast.sync_source = "floor_device"
+            linked_ast.asset_class = "floor_endpoint"
+            db.commit()
+
+    sync_physical_devices_to_cmdb(db)
 
     if fd.monitoring_enabled and (
         not was_monitored
@@ -738,6 +811,14 @@ def delete_floor_device(device_id: int, db: Session = Depends(get_db)):
     if not fd:
         raise HTTPException(status_code=404, detail="Dispositivo de planta no encontrado")
     old_rack_id = fd.linked_rack_id
+    # Desvincular activos CMDB asociados a este dispositivo de planta
+    for ast in db.query(CmdbAsset).filter(CmdbAsset.floor_device_id == device_id).all():
+        ast.floor_device_id = None
+        if ast.code.startswith("FLR-"):
+            db.query(CmdbIpAddress).filter(CmdbIpAddress.asset_id == ast.id).delete()
+            db.delete(ast)
+        else:
+            ast.sync_source = "cmdb"
     # Desvincular otros dispositivos que apuntasen a esta roseta
     db.query(FloorDevice).filter(FloorDevice.linked_outlet_id == device_id).update(
         {"linked_outlet_id": None}

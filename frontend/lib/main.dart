@@ -58,6 +58,7 @@ class _RackDocShellState extends State<RackDocShell> {
   String _activeNav = 'locations';
   int _activeLocationId = 1;
   int? _activeFloorId;
+  int? _highlightedFloorDeviceId;
   int _activeRackId = 1;
   int? _highlightedDeviceId;
   int? _highlightedStackId;
@@ -2055,9 +2056,11 @@ class _RackDocShellState extends State<RackDocShell> {
         locations: _locations,
         activeLocationId: _activeLocationId,
         initialFloorId: _activeFloorId,
+        initialFloorDeviceId: _highlightedFloorDeviceId,
         onChangeLocation: (id) => setState(() {
           _activeLocationId = id;
           _activeFloorId = null;
+          _highlightedFloorDeviceId = null;
         }),
         onBackToLocations: () => setState(() => _activeNav = 'locations'),
         onOpenRack: _openRack,
@@ -2092,6 +2095,28 @@ class _RackDocShellState extends State<RackDocShell> {
         canEdit: _currentUser.canEdit,
         onNavigateToRackDevice: (rackId, deviceId) {
           _openRack(rackId, highlightDeviceId: deviceId);
+        },
+        onNavigateToFloorDevice: (locationId, floorId, floorDeviceId) async {
+          await _refreshDataSilently();
+          if (!mounted) return;
+          setState(() {
+            if (locationId != null) {
+              _activeLocationId = locationId;
+              _expandedLocationIds.add(locationId);
+            } else {
+              for (final loc in _locations) {
+                if (loc.floors.any((fl) => fl.id == floorId)) {
+                  _activeLocationId = loc.id;
+                  _expandedLocationIds.add(loc.id);
+                  break;
+                }
+              }
+            }
+            _activeFloorId = floorId;
+            _expandedFloorIds.add(floorId);
+            _highlightedFloorDeviceId = floorDeviceId;
+            _activeNav = 'datacenter';
+          });
         },
         onNavigateToStackNode: (stackId, nodeId) {
           setState(() {

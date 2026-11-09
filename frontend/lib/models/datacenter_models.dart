@@ -175,6 +175,8 @@ class FloorDeviceNode {
   final int? linkedRackId;
   final String linkedRackDeviceCode;
   final int? linkedOutletId;
+  final int? cmdbAssetId;
+  final String cmdbAssetCode;
   final String responsiblePerson;
   final String contactFirstName;
   final String contactLastName;
@@ -210,6 +212,8 @@ class FloorDeviceNode {
     this.linkedRackId,
     required this.linkedRackDeviceCode,
     this.linkedOutletId,
+    this.cmdbAssetId,
+    this.cmdbAssetCode = '',
     required this.responsiblePerson,
     required this.contactFirstName,
     required this.contactLastName,
@@ -249,6 +253,8 @@ class FloorDeviceNode {
       linkedRackId: json['linked_rack_id'] as int?,
       linkedRackDeviceCode: (json['linked_rack_device_code'] ?? '') as String,
       linkedOutletId: json['linked_outlet_id'] as int?,
+      cmdbAssetId: json['cmdb_asset_id'] as int?,
+      cmdbAssetCode: (json['cmdb_asset_code'] ?? '') as String,
       responsiblePerson: (json['responsible_person'] ?? 'Alex Geng') as String,
       contactFirstName: (json['contact_first_name'] ?? '') as String,
       contactLastName: (json['contact_last_name'] ?? '') as String,

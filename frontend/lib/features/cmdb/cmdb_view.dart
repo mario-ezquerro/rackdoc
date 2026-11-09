@@ -8,6 +8,8 @@ class CmdbView extends StatefulWidget {
   final RackDocApiClient api;
   final bool canEdit;
   final void Function(int rackId, int? deviceId)? onNavigateToRackDevice;
+  final void Function(int? locationId, int floorId, int floorDeviceId)?
+      onNavigateToFloorDevice;
   final void Function(int stackId, int? nodeId)? onNavigateToStackNode;
   final VoidCallback? onExportExcel;
 
@@ -16,6 +18,7 @@ class CmdbView extends StatefulWidget {
     required this.api,
     required this.canEdit,
     this.onNavigateToRackDevice,
+    this.onNavigateToFloorDevice,
     this.onNavigateToStackNode,
     this.onExportExcel,
   });
@@ -154,6 +157,30 @@ class _CmdbViewState extends State<CmdbView> {
     final raw = (_overview?['locations'] as List?) ?? [];
     return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
+
+  List<Map<String, dynamic>> get _floors {
+    final raw = (_overview?['floors'] as List?) ?? [];
+    return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  static const Map<String, String> _floorDeviceTypeLabels = {
+    'printer': 'Impresora / Printer (PR)',
+    '3d_printer': 'Impresora 3D (3DP)',
+    'camera': 'Cámara CCTV / IP (CAM)',
+    'access_point': 'Punto de Acceso Wi-Fi (AP)',
+    'desktop': 'PC Sobremesa / Workstation (PC)',
+    'laptop': 'Portátil / Laptop (LP)',
+    'phone': 'Teléfono IP / VoIP (PH)',
+    'screen': 'Pantalla / Videowall (SCR)',
+    'access_control': 'Control de Acceso / Biometría (BIO)',
+    'isp_uplink': 'Router / Fibra Operador ISP (ISP)',
+    'ndi_box': 'Codificador Vídeo NDI (NDI)',
+    'microphone': 'Micrófono IP / Dante (MIC)',
+    'speaker': 'Altavoz IP / Megafonía (SPK)',
+    'sensor_temp': 'Sensor Temperatura (°C)',
+    'sensor_humidity': 'Sensor Humedad (%RH)',
+    'sensor_power_load': 'Sensor Carga Eléctrica (kW)',
+  };
 
   List<Map<String, dynamic>> get _ipCollisions {
     final raw = (_overview?['ip_collisions'] as List?) ?? [];
@@ -1968,6 +1995,9 @@ class _CmdbViewState extends State<CmdbView> {
     final int? rackId = asset['rack_id'] as int?;
     final int? rackDevId =
         (asset['rack_device_id'] as int?) ?? (asset['host_rack_device_id'] as int?);
+    final int? floorId = asset['floor_id'] as int?;
+    final int? floorDeviceId = asset['floor_device_id'] as int?;
+    final int? assetLocId = asset['location_id'] as int?;
     final int? stackDiagramId = asset['primary_stack_diagram_id'] as int?;
     final int? stackNodeId = asset['primary_stack_node_id'] as int?;
     final String stackLabel = (asset['primary_stack_label'] ?? '').toString();
@@ -2399,6 +2429,57 @@ class _CmdbViewState extends State<CmdbView> {
                                           fontSize: 10,
                                           fontWeight: FontWeight.w900,
                                           color: AppPalette.sky700,
+                                          decoration: TextDecoration.underline,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          )
+                        else if (floorDeviceId != null &&
+                            floorId != null &&
+                            widget.onNavigateToFloorDevice != null)
+                          InkWell(
+                            borderRadius: BorderRadius.circular(4),
+                            onTap: () => widget.onNavigateToFloorDevice!(
+                              assetLocId,
+                              floorId,
+                              floorDeviceId,
+                            ),
+                            child: Tooltip(
+                              message:
+                                  'Ir a la posición en Datacenter / Planta ($locLabel)',
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFDCFCE7),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(
+                                    color: const Color(0xFF86EFAC),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.location_on_rounded,
+                                      size: 12,
+                                      color: Color(0xFF15803D),
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Flexible(
+                                      child: Text(
+                                        locLabel,
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w900,
+                                          color: Color(0xFF15803D),
                                           decoration: TextDecoration.underline,
                                         ),
                                         overflow: TextOverflow.ellipsis,
@@ -3143,6 +3224,9 @@ class _CmdbViewState extends State<CmdbView> {
     final int? rackId = asset['rack_id'] as int?;
     final int? rackDevId =
         (asset['rack_device_id'] as int?) ?? (asset['host_rack_device_id'] as int?);
+    final int? floorId = asset['floor_id'] as int?;
+    final int? floorDeviceId = asset['floor_device_id'] as int?;
+    final int? assetLocId = asset['location_id'] as int?;
     final int? stackDiagramId = asset['primary_stack_diagram_id'] as int?;
     final int? stackNodeId = asset['primary_stack_node_id'] as int?;
     final String stackLabel = (asset['primary_stack_label'] ?? '').toString();
@@ -3203,6 +3287,30 @@ class _CmdbViewState extends State<CmdbView> {
                 ),
                 onPressed: () =>
                     widget.onNavigateToRackDevice!(rackId, rackDevId),
+              ),
+            if (floorDeviceId != null &&
+                floorId != null &&
+                widget.onNavigateToFloorDevice != null)
+              ActionChip(
+                visualDensity: VisualDensity.compact,
+                avatar: const Icon(
+                  Icons.location_on_rounded,
+                  size: 14,
+                  color: Color(0xFF15803D),
+                ),
+                label: Text(
+                  'Ir a Planta: ${asset['physical_location_label']}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF15803D),
+                  ),
+                ),
+                onPressed: () => widget.onNavigateToFloorDevice!(
+                  assetLocId,
+                  floorId,
+                  floorDeviceId,
+                ),
               ),
             if (stackDiagramId != null && widget.onNavigateToStackNode != null)
               ActionChip(
@@ -6271,6 +6379,11 @@ class _CmdbViewState extends State<CmdbView> {
     int? hostRackDeviceId =
         (existing?['host_rack_device_id'] as int?) ?? defaultHostRackDeviceId;
     int? selectedLocationId = existing?['location_id'] as int?;
+    int? selectedFloorId = existing?['floor_id'] as int?;
+    String? selectedFloorDeviceType =
+        (existing?['floor_device_type'] ?? '').toString().trim().isNotEmpty
+            ? (existing?['floor_device_type']).toString().trim()
+            : null;
     bool monitoringEnabled = existing?['monitoring_enabled'] ?? true;
     String monitorMethod = (existing?['monitor_method'] ?? 'icmp').toString();
     final monitorPortCtrl = TextEditingController(
@@ -6395,7 +6508,27 @@ class _CmdbViewState extends State<CmdbView> {
                             );
                           }).toList(),
                           onChanged: (v) {
-                            if (v != null) setModalState(() => assetClass = v);
+                            if (v != null) {
+                              setModalState(() {
+                                assetClass = v;
+                                if (v == 'floor_endpoint') {
+                                  selectedFloorDeviceType ??= 'printer';
+                                  if (selectedFloorId == null &&
+                                      _floors.isNotEmpty) {
+                                    final locFloor = _floors
+                                        .where(
+                                          (fl) =>
+                                              fl['location_id'] ==
+                                              selectedLocationId,
+                                        )
+                                        .firstOrNull;
+                                    selectedFloorId =
+                                        (locFloor?['id'] ?? _floors.first['id'])
+                                            as int?;
+                                  }
+                                }
+                              });
+                            }
                           },
                         ),
                       ),
@@ -6438,6 +6571,177 @@ class _CmdbViewState extends State<CmdbView> {
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 10),
+                  // SECCIÓN DE ALINEACIÓN CON DATACENTER (PLANTAS): IMPRESORA, CÁMARA, WI-FI AP, PC...
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: (selectedFloorDeviceType != null ||
+                              selectedFloorId != null ||
+                              assetClass == 'floor_endpoint')
+                          ? const Color(0xFFF0FDF4)
+                          : AppPalette.slate50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: (selectedFloorDeviceType != null ||
+                                selectedFloorId != null ||
+                                assetClass == 'floor_endpoint')
+                            ? const Color(0xFF86EFAC)
+                            : AppPalette.slate300,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(
+                              Icons.print_rounded,
+                              size: 15,
+                              color: AppPalette.teal700,
+                            ),
+                            SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'Alineación con 2. Datacenter (Plantas): Indicar si este equipo es Impresora, Cámara, Wi-Fi AP, PC o Sensor en Planta (Mismo elemento)',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppPalette.slate900,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: DropdownButtonFormField<String?>(
+                                initialValue: selectedFloorDeviceType != null &&
+                                        _floorDeviceTypeLabels.containsKey(
+                                          selectedFloorDeviceType,
+                                        )
+                                    ? selectedFloorDeviceType
+                                    : null,
+                                isExpanded: true,
+                                decoration: const InputDecoration(
+                                  labelText:
+                                      'Tipo de Dispositivo en Planta (ej. Impresora, Cámara, Wi-Fi...)',
+                                  filled: true,
+                                  fillColor: Colors.white,
+                                  border: OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                                items: [
+                                  const DropdownMenuItem<String?>(
+                                    value: null,
+                                    child: Text(
+                                      '— No es dispositivo de planta (VM / Rack / Cloud) —',
+                                    ),
+                                  ),
+                                  ..._floorDeviceTypeLabels.entries.map(
+                                    (e) => DropdownMenuItem<String?>(
+                                      value: e.key,
+                                      child: Text(e.value),
+                                    ),
+                                  ),
+                                ],
+                                onChanged: (val) {
+                                  setModalState(() {
+                                    selectedFloorDeviceType = val;
+                                    if (val != null) {
+                                      assetClass = 'floor_endpoint';
+                                      final lbl =
+                                          _floorDeviceTypeLabels[val] ?? val;
+                                      osCtrl.text = 'Endpoint ($lbl)';
+                                      if (nameCtrl.text
+                                          .trim()
+                                          .startsWith('Equipo Detectado')) {
+                                        final h = hostCtrl.text.trim().isNotEmpty
+                                            ? hostCtrl.text.trim()
+                                            : (ipDrafts.isNotEmpty
+                                                  ? (ipDrafts.first['ip_address'] ??
+                                                            '')
+                                                        .toString()
+                                                  : '');
+                                        nameCtrl.text =
+                                            '${lbl.split('(').first.trim()} • $h';
+                                      }
+                                      if (selectedFloorId == null &&
+                                          _floors.isNotEmpty) {
+                                        final locFloor = _floors
+                                            .where(
+                                              (fl) =>
+                                                  fl['location_id'] ==
+                                                  selectedLocationId,
+                                            )
+                                            .firstOrNull;
+                                        selectedFloorId = (locFloor?['id'] ??
+                                            _floors.first['id']) as int?;
+                                      }
+                                    }
+                                  });
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: DropdownButtonFormField<int?>(
+                                initialValue: _floors.any(
+                                          (fl) => fl['id'] == selectedFloorId,
+                                        )
+                                    ? selectedFloorId
+                                    : null,
+                                isExpanded: true,
+                                decoration: const InputDecoration(
+                                  labelText:
+                                      'Planta del Datacenter donde ubicarlo (Plano 2D)',
+                                  filled: true,
+                                  fillColor: Colors.white,
+                                  border: OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                                items: [
+                                  const DropdownMenuItem<int?>(
+                                    value: null,
+                                    child: Text('— Sin planta asignada —'),
+                                  ),
+                                  ..._floors.map(
+                                    (fl) => DropdownMenuItem<int?>(
+                                      value: fl['id'] as int,
+                                      child: Text(
+                                        (fl['label'] ?? fl['name'] ?? '')
+                                            .toString(),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                                onChanged: (val) {
+                                  setModalState(() {
+                                    selectedFloorId = val;
+                                    if (val != null) {
+                                      assetClass = 'floor_endpoint';
+                                      selectedFloorDeviceType ??= 'printer';
+                                      final flObj = _floors
+                                          .where((f) => f['id'] == val)
+                                          .firstOrNull;
+                                      if (flObj != null &&
+                                          flObj['location_id'] != null) {
+                                        selectedLocationId =
+                                            flObj['location_id'] as int;
+                                      }
+                                    }
+                                  });
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 10),
                   Row(
@@ -7066,6 +7370,8 @@ class _CmdbViewState extends State<CmdbView> {
                   'owner_team': teamCtrl.text.trim(),
                   'responsible_person': respCtrl.text.trim(),
                   'host_rack_device_id': hostRackDeviceId,
+                  'floor_id': selectedFloorId,
+                  'floor_device_type': selectedFloorDeviceType,
                   'monitoring_enabled': monitoringEnabled,
                   'monitor_method': monitorMethod,
                   'monitor_port': int.tryParse(monitorPortCtrl.text.trim()) ?? 22,

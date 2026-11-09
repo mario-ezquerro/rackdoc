@@ -415,6 +415,7 @@ class FloorDeviceCreate(BaseModel):
     linked_rack_id: Optional[int] = None
     linked_rack_device_code: str = ""
     linked_outlet_id: Optional[int] = None
+    cmdb_asset_id: Optional[int] = None
     responsible_person: str = "Alex Geng"
     contact_first_name: str = ""
     contact_last_name: str = ""
@@ -445,6 +446,7 @@ class FloorDeviceUpdate(BaseModel):
     linked_rack_id: Optional[int] = None
     linked_rack_device_code: Optional[str] = None
     linked_outlet_id: Optional[int] = None
+    cmdb_asset_id: Optional[int] = None
     responsible_person: Optional[str] = None
     contact_first_name: Optional[str] = None
     contact_last_name: Optional[str] = None
@@ -531,6 +533,10 @@ class CmdbAssetCreate(BaseModel):
     responsible_person: str = "Alex Geng"
     host_rack_device_id: Optional[int] = None
     parent_asset_id: Optional[int] = None
+    floor_id: Optional[int] = None
+    floor_device_type: Optional[str] = None
+    linked_rack_id: Optional[int] = None
+    room_code: Optional[str] = None
     monitoring_enabled: bool = False
     monitor_method: str = "icmp"
     monitor_port: int = 22
@@ -559,6 +565,10 @@ class CmdbAssetUpdate(BaseModel):
     responsible_person: Optional[str] = None
     host_rack_device_id: Optional[int] = None
     parent_asset_id: Optional[int] = None
+    floor_id: Optional[int] = None
+    floor_device_type: Optional[str] = None
+    linked_rack_id: Optional[int] = None
+    room_code: Optional[str] = None
     monitoring_enabled: Optional[bool] = None
     monitor_method: Optional[str] = None
     monitor_port: Optional[int] = None

@@ -6,11 +6,143 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from ..database import get_db
-from ..models import CmdbAsset, CmdbIpAddress, CmdbSubnet, FloorDevice, LogicalTopologyLink, MonitoredServiceCheck, RackDevice, SwitchSnmpPort, TechStackNode
+from ..models import CmdbAsset, CmdbIpAddress, CmdbSubnet, Floor, FloorDevice, LogicalTopologyLink, MonitoredServiceCheck, Rack, RackDevice, SwitchSnmpPort, TechStackNode
+from ..rack_sync import _sync_rack_floor_devices_box
 from ..schemas import CmdbAssetCreate, CmdbAssetUpdate, CmdbImportDiscoveredRequest, CmdbIpAddressInput, CmdbSubnetCreate, CmdbSubnetUpdate, CmdbVerifyIpRequest
 from ..routers._common import api_router
 from ..services.cmdb_service import _match_subnet_for_ip, build_cmdb_overview, check_cmdb_asset_heartbeat, check_ip_collision_in_cmdb, ensure_cmdb_seed_data, import_discovered_hosts_to_cmdb, resolve_cmdb_ip_collision, verify_ip_target_or_find_free
 from ..services.network_host_service import sync_prometheus_targets_file
+
+
+def _align_cmdb_asset_with_floor_device(
+    db: Session,
+    asset: CmdbAsset,
+    floor_id: Optional[int],
+    floor_device_type: Optional[str],
+    linked_rack_id: Optional[int],
+    room_code: Optional[str],
+) -> None:
+    """
+    Alinea bidireccionalmente un activo de la CMDB con un Dispositivo de Planta (FloorDevice) en 2. Datacenter (Plantas).
+    Si el usuario indica en CMDB que un equipo detectado es p.ej. una Impresora ('printer') o selecciona una Planta ('floor_id'),
+    crea o actualiza automáticamente el FloorDevice correspondiente y los deja vinculados como el mismo elemento.
+    """
+    hb_ip_rec = next(
+        (ip for ip in asset.ip_addresses if ip.is_heartbeat_ip or ip.ip_role == "mgmt_heartbeat"),
+        asset.ip_addresses[0] if asset.ip_addresses else None,
+    )
+    dtype_clean = (floor_device_type or "").strip()
+    if dtype_clean:
+        cf = dict(asset.custom_fields or {})
+        cf["floor_device_type"] = dtype_clean
+        asset.custom_fields = cf
+
+    wants_floor_sync = bool(
+        asset.floor_device_id
+        or (floor_id is not None and floor_id > 0)
+        or dtype_clean
+        or asset.asset_class == "floor_endpoint"
+    )
+    if not wants_floor_sync:
+        return
+
+    target_floor: Optional[Floor] = None
+    if floor_id is not None and floor_id > 0:
+        target_floor = db.query(Floor).filter(Floor.id == floor_id).first()
+    if not target_floor and asset.floor_device_id:
+        existing_fd = db.query(FloorDevice).filter(FloorDevice.id == asset.floor_device_id).first()
+        if existing_fd:
+            target_floor = db.query(Floor).filter(Floor.id == existing_fd.floor_id).first()
+    if not target_floor:
+        loc_id = (asset.custom_fields or {}).get("location_id")
+        if loc_id is not None:
+            try:
+                target_floor = db.query(Floor).filter(Floor.location_id == int(loc_id)).order_by(Floor.level_number, Floor.id).first()
+            except (ValueError, TypeError):
+                target_floor = None
+    if not target_floor:
+        target_floor = db.query(Floor).order_by(Floor.location_id, Floor.level_number, Floor.id).first()
+
+    if asset.floor_device_id:
+        fdev = db.query(FloorDevice).filter(FloorDevice.id == asset.floor_device_id).first()
+        if fdev:
+            old_rack_id = fdev.linked_rack_id
+            if target_floor and fdev.floor_id != target_floor.id:
+                fdev.floor_id = target_floor.id
+                if target_floor.rooms:
+                    fdev.room_id = target_floor.rooms[0].id
+            if dtype_clean:
+                fdev.device_type = dtype_clean
+            if linked_rack_id is not None:
+                fdev.linked_rack_id = linked_rack_id if linked_rack_id > 0 else None
+            if room_code is not None and room_code.strip():
+                fdev.room_code = room_code.strip().upper()
+            fdev.name = asset.name
+            fdev.fqdn = asset.fqdn or ""
+            fdev.responsible_person = asset.responsible_person or fdev.responsible_person
+            fdev.notes = asset.notes or fdev.notes
+            fdev.monitoring_enabled = asset.monitoring_enabled
+            fdev.monitor_method = asset.monitor_method or "icmp"
+            fdev.monitor_port = asset.monitor_port or 22
+            if hb_ip_rec:
+                fdev.ip_address = hb_ip_rec.ip_address
+                if hb_ip_rec.mac_address:
+                    fdev.mac_address = hb_ip_rec.mac_address
+                if hb_ip_rec.vlan_id is not None:
+                    fdev.vlan = hb_ip_rec.vlan_id
+            asset.sync_source = "floor_device"
+            asset.asset_class = "floor_endpoint"
+            asset.os_or_firmware = f"Endpoint ({fdev.device_type})"
+            fl_lbl = target_floor.name if target_floor else f"Sala {fdev.room_code}"
+            asset.hypervisor_or_platform = f"Planta: {fl_lbl} ({fdev.room_code})"
+            db.flush()
+            for r_id in {old_rack_id, fdev.linked_rack_id}:
+                if r_id:
+                    rk = db.query(Rack).filter(Rack.id == r_id).first()
+                    if rk:
+                        _sync_rack_floor_devices_box(db, rk)
+            return
+
+    if target_floor and ((floor_id is not None and floor_id > 0) or dtype_clean or asset.asset_class == "floor_endpoint"):
+        eff_type = dtype_clean or "desktop"
+        existing_count = db.query(FloorDevice).filter(FloorDevice.floor_id == target_floor.id).count()
+        pos_x = round(min(0.88, 0.18 + (existing_count % 6) * 0.12), 3)
+        pos_y = round(min(0.86, 0.22 + ((existing_count // 6) % 5) * 0.13), 3)
+        fd_code = asset.code[4:] if asset.code.upper().startswith("FLR-") else asset.code
+        fdev = FloorDevice(
+            floor_id=target_floor.id,
+            room_id=target_floor.rooms[0].id if target_floor.rooms else None,
+            room_code=(room_code or "GOA").strip().upper() or "GOA",
+            device_type=eff_type,
+            code=fd_code,
+            name=asset.name,
+            pos_x=pos_x,
+            pos_y=pos_y,
+            fqdn=asset.fqdn or "",
+            ip_address=hb_ip_rec.ip_address if hb_ip_rec else "",
+            mac_address=(hb_ip_rec.mac_address if hb_ip_rec else "") or "",
+            vlan=hb_ip_rec.vlan_id if hb_ip_rec else None,
+            monitoring_enabled=asset.monitoring_enabled,
+            monitor_method=asset.monitor_method or "icmp",
+            monitor_port=asset.monitor_port or 22,
+            status=asset.status or ("online" if asset.monitoring_enabled else "unmonitored"),
+            last_ping_ms=asset.last_ping_ms,
+            last_checked_at=asset.last_checked_at,
+            linked_rack_id=linked_rack_id if (linked_rack_id and linked_rack_id > 0) else None,
+            responsible_person=asset.responsible_person or "Alex Geng",
+            notes=asset.notes or "",
+        )
+        db.add(fdev)
+        db.flush()
+        asset.floor_device_id = fdev.id
+        asset.sync_source = "floor_device"
+        asset.asset_class = "floor_endpoint"
+        asset.os_or_firmware = f"Endpoint ({fdev.device_type})"
+        asset.hypervisor_or_platform = f"Planta: {target_floor.name} ({fdev.room_code})"
+        if fdev.linked_rack_id:
+            rk = db.query(Rack).filter(Rack.id == fdev.linked_rack_id).first()
+            if rk:
+                _sync_rack_floor_devices_box(db, rk)
 
 # ==============================================================================
 # CMDB & IPAM + VERIFICADOR MANUAL DE DIRECCIONES IP (MULTI-IP & MÁQUINAS VIRTUALES)
@@ -98,6 +230,16 @@ def create_cmdb_asset_endpoint(payload: CmdbAssetCreate, db: Session = Depends(g
             )
         )
 
+    db.flush()
+    db.refresh(asset)
+    _align_cmdb_asset_with_floor_device(
+        db=db,
+        asset=asset,
+        floor_id=payload.floor_id,
+        floor_device_type=payload.floor_device_type,
+        linked_rack_id=payload.linked_rack_id,
+        room_code=payload.room_code,
+    )
     db.commit()
     return build_cmdb_overview(db)
 
@@ -119,6 +261,10 @@ def update_cmdb_asset_endpoint(
 
     data = payload.model_dump(exclude_unset=True)
     ip_inputs = data.pop("ip_addresses", None)
+    floor_id = data.pop("floor_id", None)
+    floor_device_type = data.pop("floor_device_type", None)
+    linked_rack_id = data.pop("linked_rack_id", None)
+    room_code = data.pop("room_code", None)
 
     for k, v in data.items():
         if k == "code" and isinstance(v, str) and v.strip():
@@ -181,16 +327,15 @@ def update_cmdb_asset_endpoint(
                     rdev.vlan_mgmt = hb_ip_rec.vlan_id
                 if hb_ip_rec.mac_address:
                     rdev.mac_address = hb_ip_rec.mac_address
-    elif asset.sync_source == "floor_device" and asset.floor_device_id:
-        fdev = db.query(FloorDevice).filter(FloorDevice.id == asset.floor_device_id).first()
-        if fdev:
-            fdev.name = asset.name
-            fdev.fqdn = asset.fqdn
-            fdev.monitoring_enabled = asset.monitoring_enabled
-            if hb_ip_rec:
-                fdev.ip_address = hb_ip_rec.ip_address
-                if hb_ip_rec.vlan_id is not None:
-                    fdev.vlan = hb_ip_rec.vlan_id
+    else:
+        _align_cmdb_asset_with_floor_device(
+            db=db,
+            asset=asset,
+            floor_id=floor_id,
+            floor_device_type=floor_device_type,
+            linked_rack_id=linked_rack_id,
+            room_code=room_code,
+        )
 
     db.commit()
     return build_cmdb_overview(db)
@@ -218,13 +363,13 @@ def delete_cmdb_asset_endpoint(asset_id: int, db: Session = Depends(get_db)):
             fdev.ip_address = None
 
     # Limpiar referencias en monitorización, topología y stack
-    db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.cmdb_asset_id == asset.id).delete()
-    db.query(SwitchSnmpPort).filter(SwitchSnmpPort.cmdb_asset_id == asset.id).delete()
+    db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.asset_id == asset.id).delete()
+    db.query(SwitchSnmpPort).filter(SwitchSnmpPort.asset_id == asset.id).delete()
     db.query(LogicalTopologyLink).filter(
         (LogicalTopologyLink.source_asset_id == asset.id) | (LogicalTopologyLink.target_asset_id == asset.id)
     ).delete(synchronize_session=False)
-    for tnode in db.query(TechStackNode).filter(TechStackNode.cmdb_asset_id == asset.id).all():
-        tnode.cmdb_asset_id = None
+    for tnode in db.query(TechStackNode).filter(TechStackNode.asset_id == asset.id).all():
+        tnode.asset_id = None
 
     # Eliminar todas las IPs asociadas para dejarlas libres en el mapa IPAM
     db.query(CmdbIpAddress).filter(CmdbIpAddress.asset_id == asset.id).delete()

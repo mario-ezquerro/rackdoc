@@ -12,6 +12,7 @@ class DatacenterFloorView extends StatefulWidget {
   final List<LocationNode> locations;
   final int activeLocationId;
   final int? initialFloorId;
+  final int? initialFloorDeviceId;
   final ValueChanged<int> onChangeLocation;
   final VoidCallback onBackToLocations;
   final ValueChanged<int> onOpenRack;
@@ -25,6 +26,7 @@ class DatacenterFloorView extends StatefulWidget {
     required this.locations,
     required this.activeLocationId,
     this.initialFloorId,
+    this.initialFloorDeviceId,
     required this.onChangeLocation,
     required this.onBackToLocations,
     required this.onOpenRack,
@@ -531,6 +533,10 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleHardwareKey);
+    if (widget.initialFloorDeviceId != null) {
+      _selectedFloorDeviceId = widget.initialFloorDeviceId;
+      _showRightSettings = true;
+    }
     _syncFloorState();
     _loadCustomFloorDeviceTypes();
   }
@@ -543,6 +549,12 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       _selectedFloorId = widget.initialFloorId;
     } else if (widget.activeLocationId != oldWidget.activeLocationId) {
       _selectedFloorId = widget.initialFloorId;
+    }
+    if (widget.initialFloorDeviceId != null &&
+        widget.initialFloorDeviceId != oldWidget.initialFloorDeviceId) {
+      _selectedFloorDeviceId = widget.initialFloorDeviceId;
+      _selectedRackIds.clear();
+      _showRightSettings = true;
     }
     _syncFloorState();
   }
@@ -1459,15 +1471,210 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     }
   }
 
+  Future<void> _showLinkExistingFloorDeviceWithCmdbDialog(
+    FloorDeviceNode dev,
+  ) async {
+    List<Map<String, dynamic>> cmdbAssets = [];
+    try {
+      final overview = await widget.api.fetchCmdbOverview();
+      cmdbAssets = ((overview['assets'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .where((a) => a['rack_device_id'] == null)
+          .toList();
+      cmdbAssets.sort((a, b) {
+        final aUnplaced = a['floor_device_id'] == null ? 0 : 1;
+        final bUnplaced = b['floor_device_id'] == null ? 0 : 1;
+        if (aUnplaced != bUnplaced) return aUnplaced.compareTo(bUnplaced);
+        return (a['code'] ?? '')
+            .toString()
+            .compareTo((b['code'] ?? '').toString());
+      });
+    } catch (_) {}
+
+    if (!mounted) return;
+    int? chosenAssetId = dev.cmdbAssetId ??
+        (cmdbAssets.isNotEmpty ? (cmdbAssets.first['id'] as num?)?.toInt() : null);
+
+    final selectedAst = await showDialog<Map<String, dynamic>?>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.fact_check_outlined, color: AppPalette.blue600),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Vincular y Cumplimentar "${dev.code}" desde CMDB',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 520,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Selecciona un dispositivo detectado en la CMDB para unificarlo con este elemento de planta y rellenar automáticamente su IP, Nombre, Hostname, VLAN y estado:',
+                  style: TextStyle(fontSize: 12, color: AppPalette.slate600),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<int?>(
+                  initialValue: chosenAssetId,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Dispositivo en CMDB',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: cmdbAssets.map((a) {
+                    final id = (a['id'] as num).toInt();
+                    final code = (a['code'] ?? '').toString();
+                    final name = (a['name'] ?? '').toString();
+                    final ip = (a['heartbeat_ip'] ?? '').toString();
+                    final host = (a['hostname'] ?? '').toString();
+                    final unplaced = a['floor_device_id'] == null;
+                    final badge = unplaced
+                        ? '🟢 [Detectado / Sin ubicar]'
+                        : '📍 [Planta: ${a['floor_name'] ?? ''}]';
+                    return DropdownMenuItem<int?>(
+                      value: id,
+                      child: Text(
+                        '$badge $code • ${ip.isNotEmpty ? ip : "Sin IP"} • $name ${host.isNotEmpty ? "($host)" : ""}',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 11.5),
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (v) => setModal(() => chosenAssetId = v),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton.icon(
+              onPressed: chosenAssetId == null
+                  ? null
+                  : () {
+                      final ast = cmdbAssets
+                          .where(
+                            (a) => (a['id'] as num?)?.toInt() == chosenAssetId,
+                          )
+                          .firstOrNull;
+                      Navigator.pop(ctx, ast);
+                    },
+              icon: const Icon(Icons.sync_alt_rounded, size: 16),
+              label: const Text('Vincular y Autocompletar Datos'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (selectedAst != null) {
+      final astId = (selectedAst['id'] as num).toInt();
+      final hbIp = (selectedAst['heartbeat_ip'] ?? '').toString().trim();
+      final rawName = (selectedAst['name'] ?? '').toString().trim();
+      final rawHost = (selectedAst['hostname'] ?? '').toString().trim();
+      final fqdn = (selectedAst['fqdn'] ?? '').toString().trim();
+      final fType = (selectedAst['floor_device_type'] ?? '').toString().trim();
+      String mac = '';
+      int? vlan;
+      final ips = (selectedAst['ip_addresses'] as List?) ?? [];
+      if (ips.isNotEmpty && ips.first is Map) {
+        final firstIp = Map<String, dynamic>.from(ips.first as Map);
+        mac = (firstIp['mac_address'] ?? '').toString().trim();
+        vlan = (firstIp['vlan_id'] as num?)?.toInt();
+      }
+      setState(() {
+        if (fType.isNotEmpty &&
+            _allCatalogItems.any((c) => c.category == fType)) {
+          _devCategory = fType;
+        }
+        if (hbIp.isNotEmpty) _devIpCtrl.text = hbIp;
+        if (vlan != null) _devVlanCtrl.text = vlan.toString();
+        final catLabel = _catalogItemFor(_devCategory).label;
+        if (rawName.isNotEmpty && !rawName.startsWith('Equipo Detectado')) {
+          _devNameCtrl.text = rawName;
+        } else if (rawHost.isNotEmpty && !rawHost.startsWith('host-')) {
+          _devNameCtrl.text = '$catLabel • $rawHost';
+        }
+        final resp = (selectedAst['responsible_person'] ?? '').toString().trim();
+        if (resp.isNotEmpty) _devRespCtrl.text = resp;
+        final notes = (selectedAst['notes'] ?? '').toString().trim();
+        if (notes.isNotEmpty && _devNotesCtrl.text.trim().isEmpty) {
+          _devNotesCtrl.text = notes;
+        }
+        if (selectedAst['status'] == 'online' ||
+            selectedAst['monitoring_enabled'] == true) {
+          _fdMonitorEnabled = true;
+          _devStatus = 'online';
+        }
+      });
+      await widget.api.updateFloorDevice(dev.id, {
+        'device_type': _devCategory,
+        'code': _devCodeCtrl.text.trim(),
+        'name': _devNameCtrl.text.trim(),
+        'room_code': _devRoomCodeCtrl.text.trim(),
+        'ip_address': _devIpCtrl.text.trim(),
+        'fqdn': fqdn,
+        'mac_address': mac,
+        'vlan': int.tryParse(_devVlanCtrl.text.trim()),
+        'monitoring_enabled': _fdMonitorEnabled,
+        'responsible_person': _devRespCtrl.text.trim(),
+        'notes': _devNotesCtrl.text.trim(),
+        'cmdb_asset_id': astId,
+      });
+      widget.onRefresh();
+    }
+  }
+
   Future<void> _showAddFloorDeviceModal(
     FloorNode floor, {
     String initialCategory = 'sensor_temp',
     double? targetPosX,
     double? targetPosY,
+    bool focusCmdbSelector = false,
   }) async {
+    List<Map<String, dynamic>> cmdbAssets = [];
+    try {
+      final overview = await widget.api.fetchCmdbOverview();
+      cmdbAssets = ((overview['assets'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .where((a) => a['rack_device_id'] == null)
+          .toList();
+      // Priorizar primero los activos detectados en CMDB que aún no están colocados en una planta
+      cmdbAssets.sort((a, b) {
+        final aUnplaced = a['floor_device_id'] == null ? 0 : 1;
+        final bUnplaced = b['floor_device_id'] == null ? 0 : 1;
+        if (aUnplaced != bUnplaced) return aUnplaced.compareTo(bUnplaced);
+        return (a['code'] ?? '').toString().compareTo((b['code'] ?? '').toString());
+      });
+    } catch (_) {}
+
+    if (!mounted) return;
+
     String selectedCat = initialCategory == 'rack'
-        ? 'sensor_temp'
+        ? (focusCmdbSelector ? 'printer' : 'sensor_temp')
         : initialCategory;
+    int? selectedCmdbAssetId;
+    String detectedFqdn = '';
+    String detectedMac = '';
+    int? detectedVlan;
+    bool enableHeartbeatFromCmdb = false;
+
     final codeCtrl = TextEditingController(
       text: _nextAutoCodeForCategory(floor, selectedCat),
     );
@@ -1487,6 +1694,66 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
           : '',
     );
     final respCtrl = TextEditingController(text: 'Alex Geng');
+
+    void applyCmdbAssetSelection(Map<String, dynamic>? ast) {
+      if (ast == null) {
+        selectedCmdbAssetId = null;
+        detectedFqdn = '';
+        detectedMac = '';
+        detectedVlan = null;
+        enableHeartbeatFromCmdb = false;
+        return;
+      }
+      selectedCmdbAssetId = (ast['id'] as num?)?.toInt();
+      final fType = (ast['floor_device_type'] ?? '').toString().trim();
+      if (fType.isNotEmpty &&
+          _allCatalogItems.any((c) => c.category == fType)) {
+        selectedCat = fType;
+      } else if (_isSensorCategory(selectedCat)) {
+        selectedCat = 'printer';
+      }
+      final autoCode = _nextAutoCodeForCategory(floor, selectedCat);
+      final rawCode = (ast['code'] ?? '').toString().trim();
+      codeCtrl.text = (rawCode.startsWith('DISC-') || rawCode.startsWith('FLR-'))
+          ? autoCode
+          : (rawCode.isNotEmpty ? rawCode : autoCode);
+
+      final hbIp = (ast['heartbeat_ip'] ?? '').toString().trim();
+      ipCtrl.text = hbIp;
+      detectedFqdn = (ast['fqdn'] ?? '').toString().trim();
+      final ips = (ast['ip_addresses'] as List?) ?? [];
+      if (ips.isNotEmpty && ips.first is Map) {
+        final firstIp = Map<String, dynamic>.from(ips.first as Map);
+        detectedMac = (firstIp['mac_address'] ?? '').toString().trim();
+        detectedVlan = (firstIp['vlan_id'] as num?)?.toInt();
+        if (detectedFqdn.isEmpty) {
+          detectedFqdn = (firstIp['fqdn'] ?? '').toString().trim();
+        }
+      }
+      final rawName = (ast['name'] ?? '').toString().trim();
+      final rawHost = (ast['hostname'] ?? '').toString().trim();
+      final catLabel = _catalogItemFor(selectedCat).label;
+      if (rawName.isNotEmpty && !rawName.startsWith('Equipo Detectado')) {
+        nameCtrl.text = rawName;
+      } else if (rawHost.isNotEmpty && !rawHost.startsWith('host-')) {
+        nameCtrl.text = '$catLabel • $rawHost';
+      } else if (hbIp.isNotEmpty) {
+        nameCtrl.text = '$catLabel ($hbIp)';
+      } else {
+        nameCtrl.text = '$catLabel ${codeCtrl.text}';
+      }
+      final resp = (ast['responsible_person'] ?? '').toString().trim();
+      if (resp.isNotEmpty) respCtrl.text = resp;
+      final notes = (ast['notes'] ?? '').toString().trim();
+      if (notes.isNotEmpty) notesCtrl.text = notes;
+      portCtrl.text = _defaultPortHintForCategory(selectedCat);
+      enableHeartbeatFromCmdb =
+          ast['monitoring_enabled'] == true || ast['status'] == 'online';
+    }
+
+    if (focusCmdbSelector && cmdbAssets.isNotEmpty) {
+      applyCmdbAssetSelection(cmdbAssets.first);
+    }
 
     final floorRacks = <RackSummary>[];
     for (final rm in floor.rooms) {
@@ -1555,8 +1822,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       ),
                       Text(
                         targetPosX != null
-                            ? 'Posición en plano seleccionada (${(targetPosX * 100).round()}%, ${(targetPosY! * 100).round()}%) • Elige el Rack de conexión'
-                            : 'Selecciona el tipo de equipo y el Rack al que va conectado',
+                            ? 'Posición en plano seleccionada (${(targetPosX * 100).round()}%, ${(targetPosY! * 100).round()}%) • Puedes vincularlo con un equipo detectado en CMDB'
+                            : 'Selecciona un equipo detectado en la CMDB o crea uno nuevo y elige su categoría (Impresora, Cámara, Wi-Fi...)',
                         style: const TextStyle(
                           fontSize: 11,
                           color: AppPalette.slate500,
@@ -1568,12 +1835,188 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
               ],
             ),
             content: SizedBox(
-              width: 520,
+              width: 560,
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // 0. CAJA DESTACADA: SELECCIONAR EQUIPO DETECTADO EN LA CMDB (ALINEACIÓN UNIFICADA)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEFF6FF),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: AppPalette.blue500,
+                          width: 1.4,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.fact_check_outlined,
+                                size: 16,
+                                color: AppPalette.blue700,
+                              ),
+                              const SizedBox(width: 6),
+                              const Expanded(
+                                child: Text(
+                                  '0. ¿Seleccionar equipo ya detectado / registrado en la CMDB? (Mismo elemento)',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w900,
+                                    color: AppPalette.blue900,
+                                  ),
+                                ),
+                              ),
+                              if (selectedCmdbAssetId != null)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFDCFCE7),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: const Color(0xFF16A34A),
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'VINCULADO A CMDB',
+                                    style: TextStyle(
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w900,
+                                      color: Color(0xFF166534),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          const Text(
+                            'Al elegir un dispositivo detectado en la CMDB, se autorrellenan su IP, Hostname, MAC y estado, y queda unido como el mismo elemento en CMDB y Datacenter.',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              color: AppPalette.slate600,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<int?>(
+                            initialValue: selectedCmdbAssetId,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                              labelText:
+                                  'Equipo de la CMDB (Detectados por escaneo IP / Inventario CMDB)',
+                              filled: true,
+                              fillColor: Colors.white,
+                              isDense: true,
+                            ),
+                            items: [
+                              const DropdownMenuItem<int?>(
+                                value: null,
+                                child: Text(
+                                  '— Crear dispositivo nuevo (sin seleccionar de CMDB) —',
+                                ),
+                              ),
+                              ...cmdbAssets.map((a) {
+                                final id = (a['id'] as num).toInt();
+                                final code = (a['code'] ?? '').toString();
+                                final name = (a['name'] ?? '').toString();
+                                final ip = (a['heartbeat_ip'] ?? '').toString();
+                                final host = (a['hostname'] ?? '').toString();
+                                final unplaced = a['floor_device_id'] == null;
+                                final badge = unplaced
+                                    ? '🟢 [Detectado / Sin ubicar]'
+                                    : '📍 [Ya en Planta: ${a['floor_name'] ?? ''}]';
+                                return DropdownMenuItem<int?>(
+                                  value: id,
+                                  child: Text(
+                                    '$badge $code • ${ip.isNotEmpty ? ip : "Sin IP"} • $name ${host.isNotEmpty ? "($host)" : ""}',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: unplaced
+                                          ? FontWeight.w800
+                                          : FontWeight.normal,
+                                      color: unplaced
+                                          ? AppPalette.slate900
+                                          : AppPalette.slate600,
+                                    ),
+                                  ),
+                                );
+                              }),
+                            ],
+                            onChanged: (val) {
+                              setModal(() {
+                                if (val == null) {
+                                  applyCmdbAssetSelection(null);
+                                } else {
+                                  final found = cmdbAssets
+                                      .where((a) => (a['id'] as num?)?.toInt() == val)
+                                      .firstOrNull;
+                                  applyCmdbAssetSelection(found);
+                                }
+                              });
+                            },
+                          ),
+                          if (selectedCmdbAssetId != null &&
+                              (detectedFqdn.isNotEmpty ||
+                                  detectedMac.isNotEmpty ||
+                                  detectedVlan != null)) ...[
+                            const SizedBox(height: 6),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 4,
+                              children: [
+                                if (detectedFqdn.isNotEmpty)
+                                  Chip(
+                                    visualDensity: VisualDensity.compact,
+                                    backgroundColor: Colors.white,
+                                    label: Text(
+                                      'FQDN/PTR: $detectedFqdn',
+                                      style: const TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                if (detectedMac.isNotEmpty)
+                                  Chip(
+                                    visualDensity: VisualDensity.compact,
+                                    backgroundColor: Colors.white,
+                                    label: Text(
+                                      'MAC: $detectedMac',
+                                      style: const TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                if (detectedVlan != null)
+                                  Chip(
+                                    visualDensity: VisualDensity.compact,
+                                    backgroundColor: Colors.white,
+                                    label: Text(
+                                      'VLAN: $detectedVlan',
+                                      style: const TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+
                     // 1. CAJA DESTACADA: SELECCIÓN DE RACK AL QUE VA CONECTADO
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -1658,7 +2101,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       initialValue: selectedCat,
                       decoration: const InputDecoration(
                         labelText:
-                            '2. Categoría / Tipo de Sensor o Dispositivo',
+                            '2. Categoría / Tipo de Dispositivo (ej. Printer / Impresora, Cámara, Wi-Fi AP...)',
                         isDense: true,
                       ),
                       items: _allCatalogItems
@@ -1697,8 +2140,16 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                             selectedCat,
                           );
                           codeCtrl.text = auto;
-                          nameCtrl.text =
-                              '${_catalogItemFor(selectedCat).label} $auto';
+                          final catLabel = _catalogItemFor(selectedCat).label;
+                          if (selectedCmdbAssetId != null &&
+                              ipCtrl.text.trim().isNotEmpty) {
+                            final hostHint = detectedFqdn.isNotEmpty
+                                ? detectedFqdn.split('.').first
+                                : ipCtrl.text.trim();
+                            nameCtrl.text = '$catLabel • $hostHint';
+                          } else {
+                            nameCtrl.text = '$catLabel $auto';
+                          }
                           portCtrl.text =
                               _defaultPortHintForCategory(selectedCat);
                         });
@@ -1712,7 +2163,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                             controller: codeCtrl,
                             decoration: const InputDecoration(
                               labelText:
-                                  'ID / Código * (ej. TMP01, HUM01, PWR01, CAM01)',
+                                  'ID / Código * (ej. PR01, CAM01, AP01, TMP01)',
                               isDense: true,
                             ),
                           ),
@@ -1747,7 +2198,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           child: TextField(
                             controller: ipCtrl,
                             decoration: const InputDecoration(
-                              labelText: 'Dirección IP (opcional)',
+                              labelText: 'Dirección IP (sincronizada con CMDB)',
                               isDense: true,
                             ),
                           ),
@@ -1818,7 +2269,11 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
               FilledButton.icon(
                 onPressed: () => Navigator.pop(ctx, true),
                 icon: const Icon(Icons.add_location_alt_outlined, size: 16),
-                label: const Text('Colocar y Conectar al Rack'),
+                label: Text(
+                  selectedCmdbAssetId != null
+                      ? 'Colocar y Vincular con CMDB'
+                      : 'Colocar y Conectar al Rack',
+                ),
               ),
             ],
           );
@@ -1840,13 +2295,17 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         'name': nameCtrl.text.trim(),
         'room_code': roomCtrl.text.trim(),
         'ip_address': ipCtrl.text.trim(),
+        'fqdn': detectedFqdn,
+        'mac_address': detectedMac,
+        'vlan': detectedVlan,
         'pos_x': normX,
         'pos_y': normY,
-        'status': 'unmonitored',
-        'monitoring_enabled': false,
+        'status': enableHeartbeatFromCmdb ? 'online' : 'unmonitored',
+        'monitoring_enabled': enableHeartbeatFromCmdb,
         'linked_rack_id': linkedRackId,
         'linked_rack_device_code': portCtrl.text.trim(),
         'linked_outlet_id': linkedOutletId,
+        'cmdb_asset_id': selectedCmdbAssetId,
         'responsible_person': respCtrl.text.trim(),
         'notes': notesCtrl.text.trim(),
       });
@@ -2614,6 +3073,24 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           style: OutlinedButton.styleFrom(
                             foregroundColor: AppPalette.blue900,
                             side: const BorderSide(color: AppPalette.blue300),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: () => _showAddFloorDeviceModal(
+                            floor,
+                            initialCategory: 'printer',
+                            focusCmdbSelector: true,
+                          ),
+                          icon: const Icon(
+                            Icons.fact_check_outlined,
+                            size: 16,
+                          ),
+                          label: const Text('+ Desde CMDB'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppPalette.teal700,
+                            backgroundColor: const Color(0xFFF0FDFA),
+                            side: const BorderSide(color: AppPalette.teal600),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -4549,6 +5026,27 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
             ),
           ),
           Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                foregroundColor: AppPalette.teal700,
+                backgroundColor: const Color(0xFFF0FDFA),
+                side: const BorderSide(color: AppPalette.teal600),
+              ),
+              onPressed: () => _showAddFloorDeviceModal(
+                floor,
+                initialCategory: 'printer',
+                focusCmdbSelector: true,
+              ),
+              icon: const Icon(Icons.fact_check_outlined, size: 15),
+              label: const Text(
+                '+ Seleccionar Equipo CMDB',
+                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800),
+              ),
+            ),
+          ),
+          Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
             child: OutlinedButton.icon(
               style: OutlinedButton.styleFrom(
@@ -5377,6 +5875,72 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                 _buildCompactField(
                   label: 'IP Address / Host',
                   controller: _devIpCtrl,
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(9),
+                  decoration: BoxDecoration(
+                    color: dev.cmdbAssetId != null
+                        ? const Color(0xFFF0FDF4)
+                        : const Color(0xFFEFF6FF),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: dev.cmdbAssetId != null
+                          ? const Color(0xFF86EFAC)
+                          : AppPalette.blue300,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.fact_check_outlined,
+                            size: 14,
+                            color: dev.cmdbAssetId != null
+                                ? const Color(0xFF15803D)
+                                : AppPalette.blue700,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              dev.cmdbAssetId != null
+                                  ? 'Alineado con CMDB: ${dev.cmdbAssetCode}'
+                                  : 'Alineación CMDB & Control IPs',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w900,
+                                color: dev.cmdbAssetId != null
+                                    ? const Color(0xFF166534)
+                                    : AppPalette.blue900,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          backgroundColor: Colors.white,
+                          foregroundColor: AppPalette.blue900,
+                          side: const BorderSide(color: AppPalette.blue300),
+                        ),
+                        onPressed: () => _showLinkExistingFloorDeviceWithCmdbDialog(dev),
+                        icon: const Icon(Icons.sync_alt_rounded, size: 14),
+                        label: Text(
+                          dev.cmdbAssetId != null
+                              ? 'Cambiar / Autocompletar desde CMDB'
+                              : 'Seleccionar equipo detectado en CMDB',
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 12),
 
