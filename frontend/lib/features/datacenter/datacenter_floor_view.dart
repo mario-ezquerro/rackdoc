@@ -2962,1575 +2962,14 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         children: [
           // 1. CABECERA DEL DATACENTER + SELECTOR DE SEDE + PESTAÑAS DE PLANTAS DEL EDIFICIO
           if (!widget.isKioskMode)
-            Container(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                border: Border(bottom: BorderSide(color: AppPalette.slate200)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      IconButton(
-                        onPressed: widget.onBackToLocations,
-                        icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                        tooltip: 'Volver al Mapa Global de Locations',
-                      ),
-                      const SizedBox(width: 6),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.apartment_rounded,
-                                size: 20,
-                                color: AppPalette.blue900,
-                              ),
-                              const SizedBox(width: 8),
-                              DropdownButton<int>(
-                                value: loc.id,
-                                underline: const SizedBox.shrink(),
-                                style: const TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w800,
-                                  color: AppPalette.slate900,
-                                ),
-                                items: widget.locations
-                                    .map(
-                                      (l) => DropdownMenuItem<int>(
-                                        value: l.id,
-                                        child: Text('${l.name} (${l.code})'),
-                                      ),
-                                    )
-                                    .toList(),
-                                onChanged: (id) {
-                                  if (id != null) {
-                                    setState(() => _selectedFloorId = null);
-                                    widget.onChangeLocation(id);
-                                  }
-                                },
-                              ),
-                            ],
-                          ),
-                          Text(
-                            'PBX  >  Locations  >  ${loc.code}  >  ${floor?.name ?? 'Sin Planta'} (Vista de Planta 2D)',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: AppPalette.slate500,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const Spacer(),
-                      if (loc.monitoredCount > 0) ...[
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: loc.offlineCount > 0
-                                ? AppPalette.red50
-                                : AppPalette.green50,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: loc.offlineCount > 0
-                                  ? AppPalette.red200
-                                  : const Color(0xFFBBF7D0),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.monitor_heart_rounded,
-                                size: 14,
-                                color: loc.offlineCount > 0
-                                    ? AppPalette.red600
-                                    : AppPalette.green600,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                [
-                                  'Datacenter Monitorizados: ${loc.monitoredCount}',
-                                  if (loc.onlineCount > 0)
-                                    '🟢 ${loc.onlineCount}',
-                                  if (loc.offlineCount > 0)
-                                    '🔴 ${loc.offlineCount}',
-                                  if (loc.warningCount > 0)
-                                    '🟠 ${loc.warningCount}',
-                                ].join(' • '),
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppPalette.slate900,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                      ],
-                      if (widget.onToggleKioskMode != null) ...[
-                        OutlinedButton.icon(
-                          onPressed: widget.onToggleKioskMode,
-                          icon: const Icon(Icons.tv_rounded, size: 16),
-                          label: const Text(
-                            'Modo Kiosco',
-                            style: TextStyle(fontSize: 12),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppPalette.slate900,
-                            side: const BorderSide(color: AppPalette.slate400),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                      ],
-                      if (floor != null) ...[
-                        OutlinedButton.icon(
-                          onPressed: _uploading
-                              ? null
-                              : () => _uploadFloorBlueprint(floor),
-                          icon:
-                              const Icon(Icons.upload_file_outlined, size: 16),
-                          label: Text(
-                            _uploading
-                                ? 'Subiendo...'
-                                : (floor.mapImageUrl.isNotEmpty
-                                    ? 'Cambiar Plano de Planta (JPG/PNG/GIF)'
-                                    : 'Subir Plano de Planta (JPG/PNG/GIF)'),
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                        ),
-                        if (floor.mapImageUrl.isNotEmpty) ...[
-                          const SizedBox(width: 6),
-                          IconButton(
-                            onPressed: () async {
-                              await widget.api.deleteCustomPlanImage(
-                                targetType: 'floor',
-                                targetId: floor.id,
-                              );
-                              widget.onRefresh();
-                            },
-                            icon: const Icon(
-                              Icons.delete_outline,
-                              size: 18,
-                              color: AppPalette.red600,
-                            ),
-                            tooltip: 'Quitar imagen de fondo de esta planta',
-                          ),
-                        ],
-                        const SizedBox(width: 10),
-                        OutlinedButton.icon(
-                          onPressed: () => _showDrawNewRackDialog(floor),
-                          icon: const Icon(Icons.dns_outlined, size: 16),
-                          label: const Text('+ Rack'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppPalette.blue900,
-                            side: const BorderSide(color: AppPalette.blue300),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
-                          onPressed: () => _showAddFloorDeviceModal(
-                            floor,
-                            initialCategory: 'printer',
-                            focusCmdbSelector: true,
-                          ),
-                          icon: const Icon(
-                            Icons.fact_check_outlined,
-                            size: 16,
-                          ),
-                          label: const Text('+ Desde CMDB'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppPalette.teal700,
-                            backgroundColor: const Color(0xFFF0FDFA),
-                            side: const BorderSide(color: AppPalette.teal600),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        FilledButton.icon(
-                          onPressed: () => _showAddFloorDeviceModal(floor),
-                          icon: const Icon(
-                            Icons.add_location_alt_outlined,
-                            size: 17,
-                          ),
-                          label: const Text('+ Device'),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppPalette.blue600,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // BARRA DE PESTAÑAS DE PLANTAS DEL EDIFICIO (Floor 1, Floor 2, Floor 3...)
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        const Text(
-                          'PLANTAS DEL EDIFICIO:',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            color: AppPalette.slate500,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        ...loc.floors.map((fl) {
-                          final isSel = fl.id == floor?.id;
-                          int rCount = 0;
-                          for (final r in fl.rooms) {
-                            rCount += r.racks.length;
-                          }
-                          final dCount = fl.floorDevices.length;
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 8, bottom: 8),
-                            child: InkWell(
-                              onTap: () {
-                                setState(() {
-                                  _selectedFloorId = fl.id;
-                                  _selectedFloorDeviceId = null;
-                                  _editingDeviceId = null;
-                                  _syncFloorState();
-                                });
-                              },
-                              borderRadius: BorderRadius.circular(6),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: isSel
-                                      ? AppPalette.slate900
-                                      : AppPalette.slate100,
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
-                                    color: isSel
-                                        ? AppPalette.slate900
-                                        : AppPalette.slate300,
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.layers,
-                                      size: 15,
-                                      color: isSel
-                                          ? AppPalette.sky400
-                                          : AppPalette.slate600,
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      fl.name,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w700,
-                                        color: isSel
-                                            ? Colors.white
-                                            : AppPalette.slate800,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 1.5,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: isSel
-                                            ? Colors.white24
-                                            : AppPalette.slate200,
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: Text(
-                                        [
-                                          '$rCount racks',
-                                          if (dCount > 0) '$dCount disp.',
-                                          '⚪${fl.unmonitoredCount}',
-                                          '🟢${fl.onlineCount}',
-                                          if (fl.warningCount > 0)
-                                            '🟠${fl.warningCount}',
-                                          '🔴${fl.offlineCount}',
-                                        ].join(' • '),
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                          color: isSel
-                                              ? Colors.white
-                                              : AppPalette.slate700,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    InkWell(
-                                      onTap: () => _confirmDeleteFloor(fl),
-                                      child: Tooltip(
-                                        message:
-                                            'Eliminar esta Planta (${fl.name})',
-                                        child: Icon(
-                                          Icons.delete_outline,
-                                          size: 15,
-                                          color: isSel
-                                              ? AppPalette.red300
-                                              : AppPalette.red600,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          );
-                        }),
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: TextButton.icon(
-                            onPressed: () => _showAddFloorDialog(loc),
-                            icon: const Icon(Icons.add, size: 16),
-                            label: const Text('+ Añadir Planta'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            _buildCabeceraDatacenter(loc, floor),
 
           // 2. BARRA DE CONTROLES DE LA VISTA DE PLANTA (oculta en Modo Kiosco)
           if (floor != null && !widget.isKioskMode)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              decoration: const BoxDecoration(
-                color: AppPalette.slate50,
-                border: Border(bottom: BorderSide(color: AppPalette.slate200)),
-              ),
-              child: Row(
-                children: [
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      backgroundColor: _showLeftLibrary
-                          ? AppPalette.blue50
-                          : Colors.white,
-                      side: BorderSide(
-                        color: _showLeftLibrary
-                            ? AppPalette.blue500
-                            : AppPalette.slate300,
-                      ),
-                    ),
-                    onPressed: () =>
-                        setState(() => _showLeftLibrary = !_showLeftLibrary),
-                    icon: const Icon(Icons.widgets_outlined, size: 15),
-                    label: Text(
-                      _showLeftLibrary
-                          ? 'Devices Library: ON'
-                          : 'Devices Library: OFF',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      backgroundColor: _showFloorCables
-                          ? AppPalette.amber50
-                          : Colors.white,
-                      side: BorderSide(
-                        color: _showFloorCables
-                            ? AppPalette.amber500
-                            : AppPalette.slate300,
-                      ),
-                    ),
-                    onPressed: () =>
-                        setState(() => _showFloorCables = !_showFloorCables),
-                    icon: Icon(
-                      Icons.timeline_rounded,
-                      size: 15,
-                      color: _showFloorCables
-                          ? AppPalette.amber600
-                          : AppPalette.slate500,
-                    ),
-                    label: Text(
-                      _showFloorCables
-                          ? 'Cableado Estructurado: ON (${floor.floorDevices.length} disp.)'
-                          : 'Cableado Estructurado: OFF',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: _showFloorCables
-                            ? AppPalette.amber700
-                            : AppPalette.slate600,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  // Botón Deshacer (Ctrl+Z en Windows/Linux o Cmd+Z en Mac)
-                  Tooltip(
-                    message:
-                        'Deshacer último movimiento de Rack o Dispositivo (Ctrl+Z / ⌘Z)',
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        backgroundColor: _undoStack.isNotEmpty
-                            ? AppPalette.slate50
-                            : Colors.white,
-                      ),
-                      onPressed: _undoStack.isEmpty ? null : _performUndo,
-                      icon: const Icon(Icons.undo_rounded, size: 15),
-                      label: Text(
-                        _undoStack.isEmpty
-                            ? 'Deshacer (⌘Z / Ctrl+Z)'
-                            : 'Deshacer (${_undoStack.length})',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  // Botón Modo Mano (Barra Espaciadora) para mover el dashboard
-                  Tooltip(
-                    message:
-                        'Mantén pulsada la Barra Espaciadora (o activa este botón) para convertir el ratón en una mano y mover todo el dashboard',
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        backgroundColor: _isPanHandMode
-                            ? AppPalette.slate900
-                            : Colors.white,
-                        foregroundColor: _isPanHandMode
-                            ? Colors.white
-                            : AppPalette.slate700,
-                        side: BorderSide(
-                          color: _isPanHandMode
-                              ? AppPalette.sky400
-                              : AppPalette.slate300,
-                        ),
-                      ),
-                      onPressed: () => setState(
-                        () => _isHandToolPinned = !_isHandToolPinned,
-                      ),
-                      icon: Icon(
-                        Icons.pan_tool_alt_rounded,
-                        size: 15,
-                        color: _isPanHandMode
-                            ? AppPalette.sky400
-                            : AppPalette.slate600,
-                      ),
-                      label: Text(
-                        _isPanHandMode
-                            ? 'Mano: ACTIVA (Espacio)'
-                            : 'Mano (Espacio)',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (_canvasPanOffset != Offset.zero) ...[
-                    const SizedBox(width: 4),
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      tooltip: 'Restablecer posición centrada del lienzo',
-                      onPressed: () =>
-                          setState(() => _canvasPanOffset = Offset.zero),
-                      icon: const Icon(
-                        Icons.center_focus_strong_rounded,
-                        size: 16,
-                        color: AppPalette.blue600,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(width: 10),
-                  const Expanded(
-                    child: Text(
-                      'Espacio + Arrastrar: Mover Dashboard ✋  •  Ctrl+Z / ⌘Z: Deshacer  •  Doble Clic en Rack: Abrir en Rack Editor',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: AppPalette.slate700,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  if (floorRacks.isNotEmpty) ...[
-                    TextButton.icon(
-                      onPressed: () {
-                        setState(() {
-                          _selectedFloorDeviceId = null;
-                          if (_selectedRackIds.length == floorRacks.length) {
-                            _selectedRackIds.clear();
-                          } else {
-                            _selectedRackIds
-                              ..clear()
-                              ..addAll(floorRacks.map((r) => r.id));
-                          }
-                        });
-                      },
-                      icon: Icon(
-                        _selectedRackIds.length == floorRacks.length
-                            ? Icons.deselect
-                            : Icons.select_all,
-                        size: 15,
-                      ),
-                      label: Text(
-                        _selectedRackIds.length == floorRacks.length
-                            ? 'Deseleccionar Racks'
-                            : 'Sel. Racks (${floorRacks.length})',
-                        style: const TextStyle(fontSize: 11),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                  ],
-                  const Text(
-                    'Escala:',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppPalette.slate600,
-                    ),
-                  ),
-                  SizedBox(
-                    width: 110,
-                    child: Slider(
-                      value: _floorImageScale,
-                      min: 0.4,
-                      max: 2.5,
-                      divisions: 21,
-                      label: '${(_floorImageScale * 100).round()}%',
-                      onChanged: (v) {
-                        setState(() => _floorImageScale = v);
-                      },
-                      onChangeEnd: (v) => _saveFloorScale(floor, v),
-                    ),
-                  ),
-                  Text(
-                    '${(_floorImageScale * 100).round()}%',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: AppPalette.slate900,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      backgroundColor: _showRightSettings
-                          ? AppPalette.blue50
-                          : Colors.white,
-                      side: BorderSide(
-                        color: _showRightSettings
-                            ? AppPalette.blue500
-                            : AppPalette.slate300,
-                      ),
-                    ),
-                    onPressed: () =>
-                        setState(() => _showRightSettings = !_showRightSettings),
-                    icon: const Icon(Icons.tune_rounded, size: 15),
-                    label: const Text(
-                      'Settings',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            _buildBarraControlesPlanta(floor, floorRacks),
 
           // 3. ÁREA PRINCIPAL: [DEVICES LIBRARY (Izq)] + [LIENZO DE PLANTA 2D (Centro)] + [SETTINGS (Der)]
-          Expanded(
-            child: floor == null
-                ? const Center(child: Text('Crea una planta para empezar.'))
-                : Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // COLUMNA IZQUIERDA: DEVICES LIBRARY
-                      if (_showLeftLibrary && !widget.isKioskMode)
-                        _buildLeftDevicesLibraryPanel(floor),
-
-                      // COLUMNA CENTRAL: LIENZO INTERACTIVO DE PLANTA 2D CON DRAG TARGET Y CABLEADO
-                      Expanded(
-                        child: Padding(
-                          padding: EdgeInsets.all(widget.isKioskMode ? 6 : 12),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: AppPalette.slate300,
-                              ),
-                              boxShadow: const [
-                                BoxShadow(
-                                  color: Color(0x0A000000),
-                                  blurRadius: 12,
-                                  offset: Offset(0, 4),
-                                ),
-                              ],
-                            ),
-                            clipBehavior: Clip.antiAlias,
-                            child: LayoutBuilder(
-                              builder: (context, constraints) {
-                                final canvasW = constraints.maxWidth;
-                                final canvasH = constraints.maxHeight;
-                                final marqueeRect = (_marqueeStart != null &&
-                                        _marqueeCurrent != null)
-                                    ? Rect.fromPoints(
-                                        _marqueeStart!,
-                                        _marqueeCurrent!,
-                                      )
-                                    : null;
-
-                                return DragTarget<String>(
-                                  onWillAcceptWithDetails: (_) => true,
-                                  onAcceptWithDetails: (details) {
-                                    final renderBox = context.findRenderObject()
-                                        as RenderBox?;
-                                    if (renderBox == null) return;
-                                    final localPos = renderBox.globalToLocal(
-                                      details.offset,
-                                    );
-                                    final normX = (localPos.dx / canvasW).clamp(
-                                      0.04,
-                                      0.94,
-                                    );
-                                    final normY = (localPos.dy / canvasH).clamp(
-                                      0.06,
-                                      0.92,
-                                    );
-                                    _dropNewDeviceFromLibrary(
-                                      floor: floor,
-                                      category: details.data,
-                                      normX: normX,
-                                      normY: normY,
-                                    );
-                                  },
-                                  builder: (context, candidateData, _) {
-                                    final isDraggingNew =
-                                        candidateData.isNotEmpty;
-                                    return Stack(
-                                      fit: StackFit.expand,
-                                      children: [
-                                        // Lienzo desplazable con Modo Mano (Barra Espaciadora)
-                                        Transform.translate(
-                                          offset: _canvasPanOffset,
-                                          child: Stack(
-                                            fit: StackFit.expand,
-                                            children: [
-                                              // A. Fondo interactivo: clic en vacío limpia selección, arrastrar dibuja caja de selección (Marquee)
-                                              GestureDetector(
-                                                behavior:
-                                                    HitTestBehavior.opaque,
-                                                onTap: () {
-                                                  setState(() {
-                                                    if (!_isShiftPressed) {
-                                                      _selectedRackIds.clear();
-                                                    }
-                                                    _selectedFloorDeviceId =
-                                                        null;
-                                                    _editingDeviceId = null;
-                                                  });
-                                                },
-                                                onPanStart: (details) {
-                                                  setState(() {
-                                                    if (!_isShiftPressed) {
-                                                      _selectedRackIds.clear();
-                                                    }
-                                                    _selectedFloorDeviceId =
-                                                        null;
-                                                    _editingDeviceId = null;
-                                                    _marqueeStart =
-                                                        details.localPosition;
-                                                    _marqueeCurrent =
-                                                        details.localPosition;
-                                                  });
-                                                },
-                                                onPanUpdate: (details) {
-                                                  if (_marqueeStart == null) {
-                                                    return;
-                                                  }
-                                                  final cur =
-                                                      details.localPosition;
-                                                  final selRect =
-                                                      Rect.fromPoints(
-                                                    _marqueeStart!,
-                                                    cur,
-                                                  );
-                                                  setState(() {
-                                                    _marqueeCurrent = cur;
-                                                    for (final rk
-                                                        in floorRacks) {
-                                                      final normPos =
-                                                          _rackPositions[
-                                                                  rk.id] ??
-                                                              const Offset(
-                                                                0.25,
-                                                                0.35,
-                                                              );
-                                                      final sz =
-                                                          _rackSizes[rk.id] ??
-                                                              const Size(
-                                                                120.0,
-                                                                90.0,
-                                                              );
-                                                      final leftPx = (normPos
-                                                                  .dx *
-                                                              canvasW)
-                                                          .clamp(
-                                                        8.0,
-                                                        (canvasW -
-                                                                sz.width -
-                                                                8.0)
-                                                            .clamp(
-                                                              8.0,
-                                                              canvasW,
-                                                            ),
-                                                      );
-                                                      final topPx = (normPos
-                                                                  .dy *
-                                                              canvasH)
-                                                          .clamp(
-                                                        8.0,
-                                                        (canvasH -
-                                                                sz.height -
-                                                                8.0)
-                                                            .clamp(
-                                                              8.0,
-                                                              canvasH,
-                                                            ),
-                                                      );
-                                                      final rkRect =
-                                                          Rect.fromLTWH(
-                                                        leftPx,
-                                                        topPx,
-                                                        sz.width,
-                                                        sz.height,
-                                                      );
-                                                      if (selRect.overlaps(
-                                                        rkRect,
-                                                      )) {
-                                                        _selectedRackIds.add(
-                                                          rk.id,
-                                                        );
-                                                      } else if (!_isShiftPressed) {
-                                                        _selectedRackIds.remove(
-                                                          rk.id,
-                                                        );
-                                                      }
-                                                    }
-                                                  });
-                                                },
-                                                onPanEnd: (_) {
-                                                  setState(() {
-                                                    _marqueeStart = null;
-                                                    _marqueeCurrent = null;
-                                                  });
-                                                },
-                                                child: Stack(
-                                                  fit: StackFit.expand,
-                                                  children: [
-                                                    CustomPaint(
-                                                      painter:
-                                                          _ArchitecturalGridPainter(),
-                                                    ),
-                                                    if (floorImageUrl
-                                                        .isNotEmpty)
-                                                      Center(
-                                                        child: Transform.scale(
-                                                          scale:
-                                                              _floorImageScale,
-                                                          child: Image.network(
-                                                            floorImageUrl,
-                                                            fit: BoxFit.contain,
-                                                            errorBuilder:
-                                                                (ctx, err, _) {
-                                                              WidgetsBinding
-                                                                  .instance
-                                                                  .addPostFrameCallback(
-                                                                      (_) {
-                                                                if (mounted &&
-                                                                    !_floorPlanLoadError) {
-                                                                  setState(
-                                                                    () =>
-                                                                        _floorPlanLoadError =
-                                                                            true,
-                                                                  );
-                                                                }
-                                                              });
-                                                              return const SizedBox
-                                                                  .shrink();
-                                                            },
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    // A2. Líneas de Cableado Estructurado en Planta (Rack <-> Rack, Acometidas de Rack, Rack -> Roseta/Sensor y Roseta -> Puesto)
-                                                    if (_showFloorCables)
-                                                      IgnorePointer(
-                                                        child: CustomPaint(
-                                                          painter:
-                                                              _FloorConnectionsPainter(
-                                                            racks: floorRacks,
-                                                            rackPositions:
-                                                                _rackPositions,
-                                                            rackSizes:
-                                                                _rackSizes,
-                                                            floorDevices: floor
-                                                                .floorDevices,
-                                                            interRackLinks: floor
-                                                                .interRackLinks,
-                                                            devicePositions:
-                                                                _floorDevicePositions,
-                                                            selectedDeviceId:
-                                                                _selectedFloorDeviceId,
-                                                            selectedLinkedRackId:
-                                                                _devLinkedRackId,
-                                                            selectedLinkedOutletId:
-                                                                _devLinkedOutletId,
-                                                            selectedRackIds:
-                                                                _selectedRackIds,
-                                                          ),
-                                                        ),
-                                                      ),
-                                                  ],
-                                                ),
-                                              ),
-
-                                              // B. Dibujos de los Racks en Vista de Planta (Top-Down)
-                                              for (final rk in floorRacks)
-                                                _buildTopDownRackBox(
-                                                  rk: rk,
-                                                  canvasW: canvasW,
-                                                  canvasH: canvasH,
-                                                ),
-
-                                              // B2. Pines de Dispositivos de Planta (Cámaras, Rosetas Bi01, PCs, Control de Acceso, APs...)
-                                              for (final dev
-                                                  in floor.floorDevices)
-                                                _buildFloorDevicePin(
-                                                  dev: dev,
-                                                  canvasW: canvasW,
-                                                  canvasH: canvasH,
-                                                ),
-
-                                              // C. Caja de selección visual (Marquee) al arrastrar con el ratón
-                                              if (marqueeRect != null)
-                                                Positioned(
-                                                  left: marqueeRect.left,
-                                                  top: marqueeRect.top,
-                                                  width: marqueeRect.width,
-                                                  height: marqueeRect.height,
-                                                  child: IgnorePointer(
-                                                    child: Container(
-                                                      decoration: BoxDecoration(
-                                                        color: const Color(
-                                                          0xFF2563EB,
-                                                        ).withValues(
-                                                          alpha: 0.16,
-                                                        ),
-                                                        border: Border.all(
-                                                          color: const Color(
-                                                            0xFF2563EB,
-                                                          ),
-                                                          width: 1.8,
-                                                        ),
-                                                        borderRadius:
-                                                            BorderRadius
-                                                                .circular(4),
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-                                            ],
-                                          ),
-                                        ),
-
-                                        // Capa superior cuando se pulsa la Barra Espaciadora (Modo Mano para arrastrar todo el dashboard)
-                                        if (_isPanHandMode)
-                                          Positioned.fill(
-                                            child: MouseRegion(
-                                              cursor: _isSpaceDragging
-                                                  ? SystemMouseCursors.grabbing
-                                                  : SystemMouseCursors.grab,
-                                              child: GestureDetector(
-                                                behavior:
-                                                    HitTestBehavior.opaque,
-                                                onPanStart: (_) {
-                                                  setState(
-                                                    () =>
-                                                        _isSpaceDragging = true,
-                                                  );
-                                                },
-                                                onPanUpdate: (details) {
-                                                  setState(() {
-                                                    _canvasPanOffset +=
-                                                        details.delta;
-                                                  });
-                                                },
-                                                onPanEnd: (_) {
-                                                  setState(
-                                                    () => _isSpaceDragging =
-                                                        false,
-                                                  );
-                                                },
-                                                onPanCancel: () {
-                                                  setState(
-                                                    () => _isSpaceDragging =
-                                                        false,
-                                                  );
-                                                },
-                                                child: Align(
-                                                  alignment:
-                                                      Alignment.topCenter,
-                                                  child: Padding(
-                                                    padding:
-                                                        const EdgeInsets.only(
-                                                      top: 12,
-                                                    ),
-                                                    child: Container(
-                                                      padding: const EdgeInsets
-                                                          .symmetric(
-                                                        horizontal: 14,
-                                                        vertical: 6,
-                                                      ),
-                                                      decoration: BoxDecoration(
-                                                        color: const Color(
-                                                          0xEE0F172A,
-                                                        ),
-                                                        borderRadius:
-                                                            BorderRadius
-                                                                .circular(20),
-                                                        border: Border.all(
-                                                          color: const Color(
-                                                            0xFF38BDF8,
-                                                          ),
-                                                          width: 1.4,
-                                                        ),
-                                                      ),
-                                                      child: const Row(
-                                                        mainAxisSize:
-                                                            MainAxisSize.min,
-                                                        children: [
-                                                          Icon(
-                                                            Icons
-                                                                .pan_tool_alt_rounded,
-                                                            size: 15,
-                                                            color: Color(
-                                                              0xFF38BDF8,
-                                                            ),
-                                                          ),
-                                                          SizedBox(width: 6),
-                                                          Text(
-                                                            'Modo Mano activo — Arrastra con el ratón para mover el dashboard',
-                                                            style: TextStyle(
-                                                              color:
-                                                                  Colors.white,
-                                                              fontSize: 11.5,
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .w800,
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-
-                                        if (isDraggingNew)
-                                          IgnorePointer(
-                                            child: Container(
-                                              decoration: BoxDecoration(
-                                                color: AppPalette.blue600
-                                                    .withValues(alpha: 0.06),
-                                                border: Border.all(
-                                                  color:
-                                                      AppPalette.blue600,
-                                                  width: 2.5,
-                                                ),
-                                              ),
-                                              alignment: Alignment.topCenter,
-                                              padding: const EdgeInsets.only(
-                                                top: 14,
-                                              ),
-                                              child: Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                  horizontal: 14,
-                                                  vertical: 6,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  color:
-                                                      AppPalette.blue900,
-                                                  borderRadius:
-                                                      BorderRadius.circular(20),
-                                                ),
-                                                child: const Text(
-                                                  'Suelta aquí para colocar el dispositivo en la planta',
-                                                  style: TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-
-                                        if (_floorPlanLoadError &&
-                                            floorImageUrl.isNotEmpty)
-                                          Positioned(
-                                            bottom: 14,
-                                            left: 14,
-                                            child: Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 14,
-                                                vertical: 10,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: Colors.white,
-                                                borderRadius:
-                                                    BorderRadius.circular(10),
-                                                border: Border.all(
-                                                  color:
-                                                      AppPalette.amber300,
-                                                  width: 1.5,
-                                                ),
-                                                boxShadow: const [
-                                                  BoxShadow(
-                                                    color: Colors.black12,
-                                                    blurRadius: 10,
-                                                    offset: Offset(0, 3),
-                                                  ),
-                                                ],
-                                              ),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  const Icon(
-                                                    Icons.broken_image_outlined,
-                                                    color: AppPalette.amber600,
-                                                    size: 20,
-                                                  ),
-                                                  const SizedBox(width: 10),
-                                                  const Text(
-                                                    'El plano de fondo anterior no se encuentra disponible. Mostrando cuadrícula técnica.',
-                                                    style: TextStyle(
-                                                      fontSize: 12,
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                      color: AppPalette.slate700,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 12),
-                                                  FilledButton.tonalIcon(
-                                                    onPressed: () async {
-                                                      setState(
-                                                        () =>
-                                                            _floorPlanLoadError =
-                                                                false,
-                                                      );
-                                                      await _uploadFloorBlueprint(
-                                                        floor,
-                                                      );
-                                                    },
-                                                    icon: const Icon(
-                                                      Icons
-                                                          .upload_file_outlined,
-                                                      size: 15,
-                                                    ),
-                                                    label: const Text(
-                                                      'Subir Nuevo Plano',
-                                                      style: TextStyle(
-                                                        fontSize: 11.5,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 6),
-                                                  TextButton(
-                                                    onPressed: () async {
-                                                      setState(
-                                                        () =>
-                                                            _floorPlanLoadError =
-                                                                false,
-                                                      );
-                                                      await widget.api
-                                                          .deleteCustomPlanImage(
-                                                        targetType: 'floor',
-                                                        targetId: floor.id,
-                                                      );
-                                                      widget.onRefresh();
-                                                    },
-                                                    child: const Text(
-                                                      'Usar solo cuadrícula',
-                                                      style: TextStyle(
-                                                        fontSize: 11.5,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-
-                                        // D. Leyenda inferior de Cableado de Planta (Eléctrica, Fibra, Ethernet, Sensores y Rosetas)
-                                        if (_showFloorCables &&
-                                            (floor.floorDevices.isNotEmpty ||
-                                                floorRacks.isNotEmpty))
-                                          Positioned(
-                                            bottom: 10,
-                                            right: 12,
-                                            child: IgnorePointer(
-                                              child: Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                  horizontal: 10,
-                                                  vertical: 6,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.white
-                                                      .withValues(alpha: 0.94),
-                                                  borderRadius:
-                                                      BorderRadius.circular(8),
-                                                  border: Border.all(
-                                                    color:
-                                                        AppPalette.slate300,
-                                                  ),
-                                                ),
-                                                child: const Wrap(
-                                                  spacing: 10,
-                                                  runSpacing: 4,
-                                                  crossAxisAlignment:
-                                                      WrapCrossAlignment.center,
-                                                  children: [
-                                                    Row(
-                                                      mainAxisSize:
-                                                          MainAxisSize.min,
-                                                      children: [
-                                                        Icon(
-                                                          Icons.bolt_rounded,
-                                                          size: 14,
-                                                          color:
-                                                              AppPalette.orange600,
-                                                        ),
-                                                        SizedBox(width: 2),
-                                                        Text(
-                                                          'Eléctrica (PWR)',
-                                                          style: TextStyle(
-                                                            fontSize: 9.5,
-                                                            fontWeight:
-                                                                FontWeight.w800,
-                                                            color: Color(
-                                                              0xFF334155,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    Row(
-                                                      mainAxisSize:
-                                                          MainAxisSize.min,
-                                                      children: [
-                                                        Icon(
-                                                          Icons.cable_rounded,
-                                                          size: 14,
-                                                          color:
-                                                              AppPalette.cyan500,
-                                                        ),
-                                                        SizedBox(width: 3),
-                                                        Text(
-                                                          'Fibra (FIB / Inter-Rack)',
-                                                          style: TextStyle(
-                                                            fontSize: 9.5,
-                                                            fontWeight:
-                                                                FontWeight.w800,
-                                                            color: Color(
-                                                              0xFF334155,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    Row(
-                                                      mainAxisSize:
-                                                          MainAxisSize.min,
-                                                      children: [
-                                                        Icon(
-                                                          Icons
-                                                              .settings_ethernet_rounded,
-                                                          size: 14,
-                                                          color:
-                                                              AppPalette.blue600,
-                                                        ),
-                                                        SizedBox(width: 3),
-                                                        Text(
-                                                          'Ethernet (ETH)',
-                                                          style: TextStyle(
-                                                            fontSize: 9.5,
-                                                            fontWeight:
-                                                                FontWeight.w800,
-                                                            color: Color(
-                                                              0xFF334155,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    Row(
-                                                      mainAxisSize:
-                                                          MainAxisSize.min,
-                                                      children: [
-                                                        Icon(
-                                                          Icons.horizontal_rule,
-                                                          size: 15,
-                                                          color:
-                                                              AppPalette.amber500,
-                                                        ),
-                                                        SizedBox(width: 3),
-                                                        Text(
-                                                          'Rack → Sensor / Roseta',
-                                                          style: TextStyle(
-                                                            fontSize: 9.5,
-                                                            fontWeight:
-                                                                FontWeight.w700,
-                                                            color: Color(
-                                                              0xFF334155,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    Row(
-                                                      mainAxisSize:
-                                                          MainAxisSize.min,
-                                                      children: [
-                                                        Icon(
-                                                          Icons.horizontal_rule,
-                                                          size: 15,
-                                                          color:
-                                                              AppPalette.blue500,
-                                                        ),
-                                                        SizedBox(width: 3),
-                                                        Text(
-                                                          'Roseta → Puesto',
-                                                          style: TextStyle(
-                                                            fontSize: 9.5,
-                                                            fontWeight:
-                                                                FontWeight.w700,
-                                                            color: Color(
-                                                              0xFF334155,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-
-                                        // E. Barra Flotante de Colocación/Alineación cuando hay Racks seleccionados
-                                        if (_selectedRackIds.isNotEmpty)
-                                          Positioned(
-                                            top: 12,
-                                            left: 16,
-                                            right: 16,
-                                            child: Center(
-                                              child: Material(
-                                                elevation: 6,
-                                                borderRadius:
-                                                    BorderRadius.circular(10),
-                                                color: AppPalette.slate900,
-                                                child: Padding(
-                                                  padding: const EdgeInsets
-                                                      .symmetric(
-                                                    horizontal: 14,
-                                                    vertical: 8,
-                                                  ),
-                                                  child: Wrap(
-                                                    crossAxisAlignment:
-                                                        WrapCrossAlignment
-                                                            .center,
-                                                    spacing: 8,
-                                                    runSpacing: 6,
-                                                    children: [
-                                                      Container(
-                                                        padding:
-                                                            const EdgeInsets
-                                                                .symmetric(
-                                                          horizontal: 8,
-                                                          vertical: 3,
-                                                        ),
-                                                        decoration:
-                                                            BoxDecoration(
-                                                          color: const Color(
-                                                            0xFF2563EB,
-                                                          ),
-                                                          borderRadius:
-                                                              BorderRadius
-                                                                  .circular(12),
-                                                        ),
-                                                        child: Text(
-                                                          '${_selectedRackIds.length} ${_selectedRackIds.length == 1 ? 'Rack seleccionado' : 'Racks seleccionados'}',
-                                                          style:
-                                                              const TextStyle(
-                                                            color: Colors.white,
-                                                            fontSize: 11,
-                                                            fontWeight:
-                                                                FontWeight.w800,
-                                                          ),
-                                                        ),
-                                                      ),
-                                                      if (_selectedRackIds
-                                                              .length ==
-                                                          1)
-                                                        FilledButton.icon(
-                                                          style: FilledButton
-                                                              .styleFrom(
-                                                            backgroundColor:
-                                                                const Color(
-                                                              0xFF10B981,
-                                                            ),
-                                                            visualDensity:
-                                                                VisualDensity
-                                                                    .compact,
-                                                          ),
-                                                          onPressed: () =>
-                                                              widget.onOpenRack(
-                                                            _selectedRackIds
-                                                                .first,
-                                                          ),
-                                                          icon: const Icon(
-                                                            Icons.open_in_new,
-                                                            size: 14,
-                                                          ),
-                                                          label: const Text(
-                                                            'Abrir en Rack Editor (Doble Clic)',
-                                                            style: TextStyle(
-                                                              fontSize: 11,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      if (_selectedRackIds
-                                                              .length >=
-                                                          2) ...[
-                                                        OutlinedButton.icon(
-                                                          style: OutlinedButton
-                                                              .styleFrom(
-                                                            foregroundColor:
-                                                                Colors.white,
-                                                            side:
-                                                                const BorderSide(
-                                                              color: Color(
-                                                                0xFF475569,
-                                                              ),
-                                                            ),
-                                                            visualDensity:
-                                                                VisualDensity
-                                                                    .compact,
-                                                          ),
-                                                          onPressed: () =>
-                                                              _alignSelectedRacksHorizontally(
-                                                            canvasW: canvasW,
-                                                            packTightly: false,
-                                                          ),
-                                                          icon: const Icon(
-                                                            Icons
-                                                                .align_vertical_center_rounded,
-                                                            size: 14,
-                                                          ),
-                                                          label: const Text(
-                                                            'Alinear en Fila',
-                                                            style: TextStyle(
-                                                              fontSize: 11,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        OutlinedButton.icon(
-                                                          style: OutlinedButton
-                                                              .styleFrom(
-                                                            foregroundColor:
-                                                                Colors.white,
-                                                            side:
-                                                                const BorderSide(
-                                                              color: Color(
-                                                                0xFF475569,
-                                                              ),
-                                                            ),
-                                                            visualDensity:
-                                                                VisualDensity
-                                                                    .compact,
-                                                          ),
-                                                          onPressed: () =>
-                                                              _alignSelectedRacksHorizontally(
-                                                            canvasW: canvasW,
-                                                            packTightly: true,
-                                                          ),
-                                                          icon: const Icon(
-                                                            Icons
-                                                                .view_column_outlined,
-                                                            size: 14,
-                                                          ),
-                                                          label: const Text(
-                                                            'Juntar en Fila (Pasillo)',
-                                                            style: TextStyle(
-                                                              fontSize: 11,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        OutlinedButton.icon(
-                                                          style: OutlinedButton
-                                                              .styleFrom(
-                                                            foregroundColor:
-                                                                Colors.white,
-                                                            side:
-                                                                const BorderSide(
-                                                              color: Color(
-                                                                0xFF475569,
-                                                              ),
-                                                            ),
-                                                            visualDensity:
-                                                                VisualDensity
-                                                                    .compact,
-                                                          ),
-                                                          onPressed: () =>
-                                                              _alignSelectedRacksVertically(
-                                                            canvasH: canvasH,
-                                                            packTightly: false,
-                                                          ),
-                                                          icon: const Icon(
-                                                            Icons
-                                                                .align_horizontal_center_rounded,
-                                                            size: 14,
-                                                          ),
-                                                          label: const Text(
-                                                            'Alinear en Columna',
-                                                            style: TextStyle(
-                                                              fontSize: 11,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        OutlinedButton.icon(
-                                                          style: OutlinedButton
-                                                              .styleFrom(
-                                                            foregroundColor:
-                                                                Colors.white,
-                                                            side:
-                                                                const BorderSide(
-                                                              color: Color(
-                                                                0xFF475569,
-                                                              ),
-                                                            ),
-                                                            visualDensity:
-                                                                VisualDensity
-                                                                    .compact,
-                                                          ),
-                                                          onPressed: () =>
-                                                              _alignSelectedRacksVertically(
-                                                            canvasH: canvasH,
-                                                            packTightly: true,
-                                                          ),
-                                                          icon: const Icon(
-                                                            Icons
-                                                                .table_rows_outlined,
-                                                            size: 14,
-                                                          ),
-                                                          label: const Text(
-                                                            'Juntar en Columna',
-                                                            style: TextStyle(
-                                                              fontSize: 11,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        OutlinedButton.icon(
-                                                          style: OutlinedButton
-                                                              .styleFrom(
-                                                            foregroundColor:
-                                                                Colors.white,
-                                                            side:
-                                                                const BorderSide(
-                                                              color: Color(
-                                                                0xFF475569,
-                                                              ),
-                                                            ),
-                                                            visualDensity:
-                                                                VisualDensity
-                                                                    .compact,
-                                                          ),
-                                                          onPressed:
-                                                              _equalizeSelectedRacksSize,
-                                                          icon: const Icon(
-                                                            Icons.aspect_ratio,
-                                                            size: 14,
-                                                          ),
-                                                          label: const Text(
-                                                            'Igualar Tamaño',
-                                                            style: TextStyle(
-                                                              fontSize: 11,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                      IconButton(
-                                                        onPressed: () =>
-                                                            setState(
-                                                          () => _selectedRackIds
-                                                              .clear(),
-                                                        ),
-                                                        icon: const Icon(
-                                                          Icons.close,
-                                                          size: 16,
-                                                          color: Colors.white70,
-                                                        ),
-                                                        tooltip:
-                                                            'Limpiar selección',
-                                                        visualDensity:
-                                                            VisualDensity
-                                                                .compact,
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                      ],
-                                    );
-                                  },
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      // COLUMNA DERECHA: PANEL DE SETTINGS (Dispositivo o Rack seleccionado)
-                      if (_showRightSettings && !widget.isKioskMode)
-                        _buildRightSettingsPanel(floor, floorRacks),
-                    ],
-                  ),
-          ),
+          _buildAreaPrincipal(floor, floorRacks, floorImageUrl),
         ],
       ),
     );
@@ -5819,6 +4258,1582 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         ],
       ),
     );
+  }
+
+  /// Área principal: librería de equipos, lienzo del plano y panel de ajustes.
+  Widget _buildAreaPrincipal(FloorNode? floor, List<RackSummary> floorRacks, String floorImageUrl) {
+    return Expanded(
+        child: floor == null
+            ? const Center(child: Text('Crea una planta para empezar.'))
+            : Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // COLUMNA IZQUIERDA: DEVICES LIBRARY
+                  if (_showLeftLibrary && !widget.isKioskMode)
+                    _buildLeftDevicesLibraryPanel(floor),
+
+                  // COLUMNA CENTRAL: LIENZO INTERACTIVO DE PLANTA 2D CON DRAG TARGET Y CABLEADO
+                  Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.all(widget.isKioskMode ? 6 : 12),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: AppPalette.slate300,
+                          ),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x0A000000),
+                              blurRadius: 12,
+                              offset: Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            final canvasW = constraints.maxWidth;
+                            final canvasH = constraints.maxHeight;
+                            final marqueeRect = (_marqueeStart != null &&
+                                    _marqueeCurrent != null)
+                                ? Rect.fromPoints(
+                                    _marqueeStart!,
+                                    _marqueeCurrent!,
+                                  )
+                                : null;
+
+                            return DragTarget<String>(
+                              onWillAcceptWithDetails: (_) => true,
+                              onAcceptWithDetails: (details) {
+                                final renderBox = context.findRenderObject()
+                                    as RenderBox?;
+                                if (renderBox == null) return;
+                                final localPos = renderBox.globalToLocal(
+                                  details.offset,
+                                );
+                                final normX = (localPos.dx / canvasW).clamp(
+                                  0.04,
+                                  0.94,
+                                );
+                                final normY = (localPos.dy / canvasH).clamp(
+                                  0.06,
+                                  0.92,
+                                );
+                                _dropNewDeviceFromLibrary(
+                                  floor: floor,
+                                  category: details.data,
+                                  normX: normX,
+                                  normY: normY,
+                                );
+                              },
+                              builder: (context, candidateData, _) {
+                                final isDraggingNew =
+                                    candidateData.isNotEmpty;
+                                return Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    // Lienzo desplazable con Modo Mano (Barra Espaciadora)
+                                    Transform.translate(
+                                      offset: _canvasPanOffset,
+                                      child: Stack(
+                                        fit: StackFit.expand,
+                                        children: [
+                                          // A. Fondo interactivo: clic en vacío limpia selección, arrastrar dibuja caja de selección (Marquee)
+                                          GestureDetector(
+                                            behavior:
+                                                HitTestBehavior.opaque,
+                                            onTap: () {
+                                              setState(() {
+                                                if (!_isShiftPressed) {
+                                                  _selectedRackIds.clear();
+                                                }
+                                                _selectedFloorDeviceId =
+                                                    null;
+                                                _editingDeviceId = null;
+                                              });
+                                            },
+                                            onPanStart: (details) {
+                                              setState(() {
+                                                if (!_isShiftPressed) {
+                                                  _selectedRackIds.clear();
+                                                }
+                                                _selectedFloorDeviceId =
+                                                    null;
+                                                _editingDeviceId = null;
+                                                _marqueeStart =
+                                                    details.localPosition;
+                                                _marqueeCurrent =
+                                                    details.localPosition;
+                                              });
+                                            },
+                                            onPanUpdate: (details) {
+                                              if (_marqueeStart == null) {
+                                                return;
+                                              }
+                                              final cur =
+                                                  details.localPosition;
+                                              final selRect =
+                                                  Rect.fromPoints(
+                                                _marqueeStart!,
+                                                cur,
+                                              );
+                                              setState(() {
+                                                _marqueeCurrent = cur;
+                                                for (final rk
+                                                    in floorRacks) {
+                                                  final normPos =
+                                                      _rackPositions[
+                                                              rk.id] ??
+                                                          const Offset(
+                                                            0.25,
+                                                            0.35,
+                                                          );
+                                                  final sz =
+                                                      _rackSizes[rk.id] ??
+                                                          const Size(
+                                                            120.0,
+                                                            90.0,
+                                                          );
+                                                  final leftPx = (normPos
+                                                              .dx *
+                                                          canvasW)
+                                                      .clamp(
+                                                    8.0,
+                                                    (canvasW -
+                                                            sz.width -
+                                                            8.0)
+                                                        .clamp(
+                                                          8.0,
+                                                          canvasW,
+                                                        ),
+                                                  );
+                                                  final topPx = (normPos
+                                                              .dy *
+                                                          canvasH)
+                                                      .clamp(
+                                                    8.0,
+                                                    (canvasH -
+                                                            sz.height -
+                                                            8.0)
+                                                        .clamp(
+                                                          8.0,
+                                                          canvasH,
+                                                        ),
+                                                  );
+                                                  final rkRect =
+                                                      Rect.fromLTWH(
+                                                    leftPx,
+                                                    topPx,
+                                                    sz.width,
+                                                    sz.height,
+                                                  );
+                                                  if (selRect.overlaps(
+                                                    rkRect,
+                                                  )) {
+                                                    _selectedRackIds.add(
+                                                      rk.id,
+                                                    );
+                                                  } else if (!_isShiftPressed) {
+                                                    _selectedRackIds.remove(
+                                                      rk.id,
+                                                    );
+                                                  }
+                                                }
+                                              });
+                                            },
+                                            onPanEnd: (_) {
+                                              setState(() {
+                                                _marqueeStart = null;
+                                                _marqueeCurrent = null;
+                                              });
+                                            },
+                                            child: Stack(
+                                              fit: StackFit.expand,
+                                              children: [
+                                                CustomPaint(
+                                                  painter:
+                                                      _ArchitecturalGridPainter(),
+                                                ),
+                                                if (floorImageUrl
+                                                    .isNotEmpty)
+                                                  Center(
+                                                    child: Transform.scale(
+                                                      scale:
+                                                          _floorImageScale,
+                                                      child: Image.network(
+                                                        floorImageUrl,
+                                                        fit: BoxFit.contain,
+                                                        errorBuilder:
+                                                            (ctx, err, _) {
+                                                          WidgetsBinding
+                                                              .instance
+                                                              .addPostFrameCallback(
+                                                                  (_) {
+                                                            if (mounted &&
+                                                                !_floorPlanLoadError) {
+                                                              setState(
+                                                                () =>
+                                                                    _floorPlanLoadError =
+                                                                        true,
+                                                              );
+                                                            }
+                                                          });
+                                                          return const SizedBox
+                                                              .shrink();
+                                                        },
+                                                      ),
+                                                    ),
+                                                  ),
+                                                // A2. Líneas de Cableado Estructurado en Planta (Rack <-> Rack, Acometidas de Rack, Rack -> Roseta/Sensor y Roseta -> Puesto)
+                                                if (_showFloorCables)
+                                                  IgnorePointer(
+                                                    child: CustomPaint(
+                                                      painter:
+                                                          _FloorConnectionsPainter(
+                                                        racks: floorRacks,
+                                                        rackPositions:
+                                                            _rackPositions,
+                                                        rackSizes:
+                                                            _rackSizes,
+                                                        floorDevices: floor
+                                                            .floorDevices,
+                                                        interRackLinks: floor
+                                                            .interRackLinks,
+                                                        devicePositions:
+                                                            _floorDevicePositions,
+                                                        selectedDeviceId:
+                                                            _selectedFloorDeviceId,
+                                                        selectedLinkedRackId:
+                                                            _devLinkedRackId,
+                                                        selectedLinkedOutletId:
+                                                            _devLinkedOutletId,
+                                                        selectedRackIds:
+                                                            _selectedRackIds,
+                                                      ),
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+
+                                          // B. Dibujos de los Racks en Vista de Planta (Top-Down)
+                                          for (final rk in floorRacks)
+                                            _buildTopDownRackBox(
+                                              rk: rk,
+                                              canvasW: canvasW,
+                                              canvasH: canvasH,
+                                            ),
+
+                                          // B2. Pines de Dispositivos de Planta (Cámaras, Rosetas Bi01, PCs, Control de Acceso, APs...)
+                                          for (final dev
+                                              in floor.floorDevices)
+                                            _buildFloorDevicePin(
+                                              dev: dev,
+                                              canvasW: canvasW,
+                                              canvasH: canvasH,
+                                            ),
+
+                                          // C. Caja de selección visual (Marquee) al arrastrar con el ratón
+                                          if (marqueeRect != null)
+                                            Positioned(
+                                              left: marqueeRect.left,
+                                              top: marqueeRect.top,
+                                              width: marqueeRect.width,
+                                              height: marqueeRect.height,
+                                              child: IgnorePointer(
+                                                child: Container(
+                                                  decoration: BoxDecoration(
+                                                    color: const Color(
+                                                      0xFF2563EB,
+                                                    ).withValues(
+                                                      alpha: 0.16,
+                                                    ),
+                                                    border: Border.all(
+                                                      color: const Color(
+                                                        0xFF2563EB,
+                                                      ),
+                                                      width: 1.8,
+                                                    ),
+                                                    borderRadius:
+                                                        BorderRadius
+                                                            .circular(4),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+
+                                    // Capa superior cuando se pulsa la Barra Espaciadora (Modo Mano para arrastrar todo el dashboard)
+                                    if (_isPanHandMode)
+                                      Positioned.fill(
+                                        child: MouseRegion(
+                                          cursor: _isSpaceDragging
+                                              ? SystemMouseCursors.grabbing
+                                              : SystemMouseCursors.grab,
+                                          child: GestureDetector(
+                                            behavior:
+                                                HitTestBehavior.opaque,
+                                            onPanStart: (_) {
+                                              setState(
+                                                () =>
+                                                    _isSpaceDragging = true,
+                                              );
+                                            },
+                                            onPanUpdate: (details) {
+                                              setState(() {
+                                                _canvasPanOffset +=
+                                                    details.delta;
+                                              });
+                                            },
+                                            onPanEnd: (_) {
+                                              setState(
+                                                () => _isSpaceDragging =
+                                                    false,
+                                              );
+                                            },
+                                            onPanCancel: () {
+                                              setState(
+                                                () => _isSpaceDragging =
+                                                    false,
+                                              );
+                                            },
+                                            child: Align(
+                                              alignment:
+                                                  Alignment.topCenter,
+                                              child: Padding(
+                                                padding:
+                                                    const EdgeInsets.only(
+                                                  top: 12,
+                                                ),
+                                                child: Container(
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                    horizontal: 14,
+                                                    vertical: 6,
+                                                  ),
+                                                  decoration: BoxDecoration(
+                                                    color: const Color(
+                                                      0xEE0F172A,
+                                                    ),
+                                                    borderRadius:
+                                                        BorderRadius
+                                                            .circular(20),
+                                                    border: Border.all(
+                                                      color: const Color(
+                                                        0xFF38BDF8,
+                                                      ),
+                                                      width: 1.4,
+                                                    ),
+                                                  ),
+                                                  child: const Row(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    children: [
+                                                      Icon(
+                                                        Icons
+                                                            .pan_tool_alt_rounded,
+                                                        size: 15,
+                                                        color: Color(
+                                                          0xFF38BDF8,
+                                                        ),
+                                                      ),
+                                                      SizedBox(width: 6),
+                                                      Text(
+                                                        'Modo Mano activo — Arrastra con el ratón para mover el dashboard',
+                                                        style: TextStyle(
+                                                          color:
+                                                              Colors.white,
+                                                          fontSize: 11.5,
+                                                          fontWeight:
+                                                              FontWeight
+                                                                  .w800,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+
+                                    if (isDraggingNew)
+                                      IgnorePointer(
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            color: AppPalette.blue600
+                                                .withValues(alpha: 0.06),
+                                            border: Border.all(
+                                              color:
+                                                  AppPalette.blue600,
+                                              width: 2.5,
+                                            ),
+                                          ),
+                                          alignment: Alignment.topCenter,
+                                          padding: const EdgeInsets.only(
+                                            top: 14,
+                                          ),
+                                          child: Container(
+                                            padding:
+                                                const EdgeInsets.symmetric(
+                                              horizontal: 14,
+                                              vertical: 6,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color:
+                                                  AppPalette.blue900,
+                                              borderRadius:
+                                                  BorderRadius.circular(20),
+                                            ),
+                                            child: const Text(
+                                              'Suelta aquí para colocar el dispositivo en la planta',
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+
+                                    if (_floorPlanLoadError &&
+                                        floorImageUrl.isNotEmpty)
+                                      Positioned(
+                                        bottom: 14,
+                                        left: 14,
+                                        child: Container(
+                                          padding:
+                                              const EdgeInsets.symmetric(
+                                            horizontal: 14,
+                                            vertical: 10,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                            border: Border.all(
+                                              color:
+                                                  AppPalette.amber300,
+                                              width: 1.5,
+                                            ),
+                                            boxShadow: const [
+                                              BoxShadow(
+                                                color: Colors.black12,
+                                                blurRadius: 10,
+                                                offset: Offset(0, 3),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(
+                                                Icons.broken_image_outlined,
+                                                color: AppPalette.amber600,
+                                                size: 20,
+                                              ),
+                                              const SizedBox(width: 10),
+                                              const Text(
+                                                'El plano de fondo anterior no se encuentra disponible. Mostrando cuadrícula técnica.',
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight:
+                                                      FontWeight.w600,
+                                                  color: AppPalette.slate700,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 12),
+                                              FilledButton.tonalIcon(
+                                                onPressed: () async {
+                                                  setState(
+                                                    () =>
+                                                        _floorPlanLoadError =
+                                                            false,
+                                                  );
+                                                  await _uploadFloorBlueprint(
+                                                    floor,
+                                                  );
+                                                },
+                                                icon: const Icon(
+                                                  Icons
+                                                      .upload_file_outlined,
+                                                  size: 15,
+                                                ),
+                                                label: const Text(
+                                                  'Subir Nuevo Plano',
+                                                  style: TextStyle(
+                                                    fontSize: 11.5,
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 6),
+                                              TextButton(
+                                                onPressed: () async {
+                                                  setState(
+                                                    () =>
+                                                        _floorPlanLoadError =
+                                                            false,
+                                                  );
+                                                  await widget.api
+                                                      .deleteCustomPlanImage(
+                                                    targetType: 'floor',
+                                                    targetId: floor.id,
+                                                  );
+                                                  widget.onRefresh();
+                                                },
+                                                child: const Text(
+                                                  'Usar solo cuadrícula',
+                                                  style: TextStyle(
+                                                    fontSize: 11.5,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+
+                                    // D. Leyenda inferior de Cableado de Planta (Eléctrica, Fibra, Ethernet, Sensores y Rosetas)
+                                    if (_showFloorCables &&
+                                        (floor.floorDevices.isNotEmpty ||
+                                            floorRacks.isNotEmpty))
+                                      Positioned(
+                                        bottom: 10,
+                                        right: 12,
+                                        child: IgnorePointer(
+                                          child: Container(
+                                            padding:
+                                                const EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                              vertical: 6,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white
+                                                  .withValues(alpha: 0.94),
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                              border: Border.all(
+                                                color:
+                                                    AppPalette.slate300,
+                                              ),
+                                            ),
+                                            child: const Wrap(
+                                              spacing: 10,
+                                              runSpacing: 4,
+                                              crossAxisAlignment:
+                                                  WrapCrossAlignment.center,
+                                              children: [
+                                                Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.bolt_rounded,
+                                                      size: 14,
+                                                      color:
+                                                          AppPalette.orange600,
+                                                    ),
+                                                    SizedBox(width: 2),
+                                                    Text(
+                                                      'Eléctrica (PWR)',
+                                                      style: TextStyle(
+                                                        fontSize: 9.5,
+                                                        fontWeight:
+                                                            FontWeight.w800,
+                                                        color: Color(
+                                                          0xFF334155,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.cable_rounded,
+                                                      size: 14,
+                                                      color:
+                                                          AppPalette.cyan500,
+                                                    ),
+                                                    SizedBox(width: 3),
+                                                    Text(
+                                                      'Fibra (FIB / Inter-Rack)',
+                                                      style: TextStyle(
+                                                        fontSize: 9.5,
+                                                        fontWeight:
+                                                            FontWeight.w800,
+                                                        color: Color(
+                                                          0xFF334155,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      Icons
+                                                          .settings_ethernet_rounded,
+                                                      size: 14,
+                                                      color:
+                                                          AppPalette.blue600,
+                                                    ),
+                                                    SizedBox(width: 3),
+                                                    Text(
+                                                      'Ethernet (ETH)',
+                                                      style: TextStyle(
+                                                        fontSize: 9.5,
+                                                        fontWeight:
+                                                            FontWeight.w800,
+                                                        color: Color(
+                                                          0xFF334155,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.horizontal_rule,
+                                                      size: 15,
+                                                      color:
+                                                          AppPalette.amber500,
+                                                    ),
+                                                    SizedBox(width: 3),
+                                                    Text(
+                                                      'Rack → Sensor / Roseta',
+                                                      style: TextStyle(
+                                                        fontSize: 9.5,
+                                                        fontWeight:
+                                                            FontWeight.w700,
+                                                        color: Color(
+                                                          0xFF334155,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.horizontal_rule,
+                                                      size: 15,
+                                                      color:
+                                                          AppPalette.blue500,
+                                                    ),
+                                                    SizedBox(width: 3),
+                                                    Text(
+                                                      'Roseta → Puesto',
+                                                      style: TextStyle(
+                                                        fontSize: 9.5,
+                                                        fontWeight:
+                                                            FontWeight.w700,
+                                                        color: Color(
+                                                          0xFF334155,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+
+                                    // E. Barra Flotante de Colocación/Alineación cuando hay Racks seleccionados
+                                    if (_selectedRackIds.isNotEmpty)
+                                      Positioned(
+                                        top: 12,
+                                        left: 16,
+                                        right: 16,
+                                        child: Center(
+                                          child: Material(
+                                            elevation: 6,
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                            color: AppPalette.slate900,
+                                            child: Padding(
+                                              padding: const EdgeInsets
+                                                  .symmetric(
+                                                horizontal: 14,
+                                                vertical: 8,
+                                              ),
+                                              child: Wrap(
+                                                crossAxisAlignment:
+                                                    WrapCrossAlignment
+                                                        .center,
+                                                spacing: 8,
+                                                runSpacing: 6,
+                                                children: [
+                                                  Container(
+                                                    padding:
+                                                        const EdgeInsets
+                                                            .symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 3,
+                                                    ),
+                                                    decoration:
+                                                        BoxDecoration(
+                                                      color: const Color(
+                                                        0xFF2563EB,
+                                                      ),
+                                                      borderRadius:
+                                                          BorderRadius
+                                                              .circular(12),
+                                                    ),
+                                                    child: Text(
+                                                      '${_selectedRackIds.length} ${_selectedRackIds.length == 1 ? 'Rack seleccionado' : 'Racks seleccionados'}',
+                                                      style:
+                                                          const TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 11,
+                                                        fontWeight:
+                                                            FontWeight.w800,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  if (_selectedRackIds
+                                                          .length ==
+                                                      1)
+                                                    FilledButton.icon(
+                                                      style: FilledButton
+                                                          .styleFrom(
+                                                        backgroundColor:
+                                                            const Color(
+                                                          0xFF10B981,
+                                                        ),
+                                                        visualDensity:
+                                                            VisualDensity
+                                                                .compact,
+                                                      ),
+                                                      onPressed: () =>
+                                                          widget.onOpenRack(
+                                                        _selectedRackIds
+                                                            .first,
+                                                      ),
+                                                      icon: const Icon(
+                                                        Icons.open_in_new,
+                                                        size: 14,
+                                                      ),
+                                                      label: const Text(
+                                                        'Abrir en Rack Editor (Doble Clic)',
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  if (_selectedRackIds
+                                                          .length >=
+                                                      2) ...[
+                                                    OutlinedButton.icon(
+                                                      style: OutlinedButton
+                                                          .styleFrom(
+                                                        foregroundColor:
+                                                            Colors.white,
+                                                        side:
+                                                            const BorderSide(
+                                                          color: Color(
+                                                            0xFF475569,
+                                                          ),
+                                                        ),
+                                                        visualDensity:
+                                                            VisualDensity
+                                                                .compact,
+                                                      ),
+                                                      onPressed: () =>
+                                                          _alignSelectedRacksHorizontally(
+                                                        canvasW: canvasW,
+                                                        packTightly: false,
+                                                      ),
+                                                      icon: const Icon(
+                                                        Icons
+                                                            .align_vertical_center_rounded,
+                                                        size: 14,
+                                                      ),
+                                                      label: const Text(
+                                                        'Alinear en Fila',
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    OutlinedButton.icon(
+                                                      style: OutlinedButton
+                                                          .styleFrom(
+                                                        foregroundColor:
+                                                            Colors.white,
+                                                        side:
+                                                            const BorderSide(
+                                                          color: Color(
+                                                            0xFF475569,
+                                                          ),
+                                                        ),
+                                                        visualDensity:
+                                                            VisualDensity
+                                                                .compact,
+                                                      ),
+                                                      onPressed: () =>
+                                                          _alignSelectedRacksHorizontally(
+                                                        canvasW: canvasW,
+                                                        packTightly: true,
+                                                      ),
+                                                      icon: const Icon(
+                                                        Icons
+                                                            .view_column_outlined,
+                                                        size: 14,
+                                                      ),
+                                                      label: const Text(
+                                                        'Juntar en Fila (Pasillo)',
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    OutlinedButton.icon(
+                                                      style: OutlinedButton
+                                                          .styleFrom(
+                                                        foregroundColor:
+                                                            Colors.white,
+                                                        side:
+                                                            const BorderSide(
+                                                          color: Color(
+                                                            0xFF475569,
+                                                          ),
+                                                        ),
+                                                        visualDensity:
+                                                            VisualDensity
+                                                                .compact,
+                                                      ),
+                                                      onPressed: () =>
+                                                          _alignSelectedRacksVertically(
+                                                        canvasH: canvasH,
+                                                        packTightly: false,
+                                                      ),
+                                                      icon: const Icon(
+                                                        Icons
+                                                            .align_horizontal_center_rounded,
+                                                        size: 14,
+                                                      ),
+                                                      label: const Text(
+                                                        'Alinear en Columna',
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    OutlinedButton.icon(
+                                                      style: OutlinedButton
+                                                          .styleFrom(
+                                                        foregroundColor:
+                                                            Colors.white,
+                                                        side:
+                                                            const BorderSide(
+                                                          color: Color(
+                                                            0xFF475569,
+                                                          ),
+                                                        ),
+                                                        visualDensity:
+                                                            VisualDensity
+                                                                .compact,
+                                                      ),
+                                                      onPressed: () =>
+                                                          _alignSelectedRacksVertically(
+                                                        canvasH: canvasH,
+                                                        packTightly: true,
+                                                      ),
+                                                      icon: const Icon(
+                                                        Icons
+                                                            .table_rows_outlined,
+                                                        size: 14,
+                                                      ),
+                                                      label: const Text(
+                                                        'Juntar en Columna',
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    OutlinedButton.icon(
+                                                      style: OutlinedButton
+                                                          .styleFrom(
+                                                        foregroundColor:
+                                                            Colors.white,
+                                                        side:
+                                                            const BorderSide(
+                                                          color: Color(
+                                                            0xFF475569,
+                                                          ),
+                                                        ),
+                                                        visualDensity:
+                                                            VisualDensity
+                                                                .compact,
+                                                      ),
+                                                      onPressed:
+                                                          _equalizeSelectedRacksSize,
+                                                      icon: const Icon(
+                                                        Icons.aspect_ratio,
+                                                        size: 14,
+                                                      ),
+                                                      label: const Text(
+                                                        'Igualar Tamaño',
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                  IconButton(
+                                                    onPressed: () =>
+                                                        setState(
+                                                      () => _selectedRackIds
+                                                          .clear(),
+                                                    ),
+                                                    icon: const Icon(
+                                                      Icons.close,
+                                                      size: 16,
+                                                      color: Colors.white70,
+                                                    ),
+                                                    tooltip:
+                                                        'Limpiar selección',
+                                                    visualDensity:
+                                                        VisualDensity
+                                                            .compact,
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                );
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // COLUMNA DERECHA: PANEL DE SETTINGS (Dispositivo o Rack seleccionado)
+                  if (_showRightSettings && !widget.isKioskMode)
+                    _buildRightSettingsPanel(floor, floorRacks),
+                ],
+              ),
+      );
+  }
+
+  /// Barra de controles de la vista de planta (capas, zoom y modos).
+  Widget _buildBarraControlesPlanta(FloorNode floor, List<RackSummary> floorRacks) {
+    return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        decoration: const BoxDecoration(
+          color: AppPalette.slate50,
+          border: Border(bottom: BorderSide(color: AppPalette.slate200)),
+        ),
+        child: Row(
+          children: [
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                backgroundColor: _showLeftLibrary
+                    ? AppPalette.blue50
+                    : Colors.white,
+                side: BorderSide(
+                  color: _showLeftLibrary
+                      ? AppPalette.blue500
+                      : AppPalette.slate300,
+                ),
+              ),
+              onPressed: () =>
+                  setState(() => _showLeftLibrary = !_showLeftLibrary),
+              icon: const Icon(Icons.widgets_outlined, size: 15),
+              label: Text(
+                _showLeftLibrary
+                    ? 'Devices Library: ON'
+                    : 'Devices Library: OFF',
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                backgroundColor: _showFloorCables
+                    ? AppPalette.amber50
+                    : Colors.white,
+                side: BorderSide(
+                  color: _showFloorCables
+                      ? AppPalette.amber500
+                      : AppPalette.slate300,
+                ),
+              ),
+              onPressed: () =>
+                  setState(() => _showFloorCables = !_showFloorCables),
+              icon: Icon(
+                Icons.timeline_rounded,
+                size: 15,
+                color: _showFloorCables
+                    ? AppPalette.amber600
+                    : AppPalette.slate500,
+              ),
+              label: Text(
+                _showFloorCables
+                    ? 'Cableado Estructurado: ON (${floor.floorDevices.length} disp.)'
+                    : 'Cableado Estructurado: OFF',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: _showFloorCables
+                      ? AppPalette.amber700
+                      : AppPalette.slate600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Botón Deshacer (Ctrl+Z en Windows/Linux o Cmd+Z en Mac)
+            Tooltip(
+              message:
+                  'Deshacer último movimiento de Rack o Dispositivo (Ctrl+Z / ⌘Z)',
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  backgroundColor: _undoStack.isNotEmpty
+                      ? AppPalette.slate50
+                      : Colors.white,
+                ),
+                onPressed: _undoStack.isEmpty ? null : _performUndo,
+                icon: const Icon(Icons.undo_rounded, size: 15),
+                label: Text(
+                  _undoStack.isEmpty
+                      ? 'Deshacer (⌘Z / Ctrl+Z)'
+                      : 'Deshacer (${_undoStack.length})',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            // Botón Modo Mano (Barra Espaciadora) para mover el dashboard
+            Tooltip(
+              message:
+                  'Mantén pulsada la Barra Espaciadora (o activa este botón) para convertir el ratón en una mano y mover todo el dashboard',
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  backgroundColor: _isPanHandMode
+                      ? AppPalette.slate900
+                      : Colors.white,
+                  foregroundColor: _isPanHandMode
+                      ? Colors.white
+                      : AppPalette.slate700,
+                  side: BorderSide(
+                    color: _isPanHandMode
+                        ? AppPalette.sky400
+                        : AppPalette.slate300,
+                  ),
+                ),
+                onPressed: () => setState(
+                  () => _isHandToolPinned = !_isHandToolPinned,
+                ),
+                icon: Icon(
+                  Icons.pan_tool_alt_rounded,
+                  size: 15,
+                  color: _isPanHandMode
+                      ? AppPalette.sky400
+                      : AppPalette.slate600,
+                ),
+                label: Text(
+                  _isPanHandMode
+                      ? 'Mano: ACTIVA (Espacio)'
+                      : 'Mano (Espacio)',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+            if (_canvasPanOffset != Offset.zero) ...[
+              const SizedBox(width: 4),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                tooltip: 'Restablecer posición centrada del lienzo',
+                onPressed: () =>
+                    setState(() => _canvasPanOffset = Offset.zero),
+                icon: const Icon(
+                  Icons.center_focus_strong_rounded,
+                  size: 16,
+                  color: AppPalette.blue600,
+                ),
+              ),
+            ],
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Espacio + Arrastrar: Mover Dashboard ✋  •  Ctrl+Z / ⌘Z: Deshacer  •  Doble Clic en Rack: Abrir en Rack Editor',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: AppPalette.slate700,
+                  fontWeight: FontWeight.w600,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (floorRacks.isNotEmpty) ...[
+              TextButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _selectedFloorDeviceId = null;
+                    if (_selectedRackIds.length == floorRacks.length) {
+                      _selectedRackIds.clear();
+                    } else {
+                      _selectedRackIds
+                        ..clear()
+                        ..addAll(floorRacks.map((r) => r.id));
+                    }
+                  });
+                },
+                icon: Icon(
+                  _selectedRackIds.length == floorRacks.length
+                      ? Icons.deselect
+                      : Icons.select_all,
+                  size: 15,
+                ),
+                label: Text(
+                  _selectedRackIds.length == floorRacks.length
+                      ? 'Deseleccionar Racks'
+                      : 'Sel. Racks (${floorRacks.length})',
+                  style: const TextStyle(fontSize: 11),
+                ),
+              ),
+              const SizedBox(width: 6),
+            ],
+            const Text(
+              'Escala:',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: AppPalette.slate600,
+              ),
+            ),
+            SizedBox(
+              width: 110,
+              child: Slider(
+                value: _floorImageScale,
+                min: 0.4,
+                max: 2.5,
+                divisions: 21,
+                label: '${(_floorImageScale * 100).round()}%',
+                onChanged: (v) {
+                  setState(() => _floorImageScale = v);
+                },
+                onChangeEnd: (v) => _saveFloorScale(floor, v),
+              ),
+            ),
+            Text(
+              '${(_floorImageScale * 100).round()}%',
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: AppPalette.slate900,
+              ),
+            ),
+            const SizedBox(width: 10),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                backgroundColor: _showRightSettings
+                    ? AppPalette.blue50
+                    : Colors.white,
+                side: BorderSide(
+                  color: _showRightSettings
+                      ? AppPalette.blue500
+                      : AppPalette.slate300,
+                ),
+              ),
+              onPressed: () =>
+                  setState(() => _showRightSettings = !_showRightSettings),
+              icon: const Icon(Icons.tune_rounded, size: 15),
+              label: const Text(
+                'Settings',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+  }
+
+  /// Cabecera: selector de sede, plantas y acciones del datacenter.
+  Widget _buildCabeceraDatacenter(LocationNode loc, FloorNode? floor) {
+    return Container(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(bottom: BorderSide(color: AppPalette.slate200)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                IconButton(
+                  onPressed: widget.onBackToLocations,
+                  icon: const Icon(Icons.arrow_back_rounded, size: 20),
+                  tooltip: 'Volver al Mapa Global de Locations',
+                ),
+                const SizedBox(width: 6),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.apartment_rounded,
+                          size: 20,
+                          color: AppPalette.blue900,
+                        ),
+                        const SizedBox(width: 8),
+                        DropdownButton<int>(
+                          value: loc.id,
+                          underline: const SizedBox.shrink(),
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                            color: AppPalette.slate900,
+                          ),
+                          items: widget.locations
+                              .map(
+                                (l) => DropdownMenuItem<int>(
+                                  value: l.id,
+                                  child: Text('${l.name} (${l.code})'),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (id) {
+                            if (id != null) {
+                              setState(() => _selectedFloorId = null);
+                              widget.onChangeLocation(id);
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                    Text(
+                      'PBX  >  Locations  >  ${loc.code}  >  ${floor?.name ?? 'Sin Planta'} (Vista de Planta 2D)',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppPalette.slate500,
+                      ),
+                    ),
+                  ],
+                ),
+                const Spacer(),
+                if (loc.monitoredCount > 0) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: loc.offlineCount > 0
+                          ? AppPalette.red50
+                          : AppPalette.green50,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: loc.offlineCount > 0
+                            ? AppPalette.red200
+                            : const Color(0xFFBBF7D0),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.monitor_heart_rounded,
+                          size: 14,
+                          color: loc.offlineCount > 0
+                              ? AppPalette.red600
+                              : AppPalette.green600,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          [
+                            'Datacenter Monitorizados: ${loc.monitoredCount}',
+                            if (loc.onlineCount > 0)
+                              '🟢 ${loc.onlineCount}',
+                            if (loc.offlineCount > 0)
+                              '🔴 ${loc.offlineCount}',
+                            if (loc.warningCount > 0)
+                              '🟠 ${loc.warningCount}',
+                          ].join(' • '),
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: AppPalette.slate900,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                if (widget.onToggleKioskMode != null) ...[
+                  OutlinedButton.icon(
+                    onPressed: widget.onToggleKioskMode,
+                    icon: const Icon(Icons.tv_rounded, size: 16),
+                    label: const Text(
+                      'Modo Kiosco',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppPalette.slate900,
+                      side: const BorderSide(color: AppPalette.slate400),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                if (floor != null) ...[
+                  OutlinedButton.icon(
+                    onPressed: _uploading
+                        ? null
+                        : () => _uploadFloorBlueprint(floor),
+                    icon:
+                        const Icon(Icons.upload_file_outlined, size: 16),
+                    label: Text(
+                      _uploading
+                          ? 'Subiendo...'
+                          : (floor.mapImageUrl.isNotEmpty
+                              ? 'Cambiar Plano de Planta (JPG/PNG/GIF)'
+                              : 'Subir Plano de Planta (JPG/PNG/GIF)'),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                  if (floor.mapImageUrl.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    IconButton(
+                      onPressed: () async {
+                        await widget.api.deleteCustomPlanImage(
+                          targetType: 'floor',
+                          targetId: floor.id,
+                        );
+                        widget.onRefresh();
+                      },
+                      icon: const Icon(
+                        Icons.delete_outline,
+                        size: 18,
+                        color: AppPalette.red600,
+                      ),
+                      tooltip: 'Quitar imagen de fondo de esta planta',
+                    ),
+                  ],
+                  const SizedBox(width: 10),
+                  OutlinedButton.icon(
+                    onPressed: () => _showDrawNewRackDialog(floor),
+                    icon: const Icon(Icons.dns_outlined, size: 16),
+                    label: const Text('+ Rack'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppPalette.blue900,
+                      side: const BorderSide(color: AppPalette.blue300),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: () => _showAddFloorDeviceModal(
+                      floor,
+                      initialCategory: 'printer',
+                      focusCmdbSelector: true,
+                    ),
+                    icon: const Icon(
+                      Icons.fact_check_outlined,
+                      size: 16,
+                    ),
+                    label: const Text('+ Desde CMDB'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppPalette.teal700,
+                      backgroundColor: const Color(0xFFF0FDFA),
+                      side: const BorderSide(color: AppPalette.teal600),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: () => _showAddFloorDeviceModal(floor),
+                    icon: const Icon(
+                      Icons.add_location_alt_outlined,
+                      size: 17,
+                    ),
+                    label: const Text('+ Device'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppPalette.blue600,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+
+            const SizedBox(height: 12),
+
+            // BARRA DE PESTAÑAS DE PLANTAS DEL EDIFICIO (Floor 1, Floor 2, Floor 3...)
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  const Text(
+                    'PLANTAS DEL EDIFICIO:',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: AppPalette.slate500,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  ...loc.floors.map((fl) {
+                    final isSel = fl.id == floor?.id;
+                    int rCount = 0;
+                    for (final r in fl.rooms) {
+                      rCount += r.racks.length;
+                    }
+                    final dCount = fl.floorDevices.length;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8, bottom: 8),
+                      child: InkWell(
+                        onTap: () {
+                          setState(() {
+                            _selectedFloorId = fl.id;
+                            _selectedFloorDeviceId = null;
+                            _editingDeviceId = null;
+                            _syncFloorState();
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isSel
+                                ? AppPalette.slate900
+                                : AppPalette.slate100,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: isSel
+                                  ? AppPalette.slate900
+                                  : AppPalette.slate300,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.layers,
+                                size: 15,
+                                color: isSel
+                                    ? AppPalette.sky400
+                                    : AppPalette.slate600,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                fl.name,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: isSel
+                                      ? Colors.white
+                                      : AppPalette.slate800,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 1.5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: isSel
+                                      ? Colors.white24
+                                      : AppPalette.slate200,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  [
+                                    '$rCount racks',
+                                    if (dCount > 0) '$dCount disp.',
+                                    '⚪${fl.unmonitoredCount}',
+                                    '🟢${fl.onlineCount}',
+                                    if (fl.warningCount > 0)
+                                      '🟠${fl.warningCount}',
+                                    '🔴${fl.offlineCount}',
+                                  ].join(' • '),
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: isSel
+                                        ? Colors.white
+                                        : AppPalette.slate700,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              InkWell(
+                                onTap: () => _confirmDeleteFloor(fl),
+                                child: Tooltip(
+                                  message:
+                                      'Eliminar esta Planta (${fl.name})',
+                                  child: Icon(
+                                    Icons.delete_outline,
+                                    size: 15,
+                                    color: isSel
+                                        ? AppPalette.red300
+                                        : AppPalette.red600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: TextButton.icon(
+                      onPressed: () => _showAddFloorDialog(loc),
+                      icon: const Icon(Icons.add, size: 16),
+                      label: const Text('+ Añadir Planta'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
   }
 
   Widget _buildFloorDeviceSettingsForm(

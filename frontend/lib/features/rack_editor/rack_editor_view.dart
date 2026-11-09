@@ -5208,694 +5208,7 @@ class _RackEditorViewState extends State<RackEditorView> {
       children: [
         // 1. BARRA SUPERIOR (oculta en Modo Kiosco para presentar el Rack a pantalla completa)
         if (!widget.isKioskMode)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(bottom: BorderSide(color: AppPalette.slate200)),
-            ),
-            child: Row(
-              children: [
-                IconButton(
-                  onPressed: widget.onBackToLocations,
-                  icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                  tooltip: 'Volver al Mapa de Sedes y Pasillos',
-                ),
-              const SizedBox(width: 6),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    rack.name,
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: AppPalette.slate900,
-                    ),
-                  ),
-                  InkWell(
-                    onTap: widget.onBackToLocations,
-                    child: Text(
-                      'PBX  >  Locations  >  ${bc['location_code']}  >  ${bc['room_name']?.toString().split(' ').first ?? '28'}  >  ${rack.code}',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppPalette.slate500,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(width: 14),
-              // Resumen de Heartbeat en este Rack: Gris (Sin HB), Verde (OK), Naranja (Parcial), Rojo (Caído)
-              Builder(
-                builder: (_) {
-                  final physDevs = rack.devices
-                      .where((d) => !d.isExternalFeed)
-                      .toList();
-                  final unmonCnt =
-                      physDevs.where((d) => !d.monitoringEnabled).length;
-                  final monDevs =
-                      physDevs.where((d) => d.monitoringEnabled).toList();
-                  final onlineCnt =
-                      monDevs.where((d) => d.status == 'online').length;
-                  final offlineCnt =
-                      monDevs.where((d) => d.status == 'offline').length;
-                  final warnCnt = monDevs.length - onlineCnt - offlineCnt;
-                  return Tooltip(
-                    message:
-                        'Heartbeat en este Rack:\n⚪ Gris ($unmonCnt): Heartbeat desactivado\n🟢 Verde ($onlineCnt): Todos los chequeos OK\n🟠 Naranja ($warnCnt): Fallo parcial (1+ chequeo falla)\n🔴 Rojo ($offlineCnt): Todos los chequeos fallan',
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppPalette.slate50,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: offlineCnt > 0
-                              ? AppPalette.red300
-                              : (warnCnt > 0
-                                  ? const Color(0xFFFDE68A)
-                                  : AppPalette.slate300),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.monitor_heart_outlined,
-                            size: 14,
-                            color: AppPalette.slate900,
-                          ),
-                          const SizedBox(width: 5),
-                          const Text(
-                            'HB:',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                              color: AppPalette.slate900,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          // Gris: Sin Heartbeat
-                          Container(
-                            width: 7,
-                            height: 7,
-                            decoration: const BoxDecoration(
-                              color: AppPalette.slate400,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 3),
-                          Text(
-                            '$unmonCnt',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                              color: AppPalette.slate500,
-                            ),
-                          ),
-                          const SizedBox(width: 7),
-                          // Verde: OK
-                          Container(
-                            width: 7,
-                            height: 7,
-                            decoration: const BoxDecoration(
-                              color: AppPalette.green600,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 3),
-                          Text(
-                            '$onlineCnt',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                              color: AppPalette.green700,
-                            ),
-                          ),
-                          const SizedBox(width: 7),
-                          // Naranja: Fallo parcial
-                          Container(
-                            width: 7,
-                            height: 7,
-                            decoration: const BoxDecoration(
-                              color: AppPalette.amber600,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 3),
-                          Text(
-                            '$warnCnt',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                              color: AppPalette.amber700,
-                            ),
-                          ),
-                          const SizedBox(width: 7),
-                          // Rojo: Fallo total
-                          Container(
-                            width: 7,
-                            height: 7,
-                            decoration: const BoxDecoration(
-                              color: AppPalette.red600,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 3),
-                          Text(
-                            '$offlineCnt',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                              color: AppPalette.red700,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-              const Spacer(),
-
-              // Selector / Buscador rápido de Equipos o Alarmas en este Rack (con resaltado de fondo gris)
-              PopupMenuButton<int>(
-                tooltip:
-                    'Buscar o localizar un equipo / alarma en este Rack (resaltado con fondo gris)',
-                onSelected: (devId) {
-                  setState(() {
-                    _selectedDeviceId = devId;
-                    _highlightedDeviceId = devId;
-                  });
-                },
-                itemBuilder: (ctx) {
-                  final list = rack.devices
-                      .where((d) => !d.isExternalFeed)
-                      .toList()
-                    ..sort((a, b) => b.startU.compareTo(a.startU));
-                  return list.map((d) {
-                    final isAlarm =
-                        d.monitoringEnabled && d.status != 'online';
-                    return PopupMenuItem<int>(
-                      value: d.id,
-                      child: Row(
-                        children: [
-                          Icon(
-                            isAlarm
-                                ? Icons.warning_amber_rounded
-                                : (d.isRackTray
-                                    ? Icons.inbox_outlined
-                                    : Icons.dns_outlined),
-                            size: 16,
-                            color: isAlarm
-                                ? AppPalette.red600
-                                : AppPalette.slate700,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'U${d.startU} • ${d.code} — ${d.name}${d.isRackTray && d.trayItems.isNotEmpty ? ' [${d.trayItems.length} mini-eq]' : ''}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: d.id == _highlightedDeviceId ||
-                                        d.id == _selectedDeviceId
-                                    ? FontWeight.w800
-                                    : FontWeight.w600,
-                                color: isAlarm
-                                    ? AppPalette.red700
-                                    : AppPalette.slate900,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }).toList();
-                },
-                child: Container(
-                  margin: const EdgeInsets.only(right: 10),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _highlightedDeviceId != null
-                        ? AppPalette.slate200
-                        : AppPalette.slate50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppPalette.slate300),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.search_rounded,
-                        size: 15,
-                        color: AppPalette.slate700,
-                      ),
-                      SizedBox(width: 5),
-                      Text(
-                        'Localizar en Rack',
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
-                          color: AppPalette.slate800,
-                        ),
-                      ),
-                      SizedBox(width: 3),
-                      Icon(
-                        Icons.arrow_drop_down,
-                        size: 16,
-                        color: AppPalette.slate600,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Conmutador directo en barra superior: [Front | Back | Front & Back]
-              Container(
-                margin: const EdgeInsets.only(right: 10),
-                decoration: BoxDecoration(
-                  color: AppPalette.slate50,
-                  borderRadius: BorderRadius.circular(7),
-                  border: Border.all(color: AppPalette.slate300),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _FaceToggleButton(
-                      label: 'Front',
-                      active: _activeFace == 'front',
-                      onTap: () => _setFaceMode('front'),
-                    ),
-                    _FaceToggleButton(
-                      label: 'Back',
-                      active: _activeFace == 'back',
-                      onTap: () => _setFaceMode('back'),
-                    ),
-                    _FaceToggleButton(
-                      label: 'Front & Back',
-                      active: _activeFace == 'both',
-                      onTap: () => _setFaceMode('both'),
-                    ),
-                  ],
-                ),
-              ),
-
-              // Barra rápida cuando hay un equipo seleccionado: Subir 1U, Bajar 1U, Ajustar U ocupadas, Equipos en Bandeja, Foto, Cable Inter-Rack, Borrar Equipo
-              if (_canEdit && selDev != null && !selDev.isExternalFeed)
-                Container(
-                  margin: const EdgeInsets.only(right: 10),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppPalette.blue50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppPalette.blue300),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '${selDev.code} (U${selDev.startU}•${selDev.uHeight}U): ',
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w800,
-                          color: AppPalette.blue900,
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: nextFreeUpU != null
-                            ? () => _moveDeviceToU(selDev, nextFreeUpU)
-                            : null,
-                        icon: const Icon(Icons.arrow_upward_rounded, size: 15),
-                        tooltip: nextFreeUpU != null
-                            ? 'Subir a siguiente posición con ${selDev.uHeight}U libres (U$nextFreeUpU)'
-                            : 'No hay ${selDev.uHeight}U libres por encima',
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      IconButton(
-                        onPressed: nextFreeDownU != null
-                            ? () => _moveDeviceToU(selDev, nextFreeDownU)
-                            : null,
-                        icon: const Icon(
-                          Icons.arrow_downward_rounded,
-                          size: 15,
-                        ),
-                        tooltip: nextFreeDownU != null
-                            ? 'Bajar a siguiente posición con ${selDev.uHeight}U libres (U$nextFreeDownU)'
-                            : 'No hay ${selDev.uHeight}U libres por debajo',
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      // Control rápido de cuántas U ocupa (especialmente útil para Bandejas y equipos misceláneos)
-                      Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 4),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 5,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: AppPalette.blue300),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            InkWell(
-                              onTap: selDev.uHeight > 1
-                                  ? () => _quickAdjustDeviceUHeight(
-                                        selDev,
-                                        selDev.uHeight - 1,
-                                      )
-                                  : null,
-                              child: const Padding(
-                                padding: EdgeInsets.symmetric(horizontal: 3),
-                                child: Icon(
-                                  Icons.remove,
-                                  size: 12,
-                                  color: AppPalette.blue700,
-                                ),
-                              ),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 3,
-                              ),
-                              child: Text(
-                                '${selDev.uHeight}U',
-                                style: const TextStyle(
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.w800,
-                                  color: AppPalette.blue900,
-                                ),
-                              ),
-                            ),
-                            InkWell(
-                              onTap: selDev.uHeight < 16
-                                  ? () => _quickAdjustDeviceUHeight(
-                                        selDev,
-                                        selDev.uHeight + 1,
-                                      )
-                                  : null,
-                              child: const Padding(
-                                padding: EdgeInsets.symmetric(horizontal: 3),
-                                child: Icon(
-                                  Icons.add,
-                                  size: 12,
-                                  color: AppPalette.blue700,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (selDev.isRackTray)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 4),
-                          child: FilledButton.tonalIcon(
-                            onPressed: () =>
-                                _showManageTrayItemsDialog(selDev),
-                            style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFFEDE9FE),
-                              foregroundColor: const Color(0xFF6D28D9),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 9,
-                                vertical: 4,
-                              ),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            icon: const Icon(Icons.inbox_outlined, size: 14),
-                            label: Text(
-                              '+ Equipos en Bandeja (${selDev.trayItems.length})',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                        ),
-                      TextButton.icon(
-                        onPressed: () =>
-                            _showConfigureDevicePortsDialog(selDev),
-                        icon: const Icon(
-                          Icons.settings_input_component,
-                          size: 14,
-                        ),
-                        label: const Text(
-                          'Bocas F/B',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      TextButton.icon(
-                        onPressed: () =>
-                            _showHardwarePhotoSearchDialog(device: selDev),
-                        icon: const Icon(Icons.photo_camera_outlined, size: 14),
-                        label: const Text(
-                          'Foto',
-                          style: TextStyle(fontSize: 11),
-                        ),
-                      ),
-                      TextButton.icon(
-                        onPressed: () => _showInterRackConnectionDialog(
-                          initialSourceDev: selDev,
-                        ),
-                        icon: const Icon(Icons.compare_arrows, size: 14),
-                        label: const Text(
-                          'A Otro Rack',
-                          style: TextStyle(fontSize: 11),
-                        ),
-                      ),
-                      TextButton.icon(
-                        onPressed: () => _showMoveDeviceToUDialog(selDev),
-                        icon: const Icon(Icons.swap_vert, size: 14),
-                        label: const Text(
-                          'Mover a U...',
-                          style: TextStyle(fontSize: 11),
-                        ),
-                      ),
-                      TextButton.icon(
-                        onPressed: () => _quickDeleteDevice(selDev),
-                        style: TextButton.styleFrom(
-                          foregroundColor: AppPalette.red600,
-                        ),
-                        icon: const Icon(Icons.delete_outline, size: 15),
-                        label: const Text(
-                          'Borrar',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-              // Barra rápida cuando hay un cable seleccionado: Borrar Cable en 1 clic
-              if (_canEdit && selConn != null)
-                Container(
-                  margin: const EdgeInsets.only(right: 10),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppPalette.red50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppPalette.red300),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Cable ${selConn.sourceInfo.deviceCode}:${selConn.sourceInfo.portNumber} ➔ ${selConn.targetInfo.deviceCode}:${selConn.targetInfo.portNumber}',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: AppPalette.red800,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      TextButton.icon(
-                        onPressed: () async {
-                          await widget.api.deleteConnection(selConn.id);
-                          setState(() => _selectedConnectionId = null);
-                          await _loadRack();
-                        },
-                        style: TextButton.styleFrom(
-                          foregroundColor: AppPalette.red600,
-                        ),
-                        icon: const Icon(Icons.link_off, size: 15),
-                        label: const Text(
-                          'Borrar Cable',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-              if (_pendingSourcePort != null)
-                Container(
-                  margin: const EdgeInsets.only(right: 12),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppPalette.blue100,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: AppPalette.blue600),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.cable,
-                        size: 15,
-                        color: AppPalette.blue700,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Tirando desde ${_pendingSourceDevice?.code}:${_pendingSourcePort?.portNumber} — Clic en boca destino (o pulsa Esc para cancelar)',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: AppPalette.blue900,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      InkWell(
-                        onTap: () {
-                          final srcDev = _pendingSourceDevice;
-                          final srcPort = _pendingSourcePort;
-                          setState(() {
-                            _pendingSourcePort = null;
-                            _pendingSourceDevice = null;
-                          });
-                          _showInterRackConnectionDialog(
-                            initialSourceDev: srcDev,
-                            initialSourcePort: srcPort,
-                          );
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppPalette.blue700,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.compare_arrows,
-                                size: 12,
-                                color: Colors.white,
-                              ),
-                              SizedBox(width: 4),
-                              Text(
-                                'Llevar a Otro Rack...',
-                                style: TextStyle(
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.w800,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      InkWell(
-                        onTap: () => setState(() {
-                          _pendingSourcePort = null;
-                          _pendingSourceDevice = null;
-                        }),
-                        child: const Icon(
-                          Icons.close,
-                          size: 15,
-                          color: AppPalette.blue900,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              if (widget.onToggleKioskMode != null) ...[
-                OutlinedButton.icon(
-                  onPressed: widget.onToggleKioskMode,
-                  icon: const Icon(Icons.tv_rounded, size: 16),
-                  label: const Text(
-                    'Modo Kiosco',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppPalette.slate900,
-                    side: const BorderSide(color: AppPalette.slate400),
-                  ),
-                ),
-                const SizedBox(width: 8),
-              ],
-              if (_canConnectRemote)
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    final messenger = ScaffoldMessenger.of(context);
-                    await widget.api.pingAllRackDevices(rack.id);
-                    await _loadRack();
-                    if (mounted) {
-                      messenger.aviso('Chequeo de Ping completado en todos los equipos del rack.');
-                    }
-                  },
-                  icon: const Icon(Icons.network_ping, size: 16),
-                  label:
-                      const Text('Ping Rack', style: TextStyle(fontSize: 12)),
-                ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: () {
-                  final url = Uri.parse(
-                    widget.api.getExcelExportUrl(rackId: rack.id),
-                  );
-                  launchUrl(url, mode: LaunchMode.externalApplication);
-                },
-                icon: const Icon(Icons.table_view_outlined, size: 16),
-                label:
-                    const Text('Excel (.xlsx)', style: TextStyle(fontSize: 12)),
-              ),
-              if (_canEdit) ...[
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: _confirmDeleteCurrentRack,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppPalette.red600,
-                    side: const BorderSide(color: AppPalette.red300),
-                  ),
-                  icon: const Icon(Icons.delete_outline, size: 16),
-                  label: const Text(
-                    'Eliminar Rack',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
+          _buildBarraSuperior(rack, bc, selDev, selConn, nextFreeUpU, nextFreeDownU),
 
         // 2. CUERPO CENTRAL EN 3 COLUMNAS: Catálogo Izquierdo | Lienzo Central 42U (Front+Back / Individual) + Tomas Exteriores | Panel Derecho
         Expanded(
@@ -5928,761 +5241,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                   color: const Color(0xFFF4F5F7),
                   child: Stack(
                     children: [
-                      InteractiveViewer(
-                        transformationController: _transformController,
-                        minScale: 0.38,
-                        maxScale: 2.8,
-                        boundaryMargin: const EdgeInsets.all(320),
-                        constrained: false,
-                        child: MouseRegion(
-                          onHover: (event) {
-                            if (_pendingSourcePort != null) {
-                              setState(
-                                () => _cursorCanvasPos = event.localPosition,
-                              );
-                              return;
-                            }
-                            int? hitId;
-                            double bestDist = 7.0;
-                            for (final r in computedRoutes) {
-                              final d =
-                                  CableGeometryBuilder.distanceToPolyline(
-                                event.localPosition,
-                                r.points,
-                              );
-                              if (d < bestDist) {
-                                bestDist = d;
-                                hitId = r.connection.id;
-                              }
-                            }
-                            if (hitId != _hoveredConnectionId) {
-                              setState(() => _hoveredConnectionId = hitId);
-                            }
-                          },
-                          child: GestureDetector(
-                            onSecondaryTap: () {
-                              if (_pendingSourcePort != null) {
-                                setState(() {
-                                  _pendingSourcePort = null;
-                                  _pendingSourceDevice = null;
-                                  _cursorCanvasPos = null;
-                                });
-                              }
-                            },
-                            onTapUp: (details) {
-                              for (final r in computedRoutes) {
-                                final d =
-                                    CableGeometryBuilder.distanceToPolyline(
-                                  details.localPosition,
-                                  r.points,
-                                );
-                                if (d < 8.0) {
-                                  setState(() {
-                                    _selectedConnectionId = r.connection.id;
-                                    _selectedDeviceId = null;
-                                  });
-                                  return;
-                                }
-                              }
-                            },
-                            child: SizedBox(
-                              width: _effectiveCanvasWidth,
-                              height: totalCanvasHeight,
-                              child: Stack(
-                                clipBehavior: Clip.none,
-                                children: [
-                                  if (_isDualFace) ...[
-                                    // BASTIDOR 1 (IZQUIERDA): ALZADO DELANTERO (FRONT)
-                                    ..._buildSingleRackCabinetStack(
-                                      rack: rack,
-                                      face: 'front',
-                                      faceBannerLabel: 'FRONT (DELANTE)',
-                                      faceBannerColor: AppPalette.slate900,
-                                      outerLeft: _rackOuterLeft,
-                                      innerLeft: _rackInnerLeft,
-                                      occupiedUsOnFace: occupiedUsFront,
-                                      connectedPortColors: connectedPortColors,
-                                      showDropPreview: true,
-                                    ),
-
-                                    // PASAMUROS CENTRAL FRONT ↔ BACK
-                                    Positioned(
-                                      left:
-                                          _rackOuterLeft + _rackOuterWidth + 28,
-                                      top: _rackTopMargin - 42,
-                                      width: _dualFaceGap - 56,
-                                      height:
-                                          rack.totalUnits * _uHeightPx + 62,
-                                      child: IgnorePointer(
-                                        child: Column(
-                                          children: [
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 8,
-                                                vertical: 4,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: AppPalette.slate800,
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                                border: Border.all(
-                                                  color:
-                                                      AppPalette.sky400,
-                                                ),
-                                              ),
-                                              child: const Text(
-                                                '⇄ PASAMUROS F↔B',
-                                                style: TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 8.5,
-                                                  fontWeight: FontWeight.w800,
-                                                ),
-                                              ),
-                                            ),
-                                            Expanded(
-                                              child: Container(
-                                                width: 2,
-                                                margin:
-                                                    const EdgeInsets.symmetric(
-                                                  vertical: 6,
-                                                ),
-                                                color: AppPalette.slate300,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-
-                                    // BASTIDOR 2 (DERECHA): ALZADO TRASERO (BACK)
-                                    ..._buildSingleRackCabinetStack(
-                                      rack: rack,
-                                      face: 'back',
-                                      faceBannerLabel: 'BACK (DETRÁS)',
-                                      faceBannerColor: AppPalette.blue900,
-                                      outerLeft: _backRackOuterLeft,
-                                      innerLeft: _backRackInnerLeft,
-                                      occupiedUsOnFace: occupiedUsBack,
-                                      connectedPortColors: connectedPortColors,
-                                      showDropPreview: false,
-                                    ),
-                                  ] else ...[
-                                    // MODO INDIVIDUAL (SOLO FRONT O SOLO BACK)
-                                    ..._buildSingleRackCabinetStack(
-                                      rack: rack,
-                                      face: _activeFace,
-                                      faceBannerLabel: _activeFace == 'front'
-                                          ? 'FRONT (DELANTE)'
-                                          : 'BACK (DETRÁS)',
-                                      faceBannerColor: _activeFace == 'front'
-                                          ? AppPalette.slate900
-                                          : AppPalette.blue900,
-                                      outerLeft: _rackOuterLeft,
-                                      innerLeft: _rackInnerLeft,
-                                      occupiedUsOnFace: _activeFace == 'front'
-                                          ? occupiedUsFront
-                                          : occupiedUsBack,
-                                      connectedPortColors: connectedPortColors,
-                                      showDropPreview: true,
-                                    ),
-                                  ],
-
-                                  // C2. TOMAS ELÉCTRICAS EXTERIORES Y CAJAS EXTERIORES DE FIBRA
-                                  _buildExternalPowerOutletsZone(
-                                    extOutlets: extOutlets,
-                                    connectedPortColors: connectedPortColors,
-                                  ),
-
-                                  // D. Capa de Cables Ortogonales (Intra-Rack, Front↔Back e Inter-Rack)
-                                  Positioned.fill(
-                                    child: IgnorePointer(
-                                      child: CustomPaint(
-                                        painter: RackCablePainter(
-                                          routes: computedRoutes,
-                                          selectedConnectionId:
-                                              _selectedConnectionId,
-                                          hoveredConnectionId:
-                                              _hoveredConnectionId,
-                                          activeSourcePortOffset:
-                                              activeSourceOffset,
-                                          cursorPosition: _cursorCanvasPos,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-
-                                  // D2. OPCIÓN 3: BANDEROLAS "CROSS-CONNECT" CLICABLES EN EL LATERAL DEL RACK
-                                  ...computedRoutes
-                                      .where(
-                                        (r) =>
-                                            r.isOutbound &&
-                                            r.badgePosition != null,
-                                      )
-                                      .map((r) {
-                                    final c = r.connection;
-                                    final isSrcHere =
-                                        c.sourceInfo.rackId == rack.id;
-                                    final localEnd = isSrcHere
-                                        ? c.sourceInfo
-                                        : c.targetInfo;
-                                    final remoteEnd = isSrcHere
-                                        ? c.targetInfo
-                                        : c.sourceInfo;
-                                    final cCol =
-                                        CableGeometryBuilder.parseHexColor(
-                                      c.colorHex,
-                                    );
-                                    final isSel =
-                                        _selectedConnectionId == c.id;
-                                    final isHov =
-                                        _hoveredConnectionId == c.id;
-                                    final pin = r.badgePosition!;
-                                    return Positioned(
-                                      left: pin.dx + 4,
-                                      top: pin.dy - 12,
-                                      child: MouseRegion(
-                                        onEnter: (_) => setState(
-                                          () => _hoveredConnectionId = c.id,
-                                        ),
-                                        onExit: (_) {
-                                          if (_hoveredConnectionId == c.id) {
-                                            setState(
-                                              () => _hoveredConnectionId = null,
-                                            );
-                                          }
-                                        },
-                                        child: GestureDetector(
-                                          onTap: () {
-                                            setState(() {
-                                              _selectedConnectionId = c.id;
-                                              _selectedDeviceId = null;
-                                            });
-                                          },
-                                          onDoubleTap: () {
-                                            if (widget.onJumpToRackAndDevice !=
-                                                null) {
-                                              widget.onJumpToRackAndDevice!(
-                                                remoteEnd.rackId,
-                                                remoteEnd.deviceId,
-                                              );
-                                            } else {
-                                              widget.onSwitchRack(
-                                                remoteEnd.rackId,
-                                              );
-                                            }
-                                          },
-                                          child: Tooltip(
-                                            message:
-                                                'BANDEROLA CROSS-CONNECT INTER-RACK\n'
-                                                '• Origen local: ${localEnd.deviceCode}:${localEnd.portNumber} (${localEnd.face.toUpperCase()})\n'
-                                                '• Destino remoto: ${remoteEnd.rackCode} • ${remoteEnd.deviceCode}:${remoteEnd.portNumber}\n'
-                                                '• 1 Clic: Seleccionar cable y ver propiedades\n'
-                                                '• Doble Clic o botón ↗: Saltar a ${remoteEnd.rackCode} resaltando ${remoteEnd.deviceCode}',
-                                            child: AnimatedContainer(
-                                              duration: const Duration(
-                                                milliseconds: 140,
-                                              ),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 7,
-                                                vertical: 3.5,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: isSel
-                                                    ? cCol
-                                                    : (isHov
-                                                        ? const Color(
-                                                            0xFF1E293B,
-                                                          )
-                                                        : const Color(
-                                                            0xFF0F172A,
-                                                          )),
-                                                borderRadius:
-                                                    const BorderRadius.only(
-                                                  topLeft: Radius.circular(3),
-                                                  bottomLeft:
-                                                      Radius.circular(3),
-                                                  topRight:
-                                                      Radius.circular(12),
-                                                  bottomRight:
-                                                      Radius.circular(12),
-                                                ),
-                                                border: Border.all(
-                                                  color: isSel || isHov
-                                                      ? Colors.white
-                                                      : cCol,
-                                                  width:
-                                                      isSel || isHov ? 1.8 : 1.4,
-                                                ),
-                                                boxShadow: [
-                                                  BoxShadow(
-                                                    color: cCol.withValues(
-                                                      alpha: isSel || isHov
-                                                          ? 0.48
-                                                          : 0.25,
-                                                    ),
-                                                    blurRadius:
-                                                        isSel || isHov ? 8 : 4,
-                                                    offset: const Offset(0, 2),
-                                                  ),
-                                                ],
-                                              ),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Container(
-                                                    width: 7,
-                                                    height: 7,
-                                                    decoration: BoxDecoration(
-                                                      color: isSel
-                                                          ? Colors.white
-                                                          : cCol,
-                                                      shape: BoxShape.circle,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 4),
-                                                  const Icon(
-                                                    Icons.label_important,
-                                                    size: 11,
-                                                    color: AppPalette.sky400,
-                                                  ),
-                                                  const SizedBox(width: 3),
-                                                  Text(
-                                                    '➔ ${remoteEnd.rackCode} • ${remoteEnd.deviceCode}:${remoteEnd.portNumber}',
-                                                    style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 9.2,
-                                                      fontWeight:
-                                                          FontWeight.w800,
-                                                      letterSpacing: 0.1,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 5),
-                                                  InkWell(
-                                                    onTap: () {
-                                                      if (widget
-                                                              .onJumpToRackAndDevice !=
-                                                          null) {
-                                                        widget
-                                                            .onJumpToRackAndDevice!(
-                                                          remoteEnd.rackId,
-                                                          remoteEnd.deviceId,
-                                                        );
-                                                      } else {
-                                                        widget.onSwitchRack(
-                                                          remoteEnd.rackId,
-                                                        );
-                                                      }
-                                                    },
-                                                    child: Container(
-                                                      padding:
-                                                          const EdgeInsets.all(
-                                                        2,
-                                                      ),
-                                                      decoration: BoxDecoration(
-                                                        color: Colors.white
-                                                            .withValues(
-                                                          alpha: 0.16,
-                                                        ),
-                                                        borderRadius:
-                                                            BorderRadius
-                                                                .circular(4),
-                                                      ),
-                                                      child: const Icon(
-                                                        Icons.open_in_new,
-                                                        size: 10,
-                                                        color:
-                                                            AppPalette.sky400,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  }),
-
-                                  // D3. BANDEROLA CROSS-CONNECT FLOTANTE DE CONEXIÓN RÁPIDA CUANDO HAY UN PUERTO ORIGEN SELECCIONADO
-                                  if (_pendingSourcePort != null &&
-                                      activeSourceOffset != null)
-                                    Builder(
-                                      builder: (_) {
-                                        final srcPort = _pendingSourcePort!;
-                                        RackDeviceModel? srcDev;
-                                        for (final d in rack.devices) {
-                                          if (d.ports.any(
-                                            (p) => p.id == srcPort.id,
-                                          )) {
-                                            srcDev = d;
-                                            break;
-                                          }
-                                        }
-                                        final isBack =
-                                            (srcPort.face).toLowerCase() ==
-                                                'back';
-                                        final flagLeft = (_isDualFace && isBack)
-                                            ? (_backRackOuterLeft +
-                                                _rackOuterWidth +
-                                                12)
-                                            : (_rackOuterLeft +
-                                                _rackOuterWidth +
-                                                12);
-                                        return Positioned(
-                                          left: flagLeft,
-                                          top: activeSourceOffset.dy - 14,
-                                          child: Material(
-                                            color: Colors.transparent,
-                                            child: InkWell(
-                                              onTap: () {
-                                                final dev = srcDev;
-                                                final port = srcPort;
-                                                setState(() {
-                                                  _pendingSourcePort = null;
-                                                });
-                                                _showInterRackConnectionDialog(
-                                                  initialSourceDev: dev,
-                                                  initialSourcePort: port,
-                                                );
-                                              },
-                                              borderRadius:
-                                                  BorderRadius.circular(14),
-                                              child: Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                  horizontal: 10,
-                                                  vertical: 5,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  gradient:
-                                                      const LinearGradient(
-                                                    colors: [
-                                                      AppPalette.sky600,
-                                                      AppPalette.blue600,
-                                                    ],
-                                                  ),
-                                                  borderRadius:
-                                                      const BorderRadius.only(
-                                                    topLeft: Radius.circular(4),
-                                                    bottomLeft:
-                                                        Radius.circular(4),
-                                                    topRight:
-                                                        Radius.circular(14),
-                                                    bottomRight:
-                                                        Radius.circular(14),
-                                                  ),
-                                                  border: Border.all(
-                                                    color: Colors.white,
-                                                    width: 1.5,
-                                                  ),
-                                                  boxShadow: const [
-                                                    BoxShadow(
-                                                      color: Color(0x550284C7),
-                                                      blurRadius: 10,
-                                                      offset: Offset(0, 3),
-                                                    ),
-                                                  ],
-                                                ),
-                                                child: Row(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    const Icon(
-                                                      Icons.label_important,
-                                                      size: 13,
-                                                      color: Colors.white,
-                                                    ),
-                                                    const SizedBox(width: 5),
-                                                    Text(
-                                                      '🏷️ ➔ Conectar ${srcDev?.code ?? ''}:${srcPort.portNumber} a Otro Rack...',
-                                                      style: const TextStyle(
-                                                        color: Colors.white,
-                                                        fontSize: 10,
-                                                        fontWeight:
-                                                            FontWeight.w900,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                    ),
-
-                                  // E. BANDEJA AÉREA INTER-RACK SUPERIOR CON PÍLDORAS INTERACTIVAS DE SALTO A OTROS RACKS
-                                  Positioned(
-                                    left: _rackOuterLeft,
-                                    top: 4,
-                                    width: _isDualFace
-                                        ? (_backRackOuterLeft +
-                                            _rackOuterWidth -
-                                            _rackOuterLeft)
-                                        : _rackOuterWidth,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 6,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: AppPalette.slate900,
-                                        borderRadius: BorderRadius.circular(10),
-                                        border: Border.all(
-                                          color: outboundConnections.isNotEmpty
-                                              ? AppPalette.emerald500
-                                              : AppPalette.slate600,
-                                          width: 1.5,
-                                        ),
-                                        boxShadow: const [
-                                          BoxShadow(
-                                            color: Color(0x22000000),
-                                            blurRadius: 8,
-                                            offset: Offset(0, 2),
-                                          ),
-                                        ],
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          const Icon(
-                                            Icons.compare_arrows_rounded,
-                                            size: 16,
-                                            color: AppPalette.sky400,
-                                          ),
-                                          const SizedBox(width: 6),
-                                          Text(
-                                            'BANDEJA AÉREA INTER-RACK (${outboundConnections.length} fibras/cables hacia otros Racks):',
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 10.5,
-                                              fontWeight: FontWeight.w800,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            child: outboundConnections.isEmpty
-                                                ? const Text(
-                                                    'Ningún cable sale a otro Rack aún. Pulsa "+ Conectar con Otro Rack" para enlazar fibras/cables entre Racks.',
-                                                    style: TextStyle(
-                                                      color: AppPalette.slate400,
-                                                      fontSize: 10,
-                                                    ),
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                  )
-                                                : SingleChildScrollView(
-                                                    scrollDirection:
-                                                        Axis.horizontal,
-                                                    child: Row(
-                                                      children:
-                                                          outboundConnections
-                                                              .map((c) {
-                                                        final isSrcHere = c
-                                                                .sourceInfo
-                                                                .rackId ==
-                                                            rack.id;
-                                                        final localEnd =
-                                                            isSrcHere
-                                                                ? c.sourceInfo
-                                                                : c.targetInfo;
-                                                        final remoteEnd =
-                                                            isSrcHere
-                                                                ? c.targetInfo
-                                                                : c.sourceInfo;
-                                                        final cCol =
-                                                            CableGeometryBuilder
-                                                                .parseHexColor(
-                                                          c.colorHex,
-                                                        );
-                                                        final isSel =
-                                                            _selectedConnectionId ==
-                                                                c.id;
-                                                        return Padding(
-                                                          padding:
-                                                              const EdgeInsets
-                                                                  .only(
-                                                            right: 6,
-                                                          ),
-                                                          child: InkWell(
-                                                            onTap: () {
-                                                              setState(() {
-                                                                _selectedConnectionId =
-                                                                    c.id;
-                                                                _selectedDeviceId =
-                                                                    null;
-                                                              });
-                                                            },
-                                                            onDoubleTap: () {
-                                                              if (widget
-                                                                      .onJumpToRackAndDevice !=
-                                                                  null) {
-                                                                widget
-                                                                    .onJumpToRackAndDevice!(
-                                                                  remoteEnd
-                                                                      .rackId,
-                                                                  remoteEnd
-                                                                      .deviceId,
-                                                                );
-                                                              } else {
-                                                                widget
-                                                                    .onSwitchRack(
-                                                                  remoteEnd
-                                                                      .rackId,
-                                                                );
-                                                              }
-                                                            },
-                                                            child: Tooltip(
-                                                              message:
-                                                                  'Clic: Resaltar cable (${localEnd.deviceCode}:${localEnd.portNumber} ➔ ${remoteEnd.rackCode} ${remoteEnd.deviceCode}:${remoteEnd.portNumber})\nDoble Clic o icono ↗: Abrir ${remoteEnd.rackCode} en el Rack Editor',
-                                                              child: Container(
-                                                                padding:
-                                                                    const EdgeInsets
-                                                                        .symmetric(
-                                                                  horizontal: 8,
-                                                                  vertical: 3,
-                                                                ),
-                                                                decoration:
-                                                                    BoxDecoration(
-                                                                  color: isSel
-                                                                      ? cCol
-                                                                      : const Color(
-                                                                          0xFF1E293B,
-                                                                        ),
-                                                                  borderRadius:
-                                                                      BorderRadius
-                                                                          .circular(
-                                                                    14,
-                                                                  ),
-                                                                  border:
-                                                                      Border.all(
-                                                                    color: cCol,
-                                                                    width: 1.5,
-                                                                  ),
-                                                                ),
-                                                                child: Row(
-                                                                  mainAxisSize:
-                                                                      MainAxisSize
-                                                                          .min,
-                                                                  children: [
-                                                                    Container(
-                                                                      width: 7,
-                                                                      height: 7,
-                                                                      decoration:
-                                                                          BoxDecoration(
-                                                                        color: isSel
-                                                                            ? Colors.white
-                                                                            : cCol,
-                                                                        shape: BoxShape
-                                                                            .circle,
-                                                                      ),
-                                                                    ),
-                                                                    const SizedBox(
-                                                                      width: 5,
-                                                                    ),
-                                                                    Text(
-                                                                      '${localEnd.deviceCode}:${localEnd.portNumber} ⇢ ${remoteEnd.rackCode} (${remoteEnd.deviceCode}:${remoteEnd.portNumber})',
-                                                                      style:
-                                                                          const TextStyle(
-                                                                        color: Colors
-                                                                            .white,
-                                                                        fontSize:
-                                                                            9.8,
-                                                                        fontWeight:
-                                                                            FontWeight.w700,
-                                                                      ),
-                                                                    ),
-                                                                    const SizedBox(
-                                                                      width: 5,
-                                                                    ),
-                                                                    InkWell(
-                                                                      onTap: () {
-                                                                        if (widget.onJumpToRackAndDevice !=
-                                                                            null) {
-                                                                          widget.onJumpToRackAndDevice!(
-                                                                            remoteEnd.rackId,
-                                                                            remoteEnd.deviceId,
-                                                                          );
-                                                                        } else {
-                                                                          widget.onSwitchRack(
-                                                                            remoteEnd.rackId,
-                                                                          );
-                                                                        }
-                                                                      },
-                                                                      child:
-                                                                          const Icon(
-                                                                        Icons
-                                                                            .open_in_new,
-                                                                        size:
-                                                                            11,
-                                                                        color: Color(
-                                                                          0xFF38BDF8,
-                                                                        ),
-                                                                      ),
-                                                                    ),
-                                                                  ],
-                                                                ),
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        );
-                                                      }).toList(),
-                                                    ),
-                                                  ),
-                                          ),
-                                          if (_canEdit) ...[
-                                            const SizedBox(width: 8),
-                                            InkWell(
-                                              onTap: () =>
-                                                  _showInterRackConnectionDialog(),
-                                              child: Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                  horizontal: 9,
-                                                  vertical: 4,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  color:
-                                                      AppPalette.sky600,
-                                                  borderRadius:
-                                                      BorderRadius.circular(6),
-                                                ),
-                                                child: const Row(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    Icon(
-                                                      Icons.add_link,
-                                                      size: 13,
-                                                      color: Colors.white,
-                                                    ),
-                                                    SizedBox(width: 4),
-                                                    Text(
-                                                      '+ Conectar con Otro Rack',
-                                                      style: TextStyle(
-                                                        color: Colors.white,
-                                                        fontSize: 10,
-                                                        fontWeight:
-                                                            FontWeight.w800,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
+                      _buildBastidoresInteractivos(rack, extOutlets, totalCanvasHeight, computedRoutes, activeSourceOffset, connectedPortColors, occupiedUsFront, occupiedUsBack, outboundConnections),
 
                       // Capa superior cuando se pulsa la Barra Espaciadora (Modo Mano para arrastrar todo el dashboard del Rack)
                       if (_isPanHandMode)
@@ -6752,318 +5311,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         ),
 
                       // Controles Flotantes Superiores Izquierdos: [♊ Front + Back | Front | Back] + [📷 Foto Equipos ON/OFF] + Filtro de Cables + Mano + Deshacer
-                      Positioned(
-                        top: 14,
-                        left: 14,
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(8),
-                                border:
-                                    Border.all(color: AppPalette.slate300),
-                                boxShadow: const [
-                                  BoxShadow(
-                                    color: Color(0x0D000000),
-                                    blurRadius: 6,
-                                  ),
-                                ],
-                              ),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.zoom_in, size: 18),
-                                    tooltip: 'Acercar',
-                                    onPressed: () {
-                                      final m =
-                                          _transformController.value.clone();
-                                      m.scaleByDouble(1.2, 1.2, 1.0, 1.0);
-                                      _transformController.value = m;
-                                    },
-                                  ),
-                                  const Divider(height: 1),
-                                  IconButton(
-                                    icon: const Icon(Icons.zoom_out, size: 18),
-                                    tooltip: 'Alejar',
-                                    onPressed: () {
-                                      final m =
-                                          _transformController.value.clone();
-                                      m.scaleByDouble(
-                                        1 / 1.2,
-                                        1 / 1.2,
-                                        1.0,
-                                        1.0,
-                                      );
-                                      _transformController.value = m;
-                                    },
-                                  ),
-                                  const Divider(height: 1),
-                                  IconButton(
-                                    icon: const Icon(
-                                      Icons.crop_free_rounded,
-                                      size: 17,
-                                    ),
-                                    tooltip: 'Restablecer vista 100%',
-                                    onPressed: () {
-                                      _transformController.value =
-                                          Matrix4.identity();
-                                    },
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-
-                            // Conmutador [Front | Back | Front & Back]
-                            Container(
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(6),
-                                border:
-                                    Border.all(color: AppPalette.slate300),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  _FaceToggleButton(
-                                    label: 'Front',
-                                    active: _activeFace == 'front',
-                                    onTap: () => _setFaceMode('front'),
-                                  ),
-                                  _FaceToggleButton(
-                                    label: 'Back',
-                                    active: _activeFace == 'back',
-                                    onTap: () => _setFaceMode('back'),
-                                  ),
-                                  _FaceToggleButton(
-                                    label: 'Front & Back',
-                                    active: _activeFace == 'both',
-                                    onTap: () => _setFaceMode('both'),
-                                  ),
-                                ],
-                              ),
-                            ),
-
-                            const SizedBox(width: 10),
-
-                            // Conmutador de Foto Real / Bisel de Equipos ON / OFF
-                            InkWell(
-                              onTap: () => setState(
-                                () => _showEquipmentPhotos =
-                                    !_showEquipmentPhotos,
-                              ),
-                              borderRadius: BorderRadius.circular(6),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 7,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _showEquipmentPhotos
-                                      ? AppPalette.slate900
-                                      : Colors.white,
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
-                                    color: _showEquipmentPhotos
-                                        ? AppPalette.sky400
-                                        : AppPalette.slate300,
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      _showEquipmentPhotos
-                                          ? Icons.photo_camera
-                                          : Icons.photo_camera_outlined,
-                                      size: 14,
-                                      color: _showEquipmentPhotos
-                                          ? AppPalette.sky400
-                                          : AppPalette.slate600,
-                                    ),
-                                    const SizedBox(width: 5),
-                                    Text(
-                                      _showEquipmentPhotos
-                                          ? 'Foto Equipos: ON'
-                                          : 'Foto Equipos: OFF',
-                                      style: TextStyle(
-                                        fontSize: 11.5,
-                                        fontWeight: FontWeight.w700,
-                                        color: _showEquipmentPhotos
-                                            ? Colors.white
-                                            : AppPalette.slate600,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-
-                            const SizedBox(width: 10),
-
-                            // Filtro rápido por Tipo de Cable
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(6),
-                                border:
-                                    Border.all(color: AppPalette.slate300),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  _FilterChipBtn(
-                                    label: 'Todos',
-                                    color: AppPalette.slate900,
-                                    active: _cableFilter == 'all',
-                                    onTap: () =>
-                                        setState(() => _cableFilter = 'all'),
-                                  ),
-                                  _FilterChipBtn(
-                                    label: 'Red UTP',
-                                    color: AppPalette.blue600,
-                                    active: _cableFilter == 'network',
-                                    onTap: () => setState(
-                                      () => _cableFilter = 'network',
-                                    ),
-                                  ),
-                                  _FilterChipBtn(
-                                    label: 'Fibra',
-                                    color: AppPalette.amber500,
-                                    active: _cableFilter == 'fiber',
-                                    onTap: () =>
-                                        setState(() => _cableFilter = 'fiber'),
-                                  ),
-                                  _FilterChipBtn(
-                                    label: 'Electricidad',
-                                    color: AppPalette.red600,
-                                    active: _cableFilter == 'power',
-                                    onTap: () =>
-                                        setState(() => _cableFilter = 'power'),
-                                  ),
-                                ],
-                              ),
-                            ),
-
-                            const SizedBox(width: 8),
-
-                            // Conmutador Modo Mano (Barra Espaciadora)
-                            Tooltip(
-                              message:
-                                  'Mantén pulsada la Barra Espaciadora (o activa este botón) para convertir el ratón en una mano y mover el dashboard',
-                              child: InkWell(
-                                onTap: () => setState(
-                                  () => _isHandToolPinned = !_isHandToolPinned,
-                                ),
-                                borderRadius: BorderRadius.circular(6),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 7,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: _isPanHandMode
-                                        ? AppPalette.slate900
-                                        : Colors.white,
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(
-                                      color: _isPanHandMode
-                                          ? AppPalette.sky400
-                                          : AppPalette.slate300,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.pan_tool_alt_rounded,
-                                        size: 14,
-                                        color: _isPanHandMode
-                                            ? AppPalette.sky400
-                                            : AppPalette.slate600,
-                                      ),
-                                      const SizedBox(width: 5),
-                                      Text(
-                                        _isPanHandMode
-                                            ? 'Mano: ACTIVA'
-                                            : 'Mano (Espacio)',
-                                        style: TextStyle(
-                                          fontSize: 11.5,
-                                          fontWeight: FontWeight.w700,
-                                          color: _isPanHandMode
-                                              ? Colors.white
-                                              : AppPalette.slate600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-
-                            if (_canEdit) ...[
-                              const SizedBox(width: 8),
-                              // Botón Deshacer (Ctrl+Z en Windows/Linux o Cmd+Z en Mac)
-                              Tooltip(
-                                message:
-                                    'Deshacer último movimiento de equipo en el Rack (Ctrl+Z / ⌘Z)',
-                                child: InkWell(
-                                  onTap:
-                                      _undoStack.isEmpty ? null : _performUndo,
-                                  borderRadius: BorderRadius.circular(6),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 7,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: _undoStack.isNotEmpty
-                                          ? Colors.white
-                                          : AppPalette.slate50,
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(
-                                        color: AppPalette.slate300,
-                                      ),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          Icons.undo_rounded,
-                                          size: 14,
-                                          color: _undoStack.isNotEmpty
-                                              ? AppPalette.slate900
-                                              : AppPalette.slate400,
-                                        ),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          _undoStack.isEmpty
-                                              ? 'Deshacer (⌘Z)'
-                                              : 'Deshacer (${_undoStack.length})',
-                                          style: TextStyle(
-                                            fontSize: 11.5,
-                                            fontWeight: FontWeight.w700,
-                                            color: _undoStack.isNotEmpty
-                                                ? AppPalette.slate900
-                                                : AppPalette.slate400,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
+                      _buildControlesFlotantes(),
                     ],
                   ),
                 ),
@@ -7515,6 +5763,1773 @@ class _RackEditorViewState extends State<RackEditorView> {
   }
 
   /// Dibuja el raíl vertical de 19 pulgadas con las 3 perforaciones cuadradas EIA-310 por cada U (idéntico a la imagen).
+  /// Controles flotantes superpuestos al lienzo (zoom, caras, filtros de cable).
+  Widget _buildControlesFlotantes() {
+    return Positioned(
+        top: 14,
+        left: 14,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border:
+                    Border.all(color: AppPalette.slate300),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x0D000000),
+                    blurRadius: 6,
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.zoom_in, size: 18),
+                    tooltip: 'Acercar',
+                    onPressed: () {
+                      final m =
+                          _transformController.value.clone();
+                      m.scaleByDouble(1.2, 1.2, 1.0, 1.0);
+                      _transformController.value = m;
+                    },
+                  ),
+                  const Divider(height: 1),
+                  IconButton(
+                    icon: const Icon(Icons.zoom_out, size: 18),
+                    tooltip: 'Alejar',
+                    onPressed: () {
+                      final m =
+                          _transformController.value.clone();
+                      m.scaleByDouble(
+                        1 / 1.2,
+                        1 / 1.2,
+                        1.0,
+                        1.0,
+                      );
+                      _transformController.value = m;
+                    },
+                  ),
+                  const Divider(height: 1),
+                  IconButton(
+                    icon: const Icon(
+                      Icons.crop_free_rounded,
+                      size: 17,
+                    ),
+                    tooltip: 'Restablecer vista 100%',
+                    onPressed: () {
+                      _transformController.value =
+                          Matrix4.identity();
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+
+            // Conmutador [Front | Back | Front & Back]
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(6),
+                border:
+                    Border.all(color: AppPalette.slate300),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _FaceToggleButton(
+                    label: 'Front',
+                    active: _activeFace == 'front',
+                    onTap: () => _setFaceMode('front'),
+                  ),
+                  _FaceToggleButton(
+                    label: 'Back',
+                    active: _activeFace == 'back',
+                    onTap: () => _setFaceMode('back'),
+                  ),
+                  _FaceToggleButton(
+                    label: 'Front & Back',
+                    active: _activeFace == 'both',
+                    onTap: () => _setFaceMode('both'),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(width: 10),
+
+            // Conmutador de Foto Real / Bisel de Equipos ON / OFF
+            InkWell(
+              onTap: () => setState(
+                () => _showEquipmentPhotos =
+                    !_showEquipmentPhotos,
+              ),
+              borderRadius: BorderRadius.circular(6),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  color: _showEquipmentPhotos
+                      ? AppPalette.slate900
+                      : Colors.white,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: _showEquipmentPhotos
+                        ? AppPalette.sky400
+                        : AppPalette.slate300,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _showEquipmentPhotos
+                          ? Icons.photo_camera
+                          : Icons.photo_camera_outlined,
+                      size: 14,
+                      color: _showEquipmentPhotos
+                          ? AppPalette.sky400
+                          : AppPalette.slate600,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      _showEquipmentPhotos
+                          ? 'Foto Equipos: ON'
+                          : 'Foto Equipos: OFF',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: _showEquipmentPhotos
+                            ? Colors.white
+                            : AppPalette.slate600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(width: 10),
+
+            // Filtro rápido por Tipo de Cable
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6,
+                vertical: 3,
+              ),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(6),
+                border:
+                    Border.all(color: AppPalette.slate300),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _FilterChipBtn(
+                    label: 'Todos',
+                    color: AppPalette.slate900,
+                    active: _cableFilter == 'all',
+                    onTap: () =>
+                        setState(() => _cableFilter = 'all'),
+                  ),
+                  _FilterChipBtn(
+                    label: 'Red UTP',
+                    color: AppPalette.blue600,
+                    active: _cableFilter == 'network',
+                    onTap: () => setState(
+                      () => _cableFilter = 'network',
+                    ),
+                  ),
+                  _FilterChipBtn(
+                    label: 'Fibra',
+                    color: AppPalette.amber500,
+                    active: _cableFilter == 'fiber',
+                    onTap: () =>
+                        setState(() => _cableFilter = 'fiber'),
+                  ),
+                  _FilterChipBtn(
+                    label: 'Electricidad',
+                    color: AppPalette.red600,
+                    active: _cableFilter == 'power',
+                    onTap: () =>
+                        setState(() => _cableFilter = 'power'),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(width: 8),
+
+            // Conmutador Modo Mano (Barra Espaciadora)
+            Tooltip(
+              message:
+                  'Mantén pulsada la Barra Espaciadora (o activa este botón) para convertir el ratón en una mano y mover el dashboard',
+              child: InkWell(
+                onTap: () => setState(
+                  () => _isHandToolPinned = !_isHandToolPinned,
+                ),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 7,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _isPanHandMode
+                        ? AppPalette.slate900
+                        : Colors.white,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: _isPanHandMode
+                          ? AppPalette.sky400
+                          : AppPalette.slate300,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.pan_tool_alt_rounded,
+                        size: 14,
+                        color: _isPanHandMode
+                            ? AppPalette.sky400
+                            : AppPalette.slate600,
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        _isPanHandMode
+                            ? 'Mano: ACTIVA'
+                            : 'Mano (Espacio)',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: _isPanHandMode
+                              ? Colors.white
+                              : AppPalette.slate600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            if (_canEdit) ...[
+              const SizedBox(width: 8),
+              // Botón Deshacer (Ctrl+Z en Windows/Linux o Cmd+Z en Mac)
+              Tooltip(
+                message:
+                    'Deshacer último movimiento de equipo en el Rack (Ctrl+Z / ⌘Z)',
+                child: InkWell(
+                  onTap:
+                      _undoStack.isEmpty ? null : _performUndo,
+                  borderRadius: BorderRadius.circular(6),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _undoStack.isNotEmpty
+                          ? Colors.white
+                          : AppPalette.slate50,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: AppPalette.slate300,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.undo_rounded,
+                          size: 14,
+                          color: _undoStack.isNotEmpty
+                              ? AppPalette.slate900
+                              : AppPalette.slate400,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _undoStack.isEmpty
+                              ? 'Deshacer (⌘Z)'
+                              : 'Deshacer (${_undoStack.length})',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: _undoStack.isNotEmpty
+                                ? AppPalette.slate900
+                                : AppPalette.slate400,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+  }
+
+  /// Lienzo con los bastidores 19", alzado delantero y trasero, y el cableado.
+  Widget _buildBastidoresInteractivos(RackDetailModel rack, List<RackDeviceModel> extOutlets, double totalCanvasHeight, List<ComputedCableRoute> computedRoutes, Offset? activeSourceOffset, Map<int, Color> connectedPortColors, Set<int> occupiedUsFront, Set<int> occupiedUsBack, List<ConnectionModel> outboundConnections) {
+    return InteractiveViewer(
+        transformationController: _transformController,
+        minScale: 0.38,
+        maxScale: 2.8,
+        boundaryMargin: const EdgeInsets.all(320),
+        constrained: false,
+        child: MouseRegion(
+          onHover: (event) {
+            if (_pendingSourcePort != null) {
+              setState(
+                () => _cursorCanvasPos = event.localPosition,
+              );
+              return;
+            }
+            int? hitId;
+            double bestDist = 7.0;
+            for (final r in computedRoutes) {
+              final d =
+                  CableGeometryBuilder.distanceToPolyline(
+                event.localPosition,
+                r.points,
+              );
+              if (d < bestDist) {
+                bestDist = d;
+                hitId = r.connection.id;
+              }
+            }
+            if (hitId != _hoveredConnectionId) {
+              setState(() => _hoveredConnectionId = hitId);
+            }
+          },
+          child: GestureDetector(
+            onSecondaryTap: () {
+              if (_pendingSourcePort != null) {
+                setState(() {
+                  _pendingSourcePort = null;
+                  _pendingSourceDevice = null;
+                  _cursorCanvasPos = null;
+                });
+              }
+            },
+            onTapUp: (details) {
+              for (final r in computedRoutes) {
+                final d =
+                    CableGeometryBuilder.distanceToPolyline(
+                  details.localPosition,
+                  r.points,
+                );
+                if (d < 8.0) {
+                  setState(() {
+                    _selectedConnectionId = r.connection.id;
+                    _selectedDeviceId = null;
+                  });
+                  return;
+                }
+              }
+            },
+            child: SizedBox(
+              width: _effectiveCanvasWidth,
+              height: totalCanvasHeight,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  if (_isDualFace) ...[
+                    // BASTIDOR 1 (IZQUIERDA): ALZADO DELANTERO (FRONT)
+                    ..._buildSingleRackCabinetStack(
+                      rack: rack,
+                      face: 'front',
+                      faceBannerLabel: 'FRONT (DELANTE)',
+                      faceBannerColor: AppPalette.slate900,
+                      outerLeft: _rackOuterLeft,
+                      innerLeft: _rackInnerLeft,
+                      occupiedUsOnFace: occupiedUsFront,
+                      connectedPortColors: connectedPortColors,
+                      showDropPreview: true,
+                    ),
+
+                    // PASAMUROS CENTRAL FRONT ↔ BACK
+                    Positioned(
+                      left:
+                          _rackOuterLeft + _rackOuterWidth + 28,
+                      top: _rackTopMargin - 42,
+                      width: _dualFaceGap - 56,
+                      height:
+                          rack.totalUnits * _uHeightPx + 62,
+                      child: IgnorePointer(
+                        child: Column(
+                          children: [
+                            Container(
+                              padding:
+                                  const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppPalette.slate800,
+                                borderRadius:
+                                    BorderRadius.circular(12),
+                                border: Border.all(
+                                  color:
+                                      AppPalette.sky400,
+                                ),
+                              ),
+                              child: const Text(
+                                '⇄ PASAMUROS F↔B',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 8.5,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Container(
+                                width: 2,
+                                margin:
+                                    const EdgeInsets.symmetric(
+                                  vertical: 6,
+                                ),
+                                color: AppPalette.slate300,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // BASTIDOR 2 (DERECHA): ALZADO TRASERO (BACK)
+                    ..._buildSingleRackCabinetStack(
+                      rack: rack,
+                      face: 'back',
+                      faceBannerLabel: 'BACK (DETRÁS)',
+                      faceBannerColor: AppPalette.blue900,
+                      outerLeft: _backRackOuterLeft,
+                      innerLeft: _backRackInnerLeft,
+                      occupiedUsOnFace: occupiedUsBack,
+                      connectedPortColors: connectedPortColors,
+                      showDropPreview: false,
+                    ),
+                  ] else ...[
+                    // MODO INDIVIDUAL (SOLO FRONT O SOLO BACK)
+                    ..._buildSingleRackCabinetStack(
+                      rack: rack,
+                      face: _activeFace,
+                      faceBannerLabel: _activeFace == 'front'
+                          ? 'FRONT (DELANTE)'
+                          : 'BACK (DETRÁS)',
+                      faceBannerColor: _activeFace == 'front'
+                          ? AppPalette.slate900
+                          : AppPalette.blue900,
+                      outerLeft: _rackOuterLeft,
+                      innerLeft: _rackInnerLeft,
+                      occupiedUsOnFace: _activeFace == 'front'
+                          ? occupiedUsFront
+                          : occupiedUsBack,
+                      connectedPortColors: connectedPortColors,
+                      showDropPreview: true,
+                    ),
+                  ],
+
+                  // C2. TOMAS ELÉCTRICAS EXTERIORES Y CAJAS EXTERIORES DE FIBRA
+                  _buildExternalPowerOutletsZone(
+                    extOutlets: extOutlets,
+                    connectedPortColors: connectedPortColors,
+                  ),
+
+                  // D. Capa de Cables Ortogonales (Intra-Rack, Front↔Back e Inter-Rack)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(
+                        painter: RackCablePainter(
+                          routes: computedRoutes,
+                          selectedConnectionId:
+                              _selectedConnectionId,
+                          hoveredConnectionId:
+                              _hoveredConnectionId,
+                          activeSourcePortOffset:
+                              activeSourceOffset,
+                          cursorPosition: _cursorCanvasPos,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // D2. OPCIÓN 3: BANDEROLAS "CROSS-CONNECT" CLICABLES EN EL LATERAL DEL RACK
+                  ...computedRoutes
+                      .where(
+                        (r) =>
+                            r.isOutbound &&
+                            r.badgePosition != null,
+                      )
+                      .map((r) {
+                    final c = r.connection;
+                    final isSrcHere =
+                        c.sourceInfo.rackId == rack.id;
+                    final localEnd = isSrcHere
+                        ? c.sourceInfo
+                        : c.targetInfo;
+                    final remoteEnd = isSrcHere
+                        ? c.targetInfo
+                        : c.sourceInfo;
+                    final cCol =
+                        CableGeometryBuilder.parseHexColor(
+                      c.colorHex,
+                    );
+                    final isSel =
+                        _selectedConnectionId == c.id;
+                    final isHov =
+                        _hoveredConnectionId == c.id;
+                    final pin = r.badgePosition!;
+                    return Positioned(
+                      left: pin.dx + 4,
+                      top: pin.dy - 12,
+                      child: MouseRegion(
+                        onEnter: (_) => setState(
+                          () => _hoveredConnectionId = c.id,
+                        ),
+                        onExit: (_) {
+                          if (_hoveredConnectionId == c.id) {
+                            setState(
+                              () => _hoveredConnectionId = null,
+                            );
+                          }
+                        },
+                        child: GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _selectedConnectionId = c.id;
+                              _selectedDeviceId = null;
+                            });
+                          },
+                          onDoubleTap: () {
+                            if (widget.onJumpToRackAndDevice !=
+                                null) {
+                              widget.onJumpToRackAndDevice!(
+                                remoteEnd.rackId,
+                                remoteEnd.deviceId,
+                              );
+                            } else {
+                              widget.onSwitchRack(
+                                remoteEnd.rackId,
+                              );
+                            }
+                          },
+                          child: Tooltip(
+                            message:
+                                'BANDEROLA CROSS-CONNECT INTER-RACK\n'
+                                '• Origen local: ${localEnd.deviceCode}:${localEnd.portNumber} (${localEnd.face.toUpperCase()})\n'
+                                '• Destino remoto: ${remoteEnd.rackCode} • ${remoteEnd.deviceCode}:${remoteEnd.portNumber}\n'
+                                '• 1 Clic: Seleccionar cable y ver propiedades\n'
+                                '• Doble Clic o botón ↗: Saltar a ${remoteEnd.rackCode} resaltando ${remoteEnd.deviceCode}',
+                            child: AnimatedContainer(
+                              duration: const Duration(
+                                milliseconds: 140,
+                              ),
+                              padding:
+                                  const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 3.5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isSel
+                                    ? cCol
+                                    : (isHov
+                                        ? const Color(
+                                            0xFF1E293B,
+                                          )
+                                        : const Color(
+                                            0xFF0F172A,
+                                          )),
+                                borderRadius:
+                                    const BorderRadius.only(
+                                  topLeft: Radius.circular(3),
+                                  bottomLeft:
+                                      Radius.circular(3),
+                                  topRight:
+                                      Radius.circular(12),
+                                  bottomRight:
+                                      Radius.circular(12),
+                                ),
+                                border: Border.all(
+                                  color: isSel || isHov
+                                      ? Colors.white
+                                      : cCol,
+                                  width:
+                                      isSel || isHov ? 1.8 : 1.4,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: cCol.withValues(
+                                      alpha: isSel || isHov
+                                          ? 0.48
+                                          : 0.25,
+                                    ),
+                                    blurRadius:
+                                        isSel || isHov ? 8 : 4,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 7,
+                                    height: 7,
+                                    decoration: BoxDecoration(
+                                      color: isSel
+                                          ? Colors.white
+                                          : cCol,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  const Icon(
+                                    Icons.label_important,
+                                    size: 11,
+                                    color: AppPalette.sky400,
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    '➔ ${remoteEnd.rackCode} • ${remoteEnd.deviceCode}:${remoteEnd.portNumber}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 9.2,
+                                      fontWeight:
+                                          FontWeight.w800,
+                                      letterSpacing: 0.1,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 5),
+                                  InkWell(
+                                    onTap: () {
+                                      if (widget
+                                              .onJumpToRackAndDevice !=
+                                          null) {
+                                        widget
+                                            .onJumpToRackAndDevice!(
+                                          remoteEnd.rackId,
+                                          remoteEnd.deviceId,
+                                        );
+                                      } else {
+                                        widget.onSwitchRack(
+                                          remoteEnd.rackId,
+                                        );
+                                      }
+                                    },
+                                    child: Container(
+                                      padding:
+                                          const EdgeInsets.all(
+                                        2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white
+                                            .withValues(
+                                          alpha: 0.16,
+                                        ),
+                                        borderRadius:
+                                            BorderRadius
+                                                .circular(4),
+                                      ),
+                                      child: const Icon(
+                                        Icons.open_in_new,
+                                        size: 10,
+                                        color:
+                                            AppPalette.sky400,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+
+                  // D3. BANDEROLA CROSS-CONNECT FLOTANTE DE CONEXIÓN RÁPIDA CUANDO HAY UN PUERTO ORIGEN SELECCIONADO
+                  if (_pendingSourcePort != null &&
+                      activeSourceOffset != null)
+                    Builder(
+                      builder: (_) {
+                        final srcPort = _pendingSourcePort!;
+                        RackDeviceModel? srcDev;
+                        for (final d in rack.devices) {
+                          if (d.ports.any(
+                            (p) => p.id == srcPort.id,
+                          )) {
+                            srcDev = d;
+                            break;
+                          }
+                        }
+                        final isBack =
+                            (srcPort.face).toLowerCase() ==
+                                'back';
+                        final flagLeft = (_isDualFace && isBack)
+                            ? (_backRackOuterLeft +
+                                _rackOuterWidth +
+                                12)
+                            : (_rackOuterLeft +
+                                _rackOuterWidth +
+                                12);
+                        return Positioned(
+                          left: flagLeft,
+                          top: activeSourceOffset.dy - 14,
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () {
+                                final dev = srcDev;
+                                final port = srcPort;
+                                setState(() {
+                                  _pendingSourcePort = null;
+                                });
+                                _showInterRackConnectionDialog(
+                                  initialSourceDev: dev,
+                                  initialSourcePort: port,
+                                );
+                              },
+                              borderRadius:
+                                  BorderRadius.circular(14),
+                              child: Container(
+                                padding:
+                                    const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 5,
+                                ),
+                                decoration: BoxDecoration(
+                                  gradient:
+                                      const LinearGradient(
+                                    colors: [
+                                      AppPalette.sky600,
+                                      AppPalette.blue600,
+                                    ],
+                                  ),
+                                  borderRadius:
+                                      const BorderRadius.only(
+                                    topLeft: Radius.circular(4),
+                                    bottomLeft:
+                                        Radius.circular(4),
+                                    topRight:
+                                        Radius.circular(14),
+                                    bottomRight:
+                                        Radius.circular(14),
+                                  ),
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 1.5,
+                                  ),
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Color(0x550284C7),
+                                      blurRadius: 10,
+                                      offset: Offset(0, 3),
+                                    ),
+                                  ],
+                                ),
+                                child: Row(
+                                  mainAxisSize:
+                                      MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.label_important,
+                                      size: 13,
+                                      color: Colors.white,
+                                    ),
+                                    const SizedBox(width: 5),
+                                    Text(
+                                      '🏷️ ➔ Conectar ${srcDev?.code ?? ''}:${srcPort.portNumber} a Otro Rack...',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight:
+                                            FontWeight.w900,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+
+                  // E. BANDEJA AÉREA INTER-RACK SUPERIOR CON PÍLDORAS INTERACTIVAS DE SALTO A OTROS RACKS
+                  Positioned(
+                    left: _rackOuterLeft,
+                    top: 4,
+                    width: _isDualFace
+                        ? (_backRackOuterLeft +
+                            _rackOuterWidth -
+                            _rackOuterLeft)
+                        : _rackOuterWidth,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppPalette.slate900,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: outboundConnections.isNotEmpty
+                              ? AppPalette.emerald500
+                              : AppPalette.slate600,
+                          width: 1.5,
+                        ),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x22000000),
+                            blurRadius: 8,
+                            offset: Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.compare_arrows_rounded,
+                            size: 16,
+                            color: AppPalette.sky400,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'BANDEJA AÉREA INTER-RACK (${outboundConnections.length} fibras/cables hacia otros Racks):',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: outboundConnections.isEmpty
+                                ? const Text(
+                                    'Ningún cable sale a otro Rack aún. Pulsa "+ Conectar con Otro Rack" para enlazar fibras/cables entre Racks.',
+                                    style: TextStyle(
+                                      color: AppPalette.slate400,
+                                      fontSize: 10,
+                                    ),
+                                    overflow:
+                                        TextOverflow.ellipsis,
+                                  )
+                                : SingleChildScrollView(
+                                    scrollDirection:
+                                        Axis.horizontal,
+                                    child: Row(
+                                      children:
+                                          outboundConnections
+                                              .map((c) {
+                                        final isSrcHere = c
+                                                .sourceInfo
+                                                .rackId ==
+                                            rack.id;
+                                        final localEnd =
+                                            isSrcHere
+                                                ? c.sourceInfo
+                                                : c.targetInfo;
+                                        final remoteEnd =
+                                            isSrcHere
+                                                ? c.targetInfo
+                                                : c.sourceInfo;
+                                        final cCol =
+                                            CableGeometryBuilder
+                                                .parseHexColor(
+                                          c.colorHex,
+                                        );
+                                        final isSel =
+                                            _selectedConnectionId ==
+                                                c.id;
+                                        return Padding(
+                                          padding:
+                                              const EdgeInsets
+                                                  .only(
+                                            right: 6,
+                                          ),
+                                          child: InkWell(
+                                            onTap: () {
+                                              setState(() {
+                                                _selectedConnectionId =
+                                                    c.id;
+                                                _selectedDeviceId =
+                                                    null;
+                                              });
+                                            },
+                                            onDoubleTap: () {
+                                              if (widget
+                                                      .onJumpToRackAndDevice !=
+                                                  null) {
+                                                widget
+                                                    .onJumpToRackAndDevice!(
+                                                  remoteEnd
+                                                      .rackId,
+                                                  remoteEnd
+                                                      .deviceId,
+                                                );
+                                              } else {
+                                                widget
+                                                    .onSwitchRack(
+                                                  remoteEnd
+                                                      .rackId,
+                                                );
+                                              }
+                                            },
+                                            child: Tooltip(
+                                              message:
+                                                  'Clic: Resaltar cable (${localEnd.deviceCode}:${localEnd.portNumber} ➔ ${remoteEnd.rackCode} ${remoteEnd.deviceCode}:${remoteEnd.portNumber})\nDoble Clic o icono ↗: Abrir ${remoteEnd.rackCode} en el Rack Editor',
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets
+                                                        .symmetric(
+                                                  horizontal: 8,
+                                                  vertical: 3,
+                                                ),
+                                                decoration:
+                                                    BoxDecoration(
+                                                  color: isSel
+                                                      ? cCol
+                                                      : const Color(
+                                                          0xFF1E293B,
+                                                        ),
+                                                  borderRadius:
+                                                      BorderRadius
+                                                          .circular(
+                                                    14,
+                                                  ),
+                                                  border:
+                                                      Border.all(
+                                                    color: cCol,
+                                                    width: 1.5,
+                                                  ),
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize
+                                                          .min,
+                                                  children: [
+                                                    Container(
+                                                      width: 7,
+                                                      height: 7,
+                                                      decoration:
+                                                          BoxDecoration(
+                                                        color: isSel
+                                                            ? Colors.white
+                                                            : cCol,
+                                                        shape: BoxShape
+                                                            .circle,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(
+                                                      width: 5,
+                                                    ),
+                                                    Text(
+                                                      '${localEnd.deviceCode}:${localEnd.portNumber} ⇢ ${remoteEnd.rackCode} (${remoteEnd.deviceCode}:${remoteEnd.portNumber})',
+                                                      style:
+                                                          const TextStyle(
+                                                        color: Colors
+                                                            .white,
+                                                        fontSize:
+                                                            9.8,
+                                                        fontWeight:
+                                                            FontWeight.w700,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(
+                                                      width: 5,
+                                                    ),
+                                                    InkWell(
+                                                      onTap: () {
+                                                        if (widget.onJumpToRackAndDevice !=
+                                                            null) {
+                                                          widget.onJumpToRackAndDevice!(
+                                                            remoteEnd.rackId,
+                                                            remoteEnd.deviceId,
+                                                          );
+                                                        } else {
+                                                          widget.onSwitchRack(
+                                                            remoteEnd.rackId,
+                                                          );
+                                                        }
+                                                      },
+                                                      child:
+                                                          const Icon(
+                                                        Icons
+                                                            .open_in_new,
+                                                        size:
+                                                            11,
+                                                        color: Color(
+                                                          0xFF38BDF8,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ),
+                          ),
+                          if (_canEdit) ...[
+                            const SizedBox(width: 8),
+                            InkWell(
+                              onTap: () =>
+                                  _showInterRackConnectionDialog(),
+                              child: Container(
+                                padding:
+                                    const EdgeInsets.symmetric(
+                                  horizontal: 9,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color:
+                                      AppPalette.sky600,
+                                  borderRadius:
+                                      BorderRadius.circular(6),
+                                ),
+                                child: const Row(
+                                  mainAxisSize:
+                                      MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.add_link,
+                                      size: 13,
+                                      color: Colors.white,
+                                    ),
+                                    SizedBox(width: 4),
+                                    Text(
+                                      '+ Conectar con Otro Rack',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight:
+                                            FontWeight.w800,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+  }
+
+  /// Barra superior del editor: migas, selección activa y acciones del rack.
+  Widget _buildBarraSuperior(RackDetailModel rack, Map<String, dynamic> bc, RackDeviceModel? selDev, ConnectionModel? selConn, int? nextFreeUpU, int? nextFreeDownU) {
+    return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(bottom: BorderSide(color: AppPalette.slate200)),
+          ),
+          child: Row(
+            children: [
+              IconButton(
+                onPressed: widget.onBackToLocations,
+                icon: const Icon(Icons.arrow_back_rounded, size: 20),
+                tooltip: 'Volver al Mapa de Sedes y Pasillos',
+              ),
+            const SizedBox(width: 6),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  rack.name,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: AppPalette.slate900,
+                  ),
+                ),
+                InkWell(
+                  onTap: widget.onBackToLocations,
+                  child: Text(
+                    'PBX  >  Locations  >  ${bc['location_code']}  >  ${bc['room_name']?.toString().split(' ').first ?? '28'}  >  ${rack.code}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppPalette.slate500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(width: 14),
+            // Resumen de Heartbeat en este Rack: Gris (Sin HB), Verde (OK), Naranja (Parcial), Rojo (Caído)
+            Builder(
+              builder: (_) {
+                final physDevs = rack.devices
+                    .where((d) => !d.isExternalFeed)
+                    .toList();
+                final unmonCnt =
+                    physDevs.where((d) => !d.monitoringEnabled).length;
+                final monDevs =
+                    physDevs.where((d) => d.monitoringEnabled).toList();
+                final onlineCnt =
+                    monDevs.where((d) => d.status == 'online').length;
+                final offlineCnt =
+                    monDevs.where((d) => d.status == 'offline').length;
+                final warnCnt = monDevs.length - onlineCnt - offlineCnt;
+                return Tooltip(
+                  message:
+                      'Heartbeat en este Rack:\n⚪ Gris ($unmonCnt): Heartbeat desactivado\n🟢 Verde ($onlineCnt): Todos los chequeos OK\n🟠 Naranja ($warnCnt): Fallo parcial (1+ chequeo falla)\n🔴 Rojo ($offlineCnt): Todos los chequeos fallan',
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppPalette.slate50,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: offlineCnt > 0
+                            ? AppPalette.red300
+                            : (warnCnt > 0
+                                ? const Color(0xFFFDE68A)
+                                : AppPalette.slate300),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.monitor_heart_outlined,
+                          size: 14,
+                          color: AppPalette.slate900,
+                        ),
+                        const SizedBox(width: 5),
+                        const Text(
+                          'HB:',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: AppPalette.slate900,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        // Gris: Sin Heartbeat
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: const BoxDecoration(
+                            color: AppPalette.slate400,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          '$unmonCnt',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: AppPalette.slate500,
+                          ),
+                        ),
+                        const SizedBox(width: 7),
+                        // Verde: OK
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: const BoxDecoration(
+                            color: AppPalette.green600,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          '$onlineCnt',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: AppPalette.green700,
+                          ),
+                        ),
+                        const SizedBox(width: 7),
+                        // Naranja: Fallo parcial
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: const BoxDecoration(
+                            color: AppPalette.amber600,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          '$warnCnt',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: AppPalette.amber700,
+                          ),
+                        ),
+                        const SizedBox(width: 7),
+                        // Rojo: Fallo total
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: const BoxDecoration(
+                            color: AppPalette.red600,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          '$offlineCnt',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: AppPalette.red700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+            const Spacer(),
+
+            // Selector / Buscador rápido de Equipos o Alarmas en este Rack (con resaltado de fondo gris)
+            PopupMenuButton<int>(
+              tooltip:
+                  'Buscar o localizar un equipo / alarma en este Rack (resaltado con fondo gris)',
+              onSelected: (devId) {
+                setState(() {
+                  _selectedDeviceId = devId;
+                  _highlightedDeviceId = devId;
+                });
+              },
+              itemBuilder: (ctx) {
+                final list = rack.devices
+                    .where((d) => !d.isExternalFeed)
+                    .toList()
+                  ..sort((a, b) => b.startU.compareTo(a.startU));
+                return list.map((d) {
+                  final isAlarm =
+                      d.monitoringEnabled && d.status != 'online';
+                  return PopupMenuItem<int>(
+                    value: d.id,
+                    child: Row(
+                      children: [
+                        Icon(
+                          isAlarm
+                              ? Icons.warning_amber_rounded
+                              : (d.isRackTray
+                                  ? Icons.inbox_outlined
+                                  : Icons.dns_outlined),
+                          size: 16,
+                          color: isAlarm
+                              ? AppPalette.red600
+                              : AppPalette.slate700,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'U${d.startU} • ${d.code} — ${d.name}${d.isRackTray && d.trayItems.isNotEmpty ? ' [${d.trayItems.length} mini-eq]' : ''}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: d.id == _highlightedDeviceId ||
+                                      d.id == _selectedDeviceId
+                                  ? FontWeight.w800
+                                  : FontWeight.w600,
+                              color: isAlarm
+                                  ? AppPalette.red700
+                                  : AppPalette.slate900,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList();
+              },
+              child: Container(
+                margin: const EdgeInsets.only(right: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: _highlightedDeviceId != null
+                      ? AppPalette.slate200
+                      : AppPalette.slate50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppPalette.slate300),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.search_rounded,
+                      size: 15,
+                      color: AppPalette.slate700,
+                    ),
+                    SizedBox(width: 5),
+                    Text(
+                      'Localizar en Rack',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppPalette.slate800,
+                      ),
+                    ),
+                    SizedBox(width: 3),
+                    Icon(
+                      Icons.arrow_drop_down,
+                      size: 16,
+                      color: AppPalette.slate600,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // Conmutador directo en barra superior: [Front | Back | Front & Back]
+            Container(
+              margin: const EdgeInsets.only(right: 10),
+              decoration: BoxDecoration(
+                color: AppPalette.slate50,
+                borderRadius: BorderRadius.circular(7),
+                border: Border.all(color: AppPalette.slate300),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _FaceToggleButton(
+                    label: 'Front',
+                    active: _activeFace == 'front',
+                    onTap: () => _setFaceMode('front'),
+                  ),
+                  _FaceToggleButton(
+                    label: 'Back',
+                    active: _activeFace == 'back',
+                    onTap: () => _setFaceMode('back'),
+                  ),
+                  _FaceToggleButton(
+                    label: 'Front & Back',
+                    active: _activeFace == 'both',
+                    onTap: () => _setFaceMode('both'),
+                  ),
+                ],
+              ),
+            ),
+
+            // Barra rápida cuando hay un equipo seleccionado: Subir 1U, Bajar 1U, Ajustar U ocupadas, Equipos en Bandeja, Foto, Cable Inter-Rack, Borrar Equipo
+            if (_canEdit && selDev != null && !selDev.isExternalFeed)
+              Container(
+                margin: const EdgeInsets.only(right: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: AppPalette.blue50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppPalette.blue300),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${selDev.code} (U${selDev.startU}•${selDev.uHeight}U): ',
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                        color: AppPalette.blue900,
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: nextFreeUpU != null
+                          ? () => _moveDeviceToU(selDev, nextFreeUpU)
+                          : null,
+                      icon: const Icon(Icons.arrow_upward_rounded, size: 15),
+                      tooltip: nextFreeUpU != null
+                          ? 'Subir a siguiente posición con ${selDev.uHeight}U libres (U$nextFreeUpU)'
+                          : 'No hay ${selDev.uHeight}U libres por encima',
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    IconButton(
+                      onPressed: nextFreeDownU != null
+                          ? () => _moveDeviceToU(selDev, nextFreeDownU)
+                          : null,
+                      icon: const Icon(
+                        Icons.arrow_downward_rounded,
+                        size: 15,
+                      ),
+                      tooltip: nextFreeDownU != null
+                          ? 'Bajar a siguiente posición con ${selDev.uHeight}U libres (U$nextFreeDownU)'
+                          : 'No hay ${selDev.uHeight}U libres por debajo',
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    // Control rápido de cuántas U ocupa (especialmente útil para Bandejas y equipos misceláneos)
+                    Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: AppPalette.blue300),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          InkWell(
+                            onTap: selDev.uHeight > 1
+                                ? () => _quickAdjustDeviceUHeight(
+                                      selDev,
+                                      selDev.uHeight - 1,
+                                    )
+                                : null,
+                            child: const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 3),
+                              child: Icon(
+                                Icons.remove,
+                                size: 12,
+                                color: AppPalette.blue700,
+                              ),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 3,
+                            ),
+                            child: Text(
+                              '${selDev.uHeight}U',
+                              style: const TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w800,
+                                color: AppPalette.blue900,
+                              ),
+                            ),
+                          ),
+                          InkWell(
+                            onTap: selDev.uHeight < 16
+                                ? () => _quickAdjustDeviceUHeight(
+                                      selDev,
+                                      selDev.uHeight + 1,
+                                    )
+                                : null,
+                            child: const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 3),
+                              child: Icon(
+                                Icons.add,
+                                size: 12,
+                                color: AppPalette.blue700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (selDev.isRackTray)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: FilledButton.tonalIcon(
+                          onPressed: () =>
+                              _showManageTrayItemsDialog(selDev),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFFEDE9FE),
+                            foregroundColor: const Color(0xFF6D28D9),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 4,
+                            ),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          icon: const Icon(Icons.inbox_outlined, size: 14),
+                          label: Text(
+                            '+ Equipos en Bandeja (${selDev.trayItems.length})',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ),
+                    TextButton.icon(
+                      onPressed: () =>
+                          _showConfigureDevicePortsDialog(selDev),
+                      icon: const Icon(
+                        Icons.settings_input_component,
+                        size: 14,
+                      ),
+                      label: const Text(
+                        'Bocas F/B',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: () =>
+                          _showHardwarePhotoSearchDialog(device: selDev),
+                      icon: const Icon(Icons.photo_camera_outlined, size: 14),
+                      label: const Text(
+                        'Foto',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: () => _showInterRackConnectionDialog(
+                        initialSourceDev: selDev,
+                      ),
+                      icon: const Icon(Icons.compare_arrows, size: 14),
+                      label: const Text(
+                        'A Otro Rack',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: () => _showMoveDeviceToUDialog(selDev),
+                      icon: const Icon(Icons.swap_vert, size: 14),
+                      label: const Text(
+                        'Mover a U...',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: () => _quickDeleteDevice(selDev),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppPalette.red600,
+                      ),
+                      icon: const Icon(Icons.delete_outline, size: 15),
+                      label: const Text(
+                        'Borrar',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            // Barra rápida cuando hay un cable seleccionado: Borrar Cable en 1 clic
+            if (_canEdit && selConn != null)
+              Container(
+                margin: const EdgeInsets.only(right: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: AppPalette.red50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppPalette.red300),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Cable ${selConn.sourceInfo.deviceCode}:${selConn.sourceInfo.portNumber} ➔ ${selConn.targetInfo.deviceCode}:${selConn.targetInfo.portNumber}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: AppPalette.red800,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    TextButton.icon(
+                      onPressed: () async {
+                        await widget.api.deleteConnection(selConn.id);
+                        setState(() => _selectedConnectionId = null);
+                        await _loadRack();
+                      },
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppPalette.red600,
+                      ),
+                      icon: const Icon(Icons.link_off, size: 15),
+                      label: const Text(
+                        'Borrar Cable',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            if (_pendingSourcePort != null)
+              Container(
+                margin: const EdgeInsets.only(right: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: AppPalette.blue100,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: AppPalette.blue600),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.cable,
+                      size: 15,
+                      color: AppPalette.blue700,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Tirando desde ${_pendingSourceDevice?.code}:${_pendingSourcePort?.portNumber} — Clic en boca destino (o pulsa Esc para cancelar)',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: AppPalette.blue900,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: () {
+                        final srcDev = _pendingSourceDevice;
+                        final srcPort = _pendingSourcePort;
+                        setState(() {
+                          _pendingSourcePort = null;
+                          _pendingSourceDevice = null;
+                        });
+                        _showInterRackConnectionDialog(
+                          initialSourceDev: srcDev,
+                          initialSourcePort: srcPort,
+                        );
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppPalette.blue700,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.compare_arrows,
+                              size: 12,
+                              color: Colors.white,
+                            ),
+                            SizedBox(width: 4),
+                            Text(
+                              'Llevar a Otro Rack...',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: () => setState(() {
+                        _pendingSourcePort = null;
+                        _pendingSourceDevice = null;
+                      }),
+                      child: const Icon(
+                        Icons.close,
+                        size: 15,
+                        color: AppPalette.blue900,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (widget.onToggleKioskMode != null) ...[
+              OutlinedButton.icon(
+                onPressed: widget.onToggleKioskMode,
+                icon: const Icon(Icons.tv_rounded, size: 16),
+                label: const Text(
+                  'Modo Kiosco',
+                  style: TextStyle(fontSize: 12),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppPalette.slate900,
+                  side: const BorderSide(color: AppPalette.slate400),
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
+            if (_canConnectRemote)
+              OutlinedButton.icon(
+                onPressed: () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  await widget.api.pingAllRackDevices(rack.id);
+                  await _loadRack();
+                  if (mounted) {
+                    messenger.aviso('Chequeo de Ping completado en todos los equipos del rack.');
+                  }
+                },
+                icon: const Icon(Icons.network_ping, size: 16),
+                label:
+                    const Text('Ping Rack', style: TextStyle(fontSize: 12)),
+              ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: () {
+                final url = Uri.parse(
+                  widget.api.getExcelExportUrl(rackId: rack.id),
+                );
+                launchUrl(url, mode: LaunchMode.externalApplication);
+              },
+              icon: const Icon(Icons.table_view_outlined, size: 16),
+              label:
+                  const Text('Excel (.xlsx)', style: TextStyle(fontSize: 12)),
+            ),
+            if (_canEdit) ...[
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: _confirmDeleteCurrentRack,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppPalette.red600,
+                  side: const BorderSide(color: AppPalette.red300),
+                ),
+                icon: const Icon(Icons.delete_outline, size: 16),
+                label: const Text(
+                  'Eliminar Rack',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+  }
+
   Widget _buildPerforated19InchRail(int totalUnits, {bool isLeft = true}) {
     return Container(
       decoration: const BoxDecoration(
