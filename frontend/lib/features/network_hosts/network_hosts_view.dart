@@ -1,28 +1,11 @@
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import '../../core/theme.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api_client.dart';
-
-class AppTheme {
-  static const Color bgPrimary = Color(0xFFF8FAFC);
-  static const Color bgSecondary = Color(0xFFFFFFFF);
-  static const Color bgCard = Color(0xFFF1F5F9);
-  static const Color bgElevated = Color(0xFFE2E8F0);
-  static const Color border = Color(0xFFCBD5E1);
-  static const Color textPrimary = Color(0xFF0F172A);
-  static const Color textSecondary = Color(0xFF334155);
-  static const Color textMuted = Color(0xFF64748B);
-  static const Color accentCyan = Color(0xFF0284C7);
-  static const Color accentBlue = Color(0xFF2563EB);
-  static const Color accentPurple = Color(0xFF7C3AED);
-  static const Color accentTeal = Color(0xFF0D9488);
-  static const Color success = Color(0xFF16A34A);
-  static const Color warning = Color(0xFFD97706);
-  static const Color error = Color(0xFFDC2626);
-}
 
 class NetworkHostsView extends StatefulWidget {
   final RackDocApiClient api;
@@ -3088,7 +3071,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                                 vertical: 2,
                               ),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF0F172A),
+                                color: AppPalette.slate900,
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: const Row(
@@ -3097,7 +3080,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                                   Icon(
                                     Icons.terminal_rounded,
                                     size: 10,
-                                    color: Color(0xFF38BDF8),
+                                    color: AppPalette.sky400,
                                   ),
                                   SizedBox(width: 3),
                                   Text(
@@ -4050,7 +4033,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                               onPressed: () =>
                                   _showSshWebConsoleDialog(sn, host),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF0F172A),
+                                backgroundColor: AppPalette.slate900,
                                 foregroundColor: Colors.white,
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 10,
@@ -4060,7 +4043,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                               icon: const Icon(
                                 Icons.terminal_rounded,
                                 size: 13,
-                                color: Color(0xFF38BDF8),
+                                color: AppPalette.sky400,
                               ),
                               label: Text(
                                 'SSH ${sn['ssh_user'] ?? 'root'}@${host['ssh_host'] ?? host['heartbeat_ip']}',
@@ -9601,7 +9584,7 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                     height: 260,
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0F172A),
+                      color: AppPalette.slate900,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: SingleChildScrollView(

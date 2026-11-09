@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'core/theme.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'core/api_client.dart';
@@ -26,8 +27,8 @@ class RackDocApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        colorSchemeSeed: const Color(0xFF1E3A8A),
-        scaffoldBackgroundColor: const Color(0xFFF8FAFC),
+        colorSchemeSeed: AppPalette.blue900,
+        scaffoldBackgroundColor: AppPalette.slate50,
         fontFamily: 'SF Pro Text',
         snackBarTheme: SnackBarThemeData(
           behavior: SnackBarBehavior.floating,
@@ -354,7 +355,7 @@ class _RackDocShellState extends State<RackDocShell> {
         builder: (ctx, setModal) => AlertDialog(
           title: const Row(
             children: [
-              Icon(Icons.lock_person_outlined, color: Color(0xFF1E3A8A)),
+              Icon(Icons.lock_person_outlined, color: AppPalette.blue900),
               SizedBox(width: 8),
               Text('Cambiar de Usuario (Requiere Contraseña)'),
             ],
@@ -367,7 +368,7 @@ class _RackDocShellState extends State<RackDocShell> {
               children: [
                 const Text(
                   'Introduce el usuario y la contraseña para cambiar de sesión (Local .env o Active Directory):',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF475569)),
+                  style: TextStyle(fontSize: 12, color: AppPalette.slate600),
                 ),
                 const SizedBox(height: 12),
                 Row(
@@ -467,16 +468,16 @@ class _RackDocShellState extends State<RackDocShell> {
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFEF2F2),
+                      color: AppPalette.red50,
                       borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: const Color(0xFFFECACA)),
+                      border: Border.all(color: AppPalette.red200),
                     ),
                     child: Text(
                       authError!,
                       style: const TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFFDC2626),
+                        color: AppPalette.red600,
                       ),
                     ),
                   ),
@@ -487,7 +488,7 @@ class _RackDocShellState extends State<RackDocShell> {
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF0F172A),
+                    color: AppPalette.slate900,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -501,13 +502,13 @@ class _RackDocShellState extends State<RackDocShell> {
                         dense: true,
                         visualDensity: VisualDensity.compact,
                         selected: isSel,
-                        selectedTileColor: const Color(0xFFEFF6FF),
+                        selectedTileColor: AppPalette.blue50,
                         leading: Icon(
                           u.authSource == 'ad'
                               ? Icons.domain_verification
                               : Icons.person_outline,
                           size: 18,
-                          color: const Color(0xFF1E3A8A),
+                          color: AppPalette.blue900,
                         ),
                         title: Text(
                           '${u.username} — ${u.fullName}',
@@ -523,14 +524,14 @@ class _RackDocShellState extends State<RackDocShell> {
                         trailing: isSel
                             ? const Icon(
                                 Icons.check_circle,
-                                color: Color(0xFF16A34A),
+                                color: AppPalette.green600,
                                 size: 18,
                               )
                             : const Text(
                                 'Seleccionar',
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: Color(0xFF2563EB),
+                                  color: AppPalette.blue600,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -569,11 +570,11 @@ class _RackDocShellState extends State<RackDocShell> {
               icon: const Icon(
                 Icons.logout,
                 size: 15,
-                color: Color(0xFFDC2626),
+                color: AppPalette.red600,
               ),
               label: const Text(
                 'Cerrar Sesión',
-                style: TextStyle(color: Color(0xFFDC2626)),
+                style: TextStyle(color: AppPalette.red600),
               ),
             ),
             TextButton(
@@ -618,7 +619,7 @@ class _RackDocShellState extends State<RackDocShell> {
         builder: (ctx, setModal) => AlertDialog(
           title: const Row(
             children: [
-              Icon(Icons.upload_file_rounded, color: Color(0xFF15803D)),
+              Icon(Icons.upload_file_rounded, color: AppPalette.green700),
               SizedBox(width: 8),
               Text('Importar Datos desde Excel (.xlsx)'),
             ],
@@ -632,9 +633,9 @@ class _RackDocShellState extends State<RackDocShell> {
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF0FDF4),
+                    color: AppPalette.green50,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFF86EFAC)),
+                    border: Border.all(color: AppPalette.green300),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -644,7 +645,7 @@ class _RackDocShellState extends State<RackDocShell> {
                           Icon(
                             Icons.description_outlined,
                             size: 18,
-                            color: Color(0xFF15803D),
+                            color: AppPalette.green700,
                           ),
                           SizedBox(width: 6),
                           Text(
@@ -673,8 +674,8 @@ class _RackDocShellState extends State<RackDocShell> {
                         },
                         style: OutlinedButton.styleFrom(
                           backgroundColor: Colors.white,
-                          foregroundColor: const Color(0xFF15803D),
-                          side: const BorderSide(color: Color(0xFF16A34A)),
+                          foregroundColor: AppPalette.green700,
+                          side: const BorderSide(color: AppPalette.green600),
                         ),
                         icon: const Icon(Icons.download_rounded, size: 16),
                         label: const Text(
@@ -692,9 +693,9 @@ class _RackDocShellState extends State<RackDocShell> {
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
+                    color: AppPalette.slate50,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                    border: Border.all(color: AppPalette.slate300),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -704,7 +705,7 @@ class _RackDocShellState extends State<RackDocShell> {
                           Icon(
                             Icons.cloud_upload_outlined,
                             size: 18,
-                            color: Color(0xFF1E3A8A),
+                            color: AppPalette.blue900,
                           ),
                           SizedBox(width: 6),
                           Text(
@@ -712,7 +713,7 @@ class _RackDocShellState extends State<RackDocShell> {
                             style: TextStyle(
                               fontSize: 12.5,
                               fontWeight: FontWeight.w800,
-                              color: Color(0xFF0F172A),
+                              color: AppPalette.slate900,
                             ),
                           ),
                         ],
@@ -722,7 +723,7 @@ class _RackDocShellState extends State<RackDocShell> {
                         'RackDoc8 importará automáticamente las Sedes, Plantas, Racks y montará cada Equipo/Host en su unidad U correspondiente.',
                         style: TextStyle(
                           fontSize: 11.5,
-                          color: Color(0xFF475569),
+                          color: AppPalette.slate600,
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -752,7 +753,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                       content: Text(
                                         'Importación de Excel completada correctamente.',
                                       ),
-                                      backgroundColor: Color(0xFF15803D),
+                                      backgroundColor: AppPalette.green700,
                                     ),
                                   );
                                 } catch (e) {
@@ -765,7 +766,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                 }
                               },
                         style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFF1E3A8A),
+                          backgroundColor: AppPalette.blue900,
                         ),
                         icon: Icon(
                           importing
@@ -791,16 +792,16 @@ class _RackDocShellState extends State<RackDocShell> {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFEF2F2),
+                      color: AppPalette.red50,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFFFECACA)),
+                      border: Border.all(color: AppPalette.red200),
                     ),
                     child: Text(
                       'Error: $importError',
                       style: const TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFFDC2626),
+                        color: AppPalette.red600,
                       ),
                     ),
                   ),
@@ -810,9 +811,9 @@ class _RackDocShellState extends State<RackDocShell> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFEFF6FF),
+                      color: AppPalette.blue50,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFF93C5FD)),
+                      border: Border.all(color: AppPalette.blue300),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -822,7 +823,7 @@ class _RackDocShellState extends State<RackDocShell> {
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w800,
-                            color: Color(0xFF1E3A8A),
+                            color: AppPalette.blue900,
                           ),
                         ),
                         const SizedBox(height: 4),
@@ -832,7 +833,7 @@ class _RackDocShellState extends State<RackDocShell> {
                           '• Equipos creados: ${importResult!['devices_created'] ?? 0}  |  Equipos actualizados: ${importResult!['devices_updated'] ?? 0}',
                           style: const TextStyle(
                             fontSize: 11.5,
-                            color: Color(0xFF1E293B),
+                            color: AppPalette.slate800,
                           ),
                         ),
                         if ((importResult!['errors'] as List?)?.isNotEmpty ==
@@ -842,7 +843,7 @@ class _RackDocShellState extends State<RackDocShell> {
                             'Avisos (${(importResult!['errors'] as List).length}): ${(importResult!['errors'] as List).take(3).join(' | ')}',
                             style: const TextStyle(
                               fontSize: 10.5,
-                              color: Color(0xFFB45309),
+                              color: AppPalette.amber700,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -867,7 +868,7 @@ class _RackDocShellState extends State<RackDocShell> {
 
   Widget _buildLoginGateScreen() {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: AppPalette.slate900,
       body: Center(
         child: Container(
           width: 440,
@@ -893,7 +894,7 @@ class _RackDocShellState extends State<RackDocShell> {
                     width: 42,
                     height: 42,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1E3A8A),
+                      color: AppPalette.blue900,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Icon(
@@ -912,14 +913,14 @@ class _RackDocShellState extends State<RackDocShell> {
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w900,
-                            color: Color(0xFF0F172A),
+                            color: AppPalette.slate900,
                           ),
                         ),
                         Text(
                           'Acceso Seguro — Autenticación Local (.env) / Active Directory',
                           style: TextStyle(
                             fontSize: 11.5,
-                            color: Color(0xFF64748B),
+                            color: AppPalette.slate500,
                           ),
                         ),
                       ],
@@ -954,16 +955,16 @@ class _RackDocShellState extends State<RackDocShell> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFEF2F2),
+                    color: AppPalette.red50,
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFFFECACA)),
+                    border: Border.all(color: AppPalette.red200),
                   ),
                   child: Text(
                     _gateAuthError!,
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFFDC2626),
+                      color: AppPalette.red600,
                     ),
                   ),
                 ),
@@ -974,7 +975,7 @@ class _RackDocShellState extends State<RackDocShell> {
                 child: FilledButton.icon(
                   onPressed: _gateAuthenticating ? null : _performGateLogin,
                   style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF1E3A8A),
+                    backgroundColor: AppPalette.blue900,
                   ),
                   icon: const Icon(Icons.login, size: 18),
                   label: Text(
@@ -992,13 +993,13 @@ class _RackDocShellState extends State<RackDocShell> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF8FAFC),
+                  color: AppPalette.slate50,
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                  border: Border.all(color: AppPalette.slate200),
                 ),
                 child: const Text(
                   'Credenciales iniciales por defecto (.env): usuario "admin" / contraseña "admin" (o "rackdoc123" para usuarios AD/locales de demostración).',
-                  style: TextStyle(fontSize: 11, color: Color(0xFF475569)),
+                  style: TextStyle(fontSize: 11, color: AppPalette.slate600),
                 ),
               ),
               const SizedBox(height: 12),
@@ -1014,7 +1015,7 @@ class _RackDocShellState extends State<RackDocShell> {
                     vertical: 8,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0F172A),
+                    color: AppPalette.slate900,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Row(
@@ -1023,7 +1024,7 @@ class _RackDocShellState extends State<RackDocShell> {
                       Icon(
                         Icons.code_rounded,
                         size: 16,
-                        color: Color(0xFF38BDF8),
+                        color: AppPalette.sky400,
                       ),
                       SizedBox(width: 8),
                       Flexible(
@@ -1041,7 +1042,7 @@ class _RackDocShellState extends State<RackDocShell> {
                       Icon(
                         Icons.open_in_new_rounded,
                         size: 13,
-                        color: Color(0xFF94A3B8),
+                        color: AppPalette.slate400,
                       ),
                     ],
                   ),
@@ -1072,7 +1073,7 @@ class _RackDocShellState extends State<RackDocShell> {
                   width: 245,
                   decoration: const BoxDecoration(
                     color: Colors.white,
-                    border: Border(right: BorderSide(color: Color(0xFFE2E8F0))),
+                    border: Border(right: BorderSide(color: AppPalette.slate200)),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1085,7 +1086,7 @@ class _RackDocShellState extends State<RackDocShell> {
                         width: 32,
                         height: 32,
                         decoration: BoxDecoration(
-                          color: const Color(0xFF0F172A),
+                          color: AppPalette.slate900,
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: const Icon(
@@ -1104,14 +1105,14 @@ class _RackDocShellState extends State<RackDocShell> {
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w800,
-                                color: Color(0xFF0F172A),
+                                color: AppPalette.slate900,
                               ),
                             ),
                             Text(
                               'PBX Datacenter',
                               style: TextStyle(
                                 fontSize: 11,
-                                color: Color(0xFF64748B),
+                                color: AppPalette.slate500,
                               ),
                             ),
                           ],
@@ -1132,16 +1133,16 @@ class _RackDocShellState extends State<RackDocShell> {
                           child: Container(
                             padding: const EdgeInsets.all(6),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF1F5F9),
+                              color: AppPalette.slate100,
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(
-                                color: const Color(0xFFCBD5E1),
+                                color: AppPalette.slate300,
                               ),
                             ),
                             child: const Icon(
                               Icons.code_rounded,
                               size: 18,
-                              color: Color(0xFF0F172A),
+                              color: AppPalette.slate900,
                             ),
                           ),
                         ),
@@ -1158,21 +1159,21 @@ class _RackDocShellState extends State<RackDocShell> {
                             padding: const EdgeInsets.all(6),
                             decoration: BoxDecoration(
                               color: _activeNav == 'admin'
-                                  ? const Color(0xFFDBEAFE)
-                                  : const Color(0xFFF1F5F9),
+                                  ? AppPalette.blue100
+                                  : AppPalette.slate100,
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(
                                 color: _activeNav == 'admin'
-                                    ? const Color(0xFF2563EB)
-                                    : const Color(0xFFCBD5E1),
+                                    ? AppPalette.blue600
+                                    : AppPalette.slate300,
                               ),
                             ),
                             child: Icon(
                               Icons.settings_rounded,
                               size: 18,
                               color: _activeNav == 'admin'
-                                  ? const Color(0xFF1D4ED8)
-                                  : const Color(0xFF334155),
+                                  ? AppPalette.blue700
+                                  : AppPalette.slate700,
                             ),
                           ),
                         ),
@@ -1193,16 +1194,16 @@ class _RackDocShellState extends State<RackDocShell> {
                         vertical: 8,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
+                        color: AppPalette.slate50,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                        border: Border.all(color: AppPalette.slate300),
                       ),
                       child: Row(
                         children: [
                           const Icon(
                             Icons.verified_user_outlined,
                             size: 16,
-                            color: Color(0xFF1E3A8A),
+                            color: AppPalette.blue900,
                           ),
                           const SizedBox(width: 8),
                           Expanded(
@@ -1214,7 +1215,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                   style: const TextStyle(
                                     fontSize: 11.5,
                                     fontWeight: FontWeight.w800,
-                                    color: Color(0xFF0F172A),
+                                    color: AppPalette.slate900,
                                   ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -1223,7 +1224,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                   style: const TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.w600,
-                                    color: Color(0xFF2563EB),
+                                    color: AppPalette.blue600,
                                   ),
                                 ),
                               ],
@@ -1234,7 +1235,7 @@ class _RackDocShellState extends State<RackDocShell> {
                             child: Icon(
                               Icons.swap_horiz_rounded,
                               size: 16,
-                              color: Color(0xFF64748B),
+                              color: AppPalette.slate500,
                             ),
                           ),
                         ],
@@ -1297,9 +1298,9 @@ class _RackDocShellState extends State<RackDocShell> {
                     child: OutlinedButton.icon(
                       onPressed: () => _setKioskMode(true),
                       style: OutlinedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0F172A),
+                        backgroundColor: AppPalette.slate900,
                         foregroundColor: Colors.white,
-                        side: const BorderSide(color: Color(0xFF38BDF8)),
+                        side: const BorderSide(color: AppPalette.sky400),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 10,
                           vertical: 8,
@@ -1308,7 +1309,7 @@ class _RackDocShellState extends State<RackDocShell> {
                       icon: const Icon(
                         Icons.tv_rounded,
                         size: 16,
-                        color: Color(0xFF38BDF8),
+                        color: AppPalette.sky400,
                       ),
                       label: const Text(
                         'Modo Kiosco (Monitor)',
@@ -1330,7 +1331,7 @@ class _RackDocShellState extends State<RackDocShell> {
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w700,
-                            color: Color(0xFF94A3B8),
+                            color: AppPalette.slate400,
                             letterSpacing: 0.6,
                           ),
                         ),
@@ -1354,7 +1355,7 @@ class _RackDocShellState extends State<RackDocShell> {
                             child: Icon(
                               Icons.unfold_more_rounded,
                               size: 14,
-                              color: Color(0xFF64748B),
+                              color: AppPalette.slate500,
                             ),
                           ),
                         ),
@@ -1375,7 +1376,7 @@ class _RackDocShellState extends State<RackDocShell> {
                             child: Icon(
                               Icons.unfold_less_rounded,
                               size: 14,
-                              color: Color(0xFF64748B),
+                              color: AppPalette.slate500,
                             ),
                           ),
                         ),
@@ -1402,7 +1403,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                   margin: const EdgeInsets.only(bottom: 2),
                                   decoration: BoxDecoration(
                                     color: isLocActive
-                                        ? const Color(0xFFEFF6FF)
+                                        ? AppPalette.blue50
                                         : Colors.transparent,
                                     borderRadius: BorderRadius.circular(6),
                                   ),
@@ -1436,8 +1437,8 @@ class _RackDocShellState extends State<RackDocShell> {
                                               Icons.play_arrow_rounded,
                                               size: 17,
                                               color: isLocExpanded
-                                                  ? const Color(0xFF1D4ED8)
-                                                  : const Color(0xFF475569),
+                                                  ? AppPalette.blue700
+                                                  : AppPalette.slate600,
                                             ),
                                           ),
                                         ),
@@ -1466,8 +1467,8 @@ class _RackDocShellState extends State<RackDocShell> {
                                                   Icons.business_rounded,
                                                   size: 15,
                                                   color: loc.offlineCount > 0
-                                                      ? const Color(0xFFDC2626)
-                                                      : const Color(0xFF0F172A),
+                                                      ? AppPalette.red600
+                                                      : AppPalette.slate900,
                                                 ),
                                                 const SizedBox(width: 6),
                                                 Expanded(
@@ -1517,7 +1518,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                                           fontWeight:
                                                               FontWeight.w600,
                                                           color:
-                                                              Color(0xFF475569),
+                                                              AppPalette.slate600,
                                                         ),
                                                       ),
                                                     ],
@@ -1560,7 +1561,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                                 ),
                                                 decoration: BoxDecoration(
                                                   color: isFloorActive
-                                                      ? const Color(0xFFF1F5F9)
+                                                      ? AppPalette.slate100
                                                       : Colors.transparent,
                                                   borderRadius:
                                                       BorderRadius.circular(6),
@@ -1776,7 +1777,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                                         style: const TextStyle(
                                                           fontSize: 9,
                                                           color:
-                                                              Color(0xFF64748B),
+                                                              AppPalette.slate500,
                                                         ),
                                                       ),
                                                       onTap: () =>
@@ -1840,7 +1841,7 @@ class _RackDocShellState extends State<RackDocShell> {
                             vertical: 7,
                           ),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF0F172A),
+                            color: AppPalette.slate900,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Row(
@@ -1849,7 +1850,7 @@ class _RackDocShellState extends State<RackDocShell> {
                               Icon(
                                 Icons.code_rounded,
                                 size: 14,
-                                color: Color(0xFF38BDF8),
+                                color: AppPalette.sky400,
                               ),
                               SizedBox(width: 6),
                               Flexible(
@@ -1867,7 +1868,7 @@ class _RackDocShellState extends State<RackDocShell> {
                               Icon(
                                 Icons.open_in_new_rounded,
                                 size: 12,
-                                color: Color(0xFF94A3B8),
+                                color: AppPalette.slate400,
                               ),
                             ],
                           ),
@@ -1906,7 +1907,7 @@ class _RackDocShellState extends State<RackDocShell> {
           duration: const Duration(milliseconds: 200),
           opacity: _kioskExitHovered ? 0.96 : 0.22,
           child: Material(
-            color: const Color(0xFF0F172A),
+            color: AppPalette.slate900,
             elevation: _kioskExitHovered ? 8 : 1,
             borderRadius: BorderRadius.circular(20),
             child: Container(
@@ -1918,8 +1919,8 @@ class _RackDocShellState extends State<RackDocShell> {
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
                   color: _kioskExitHovered
-                      ? const Color(0xFF38BDF8)
-                      : const Color(0xFF475569),
+                      ? AppPalette.sky400
+                      : AppPalette.slate600,
                   width: 1.0,
                 ),
               ),
@@ -1942,7 +1943,7 @@ class _RackDocShellState extends State<RackDocShell> {
                       width: 1,
                       height: 16,
                       margin: const EdgeInsets.symmetric(horizontal: 8),
-                      color: const Color(0xFF475569),
+                      color: AppPalette.slate600,
                     ),
                   ],
                   InkWell(
@@ -1959,7 +1960,7 @@ class _RackDocShellState extends State<RackDocShell> {
                           const Icon(
                             Icons.fullscreen_exit_rounded,
                             size: 16,
-                            color: Color(0xFF38BDF8),
+                            color: AppPalette.sky400,
                           ),
                           if (_kioskExitHovered) ...[
                             const SizedBox(width: 5),
@@ -1998,13 +1999,13 @@ class _RackDocShellState extends State<RackDocShell> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
-          color: active ? const Color(0xFF0284C7) : const Color(0xFF1E293B),
+          color: active ? AppPalette.sky600 : AppPalette.slate800,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: active ? Colors.white : const Color(0xFFCBD5E1),
+            color: active ? Colors.white : AppPalette.slate300,
             fontSize: 10.5,
             fontWeight: FontWeight.w700,
           ),
@@ -2025,12 +2026,12 @@ class _RackDocShellState extends State<RackDocShell> {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
+            border: Border.all(color: AppPalette.slate200),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.cloud_off, size: 42, color: Color(0xFFDC2626)),
+              const Icon(Icons.cloud_off, size: 42, color: AppPalette.red600),
               const SizedBox(height: 12),
               const Text(
                 'No se pudo conectar con el Backend de RackDoc',
@@ -2040,7 +2041,7 @@ class _RackDocShellState extends State<RackDocShell> {
               Text(
                 'Detalle: $_error',
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                style: const TextStyle(fontSize: 12, color: AppPalette.slate500),
               ),
               const SizedBox(height: 16),
               FilledButton.icon(
@@ -2378,13 +2379,13 @@ class _RackDocShellState extends State<RackDocShell> {
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF0F172A),
+                        color: AppPalette.slate900,
                       ),
                     ),
                     SizedBox(height: 4),
                     Text(
                       'Diferenciación línea por línea entre "Hierro" (Switches, Routers, Servidores, SAN/NAS, SAI, PDU) y Patch Panels boca a boca (ocupada o libre, qué aparato está conectado y qué IP tiene).',
-                      style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+                      style: TextStyle(fontSize: 13, color: AppPalette.slate500),
                     ),
                   ],
                 ),
@@ -2395,8 +2396,8 @@ class _RackDocShellState extends State<RackDocShell> {
                   icon: const Icon(Icons.tv_rounded, size: 17),
                   label: const Text('Modo Kiosco'),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF0F172A),
-                    side: const BorderSide(color: Color(0xFF94A3B8)),
+                    foregroundColor: AppPalette.slate900,
+                    side: const BorderSide(color: AppPalette.slate400),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -2420,7 +2421,7 @@ class _RackDocShellState extends State<RackDocShell> {
                   icon: const Icon(Icons.upload_file_rounded, size: 18),
                   label: const Text('Importar Excel (.xlsx)'),
                   style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF1E3A8A),
+                    backgroundColor: AppPalette.blue900,
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -2438,7 +2439,7 @@ class _RackDocShellState extends State<RackDocShell> {
                         : 'Exportar Todo a Excel (.xlsx)',
                   ),
                   style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF15803D),
+                    backgroundColor: AppPalette.green700,
                   ),
                 ),
               ],
@@ -2454,44 +2455,44 @@ class _RackDocShellState extends State<RackDocShell> {
                 value:
                     '${_locations.length} Sedes / $totalFloors Plantas / $totalRacks Racks ($totalRooms Salas)',
                 icon: Icons.public,
-                color: const Color(0xFF2563EB),
+                color: AppPalette.blue600,
               ),
               _DashboardCard(
                 title: 'Hierro en Rack (Equipos Activos)',
                 value: '$hierroCount Equipos Hierro • $pasivoCount Pasivos',
                 icon: Icons.dns_rounded,
-                color: const Color(0xFF4F46E5),
+                color: AppPalette.indigo600,
               ),
               _DashboardCard(
                 title: 'Patch Panels (Mapa de Bocas)',
                 value:
                     '${allPatchPanels.length} Panels • $occupiedPpBocas Ocup. / $freePpBocas Libres',
                 icon: Icons.settings_input_component_rounded,
-                color: const Color(0xFF0D9488),
+                color: AppPalette.teal600,
               ),
               _DashboardCard(
                 title: 'Sin Heartbeat (Gris)',
                 value: '⚪ $totalUnmonitored Desactivados',
                 icon: Icons.radio_button_unchecked_rounded,
-                color: const Color(0xFF64748B),
+                color: AppPalette.slate500,
               ),
               _DashboardCard(
                 title: 'Estado Online (Verde)',
                 value: '🟢 $totalOnline Online (de $totalMonitored act.)',
                 icon: Icons.check_circle_outline,
-                color: const Color(0xFF16A34A),
+                color: AppPalette.green600,
               ),
               _DashboardCard(
                 title: 'Fallo Parcial (Naranja)',
                 value: '🟠 $totalWarning Parcial (1+ chequeo)',
                 icon: Icons.warning_amber_rounded,
-                color: const Color(0xFFD97706),
+                color: AppPalette.amber600,
               ),
               _DashboardCard(
                 title: 'Fallo Total (Rojo)',
                 value: '🔴 $totalOffline Offline',
                 icon: Icons.error_outline,
-                color: const Color(0xFFDC2626),
+                color: AppPalette.red600,
               ),
             ],
           ),
@@ -2504,7 +2505,7 @@ class _RackDocShellState extends State<RackDocShell> {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFFCBD5E1)),
+              border: Border.all(color: AppPalette.slate300),
             ),
             child: Wrap(
               spacing: 16,
@@ -2517,7 +2518,7 @@ class _RackDocShellState extends State<RackDocShell> {
                     const Icon(
                       Icons.filter_alt_outlined,
                       size: 18,
-                      color: Color(0xFF1E3A8A),
+                      color: AppPalette.blue900,
                     ),
                     const SizedBox(width: 8),
                     const Text(
@@ -2525,7 +2526,7 @@ class _RackDocShellState extends State<RackDocShell> {
                       style: TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF0F172A),
+                        color: AppPalette.slate900,
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -2541,7 +2542,7 @@ class _RackDocShellState extends State<RackDocShell> {
                             vertical: 8,
                           ),
                           filled: true,
-                          fillColor: const Color(0xFFF8FAFC),
+                          fillColor: AppPalette.slate50,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
@@ -2641,7 +2642,7 @@ class _RackDocShellState extends State<RackDocShell> {
                         vertical: 8,
                       ),
                       filled: true,
-                      fillColor: const Color(0xFFF8FAFC),
+                      fillColor: AppPalette.slate50,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
@@ -2691,7 +2692,7 @@ class _RackDocShellState extends State<RackDocShell> {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
+              border: Border.all(color: AppPalette.slate200),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2700,7 +2701,7 @@ class _RackDocShellState extends State<RackDocShell> {
                   children: [
                     const Icon(
                       Icons.monitor_heart_rounded,
-                      color: Color(0xFF1E3A8A),
+                      color: AppPalette.blue900,
                       size: 20,
                     ),
                     const SizedBox(width: 8),
@@ -2709,7 +2710,7 @@ class _RackDocShellState extends State<RackDocShell> {
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF0F172A),
+                        color: AppPalette.slate900,
                       ),
                     ),
                     const Spacer(),
@@ -2769,11 +2770,11 @@ class _RackDocShellState extends State<RackDocShell> {
                               : null,
                           isDense: true,
                           filled: true,
-                          fillColor: const Color(0xFFF8FAFC),
+                          fillColor: AppPalette.slate50,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                             borderSide: const BorderSide(
-                              color: Color(0xFFCBD5E1),
+                              color: AppPalette.slate300,
                             ),
                           ),
                         ),
@@ -2789,7 +2790,7 @@ class _RackDocShellState extends State<RackDocShell> {
                           labelText: 'Filtrar Método Heartbeat',
                           isDense: true,
                           filled: true,
-                          fillColor: const Color(0xFFF8FAFC),
+                          fillColor: AppPalette.slate50,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
@@ -2838,7 +2839,7 @@ class _RackDocShellState extends State<RackDocShell> {
                           labelText: 'Organizar / Ordenar por',
                           isDense: true,
                           filled: true,
-                          fillColor: const Color(0xFFF8FAFC),
+                          fillColor: AppPalette.slate50,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
@@ -2897,7 +2898,7 @@ class _RackDocShellState extends State<RackDocShell> {
                     child: Center(
                       child: Text(
                         'No se encontraron sistemas monitorizados con los filtros actuales.',
-                        style: TextStyle(color: Color(0xFF64748B)),
+                        style: TextStyle(color: AppPalette.slate500),
                       ),
                     ),
                   )
@@ -2907,10 +2908,10 @@ class _RackDocShellState extends State<RackDocShell> {
                     final isOnline = st == 'online';
                     final isOffline = st == 'offline';
                     final stCol = isOnline
-                        ? const Color(0xFF16A34A)
+                        ? AppPalette.green600
                         : (isOffline
-                            ? const Color(0xFFDC2626)
-                            : const Color(0xFFD97706));
+                            ? AppPalette.red600
+                            : AppPalette.amber600);
                     final method = (sys['monitor_method'] ?? 'icmp')
                         .toString()
                         .toUpperCase();
@@ -2932,10 +2933,10 @@ class _RackDocShellState extends State<RackDocShell> {
                         ),
                         decoration: BoxDecoration(
                           color: isOffline
-                              ? const Color(0xFFFEF2F2)
+                              ? AppPalette.red50
                               : Colors.transparent,
                           border: const Border(
-                            bottom: BorderSide(color: Color(0xFFF1F5F9)),
+                            bottom: BorderSide(color: AppPalette.slate100),
                           ),
                         ),
                         child: Row(
@@ -2990,14 +2991,14 @@ class _RackDocShellState extends State<RackDocShell> {
                                     style: const TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w800,
-                                      color: Color(0xFF0F172A),
+                                      color: AppPalette.slate900,
                                     ),
                                   ),
                                   Text(
                                     '${sys['model_name']} • Hostname: ${sys['hostname']?.toString().isNotEmpty == true ? sys['hostname'] : '-'}',
                                     style: const TextStyle(
                                       fontSize: 11,
-                                      color: Color(0xFF64748B),
+                                      color: AppPalette.slate500,
                                     ),
                                   ),
                                 ],
@@ -3013,14 +3014,14 @@ class _RackDocShellState extends State<RackDocShell> {
                                     style: const TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w700,
-                                      color: Color(0xFF1E293B),
+                                      color: AppPalette.slate800,
                                     ),
                                   ),
                                   Text(
                                     'Heartbeat: $method (Puerto $port)${pingMs != null ? ' • $pingMs ms' : ''}',
                                     style: const TextStyle(
                                       fontSize: 11,
-                                      color: Color(0xFF475569),
+                                      color: AppPalette.slate600,
                                     ),
                                   ),
                                 ],
@@ -3036,14 +3037,14 @@ class _RackDocShellState extends State<RackDocShell> {
                                     style: const TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w700,
-                                      color: Color(0xFF1E3A8A),
+                                      color: AppPalette.blue900,
                                     ),
                                   ),
                                   Text(
                                     '${sys['floor_name']} • ${sys['rack_name']}',
                                     style: const TextStyle(
                                       fontSize: 10.5,
-                                      color: Color(0xFF64748B),
+                                      color: AppPalette.slate500,
                                     ),
                                   ),
                                 ],
@@ -3087,7 +3088,7 @@ class _RackDocShellState extends State<RackDocShell> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: AppPalette.slate200),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3096,7 +3097,7 @@ class _RackDocShellState extends State<RackDocShell> {
             children: [
               const Icon(
                 Icons.dns_rounded,
-                color: Color(0xFF4F46E5),
+                color: AppPalette.indigo600,
                 size: 21,
               ),
               const SizedBox(width: 8),
@@ -3109,13 +3110,13 @@ class _RackDocShellState extends State<RackDocShell> {
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF0F172A),
+                        color: AppPalette.slate900,
                       ),
                     ),
                     const SizedBox(height: 2),
                     const Text(
                       'Diferencia claramente qué hay montado en cada U del armario: equipos de "Hierro" activos (Switches, Routers, Firewalls, Servidores, SAN/NAS, SAI, PDUs) frente a Patch Panels y pasivos.',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                      style: TextStyle(fontSize: 12, color: AppPalette.slate500),
                     ),
                   ],
                 ),
@@ -3159,7 +3160,7 @@ class _RackDocShellState extends State<RackDocShell> {
               child: Center(
                 child: Text(
                   'No hay líneas de Rack para el filtro seleccionado.',
-                  style: TextStyle(color: Color(0xFF64748B)),
+                  style: TextStyle(color: AppPalette.slate500),
                 ),
               ),
             )
@@ -3170,10 +3171,10 @@ class _RackDocShellState extends State<RackDocShell> {
               final isPatchPanel = kg == 'patch_panel';
               final badgeText = (ln['equipment_type_badge'] ?? '').toString();
               final badgeColor = isHierro
-                  ? const Color(0xFF4F46E5)
+                  ? AppPalette.indigo600
                   : (isPatchPanel
-                      ? const Color(0xFF0D9488)
-                      : const Color(0xFF64748B));
+                      ? AppPalette.teal600
+                      : AppPalette.slate500);
 
               final st = (ln['status'] ?? 'unknown').toString().toLowerCase();
               final isOnline = st == 'online';
@@ -3189,10 +3190,10 @@ class _RackDocShellState extends State<RackDocShell> {
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   color: isHierro
-                      ? const Color(0xFFF8FAFC)
+                      ? AppPalette.slate50
                       : const Color(0xFFF0FDFA).withValues(alpha: 0.45),
                   border: const Border(
-                    bottom: BorderSide(color: Color(0xFFE2E8F0)),
+                    bottom: BorderSide(color: AppPalette.slate200),
                   ),
                 ),
                 child: Row(
@@ -3205,7 +3206,7 @@ class _RackDocShellState extends State<RackDocShell> {
                         vertical: 5,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF0F172A),
+                        color: AppPalette.slate900,
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Column(
@@ -3222,7 +3223,7 @@ class _RackDocShellState extends State<RackDocShell> {
                             '${ln['rack_code']} • ${ln['mounted_face']}',
                             style: const TextStyle(
                               fontSize: 9.5,
-                              color: Color(0xFF94A3B8),
+                              color: AppPalette.slate400,
                               fontWeight: FontWeight.w700,
                             ),
                             overflow: TextOverflow.ellipsis,
@@ -3282,14 +3283,14 @@ class _RackDocShellState extends State<RackDocShell> {
                             style: const TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w800,
-                              color: Color(0xFF0F172A),
+                              color: AppPalette.slate900,
                             ),
                           ),
                           Text(
                             '${ln['manufacturer']} ${ln['model_name']}${ln['hostname']?.toString().isNotEmpty == true ? ' • Host: ${ln['hostname']}' : ''}',
                             style: const TextStyle(
                               fontSize: 11,
-                              color: Color(0xFF64748B),
+                              color: AppPalette.slate500,
                             ),
                           ),
                         ],
@@ -3306,7 +3307,7 @@ class _RackDocShellState extends State<RackDocShell> {
                               const Icon(
                                 Icons.lan_outlined,
                                 size: 14,
-                                color: Color(0xFF334155),
+                                color: AppPalette.slate700,
                               ),
                               const SizedBox(width: 4),
                               Expanded(
@@ -3320,8 +3321,8 @@ class _RackDocShellState extends State<RackDocShell> {
                                     fontSize: 12,
                                     fontWeight: FontWeight.w800,
                                     color: ipStr.isNotEmpty
-                                        ? const Color(0xFF1D4ED8)
-                                        : const Color(0xFF64748B),
+                                        ? AppPalette.blue700
+                                        : AppPalette.slate500,
                                   ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -3342,11 +3343,11 @@ class _RackDocShellState extends State<RackDocShell> {
                               fontWeight: FontWeight.w700,
                               color: isHierro
                                   ? (isOnline
-                                      ? const Color(0xFF16A34A)
+                                      ? AppPalette.green600
                                       : (isOffline
-                                          ? const Color(0xFFDC2626)
-                                          : const Color(0xFF64748B)))
-                                  : const Color(0xFF0D9488),
+                                          ? AppPalette.red600
+                                          : AppPalette.slate500))
+                                  : AppPalette.teal600,
                             ),
                           ),
                         ],
@@ -3365,7 +3366,7 @@ class _RackDocShellState extends State<RackDocShell> {
                             style: const TextStyle(
                               fontSize: 11.5,
                               fontWeight: FontWeight.w700,
-                              color: Color(0xFF1E293B),
+                              color: AppPalette.slate800,
                             ),
                           ),
                           if (totPorts > 0) ...[
@@ -3375,10 +3376,10 @@ class _RackDocShellState extends State<RackDocShell> {
                               child: LinearProgressIndicator(
                                 value: (occPorts / totPorts).clamp(0.0, 1.0),
                                 minHeight: 6,
-                                backgroundColor: const Color(0xFFE2E8F0),
+                                backgroundColor: AppPalette.slate200,
                                 color: isPatchPanel
-                                    ? const Color(0xFF0D9488)
-                                    : const Color(0xFF4F46E5),
+                                    ? AppPalette.teal600
+                                    : AppPalette.indigo600,
                               ),
                             ),
                           ],
@@ -3438,7 +3439,7 @@ class _RackDocShellState extends State<RackDocShell> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: AppPalette.slate200),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3450,7 +3451,7 @@ class _RackDocShellState extends State<RackDocShell> {
             children: [
               const Icon(
                 Icons.settings_input_component_rounded,
-                color: Color(0xFF0D9488),
+                color: AppPalette.teal600,
                 size: 22,
               ),
               Column(
@@ -3461,13 +3462,13 @@ class _RackDocShellState extends State<RackDocShell> {
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w800,
-                      color: Color(0xFF0F172A),
+                      color: AppPalette.slate900,
                     ),
                   ),
                   const SizedBox(height: 2),
                   const Text(
                     'Muestra cada boca (1..24) del Patch Panel: si está conectada o libre, a qué Switch ("Hierro") va unida y qué aparato final está conectado (cuál es, tipo y dirección IP).',
-                    style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                    style: TextStyle(fontSize: 12, color: AppPalette.slate500),
                   ),
                 ],
               ),
@@ -3481,7 +3482,7 @@ class _RackDocShellState extends State<RackDocShell> {
                     labelText: 'Seleccionar Patch Panel',
                     isDense: true,
                     filled: true,
-                    fillColor: const Color(0xFFF8FAFC),
+                    fillColor: AppPalette.slate50,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -3552,7 +3553,7 @@ class _RackDocShellState extends State<RackDocShell> {
               child: Center(
                 child: Text(
                   'No hay Patch Panels registrados en el Rack seleccionado.',
-                  style: TextStyle(color: Color(0xFF64748B)),
+                  style: TextStyle(color: AppPalette.slate500),
                 ),
               ),
             )
@@ -3599,9 +3600,9 @@ class _RackDocShellState extends State<RackDocShell> {
               return Container(
                 margin: const EdgeInsets.only(top: 16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF8FAFC),
+                  color: AppPalette.slate50,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                  border: Border.all(color: AppPalette.slate300),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -3613,7 +3614,7 @@ class _RackDocShellState extends State<RackDocShell> {
                         vertical: 10,
                       ),
                       decoration: const BoxDecoration(
-                        color: Color(0xFF0F172A),
+                        color: AppPalette.slate900,
                         borderRadius: BorderRadius.vertical(
                           top: Radius.circular(9),
                         ),
@@ -3626,7 +3627,7 @@ class _RackDocShellState extends State<RackDocShell> {
                               vertical: 3,
                             ),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF0D9488),
+                              color: AppPalette.teal600,
                               borderRadius: BorderRadius.circular(5),
                             ),
                             child: Text(
@@ -3655,10 +3656,10 @@ class _RackDocShellState extends State<RackDocShell> {
                               vertical: 4,
                             ),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF1E293B),
+                              color: AppPalette.slate800,
                               borderRadius: BorderRadius.circular(6),
                               border: Border.all(
-                                color: const Color(0xFF475569),
+                                color: AppPalette.slate600,
                               ),
                             ),
                             child: Text(
@@ -3666,7 +3667,7 @@ class _RackDocShellState extends State<RackDocShell> {
                               style: const TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
-                                color: Color(0xFFE2E8F0),
+                                color: AppPalette.slate200,
                               ),
                             ),
                           ),
@@ -3697,9 +3698,9 @@ class _RackDocShellState extends State<RackDocShell> {
                         vertical: 8,
                       ),
                       decoration: const BoxDecoration(
-                        color: Color(0xFFF1F5F9),
+                        color: AppPalette.slate100,
                         border: Border(
-                          bottom: BorderSide(color: Color(0xFFCBD5E1)),
+                          bottom: BorderSide(color: AppPalette.slate300),
                         ),
                       ),
                       child: Wrap(
@@ -3723,13 +3724,13 @@ class _RackDocShellState extends State<RackDocShell> {
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
                                 color: isOcc
-                                    ? const Color(0xFF0D9488)
+                                    ? AppPalette.teal600
                                     : Colors.white,
                                 borderRadius: BorderRadius.circular(4),
                                 border: Border.all(
                                   color: isOcc
-                                      ? const Color(0xFF0F766E)
-                                      : const Color(0xFFCBD5E1),
+                                      ? AppPalette.teal700
+                                      : AppPalette.slate300,
                                   width: isOcc ? 1.4 : 1.0,
                                 ),
                               ),
@@ -3740,7 +3741,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                   fontWeight: FontWeight.w800,
                                   color: isOcc
                                       ? Colors.white
-                                      : const Color(0xFF64748B),
+                                      : AppPalette.slate500,
                                 ),
                               ),
                             ),
@@ -3755,7 +3756,7 @@ class _RackDocShellState extends State<RackDocShell> {
                         horizontal: 14,
                         vertical: 7,
                       ),
-                      color: const Color(0xFFE2E8F0).withValues(alpha: 0.55),
+                      color: AppPalette.slate200.withValues(alpha: 0.55),
                       child: const Row(
                         children: [
                           SizedBox(
@@ -3765,7 +3766,7 @@ class _RackDocShellState extends State<RackDocShell> {
                               style: TextStyle(
                                 fontSize: 10.5,
                                 fontWeight: FontWeight.w900,
-                                color: Color(0xFF334155),
+                                color: AppPalette.slate700,
                               ),
                             ),
                           ),
@@ -3776,7 +3777,7 @@ class _RackDocShellState extends State<RackDocShell> {
                               style: TextStyle(
                                 fontSize: 10.5,
                                 fontWeight: FontWeight.w900,
-                                color: Color(0xFF334155),
+                                color: AppPalette.slate700,
                               ),
                             ),
                           ),
@@ -3787,7 +3788,7 @@ class _RackDocShellState extends State<RackDocShell> {
                               style: TextStyle(
                                 fontSize: 10.5,
                                 fontWeight: FontWeight.w900,
-                                color: Color(0xFF334155),
+                                color: AppPalette.slate700,
                               ),
                             ),
                           ),
@@ -3798,7 +3799,7 @@ class _RackDocShellState extends State<RackDocShell> {
                               style: TextStyle(
                                 fontSize: 10.5,
                                 fontWeight: FontWeight.w900,
-                                color: Color(0xFF334155),
+                                color: AppPalette.slate700,
                               ),
                             ),
                           ),
@@ -3809,7 +3810,7 @@ class _RackDocShellState extends State<RackDocShell> {
                               style: TextStyle(
                                 fontSize: 10.5,
                                 fontWeight: FontWeight.w900,
-                                color: Color(0xFF334155),
+                                color: AppPalette.slate700,
                               ),
                             ),
                           ),
@@ -3824,7 +3825,7 @@ class _RackDocShellState extends State<RackDocShell> {
                           'No hay bocas en este Patch Panel que coincidan con el filtro actual.',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Color(0xFF64748B),
+                            color: AppPalette.slate500,
                           ),
                         ),
                       )
@@ -3859,9 +3860,9 @@ class _RackDocShellState extends State<RackDocShell> {
                           decoration: BoxDecoration(
                             color: isOcc
                                 ? Colors.white
-                                : const Color(0xFFF8FAFC),
+                                : AppPalette.slate50,
                             border: const Border(
-                              bottom: BorderSide(color: Color(0xFFE2E8F0)),
+                              bottom: BorderSide(color: AppPalette.slate200),
                             ),
                           ),
                           child: Row(
@@ -3878,8 +3879,8 @@ class _RackDocShellState extends State<RackDocShell> {
                                       ),
                                       decoration: BoxDecoration(
                                         color: isOcc
-                                            ? const Color(0xFF0F172A)
-                                            : const Color(0xFFE2E8F0),
+                                            ? AppPalette.slate900
+                                            : AppPalette.slate200,
                                         borderRadius: BorderRadius.circular(5),
                                       ),
                                       child: Text(
@@ -3889,7 +3890,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                           fontWeight: FontWeight.w900,
                                           color: isOcc
                                               ? Colors.white
-                                              : const Color(0xFF475569),
+                                              : AppPalette.slate600,
                                         ),
                                       ),
                                     ),
@@ -3909,13 +3910,13 @@ class _RackDocShellState extends State<RackDocShell> {
                                       ),
                                       decoration: BoxDecoration(
                                         color: isOcc
-                                            ? const Color(0xFFDCFCE7)
-                                            : const Color(0xFFF1F5F9),
+                                            ? AppPalette.green100
+                                            : AppPalette.slate100,
                                         borderRadius: BorderRadius.circular(10),
                                         border: Border.all(
                                           color: isOcc
-                                              ? const Color(0xFF16A34A)
-                                              : const Color(0xFFCBD5E1),
+                                              ? AppPalette.green600
+                                              : AppPalette.slate300,
                                         ),
                                       ),
                                       child: Text(
@@ -3926,8 +3927,8 @@ class _RackDocShellState extends State<RackDocShell> {
                                           fontSize: 10,
                                           fontWeight: FontWeight.w800,
                                           color: isOcc
-                                              ? const Color(0xFF15803D)
-                                              : const Color(0xFF64748B),
+                                              ? AppPalette.green700
+                                              : AppPalette.slate500,
                                         ),
                                       ),
                                     ),
@@ -3948,14 +3949,14 @@ class _RackDocShellState extends State<RackDocShell> {
                                             style: const TextStyle(
                                               fontSize: 12,
                                               fontWeight: FontWeight.w800,
-                                              color: Color(0xFF4F46E5),
+                                              color: AppPalette.indigo600,
                                             ),
                                           ),
                                           Text(
                                             '${sw['name']}${sw['ip_address']?.toString().isNotEmpty == true ? ' • IP SW: ${sw['ip_address']}' : ''}',
                                             style: const TextStyle(
                                               fontSize: 10.5,
-                                              color: Color(0xFF64748B),
+                                              color: AppPalette.slate500,
                                             ),
                                             overflow: TextOverflow.ellipsis,
                                           ),
@@ -3967,7 +3968,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                             : '— Sin conexión a Switch —',
                                         style: const TextStyle(
                                           fontSize: 11,
-                                          color: Color(0xFF94A3B8),
+                                          color: AppPalette.slate400,
                                         ),
                                       ),
                               ),
@@ -3989,7 +3990,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                                   vertical: 1.5,
                                                 ),
                                                 decoration: BoxDecoration(
-                                                  color: const Color(0xFFE0F2FE),
+                                                  color: AppPalette.sky100,
                                                   borderRadius:
                                                       BorderRadius.circular(4),
                                                 ),
@@ -3998,7 +3999,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                                   style: const TextStyle(
                                                     fontSize: 9.5,
                                                     fontWeight: FontWeight.w800,
-                                                    color: Color(0xFF0369A1),
+                                                    color: AppPalette.sky700,
                                                   ),
                                                 ),
                                               ),
@@ -4009,7 +4010,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                                   style: const TextStyle(
                                                     fontSize: 12,
                                                     fontWeight: FontWeight.w800,
-                                                    color: Color(0xFF0F172A),
+                                                    color: AppPalette.slate900,
                                                   ),
                                                   overflow:
                                                       TextOverflow.ellipsis,
@@ -4022,7 +4023,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                             'Ubicación: ${ep['room_code']?.toString().isNotEmpty == true ? ep['room_code'] : 'Planta'}${b['vlan'] != null ? ' • VLAN ${b['vlan']}' : ''}',
                                             style: const TextStyle(
                                               fontSize: 10.5,
-                                              color: Color(0xFF64748B),
+                                              color: AppPalette.slate500,
                                             ),
                                           ),
                                         ],
@@ -4032,7 +4033,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                         style: TextStyle(
                                           fontSize: 11.5,
                                           fontStyle: FontStyle.italic,
-                                          color: Color(0xFF94A3B8),
+                                          color: AppPalette.slate400,
                                         ),
                                       ),
                               ),
@@ -4048,14 +4049,14 @@ class _RackDocShellState extends State<RackDocShell> {
                                         ),
                                         decoration: BoxDecoration(
                                           color: hasValidIp
-                                              ? const Color(0xFFEFF6FF)
-                                              : const Color(0xFFF1F5F9),
+                                              ? AppPalette.blue50
+                                              : AppPalette.slate100,
                                           borderRadius:
                                               BorderRadius.circular(6),
                                           border: Border.all(
                                             color: hasValidIp
-                                                ? const Color(0xFF93C5FD)
-                                                : const Color(0xFFCBD5E1),
+                                                ? AppPalette.blue300
+                                                : AppPalette.slate300,
                                           ),
                                         ),
                                         child: Row(
@@ -4065,8 +4066,8 @@ class _RackDocShellState extends State<RackDocShell> {
                                               Icons.language_rounded,
                                               size: 13,
                                               color: hasValidIp
-                                                  ? const Color(0xFF1D4ED8)
-                                                  : const Color(0xFF64748B),
+                                                  ? AppPalette.blue700
+                                                  : AppPalette.slate500,
                                             ),
                                             const SizedBox(width: 5),
                                             Expanded(
@@ -4080,8 +4081,8 @@ class _RackDocShellState extends State<RackDocShell> {
                                                   fontSize: 11,
                                                   fontWeight: FontWeight.w800,
                                                   color: hasValidIp
-                                                      ? const Color(0xFF1E3A8A)
-                                                      : const Color(0xFF64748B),
+                                                      ? AppPalette.blue900
+                                                      : AppPalette.slate500,
                                                 ),
                                                 overflow: TextOverflow.ellipsis,
                                               ),
@@ -4093,7 +4094,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                         '—',
                                         style: TextStyle(
                                           fontSize: 12,
-                                          color: Color(0xFFCBD5E1),
+                                          color: AppPalette.slate300,
                                         ),
                                       ),
                               ),
@@ -4134,7 +4135,7 @@ class _SidebarItem extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
           decoration: BoxDecoration(
-            color: active ? const Color(0xFFEFF6FF) : Colors.transparent,
+            color: active ? AppPalette.blue50 : Colors.transparent,
             borderRadius: BorderRadius.circular(6),
           ),
           child: Row(
@@ -4143,8 +4144,8 @@ class _SidebarItem extends StatelessWidget {
                 icon,
                 size: 18,
                 color: active
-                    ? const Color(0xFF2563EB)
-                    : const Color(0xFF475569),
+                    ? AppPalette.blue600
+                    : AppPalette.slate600,
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -4154,8 +4155,8 @@ class _SidebarItem extends StatelessWidget {
                     fontSize: 12.5,
                     fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                     color: active
-                        ? const Color(0xFF1D4ED8)
-                        : const Color(0xFF334155),
+                        ? AppPalette.blue700
+                        : AppPalette.slate700,
                   ),
                 ),
               ),
@@ -4188,7 +4189,7 @@ class _DashboardCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: AppPalette.slate200),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4197,7 +4198,7 @@ class _DashboardCard extends StatelessWidget {
           const SizedBox(height: 12),
           Text(
             title,
-            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+            style: const TextStyle(fontSize: 12, color: AppPalette.slate500),
           ),
           const SizedBox(height: 4),
           Text(
@@ -4205,7 +4206,7 @@ class _DashboardCard extends StatelessWidget {
             style: const TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w800,
-              color: Color(0xFF0F172A),
+              color: AppPalette.slate900,
             ),
           ),
         ],

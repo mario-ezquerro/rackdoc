@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/theme.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_client.dart';
@@ -186,7 +187,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       final val = int.tryParse('FF$cleaned', radix: 16);
       if (val != null) return Color(val);
     }
-    return const Color(0xFF0F172A);
+    return AppPalette.slate900;
   }
 
   static const List<_FloorDeviceCatalogItem> _floorDeviceCatalog = [
@@ -197,7 +198,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Sensor Temperatura (°C)',
       prefix: 'TMP',
       icon: Icons.thermostat_rounded,
-      pinColor: Color(0xFF0D9488),
+      pinColor: AppPalette.teal600,
       defaultPortHint: 'ENV-MON01:Temp-1 (21.2 °C)',
       isSensor: true,
     ),
@@ -207,7 +208,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Sensor Humedad (%RH)',
       prefix: 'HUM',
       icon: Icons.water_drop_outlined,
-      pinColor: Color(0xFF0284C7),
+      pinColor: AppPalette.sky600,
       defaultPortHint: 'ENV-MON01:Hum-1 (45 %RH)',
       isSensor: true,
     ),
@@ -217,7 +218,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Sensor Temp + Humedad',
       prefix: 'TH',
       icon: Icons.device_thermostat_rounded,
-      pinColor: Color(0xFF0D9488),
+      pinColor: AppPalette.teal600,
       defaultPortHint: 'ENV-MON01:TH-1 (21.0 °C / 46 %RH)',
       isSensor: true,
     ),
@@ -227,7 +228,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Sensor Carga Eléctrica (kW/A)',
       prefix: 'PWR',
       icon: Icons.bolt_rounded,
-      pinColor: Color(0xFFD97706),
+      pinColor: AppPalette.amber600,
       defaultPortHint: 'PDU-A:Meter-1 (4.8 kW / 20.9 A)',
       isSensor: true,
     ),
@@ -237,7 +238,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Detector Humo / Incendio',
       prefix: 'SMK',
       icon: Icons.local_fire_department_outlined,
-      pinColor: Color(0xFFDC2626),
+      pinColor: AppPalette.red600,
       defaultPortHint: 'ENV-MON01:Smoke-1 (Normal)',
       isSensor: true,
     ),
@@ -247,7 +248,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Sensor Fuga de Agua',
       prefix: 'WTR',
       icon: Icons.waves_rounded,
-      pinColor: Color(0xFF0284C7),
+      pinColor: AppPalette.sky600,
       defaultPortHint: 'ENV-MON01:Leak-1 (Seco)',
       isSensor: true,
     ),
@@ -257,7 +258,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Sensor Flujo Aire / Presión',
       prefix: 'AIR',
       icon: Icons.air_rounded,
-      pinColor: Color(0xFF0D9488),
+      pinColor: AppPalette.teal600,
       defaultPortHint: 'ENV-MON01:Airflow-1 (2.4 m/s)',
       isSensor: true,
     ),
@@ -267,7 +268,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Sensor Contacto Puerta',
       prefix: 'DOR',
       icon: Icons.sensor_door_outlined,
-      pinColor: Color(0xFF0D9488),
+      pinColor: AppPalette.teal600,
       defaultPortHint: 'ENV-MON01:Door-1 (Cerrada)',
       isSensor: true,
     ),
@@ -279,7 +280,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Camera CCTV',
       prefix: 'CAM',
       icon: Icons.videocam_outlined,
-      pinColor: Color(0xFF0F172A),
+      pinColor: AppPalette.slate900,
       defaultPortHint: 'SW01:Gi1/0/21 (PoE)',
     ),
     _FloorDeviceCatalogItem(
@@ -288,7 +289,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Access Control Panel',
       prefix: 'AC',
       icon: Icons.dialpad_rounded,
-      pinColor: Color(0xFF0F172A),
+      pinColor: AppPalette.slate900,
       defaultPortHint: 'SW01:Gi1/0/24',
     ),
 
@@ -299,7 +300,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Telecommunications Outlet',
       prefix: 'Bi',
       icon: Icons.settings_input_hdmi_outlined,
-      pinColor: Color(0xFF64748B),
+      pinColor: AppPalette.slate500,
       defaultPortHint: 'PP-A:01-04',
     ),
     _FloorDeviceCatalogItem(
@@ -308,7 +309,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Access Point Wi-Fi',
       prefix: 'AP',
       icon: Icons.wifi_tethering_rounded,
-      pinColor: Color(0xFF0F172A),
+      pinColor: AppPalette.slate900,
       defaultPortHint: 'SW01:Gi1/0/18 (PoE+)',
     ),
     _FloorDeviceCatalogItem(
@@ -317,7 +318,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'ISP Uplink / Acometida',
       prefix: 'ISP',
       icon: Icons.public_rounded,
-      pinColor: Color(0xFF1E3A8A),
+      pinColor: AppPalette.blue900,
       defaultPortHint: 'FW01:WAN1',
     ),
     _FloorDeviceCatalogItem(
@@ -326,7 +327,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Rack Cabinet',
       prefix: 'RK',
       icon: Icons.dns_outlined,
-      pinColor: Color(0xFF1E3A8A),
+      pinColor: AppPalette.blue900,
       defaultPortHint: '',
     ),
 
@@ -337,7 +338,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Desktop',
       prefix: 'DP',
       icon: Icons.desktop_windows_outlined,
-      pinColor: Color(0xFF0F172A),
+      pinColor: AppPalette.slate900,
       defaultPortHint: 'SW01:Gi1/0/1',
     ),
     _FloorDeviceCatalogItem(
@@ -346,7 +347,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Laptop',
       prefix: 'LP',
       icon: Icons.laptop_mac_outlined,
-      pinColor: Color(0xFF0F172A),
+      pinColor: AppPalette.slate900,
       defaultPortHint: 'SW01:Gi1/0/2',
     ),
     _FloorDeviceCatalogItem(
@@ -355,7 +356,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Phone VoIP',
       prefix: 'PH',
       icon: Icons.phone_in_talk_outlined,
-      pinColor: Color(0xFF0F172A),
+      pinColor: AppPalette.slate900,
       defaultPortHint: 'SW01:Gi1/0/5 (VoIP)',
     ),
     _FloorDeviceCatalogItem(
@@ -364,7 +365,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Printer',
       prefix: 'PR',
       icon: Icons.print_outlined,
-      pinColor: Color(0xFF0F172A),
+      pinColor: AppPalette.slate900,
       defaultPortHint: 'SW01:Gi1/0/8',
     ),
     _FloorDeviceCatalogItem(
@@ -373,7 +374,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: '3D Printer',
       prefix: '3DP',
       icon: Icons.view_in_ar_rounded,
-      pinColor: Color(0xFF0F172A),
+      pinColor: AppPalette.slate900,
       defaultPortHint: 'SW01:Gi1/0/9',
     ),
     _FloorDeviceCatalogItem(
@@ -382,7 +383,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Screen / Videowall',
       prefix: 'SC',
       icon: Icons.tv_rounded,
-      pinColor: Color(0xFF0F172A),
+      pinColor: AppPalette.slate900,
       defaultPortHint: 'SW01:Gi1/0/12',
     ),
     _FloorDeviceCatalogItem(
@@ -391,7 +392,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Speaker',
       prefix: 'SPK',
       icon: Icons.speaker_outlined,
-      pinColor: Color(0xFF0F172A),
+      pinColor: AppPalette.slate900,
       defaultPortHint: 'SW01:Gi1/0/14',
     ),
     _FloorDeviceCatalogItem(
@@ -400,7 +401,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Microphone',
       prefix: 'MIC',
       icon: Icons.mic_none_rounded,
-      pinColor: Color(0xFF0F172A),
+      pinColor: AppPalette.slate900,
       defaultPortHint: 'SW01:Gi1/0/15',
     ),
     _FloorDeviceCatalogItem(
@@ -409,7 +410,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'NDI Box',
       prefix: 'NDI',
       icon: Icons.cast_connected_rounded,
-      pinColor: Color(0xFF0F172A),
+      pinColor: AppPalette.slate900,
       defaultPortHint: 'SW01:Gi1/0/16',
     ),
 
@@ -420,7 +421,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Climatizador CRAC / InRow',
       prefix: 'CRAC',
       icon: Icons.ac_unit_rounded,
-      pinColor: Color(0xFF7C3AED),
+      pinColor: AppPalette.violet600,
       defaultPortHint: 'BMS:Modbus-CRAC1 (18.5 °C)',
       isSensor: true,
     ),
@@ -430,7 +431,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'SAI / UPS Industrial Planta',
       prefix: 'UPS',
       icon: Icons.battery_charging_full_rounded,
-      pinColor: Color(0xFFD97706),
+      pinColor: AppPalette.amber600,
       defaultPortHint: 'PDU-MAIN:Feed-A+B (98% Bat)',
       isSensor: true,
     ),
@@ -440,7 +441,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: 'Cuadro Eléctrico General',
       prefix: 'CEG',
       icon: Icons.bolt_rounded,
-      pinColor: Color(0xFFD97706),
+      pinColor: AppPalette.amber600,
       defaultPortHint: 'CEG-01:Disyuntor-Rack',
     ),
   ];
@@ -472,7 +473,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       label: category.toUpperCase(),
       prefix: 'DEV',
       icon: Icons.sensors_rounded,
-      pinColor: const Color(0xFF7C3AED),
+      pinColor: AppPalette.violet600,
     );
   }
 
@@ -1047,7 +1048,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
           messenger.showSnackBar(
             SnackBar(
               content: Text('Abriendo SSH ($sshCmd copiado al portapapeles)'),
-              backgroundColor: const Color(0xFF0F172A),
+              backgroundColor: AppPalette.slate900,
             ),
           );
         }
@@ -1257,7 +1258,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     ),
                     Text(
                       'Se añadirá a DEVICES LIBRARY para arrastrarlo o colocarlo en cualquier planta',
-                      style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                      style: TextStyle(fontSize: 11, color: AppPalette.slate500),
                     ),
                   ],
                 ),
@@ -1341,7 +1342,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     style: TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w800,
-                      color: Color(0xFF334155),
+                      color: AppPalette.slate700,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -1360,12 +1361,12 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           decoration: BoxDecoration(
                             color: isSel
                                 ? _colorFromHex(selectedColorHex)
-                                : const Color(0xFFF1F5F9),
+                                : AppPalette.slate100,
                             borderRadius: BorderRadius.circular(6),
                             border: Border.all(
                               color: isSel
-                                  ? const Color(0xFF0F172A)
-                                  : const Color(0xFFCBD5E1),
+                                  ? AppPalette.slate900
+                                  : AppPalette.slate300,
                               width: isSel ? 1.8 : 1.0,
                             ),
                           ),
@@ -1374,7 +1375,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                             size: 17,
                             color: isSel
                                 ? Colors.white
-                                : const Color(0xFF334155),
+                                : AppPalette.slate700,
                           ),
                         ),
                       );
@@ -1386,7 +1387,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     style: TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w800,
-                      color: Color(0xFF334155),
+                      color: AppPalette.slate700,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -1561,7 +1562,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                             : 'Selecciona el tipo de equipo y el Rack al que va conectado',
                         style: const TextStyle(
                           fontSize: 11,
-                          color: Color(0xFF64748B),
+                          color: AppPalette.slate500,
                         ),
                       ),
                     ],
@@ -1580,10 +1581,10 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFFFBEB),
+                        color: AppPalette.amber50,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color: const Color(0xFFF59E0B),
+                          color: AppPalette.amber500,
                           width: 1.4,
                         ),
                       ),
@@ -1595,7 +1596,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                               Icon(
                                 Icons.dns_rounded,
                                 size: 16,
-                                color: Color(0xFFB45309),
+                                color: AppPalette.amber700,
                               ),
                               SizedBox(width: 6),
                               Text(
@@ -1603,7 +1604,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w900,
-                                  color: Color(0xFF92400E),
+                                  color: AppPalette.amber800,
                                 ),
                               ),
                             ],
@@ -1881,7 +1882,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
           ),
           FilledButton.icon(
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
+              backgroundColor: AppPalette.red600,
             ),
             onPressed: () => Navigator.pop(ctx, true),
             icon: const Icon(Icons.delete_outline, size: 16),
@@ -2295,7 +2296,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
           ),
           FilledButton.icon(
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
+              backgroundColor: AppPalette.red600,
             ),
             onPressed: () => Navigator.pop(ctx, true),
             icon: const Icon(Icons.delete_outline, size: 16),
@@ -2343,7 +2344,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
           ),
           FilledButton.icon(
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
+              backgroundColor: AppPalette.red600,
             ),
             onPressed: () => Navigator.pop(ctx, true),
             icon: const Icon(Icons.delete_outline, size: 16),
@@ -2420,11 +2421,11 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
             icon: const Icon(
               Icons.delete_outline,
               size: 16,
-              color: Color(0xFFDC2626),
+              color: AppPalette.red600,
             ),
             label: const Text(
               'Eliminar Rack',
-              style: TextStyle(color: Color(0xFFDC2626)),
+              style: TextStyle(color: AppPalette.red600),
             ),
           ),
           TextButton(
@@ -2471,7 +2472,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         : '';
 
     return Container(
-      color: const Color(0xFFF1F5F9),
+      color: AppPalette.slate100,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -2481,7 +2482,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
               decoration: const BoxDecoration(
                 color: Colors.white,
-                border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+                border: Border(bottom: BorderSide(color: AppPalette.slate200)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -2502,7 +2503,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                               const Icon(
                                 Icons.apartment_rounded,
                                 size: 20,
-                                color: Color(0xFF1E3A8A),
+                                color: AppPalette.blue900,
                               ),
                               const SizedBox(width: 8),
                               DropdownButton<int>(
@@ -2511,7 +2512,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                 style: const TextStyle(
                                   fontSize: 17,
                                   fontWeight: FontWeight.w800,
-                                  color: Color(0xFF0F172A),
+                                  color: AppPalette.slate900,
                                 ),
                                 items: widget.locations
                                     .map(
@@ -2534,7 +2535,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                             'PBX  >  Locations  >  ${loc.code}  >  ${floor?.name ?? 'Sin Planta'} (Vista de Planta 2D)',
                             style: const TextStyle(
                               fontSize: 11,
-                              color: Color(0xFF64748B),
+                              color: AppPalette.slate500,
                             ),
                           ),
                         ],
@@ -2548,12 +2549,12 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           ),
                           decoration: BoxDecoration(
                             color: loc.offlineCount > 0
-                                ? const Color(0xFFFEF2F2)
-                                : const Color(0xFFF0FDF4),
+                                ? AppPalette.red50
+                                : AppPalette.green50,
                             borderRadius: BorderRadius.circular(14),
                             border: Border.all(
                               color: loc.offlineCount > 0
-                                  ? const Color(0xFFFECACA)
+                                  ? AppPalette.red200
                                   : const Color(0xFFBBF7D0),
                             ),
                           ),
@@ -2564,8 +2565,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                 Icons.monitor_heart_rounded,
                                 size: 14,
                                 color: loc.offlineCount > 0
-                                    ? const Color(0xFFDC2626)
-                                    : const Color(0xFF16A34A),
+                                    ? AppPalette.red600
+                                    : AppPalette.green600,
                               ),
                               const SizedBox(width: 6),
                               Text(
@@ -2581,7 +2582,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                 style: const TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
-                                  color: Color(0xFF0F172A),
+                                  color: AppPalette.slate900,
                                 ),
                               ),
                             ],
@@ -2598,8 +2599,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                             style: TextStyle(fontSize: 12),
                           ),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: const Color(0xFF0F172A),
-                            side: const BorderSide(color: Color(0xFF94A3B8)),
+                            foregroundColor: AppPalette.slate900,
+                            side: const BorderSide(color: AppPalette.slate400),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -2633,7 +2634,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                             icon: const Icon(
                               Icons.delete_outline,
                               size: 18,
-                              color: Color(0xFFDC2626),
+                              color: AppPalette.red600,
                             ),
                             tooltip: 'Quitar imagen de fondo de esta planta',
                           ),
@@ -2644,8 +2645,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           icon: const Icon(Icons.dns_outlined, size: 16),
                           label: const Text('+ Rack'),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: const Color(0xFF1E3A8A),
-                            side: const BorderSide(color: Color(0xFF93C5FD)),
+                            foregroundColor: AppPalette.blue900,
+                            side: const BorderSide(color: AppPalette.blue300),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -2657,7 +2658,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           ),
                           label: const Text('+ Device'),
                           style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF2563EB),
+                            backgroundColor: AppPalette.blue600,
                           ),
                         ),
                       ],
@@ -2676,7 +2677,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w800,
-                            color: Color(0xFF64748B),
+                            color: AppPalette.slate500,
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -2706,13 +2707,13 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                 ),
                                 decoration: BoxDecoration(
                                   color: isSel
-                                      ? const Color(0xFF0F172A)
-                                      : const Color(0xFFF1F5F9),
+                                      ? AppPalette.slate900
+                                      : AppPalette.slate100,
                                   borderRadius: BorderRadius.circular(6),
                                   border: Border.all(
                                     color: isSel
-                                        ? const Color(0xFF0F172A)
-                                        : const Color(0xFFCBD5E1),
+                                        ? AppPalette.slate900
+                                        : AppPalette.slate300,
                                   ),
                                 ),
                                 child: Row(
@@ -2722,8 +2723,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                       Icons.layers,
                                       size: 15,
                                       color: isSel
-                                          ? const Color(0xFF38BDF8)
-                                          : const Color(0xFF475569),
+                                          ? AppPalette.sky400
+                                          : AppPalette.slate600,
                                     ),
                                     const SizedBox(width: 6),
                                     Text(
@@ -2733,7 +2734,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                         fontWeight: FontWeight.w700,
                                         color: isSel
                                             ? Colors.white
-                                            : const Color(0xFF1E293B),
+                                            : AppPalette.slate800,
                                       ),
                                     ),
                                     const SizedBox(width: 8),
@@ -2745,7 +2746,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                       decoration: BoxDecoration(
                                         color: isSel
                                             ? Colors.white24
-                                            : const Color(0xFFE2E8F0),
+                                            : AppPalette.slate200,
                                         borderRadius: BorderRadius.circular(10),
                                       ),
                                       child: Text(
@@ -2763,7 +2764,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                           fontWeight: FontWeight.bold,
                                           color: isSel
                                               ? Colors.white
-                                              : const Color(0xFF334155),
+                                              : AppPalette.slate700,
                                         ),
                                       ),
                                     ),
@@ -2777,8 +2778,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                           Icons.delete_outline,
                                           size: 15,
                                           color: isSel
-                                              ? const Color(0xFFFCA5A5)
-                                              : const Color(0xFFDC2626),
+                                              ? AppPalette.red300
+                                              : AppPalette.red600,
                                         ),
                                       ),
                                     ),
@@ -2808,8 +2809,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
               decoration: const BoxDecoration(
-                color: Color(0xFFF8FAFC),
-                border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+                color: AppPalette.slate50,
+                border: Border(bottom: BorderSide(color: AppPalette.slate200)),
               ),
               child: Row(
                 children: [
@@ -2817,12 +2818,12 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     style: OutlinedButton.styleFrom(
                       visualDensity: VisualDensity.compact,
                       backgroundColor: _showLeftLibrary
-                          ? const Color(0xFFEFF6FF)
+                          ? AppPalette.blue50
                           : Colors.white,
                       side: BorderSide(
                         color: _showLeftLibrary
-                            ? const Color(0xFF3B82F6)
-                            : const Color(0xFFCBD5E1),
+                            ? AppPalette.blue500
+                            : AppPalette.slate300,
                       ),
                     ),
                     onPressed: () =>
@@ -2843,12 +2844,12 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     style: OutlinedButton.styleFrom(
                       visualDensity: VisualDensity.compact,
                       backgroundColor: _showFloorCables
-                          ? const Color(0xFFFFFBEB)
+                          ? AppPalette.amber50
                           : Colors.white,
                       side: BorderSide(
                         color: _showFloorCables
-                            ? const Color(0xFFF59E0B)
-                            : const Color(0xFFCBD5E1),
+                            ? AppPalette.amber500
+                            : AppPalette.slate300,
                       ),
                     ),
                     onPressed: () =>
@@ -2857,8 +2858,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       Icons.timeline_rounded,
                       size: 15,
                       color: _showFloorCables
-                          ? const Color(0xFFD97706)
-                          : const Color(0xFF64748B),
+                          ? AppPalette.amber600
+                          : AppPalette.slate500,
                     ),
                     label: Text(
                       _showFloorCables
@@ -2868,8 +2869,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
                         color: _showFloorCables
-                            ? const Color(0xFFB45309)
-                            : const Color(0xFF475569),
+                            ? AppPalette.amber700
+                            : AppPalette.slate600,
                       ),
                     ),
                   ),
@@ -2882,7 +2883,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       style: OutlinedButton.styleFrom(
                         visualDensity: VisualDensity.compact,
                         backgroundColor: _undoStack.isNotEmpty
-                            ? const Color(0xFFF8FAFC)
+                            ? AppPalette.slate50
                             : Colors.white,
                       ),
                       onPressed: _undoStack.isEmpty ? null : _performUndo,
@@ -2907,15 +2908,15 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       style: OutlinedButton.styleFrom(
                         visualDensity: VisualDensity.compact,
                         backgroundColor: _isPanHandMode
-                            ? const Color(0xFF0F172A)
+                            ? AppPalette.slate900
                             : Colors.white,
                         foregroundColor: _isPanHandMode
                             ? Colors.white
-                            : const Color(0xFF334155),
+                            : AppPalette.slate700,
                         side: BorderSide(
                           color: _isPanHandMode
-                              ? const Color(0xFF38BDF8)
-                              : const Color(0xFFCBD5E1),
+                              ? AppPalette.sky400
+                              : AppPalette.slate300,
                         ),
                       ),
                       onPressed: () => setState(
@@ -2925,8 +2926,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                         Icons.pan_tool_alt_rounded,
                         size: 15,
                         color: _isPanHandMode
-                            ? const Color(0xFF38BDF8)
-                            : const Color(0xFF475569),
+                            ? AppPalette.sky400
+                            : AppPalette.slate600,
                       ),
                       label: Text(
                         _isPanHandMode
@@ -2949,7 +2950,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       icon: const Icon(
                         Icons.center_focus_strong_rounded,
                         size: 16,
-                        color: Color(0xFF2563EB),
+                        color: AppPalette.blue600,
                       ),
                     ),
                   ],
@@ -2959,7 +2960,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       'Espacio + Arrastrar: Mover Dashboard ✋  •  Ctrl+Z / ⌘Z: Deshacer  •  Doble Clic en Rack: Abrir en Rack Editor',
                       style: TextStyle(
                         fontSize: 11,
-                        color: Color(0xFF334155),
+                        color: AppPalette.slate700,
                         fontWeight: FontWeight.w600,
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -2999,7 +3000,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFF475569),
+                      color: AppPalette.slate600,
                     ),
                   ),
                   SizedBox(
@@ -3021,7 +3022,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     style: const TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF0F172A),
+                      color: AppPalette.slate900,
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -3029,12 +3030,12 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     style: OutlinedButton.styleFrom(
                       visualDensity: VisualDensity.compact,
                       backgroundColor: _showRightSettings
-                          ? const Color(0xFFEFF6FF)
+                          ? AppPalette.blue50
                           : Colors.white,
                       side: BorderSide(
                         color: _showRightSettings
-                            ? const Color(0xFF3B82F6)
-                            : const Color(0xFFCBD5E1),
+                            ? AppPalette.blue500
+                            : AppPalette.slate300,
                       ),
                     ),
                     onPressed: () =>
@@ -3072,7 +3073,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
-                                color: const Color(0xFFCBD5E1),
+                                color: AppPalette.slate300,
                               ),
                               boxShadow: const [
                                 BoxShadow(
@@ -3457,11 +3458,11 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                           IgnorePointer(
                                             child: Container(
                                               decoration: BoxDecoration(
-                                                color: const Color(0xFF2563EB)
+                                                color: AppPalette.blue600
                                                     .withValues(alpha: 0.06),
                                                 border: Border.all(
                                                   color:
-                                                      const Color(0xFF2563EB),
+                                                      AppPalette.blue600,
                                                   width: 2.5,
                                                 ),
                                               ),
@@ -3477,7 +3478,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                                 ),
                                                 decoration: BoxDecoration(
                                                   color:
-                                                      const Color(0xFF1E3A8A),
+                                                      AppPalette.blue900,
                                                   borderRadius:
                                                       BorderRadius.circular(20),
                                                 ),
@@ -3510,7 +3511,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                                     BorderRadius.circular(10),
                                                 border: Border.all(
                                                   color:
-                                                      const Color(0xFFFCD34D),
+                                                      AppPalette.amber300,
                                                   width: 1.5,
                                                 ),
                                                 boxShadow: const [
@@ -3526,7 +3527,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                                 children: [
                                                   const Icon(
                                                     Icons.broken_image_outlined,
-                                                    color: Color(0xFFD97706),
+                                                    color: AppPalette.amber600,
                                                     size: 20,
                                                   ),
                                                   const SizedBox(width: 10),
@@ -3536,7 +3537,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                                       fontSize: 12,
                                                       fontWeight:
                                                           FontWeight.w600,
-                                                      color: Color(0xFF334155),
+                                                      color: AppPalette.slate700,
                                                     ),
                                                   ),
                                                   const SizedBox(width: 12),
@@ -3611,7 +3612,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                                       BorderRadius.circular(8),
                                                   border: Border.all(
                                                     color:
-                                                        const Color(0xFFCBD5E1),
+                                                        AppPalette.slate300,
                                                   ),
                                                 ),
                                                 child: const Wrap(
@@ -3628,7 +3629,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                                           Icons.bolt_rounded,
                                                           size: 14,
                                                           color:
-                                                              Color(0xFFEA580C),
+                                                              AppPalette.orange600,
                                                         ),
                                                         SizedBox(width: 2),
                                                         Text(
@@ -3652,7 +3653,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                                           Icons.cable_rounded,
                                                           size: 14,
                                                           color:
-                                                              Color(0xFF06B6D4),
+                                                              AppPalette.cyan500,
                                                         ),
                                                         SizedBox(width: 3),
                                                         Text(
@@ -3677,7 +3678,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                                               .settings_ethernet_rounded,
                                                           size: 14,
                                                           color:
-                                                              Color(0xFF2563EB),
+                                                              AppPalette.blue600,
                                                         ),
                                                         SizedBox(width: 3),
                                                         Text(
@@ -3701,7 +3702,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                                           Icons.horizontal_rule,
                                                           size: 15,
                                                           color:
-                                                              Color(0xFFF59E0B),
+                                                              AppPalette.amber500,
                                                         ),
                                                         SizedBox(width: 3),
                                                         Text(
@@ -3725,7 +3726,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                                           Icons.horizontal_rule,
                                                           size: 15,
                                                           color:
-                                                              Color(0xFF3B82F6),
+                                                              AppPalette.blue500,
                                                         ),
                                                         SizedBox(width: 3),
                                                         Text(
@@ -3758,7 +3759,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                                 elevation: 6,
                                                 borderRadius:
                                                     BorderRadius.circular(10),
-                                                color: const Color(0xFF0F172A),
+                                                color: AppPalette.slate900,
                                                 child: Padding(
                                                   padding: const EdgeInsets
                                                       .symmetric(
@@ -4052,8 +4053,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
 
     final isCold = rk.aisleType == 'cold';
     final frontStripColor = isCold
-        ? const Color(0xFF0284C7)
-        : const Color(0xFF2563EB);
+        ? AppPalette.sky600
+        : AppPalette.blue600;
 
     return Positioned(
       left: leftPx,
@@ -4130,13 +4131,13 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
             child: Container(
             decoration: BoxDecoration(
               color: isSelected
-                  ? const Color(0xFF1E3A8A)
-                  : const Color(0xFF0F172A),
+                  ? AppPalette.blue900
+                  : AppPalette.slate900,
               borderRadius: BorderRadius.circular(6),
               border: Border.all(
                 color: isSelected
                     ? const Color(0xFFFACC15)
-                    : const Color(0xFF38BDF8),
+                    : AppPalette.sky400,
                 width: isSelected ? 2.8 : 1.8,
               ),
               boxShadow: [
@@ -4182,7 +4183,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                             child: Icon(
                               Icons.rotate_right,
                               size: 14,
-                              color: Color(0xFF94A3B8),
+                              color: AppPalette.slate400,
                             ),
                           ),
                         ),
@@ -4197,7 +4198,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                 child: Icon(
                                   Icons.edit_outlined,
                                   size: 13,
-                                  color: Color(0xFF94A3B8),
+                                  color: AppPalette.slate400,
                                 ),
                               ),
                             ),
@@ -4209,7 +4210,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                 child: Icon(
                                   Icons.delete_outline,
                                   size: 14,
-                                  color: Color(0xFFFCA5A5),
+                                  color: AppPalette.red300,
                                 ),
                               ),
                             ),
@@ -4233,7 +4234,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       rk.name,
                       textAlign: TextAlign.center,
                       style: const TextStyle(
-                        color: Color(0xFFBAE6FD),
+                        color: AppPalette.sky200,
                         fontSize: 10.5,
                         fontWeight: FontWeight.w600,
                       ),
@@ -4243,7 +4244,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     Text(
                       '${rk.totalUnits}U • ${rk.deviceCount} eq.',
                       style: const TextStyle(
-                        color: Color(0xFF94A3B8),
+                        color: AppPalette.slate400,
                         fontSize: 9.5,
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -4320,7 +4321,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                               child: Text(
                                 '🔌${rk.ethCablesCount}',
                                 style: const TextStyle(
-                                  color: Color(0xFFDBEAFE),
+                                  color: AppPalette.blue100,
                                   fontSize: 8.0,
                                   fontWeight: FontWeight.w900,
                                 ),
@@ -4351,7 +4352,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                   ? const Color(0xFFFBBF24)
                                   : (rk.onlineCount > 0
                                       ? const Color(0xFF4ADE80)
-                                      : const Color(0xFF94A3B8))),
+                                      : AppPalette.slate400)),
                           width: 0.8,
                         ),
                       ),
@@ -4404,7 +4405,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       width: 18,
                       height: 18,
                       decoration: const BoxDecoration(
-                        color: Color(0xFF38BDF8),
+                        color: AppPalette.sky400,
                         borderRadius: BorderRadius.only(
                           topLeft: Radius.circular(6),
                           bottomRight: Radius.circular(4),
@@ -4413,7 +4414,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       child: const Icon(
                         Icons.open_in_full_rounded,
                         size: 11,
-                        color: Color(0xFF0F172A),
+                        color: AppPalette.slate900,
                       ),
                     ),
                   ),
@@ -4493,18 +4494,18 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     }
 
     Color groupAccentFor(String g) {
-      if (g.startsWith('Sensores')) return const Color(0xFF0D9488);
-      if (g.startsWith('Seguridad')) return const Color(0xFF0F172A);
-      if (g.startsWith('Red')) return const Color(0xFF2563EB);
-      if (g.startsWith('Puestos')) return const Color(0xFF1E3A8A);
-      return const Color(0xFF7C3AED);
+      if (g.startsWith('Sensores')) return AppPalette.teal600;
+      if (g.startsWith('Seguridad')) return AppPalette.slate900;
+      if (g.startsWith('Red')) return AppPalette.blue600;
+      if (g.startsWith('Puestos')) return AppPalette.blue900;
+      return AppPalette.violet600;
     }
 
     return Container(
       width: 265,
       decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(right: BorderSide(color: Color(0xFFE2E8F0))),
+        border: Border(right: BorderSide(color: AppPalette.slate200)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -4520,7 +4521,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       fontSize: 11.5,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 0.6,
-                      color: Color(0xFF0F172A),
+                      color: AppPalette.slate900,
                     ),
                   ),
                 ),
@@ -4529,7 +4530,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   icon: const Icon(
                     Icons.keyboard_double_arrow_left_rounded,
                     size: 18,
-                    color: Color(0xFF64748B),
+                    color: AppPalette.slate500,
                   ),
                   tooltip: 'Ocultar Devices Library',
                   visualDensity: VisualDensity.compact,
@@ -4543,7 +4544,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
               'Arrastra un equipo o sensor a la planta para elegir su Rack de conexión',
               style: TextStyle(
                 fontSize: 10.5,
-                color: Color(0xFF64748B),
+                color: AppPalette.slate500,
               ),
             ),
           ),
@@ -4558,23 +4559,23 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   hintText: 'Buscar sensor, cámara, PC...',
                   hintStyle: const TextStyle(
                     fontSize: 11.5,
-                    color: Color(0xFF94A3B8),
+                    color: AppPalette.slate400,
                   ),
                   prefixIcon: const Icon(
                     Icons.search_rounded,
                     size: 16,
-                    color: Color(0xFF94A3B8),
+                    color: AppPalette.slate400,
                   ),
                   contentPadding: const EdgeInsets.symmetric(horizontal: 8),
                   filled: true,
-                  fillColor: const Color(0xFFF8FAFC),
+                  fillColor: AppPalette.slate50,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(6),
-                    borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                    borderSide: const BorderSide(color: AppPalette.slate200),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(6),
-                    borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                    borderSide: const BorderSide(color: AppPalette.slate200),
                   ),
                 ),
               ),
@@ -4585,7 +4586,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
             child: OutlinedButton.icon(
               style: OutlinedButton.styleFrom(
                 visualDensity: VisualDensity.compact,
-                foregroundColor: const Color(0xFF7C3AED),
+                foregroundColor: AppPalette.violet600,
                 backgroundColor: const Color(0xFFF5F3FF),
                 side: const BorderSide(color: Color(0xFFC4B5FD)),
               ),
@@ -4597,7 +4598,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
               ),
             ),
           ),
-          const Divider(height: 1, color: Color(0xFFE2E8F0)),
+          const Divider(height: 1, color: AppPalette.slate200),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
@@ -4623,9 +4624,9 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           vertical: 6,
                         ),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF8FAFC),
+                          color: AppPalette.slate50,
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                          border: Border.all(color: AppPalette.slate200),
                         ),
                         child: Row(
                           children: [
@@ -4655,7 +4656,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
-                                  color: const Color(0xFFCBD5E1),
+                                  color: AppPalette.slate300,
                                 ),
                               ),
                               child: Text(
@@ -4663,7 +4664,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                 style: const TextStyle(
                                   fontSize: 9.5,
                                   fontWeight: FontWeight.bold,
-                                  color: Color(0xFF475569),
+                                  color: AppPalette.slate600,
                                 ),
                               ),
                             ),
@@ -4674,7 +4675,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                   ? Icons.expand_less_rounded
                                   : Icons.expand_more_rounded,
                               size: 16,
-                              color: const Color(0xFF64748B),
+                              color: AppPalette.slate500,
                             ),
                           ],
                         ),
@@ -4712,7 +4713,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: const Color(0xFFF1F5F9)),
+        border: Border.all(color: AppPalette.slate100),
       ),
       child: Row(
         children: [
@@ -4736,7 +4737,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
               style: const TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF1E293B),
+                color: AppPalette.slate800,
               ),
               overflow: TextOverflow.ellipsis,
             ),
@@ -4749,7 +4750,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                 vertical: 1,
               ),
               decoration: BoxDecoration(
-                color: const Color(0xFFF1F5F9),
+                color: AppPalette.slate100,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
@@ -4757,7 +4758,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                 style: const TextStyle(
                   fontSize: 9.5,
                   fontWeight: FontWeight.bold,
-                  color: Color(0xFF64748B),
+                  color: AppPalette.slate500,
                 ),
               ),
             ),
@@ -4777,7 +4778,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   child: Icon(
                     Icons.delete_outline,
                     size: 14,
-                    color: Color(0xFF94A3B8),
+                    color: AppPalette.slate400,
                   ),
                 ),
               ),
@@ -4801,7 +4802,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                 child: Icon(
                   Icons.add_circle_outline_rounded,
                   size: 16,
-                  color: Color(0xFF2563EB),
+                  color: AppPalette.blue600,
                 ),
               ),
             ),
@@ -4884,16 +4885,16 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     final centerY = (normPos.dy * canvasH).clamp(24.0, canvasH - 16.0);
 
     final Color pinBgColor =
-        isSelected ? const Color(0xFF2563EB) : catItem.pinColor;
+        isSelected ? AppPalette.blue600 : catItem.pinColor;
 
     final effectiveMonitored =
         isSelected ? _fdMonitorEnabled : dev.monitoringEnabled;
-    Color statusDotColor = const Color(0xFF94A3B8); // Gris: Sin Heartbeat
+    Color statusDotColor = AppPalette.slate400; // Gris: Sin Heartbeat
     if (effectiveMonitored) {
       if (effectiveStatus == 'offline') {
         statusDotColor = const Color(0xFFEF4444); // Rojo: Todo falla
       } else if (effectiveStatus == 'warning') {
-        statusDotColor = const Color(0xFFF59E0B); // Naranja: Fallo parcial
+        statusDotColor = AppPalette.amber500; // Naranja: Fallo parcial
       } else {
         statusDotColor = const Color(0xFF22C55E); // Verde: Todo OK
       }
@@ -4992,7 +4993,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   ),
                   decoration: BoxDecoration(
                     color: isSelected
-                        ? const Color(0xFF1E3A8A)
+                        ? AppPalette.blue900
                         : Colors.white.withValues(alpha: 0.94),
                     borderRadius: BorderRadius.circular(5),
                     border: Border.all(
@@ -5000,7 +5001,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           ? const Color(0xFFFACC15)
                           : (catItem.isSensor
                               ? catItem.pinColor.withValues(alpha: 0.55)
-                              : const Color(0xFFCBD5E1)),
+                              : AppPalette.slate300),
                       width: isSelected ? 1.5 : 1.0,
                     ),
                     boxShadow: const [
@@ -5033,8 +5034,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           color: isSelected
                               ? Colors.white
                               : (isOutlet
-                                  ? const Color(0xFF475569)
-                                  : const Color(0xFF0F172A)),
+                                  ? AppPalette.slate600
+                                  : AppPalette.slate900),
                         ),
                       ),
                       if (linkedRackCode.isNotEmpty &&
@@ -5047,7 +5048,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                             fontWeight: FontWeight.w700,
                             color: isSelected
                                 ? const Color(0xFFFDE047)
-                                : const Color(0xFFB45309),
+                                : AppPalette.amber700,
                           ),
                         ),
                       ],
@@ -5098,7 +5099,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       width: 310,
       decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(left: BorderSide(color: Color(0xFFE2E8F0))),
+        border: Border(left: BorderSide(color: AppPalette.slate200)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -5107,7 +5108,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
           Container(
             padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
             decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+              border: Border(bottom: BorderSide(color: AppPalette.slate200)),
             ),
             child: Row(
               children: [
@@ -5135,7 +5136,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           style: const TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w900,
-                            color: Color(0xFF0F172A),
+                            color: AppPalette.slate900,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -5143,7 +5144,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           _catalogItemFor(selectedDev.category).label,
                           style: const TextStyle(
                             fontSize: 10.5,
-                            color: Color(0xFF64748B),
+                            color: AppPalette.slate500,
                           ),
                         ),
                       ],
@@ -5154,7 +5155,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     icon: const Icon(
                       Icons.save_outlined,
                       size: 18,
-                      color: Color(0xFF2563EB),
+                      color: AppPalette.blue600,
                     ),
                     tooltip: 'Guardar cambios',
                     visualDensity: VisualDensity.compact,
@@ -5164,7 +5165,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     icon: const Icon(
                       Icons.delete_outline,
                       size: 18,
-                      color: Color(0xFFDC2626),
+                      color: AppPalette.red600,
                     ),
                     tooltip: 'Eliminar dispositivo',
                     visualDensity: VisualDensity.compact,
@@ -5174,7 +5175,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     width: 28,
                     height: 28,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1E3A8A),
+                      color: AppPalette.blue900,
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: const Icon(
@@ -5193,14 +5194,14 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           style: const TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w900,
-                            color: Color(0xFF0F172A),
+                            color: AppPalette.slate900,
                           ),
                         ),
                         const Text(
                           'Rack Cabinet',
                           style: TextStyle(
                             fontSize: 10.5,
-                            color: Color(0xFF64748B),
+                            color: AppPalette.slate500,
                           ),
                         ),
                       ],
@@ -5210,7 +5211,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   const Icon(
                     Icons.tune_rounded,
                     size: 18,
-                    color: Color(0xFF1E3A8A),
+                    color: AppPalette.blue900,
                   ),
                   const SizedBox(width: 8),
                   const Expanded(
@@ -5219,7 +5220,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF0F172A),
+                        color: AppPalette.slate900,
                       ),
                     ),
                   ),
@@ -5229,7 +5230,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   icon: const Icon(
                     Icons.close_rounded,
                     size: 18,
-                    color: Color(0xFF64748B),
+                    color: AppPalette.slate500,
                   ),
                   tooltip: 'Cerrar panel Settings',
                   visualDensity: VisualDensity.compact,
@@ -5242,12 +5243,12 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: _settingsSaveError
-                    ? const Color(0xFFFEF2F2)
+                    ? AppPalette.red50
                     : const Color(0xFFECFDF5),
                 border: Border(
                   bottom: BorderSide(
                     color: _settingsSaveError
-                        ? const Color(0xFFFECACA)
+                        ? AppPalette.red200
                         : const Color(0xFFA7F3D0),
                   ),
                 ),
@@ -5260,7 +5261,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                         : Icons.check_circle_rounded,
                     size: 14,
                     color: _settingsSaveError
-                        ? const Color(0xFFDC2626)
+                        ? AppPalette.red600
                         : const Color(0xFF059669),
                   ),
                   const SizedBox(width: 6),
@@ -5271,7 +5272,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
                         color: _settingsSaveError
-                            ? const Color(0xFFB91C1C)
+                            ? AppPalette.red700
                             : const Color(0xFF065F46),
                       ),
                     ),
@@ -5339,7 +5340,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
-                    color: Color(0xFF2563EB),
+                    color: AppPalette.blue600,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -5350,7 +5351,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   isDense: true,
                   style: const TextStyle(
                     fontSize: 12,
-                    color: Color(0xFF0F172A),
+                    color: AppPalette.slate900,
                   ),
                   decoration: _compactInputDecoration('Device / Sensor Type'),
                   items: _allCatalogItems
@@ -5424,20 +5425,20 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   decoration: BoxDecoration(
                     color: _fdMonitorEnabled
                         ? (_devStatus == 'offline'
-                            ? const Color(0xFFFEF2F2)
+                            ? AppPalette.red50
                             : (_devStatus == 'warning'
-                                ? const Color(0xFFFFFBEB)
-                                : const Color(0xFFF0FDF4)))
-                        : const Color(0xFFF8FAFC),
+                                ? AppPalette.amber50
+                                : AppPalette.green50))
+                        : AppPalette.slate50,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       color: _fdMonitorEnabled
                           ? (_devStatus == 'offline'
-                              ? const Color(0xFFFCA5A5)
+                              ? AppPalette.red300
                               : (_devStatus == 'warning'
-                                  ? const Color(0xFFFCD34D)
-                                  : const Color(0xFF86EFAC)))
-                          : const Color(0xFFCBD5E1),
+                                  ? AppPalette.amber300
+                                  : AppPalette.green300))
+                          : AppPalette.slate300,
                     ),
                   ),
                   child: Column(
@@ -5451,12 +5452,12 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               color: !_fdMonitorEnabled
-                                  ? const Color(0xFF94A3B8)
+                                  ? AppPalette.slate400
                                   : (_devStatus == 'online'
-                                      ? const Color(0xFF16A34A)
+                                      ? AppPalette.green600
                                       : (_devStatus == 'warning'
-                                          ? const Color(0xFFD97706)
-                                          : const Color(0xFFDC2626))),
+                                          ? AppPalette.amber600
+                                          : AppPalette.red600)),
                             ),
                           ),
                           const SizedBox(width: 7),
@@ -5471,7 +5472,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                   style: const TextStyle(
                                     fontSize: 11.5,
                                     fontWeight: FontWeight.w900,
-                                    color: Color(0xFF0F172A),
+                                    color: AppPalette.slate900,
                                   ),
                                 ),
                                 Text(
@@ -5480,7 +5481,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                       : 'Sin chequeo automático de estado',
                                   style: const TextStyle(
                                     fontSize: 10,
-                                    color: Color(0xFF64748B),
+                                    color: AppPalette.slate500,
                                   ),
                                 ),
                               ],
@@ -5488,20 +5489,20 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           ),
                           Switch.adaptive(
                             value: _fdMonitorEnabled,
-                            activeTrackColor: const Color(0xFF16A34A),
+                            activeTrackColor: AppPalette.green600,
                             onChanged: (v) =>
                                 _toggleFloorDeviceHeartbeat(dev, v),
                           ),
                         ],
                       ),
                       if (_fdMonitorEnabled) ...[
-                        const Divider(height: 14, color: Color(0xFFCBD5E1)),
+                        const Divider(height: 14, color: AppPalette.slate300),
                         const Text(
                           'Sistemas de chequeo activos (elige uno o varios):',
                           style: TextStyle(
                             fontSize: 10.5,
                             fontWeight: FontWeight.w800,
-                            color: Color(0xFF334155),
+                            color: AppPalette.slate700,
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -5526,12 +5527,12 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                     color: _fdEnabledMonitorSystems
                                             .contains(entry.$1)
                                         ? Colors.white
-                                        : const Color(0xFF1E293B),
+                                        : AppPalette.slate800,
                                   ),
                                 ),
                                 selected: _fdEnabledMonitorSystems
                                     .contains(entry.$1),
-                                selectedColor: const Color(0xFF0F172A),
+                                selectedColor: AppPalette.slate900,
                                 checkmarkColor: const Color(0xFF4ADE80),
                                 backgroundColor: Colors.white,
                                 visualDensity: VisualDensity.compact,
@@ -5692,8 +5693,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                           : Icons.cancel_rounded,
                                       size: 13,
                                       color: pr['status'] == 'online'
-                                          ? const Color(0xFF16A34A)
-                                          : const Color(0xFFDC2626),
+                                          ? AppPalette.green600
+                                          : AppPalette.red600,
                                     ),
                                     const SizedBox(width: 5),
                                     Expanded(
@@ -5702,7 +5703,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                         style: const TextStyle(
                                           fontSize: 10,
                                           fontWeight: FontWeight.w700,
-                                          color: Color(0xFF1E293B),
+                                          color: AppPalette.slate800,
                                         ),
                                       ),
                                     ),
@@ -5740,7 +5741,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                               ),
                             ),
                             style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFF0F172A),
+                              backgroundColor: AppPalette.slate900,
                               visualDensity: VisualDensity.compact,
                             ),
                           ),
@@ -5762,13 +5763,13 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
                     color: _fdConnectEnabled
-                        ? const Color(0xFFEFF6FF)
-                        : const Color(0xFFF8FAFC),
+                        ? AppPalette.blue50
+                        : AppPalette.slate50,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       color: _fdConnectEnabled
-                          ? const Color(0xFF93C5FD)
-                          : const Color(0xFFCBD5E1),
+                          ? AppPalette.blue300
+                          : AppPalette.slate300,
                     ),
                   ),
                   child: Column(
@@ -5780,8 +5781,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                             Icons.open_in_new_rounded,
                             size: 15,
                             color: _fdConnectEnabled
-                                ? const Color(0xFF2563EB)
-                                : const Color(0xFF64748B),
+                                ? AppPalette.blue600
+                                : AppPalette.slate500,
                           ),
                           const SizedBox(width: 7),
                           Expanded(
@@ -5795,14 +5796,14 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                   style: const TextStyle(
                                     fontSize: 11.5,
                                     fontWeight: FontWeight.w900,
-                                    color: Color(0xFF0F172A),
+                                    color: AppPalette.slate900,
                                   ),
                                 ),
                                 const Text(
                                   'Acceso directo SSH / HTTP / HTTPS desde el navegador',
                                   style: TextStyle(
                                     fontSize: 10,
-                                    color: Color(0xFF64748B),
+                                    color: AppPalette.slate500,
                                   ),
                                 ),
                               ],
@@ -5810,7 +5811,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           ),
                           Switch.adaptive(
                             value: _fdConnectEnabled,
-                            activeTrackColor: const Color(0xFF2563EB),
+                            activeTrackColor: AppPalette.blue600,
                             onChanged: (v) {
                               setState(() {
                                 _fdConnectEnabled = v;
@@ -5847,12 +5848,12 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                     color: _fdEnabledConnectSystems
                                             .contains(entry.$1)
                                         ? Colors.white
-                                        : const Color(0xFF1E3A8A),
+                                        : AppPalette.blue900,
                                   ),
                                 ),
                                 selected: _fdEnabledConnectSystems
                                     .contains(entry.$1),
-                                selectedColor: const Color(0xFF2563EB),
+                                selectedColor: AppPalette.blue600,
                                 checkmarkColor: Colors.white,
                                 backgroundColor: Colors.white,
                                 visualDensity: VisualDensity.compact,
@@ -5910,7 +5911,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                 ),
                               ),
                               style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFF0F172A),
+                                foregroundColor: AppPalette.slate900,
                                 backgroundColor: Colors.white,
                                 visualDensity: VisualDensity.compact,
                               ),
@@ -5938,7 +5939,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                 ),
                               ),
                               style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFF1D4ED8),
+                                foregroundColor: AppPalette.blue700,
                                 backgroundColor: Colors.white,
                                 visualDensity: VisualDensity.compact,
                               ),
@@ -5966,7 +5967,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                 ),
                               ),
                               style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFF2563EB),
+                                backgroundColor: AppPalette.blue600,
                                 visualDensity: VisualDensity.compact,
                               ),
                             ),
@@ -5981,9 +5982,9 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFFBEB),
+                    color: AppPalette.amber50,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFFCD34D)),
+                    border: Border.all(color: AppPalette.amber300),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -5993,7 +5994,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           Icon(
                             Icons.dns_rounded,
                             size: 14,
-                            color: Color(0xFFB45309),
+                            color: AppPalette.amber700,
                           ),
                           SizedBox(width: 6),
                           Text(
@@ -6001,7 +6002,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                             style: TextStyle(
                               fontSize: 11.5,
                               fontWeight: FontWeight.w900,
-                              color: Color(0xFF92400E),
+                              color: AppPalette.amber800,
                             ),
                           ),
                         ],
@@ -6014,7 +6015,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                         isDense: true,
                         style: const TextStyle(
                           fontSize: 12,
-                          color: Color(0xFF0F172A),
+                          color: AppPalette.slate900,
                         ),
                         decoration: _compactInputDecoration(
                           'Conectado al Rack (Línea Naranja)',
@@ -6064,7 +6065,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           isDense: true,
                           style: const TextStyle(
                             fontSize: 12,
-                            color: Color(0xFF0F172A),
+                            color: AppPalette.slate900,
                           ),
                           decoration: _compactInputDecoration(
                             'Telecommunications Outlet (Línea Azul)',
@@ -6106,9 +6107,9 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                             ),
                           ),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: const Color(0xFF92400E),
+                            foregroundColor: AppPalette.amber800,
                             backgroundColor: Colors.white,
-                            side: const BorderSide(color: Color(0xFFF59E0B)),
+                            side: const BorderSide(color: AppPalette.amber500),
                             visualDensity: VisualDensity.compact,
                           ),
                         ),
@@ -6122,14 +6123,14 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   controller: _devRespCtrl,
                 ),
                 const SizedBox(height: 12),
-                const Divider(height: 1, color: Color(0xFFE2E8F0)),
+                const Divider(height: 1, color: AppPalette.slate200),
                 const SizedBox(height: 10),
                 const Text(
                   'Contact person',
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w800,
-                    color: Color(0xFF0F172A),
+                    color: AppPalette.slate900,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -6183,15 +6184,15 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: const BoxDecoration(
-            color: Color(0xFFF8FAFC),
-            border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+            color: AppPalette.slate50,
+            border: Border(top: BorderSide(color: AppPalette.slate200)),
           ),
           child: FilledButton.icon(
             onPressed: () => _saveSelectedFloorDeviceSettings(),
             icon: const Icon(Icons.save_outlined, size: 16),
             label: const Text('Guardar Cambios (Save Settings)'),
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF2563EB),
+              backgroundColor: AppPalette.blue600,
             ),
           ),
         ),
@@ -6221,9 +6222,9 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
+              color: AppPalette.slate50,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
+              border: Border.all(color: AppPalette.slate200),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -6233,7 +6234,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w800,
-                    color: Color(0xFF0F172A),
+                    color: AppPalette.slate900,
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -6241,7 +6242,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   'Altura: ${rk.totalUnits}U  •  Equipos en Rack: ${rk.deviceCount}',
                   style: const TextStyle(
                     fontSize: 11.5,
-                    color: Color(0xFF475569),
+                    color: AppPalette.slate600,
                   ),
                 ),
                 if (rk.responsiblePerson.isNotEmpty) ...[
@@ -6250,7 +6251,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     'Responsable: ${rk.responsiblePerson}',
                     style: const TextStyle(
                       fontSize: 11.5,
-                      color: Color(0xFF475569),
+                      color: AppPalette.slate600,
                     ),
                   ),
                 ],
@@ -6260,7 +6261,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   icon: const Icon(Icons.open_in_new, size: 15),
                   label: const Text('Abrir en 3. Rack Editor'),
                   style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF1E3A8A),
+                    backgroundColor: AppPalette.blue900,
                     visualDensity: VisualDensity.compact,
                   ),
                 ),
@@ -6272,9 +6273,9 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: const Color(0xFFF0F9FF),
+              color: AppPalette.sky50,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFFBAE6FD)),
+              border: Border.all(color: AppPalette.sky200),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -6284,7 +6285,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w900,
-                    color: Color(0xFF0369A1),
+                    color: AppPalette.sky700,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -6308,7 +6309,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                               style: const TextStyle(
                                 fontSize: 12.5,
                                 fontWeight: FontWeight.w900,
-                                color: Color(0xFFEA580C),
+                                color: AppPalette.orange600,
                               ),
                             ),
                             const Text(
@@ -6316,7 +6317,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                               style: TextStyle(
                                 fontSize: 9.5,
                                 fontWeight: FontWeight.w700,
-                                color: Color(0xFF64748B),
+                                color: AppPalette.slate500,
                               ),
                             ),
                           ],
@@ -6350,7 +6351,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                               style: TextStyle(
                                 fontSize: 9.5,
                                 fontWeight: FontWeight.w700,
-                                color: Color(0xFF64748B),
+                                color: AppPalette.slate500,
                               ),
                             ),
                           ],
@@ -6376,7 +6377,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                               style: const TextStyle(
                                 fontSize: 12.5,
                                 fontWeight: FontWeight.w900,
-                                color: Color(0xFF2563EB),
+                                color: AppPalette.blue600,
                               ),
                             ),
                             const Text(
@@ -6384,7 +6385,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                               style: TextStyle(
                                 fontSize: 9.5,
                                 fontWeight: FontWeight.w700,
-                                color: Color(0xFF64748B),
+                                color: AppPalette.slate500,
                               ),
                             ),
                           ],
@@ -6413,8 +6414,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           borderRadius: BorderRadius.circular(5),
                           border: Border.all(
                             color: isFib
-                                ? const Color(0xFF06B6D4)
-                                : const Color(0xFFEA580C),
+                                ? AppPalette.cyan500
+                                : AppPalette.orange600,
                           ),
                         ),
                         child: Text(
@@ -6433,14 +6434,14 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                 ],
                 if (rackInterLinks.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  const Divider(height: 1, color: Color(0xFFBAE6FD)),
+                  const Divider(height: 1, color: AppPalette.sky200),
                   const SizedBox(height: 6),
                   Text(
                     'ENLACES INTER-RACK (${rackInterLinks.length}):',
                     style: const TextStyle(
                       fontSize: 9.5,
                       fontWeight: FontWeight.w900,
-                      color: Color(0xFF0369A1),
+                      color: AppPalette.sky700,
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -6466,7 +6467,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                         style: const TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF0F172A),
+                          color: AppPalette.slate900,
                         ),
                       ),
                     );
@@ -6481,14 +6482,14 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
             style: const TextStyle(
               fontSize: 10.5,
               fontWeight: FontWeight.w900,
-              color: Color(0xFF64748B),
+              color: AppPalette.slate500,
             ),
           ),
           const SizedBox(height: 8),
           if (connectedDevices.isEmpty)
             const Text(
               'Ningún sensor, roseta o cámara vinculado aún a este Rack.',
-              style: TextStyle(fontSize: 11.5, color: Color(0xFF94A3B8)),
+              style: TextStyle(fontSize: 11.5, color: AppPalette.slate400),
             )
           else
             ...connectedDevices.map((d) {
@@ -6498,7 +6499,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                 elevation: 0,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(6),
-                  side: const BorderSide(color: Color(0xFFE2E8F0)),
+                  side: const BorderSide(color: AppPalette.slate200),
                 ),
                 child: ListTile(
                   dense: true,
@@ -6526,7 +6527,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     icon: const Icon(
                       Icons.link_off_rounded,
                       size: 16,
-                      color: Color(0xFFDC2626),
+                      color: AppPalette.red600,
                     ),
                     onPressed: () => _quickLinkDeviceToRack(d, null, rk.code),
                   ),
@@ -6536,14 +6537,14 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
             }),
           if (otherDevices.isNotEmpty) ...[
             const SizedBox(height: 14),
-            const Divider(height: 1, color: Color(0xFFE2E8F0)),
+            const Divider(height: 1, color: AppPalette.slate200),
             const SizedBox(height: 12),
             Text(
               'MOVER / CONECTAR OTROS SENSORES DE PLANTA A ${rk.code} (${otherDevices.length})',
               style: const TextStyle(
                 fontSize: 10.5,
                 fontWeight: FontWeight.w900,
-                color: Color(0xFFB45309),
+                color: AppPalette.amber700,
               ),
             ),
             const SizedBox(height: 6),
@@ -6552,7 +6553,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
               return Card(
                 margin: const EdgeInsets.only(bottom: 5),
                 elevation: 0,
-                color: const Color(0xFFFFFBEB),
+                color: AppPalette.amber50,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(6),
                   side: const BorderSide(color: Color(0xFFFDE68A)),
@@ -6581,8 +6582,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                     style: FilledButton.styleFrom(
                       visualDensity: VisualDensity.compact,
                       padding: const EdgeInsets.symmetric(horizontal: 8),
-                      backgroundColor: const Color(0xFFFEF3C7),
-                      foregroundColor: const Color(0xFF92400E),
+                      backgroundColor: AppPalette.amber100,
+                      foregroundColor: AppPalette.amber800,
                     ),
                     onPressed: () => _quickLinkDeviceToRack(d, rk.id, rk.code),
                     child: Text(
@@ -6616,11 +6617,11 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
             'Haz clic en cualquier sensor, cámara, roseta, PC o Rack del plano para editar sus Settings (${floor.floorDevices.length} elementos en planta).',
             style: const TextStyle(
               fontSize: 11,
-              color: Color(0xFF64748B),
+              color: AppPalette.slate500,
             ),
           ),
         ),
-        const Divider(height: 1, color: Color(0xFFE2E8F0)),
+        const Divider(height: 1, color: AppPalette.slate200),
         Expanded(
           child: ListView(
             padding: const EdgeInsets.all(10),
@@ -6630,7 +6631,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   padding: EdgeInsets.all(16),
                   child: Text(
                     'No hay dispositivos en esta planta. Arrastra elementos desde DEVICES LIBRARY a la izquierda.',
-                    style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+                    style: TextStyle(fontSize: 12, color: AppPalette.slate400),
                   ),
                 )
               else
@@ -6639,9 +6640,9 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   return Container(
                     margin: const EdgeInsets.only(bottom: 5),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF8FAFC),
+                      color: AppPalette.slate50,
                       borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                      border: Border.all(color: AppPalette.slate200),
                     ),
                     child: ListTile(
                       dense: true,
@@ -6683,18 +6684,18 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   InputDecoration _compactInputDecoration(String label) {
     return InputDecoration(
       labelText: label,
-      labelStyle: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+      labelStyle: const TextStyle(fontSize: 11, color: AppPalette.slate500),
       isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
       filled: true,
       fillColor: Colors.white,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(6),
-        borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+        borderSide: const BorderSide(color: AppPalette.slate300),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(6),
-        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+        borderSide: const BorderSide(color: AppPalette.slate200),
       ),
     );
   }
@@ -6711,7 +6712,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
           maxLines == 1 ? TextInputAction.done : TextInputAction.newline,
       onSubmitted:
           maxLines == 1 ? (_) => _saveSelectedFloorDeviceSettings() : null,
-      style: const TextStyle(fontSize: 12, color: Color(0xFF0F172A)),
+      style: const TextStyle(fontSize: 12, color: AppPalette.slate900),
       decoration: _compactInputDecoration(label),
     );
   }
@@ -6734,7 +6735,7 @@ class _FloorDeviceCatalogItem {
     required this.label,
     required this.prefix,
     required this.icon,
-    this.pinColor = const Color(0xFF0F172A),
+    this.pinColor = AppPalette.slate900,
     this.defaultPortHint = 'SW01:Gi1/0/1',
     this.isSensor = false,
     this.customTypeId,
@@ -6823,17 +6824,17 @@ class _FloorConnectionsPainter extends CustomPainter {
         if (rk.powerCablesCount > 0)
           (
             label: '⚡${rk.powerCablesCount}',
-            color: const Color(0xFFEA580C),
+            color: AppPalette.orange600,
           ),
         if (rk.fiberCablesCount > 0)
           (
             label: '🌐${rk.fiberCablesCount}',
-            color: const Color(0xFF06B6D4),
+            color: AppPalette.cyan500,
           ),
         if (rk.ethCablesCount > 0)
           (
             label: '🔌${rk.ethCablesCount}',
-            color: const Color(0xFF2563EB),
+            color: AppPalette.blue600,
           ),
       ];
       if (stubs.isEmpty) continue;
@@ -6920,10 +6921,10 @@ class _FloorConnectionsPainter extends CustomPainter {
       final ePt = Offset(p2.dx + nx * offsetMag, p2.dy + ny * offsetMag);
 
       final Color lineColor = mg == 'fiber'
-          ? const Color(0xFF06B6D4)
+          ? AppPalette.cyan500
           : (mg == 'power'
-              ? const Color(0xFFEA580C)
-              : const Color(0xFF2563EB));
+              ? AppPalette.orange600
+              : AppPalette.blue600);
       final isHighlighted =
           selectedRackIds.contains(r1) || selectedRackIds.contains(r2);
 
@@ -6979,10 +6980,10 @@ class _FloorConnectionsPainter extends CustomPainter {
       perRackCrossOffset[localId] = idx + 1;
 
       final Color lineColor = mg == 'fiber'
-          ? const Color(0xFF06B6D4)
+          ? AppPalette.cyan500
           : (mg == 'power'
-              ? const Color(0xFFEA580C)
-              : const Color(0xFF2563EB));
+              ? AppPalette.orange600
+              : AppPalette.blue600);
       final startPt = Offset(rRect.right, rRect.top + 18.0 + idx * 18.0);
       final endPt = Offset(rRect.right + 28.0, rRect.top + 18.0 + idx * 18.0);
 
@@ -7019,8 +7020,8 @@ class _FloorConnectionsPainter extends CustomPainter {
       final isHighlighted = isSel || selectedRackIds.contains(rId);
       final paint = Paint()
         ..color = isHighlighted
-            ? const Color(0xFFD97706)
-            : const Color(0xFFF59E0B).withValues(alpha: 0.78)
+            ? AppPalette.amber600
+            : AppPalette.amber500.withValues(alpha: 0.78)
         ..strokeWidth = isHighlighted ? 2.4 : 1.5
         ..style = PaintingStyle.stroke;
 
@@ -7039,8 +7040,8 @@ class _FloorConnectionsPainter extends CustomPainter {
       final isHighlighted = isSel || selectedDeviceId == outId;
       final paint = Paint()
         ..color = isHighlighted
-            ? const Color(0xFF1D4ED8)
-            : const Color(0xFF3B82F6).withValues(alpha: 0.85)
+            ? AppPalette.blue700
+            : AppPalette.blue500.withValues(alpha: 0.85)
         ..strokeWidth = isHighlighted ? 2.5 : 1.7
         ..style = PaintingStyle.stroke;
 
@@ -7124,10 +7125,10 @@ class _ArchitecturalGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final minorPaint = Paint()
-      ..color = const Color(0xFFF1F5F9)
+      ..color = AppPalette.slate100
       ..strokeWidth = 1.0;
     final majorPaint = Paint()
-      ..color = const Color(0xFFE2E8F0)
+      ..color = AppPalette.slate200
       ..strokeWidth = 1.2;
 
     const step = 32.0;

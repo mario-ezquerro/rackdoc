@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/theme.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/api_client.dart';
@@ -614,7 +615,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Indica el Host / IP para la conexión SSH.'),
-          backgroundColor: Color(0xFFDC2626),
+          backgroundColor: AppPalette.red600,
         ),
       );
       return;
@@ -653,7 +654,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Indica la URL ${scheme.toUpperCase()} para conectar.'),
-            backgroundColor: const Color(0xFFDC2626),
+            backgroundColor: AppPalette.red600,
           ),
         );
         return;
@@ -693,7 +694,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         builder: (ctx, setModal) => AlertDialog(
           title: Row(
             children: [
-              const Icon(Icons.warning_amber_rounded, color: Color(0xFFDC2626)),
+              const Icon(Icons.warning_amber_rounded, color: AppPalette.red600),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -712,9 +713,9 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFEF2F2),
+                    color: AppPalette.red50,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFFCA5A5)),
+                    border: Border.all(color: AppPalette.red300),
                   ),
                   child: Text(
                     'La dirección IP $ip ya está registrada en CMDB en el activo:\n'
@@ -732,7 +733,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                     selectedAction == 'merge'
                         ? Icons.radio_button_checked
                         : Icons.radio_button_off,
-                    color: const Color(0xFF2563EB),
+                    color: AppPalette.blue600,
                   ),
                   title: const Text(
                     'Es el mismo equipo: Unificar y alinear en un único activo CMDB (Recomendado)',
@@ -751,7 +752,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                     selectedAction == 'reassign_or_clear'
                         ? Icons.radio_button_checked
                         : Icons.radio_button_off,
-                    color: const Color(0xFF2563EB),
+                    color: AppPalette.blue600,
                   ),
                   title: const Text(
                     'Son equipos distintos: Asignar la IP a este equipo del Rack y liberarla del otro',
@@ -1021,7 +1022,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
       width: 340,
       decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(left: BorderSide(color: Color(0xFFE2E8F0))),
+        border: Border(left: BorderSide(color: AppPalette.slate200)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1056,7 +1057,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                 style: const TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
-                  color: Color(0xFF0F172A),
+                  color: AppPalette.slate900,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -1079,7 +1080,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w700,
-            color: Color(0xFF334155),
+            color: AppPalette.slate700,
           ),
         ),
         const SizedBox(height: 12),
@@ -1088,7 +1089,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         if (widget.rack.availableAisles.isNotEmpty) ...[
           const Text(
             'Pasillo de Racks (Aisle)',
-            style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+            style: TextStyle(fontSize: 11, color: AppPalette.slate500),
           ),
           const SizedBox(height: 4),
           DropdownButtonFormField<int?>(
@@ -1129,7 +1130,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
             icon: const Icon(Icons.save_outlined, size: 16),
             label: Text(_isSaving ? 'Guardando...' : 'Guardar Ajustes del Rack'),
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF0F172A),
+              backgroundColor: AppPalette.slate900,
             ),
           ),
         const SizedBox(height: 10),
@@ -1148,8 +1149,8 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
           OutlinedButton.icon(
             onPressed: widget.onDeleteRack,
             style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFFDC2626),
-              side: const BorderSide(color: Color(0xFFFCA5A5)),
+              foregroundColor: AppPalette.red600,
+              side: const BorderSide(color: AppPalette.red300),
             ),
             icon: const Icon(Icons.delete_outline, size: 16),
             label: Text('Eliminar este Rack (${widget.rack.code})'),
@@ -1166,8 +1167,8 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
     final isOnline = d.status == 'online';
     final isOffline = d.status == 'offline';
     final statusColor = isOnline
-        ? const Color(0xFF16A34A)
-        : (isOffline ? const Color(0xFFDC2626) : const Color(0xFFD97706));
+        ? AppPalette.green600
+        : (isOffline ? AppPalette.red600 : AppPalette.amber600);
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -1177,7 +1178,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
               decoration: BoxDecoration(
-                color: const Color(0xFFEFF6FF),
+                color: AppPalette.blue50,
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
@@ -1185,7 +1186,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                 style: const TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
-                  color: Color(0xFF1D4ED8),
+                  color: AppPalette.blue700,
                 ),
               ),
             ),
@@ -1196,7 +1197,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                 style: const TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
-                  color: Color(0xFF0F172A),
+                  color: AppPalette.slate900,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -1211,7 +1212,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         ),
         Text(
           '${d.template.manufacturer} ${d.template.modelName}${d.template.isFullDepth ? ' (Full-Depth Front+Back)' : ''}',
-          style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+          style: const TextStyle(fontSize: 11, color: AppPalette.slate500),
         ),
         const Divider(height: 20),
 
@@ -1219,12 +1220,12 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: const Color(0xFFF8FAFC),
+            color: AppPalette.slate50,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: _devMonitorEnabled
                   ? statusColor.withValues(alpha: 0.45)
-                  : const Color(0xFFE2E8F0),
+                  : AppPalette.slate200,
             ),
           ),
           child: Column(
@@ -1238,7 +1239,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                     decoration: BoxDecoration(
                       color: _devMonitorEnabled
                           ? statusColor
-                          : const Color(0xFF94A3B8),
+                          : AppPalette.slate400,
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -1253,7 +1254,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                         fontWeight: FontWeight.w800,
                         color: _devMonitorEnabled
                             ? statusColor
-                            : const Color(0xFF64748B),
+                            : AppPalette.slate500,
                       ),
                     ),
                   ),
@@ -1265,7 +1266,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                         style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF334155),
+                          color: AppPalette.slate700,
                         ),
                       ),
                     ),
@@ -1283,7 +1284,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                   style: TextStyle(
                     fontSize: 10.5,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF475569),
+                    color: AppPalette.slate600,
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -1322,8 +1323,8 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                       showCheckmark: true,
                       visualDensity: VisualDensity.compact,
                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      selectedColor: const Color(0xFFDBEAFE),
-                      checkmarkColor: const Color(0xFF1D4ED8),
+                      selectedColor: AppPalette.blue100,
+                      checkmarkColor: AppPalette.blue700,
                       label: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -1333,8 +1334,8 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                               fontSize: 10.5,
                               fontWeight: FontWeight.w800,
                               color: isChecked
-                                  ? const Color(0xFF1E3A8A)
-                                  : const Color(0xFF475569),
+                                  ? AppPalette.blue900
+                                  : AppPalette.slate600,
                             ),
                           ),
                           if (isChecked && checkRes != null) ...[
@@ -1345,10 +1346,10 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: chkOnline
-                                    ? const Color(0xFF16A34A)
+                                    ? AppPalette.green600
                                     : (chkOffline
-                                        ? const Color(0xFFDC2626)
-                                        : const Color(0xFFD97706)),
+                                        ? AppPalette.red600
+                                        : AppPalette.amber600),
                               ),
                             ),
                           ],
@@ -1382,7 +1383,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                     child: Text(
                       'Envía eco ICMP directo a ${_hbIcmpTarget == "fqdn" ? (_devFqdnCtrl.text.isEmpty ? "FQDN (sin definir)" : _devFqdnCtrl.text) : (_devIpCtrl.text.isEmpty ? "IP (sin definir)" : _devIpCtrl.text)} (sin puerto).',
                       style:
-                          const TextStyle(fontSize: 10, color: Color(0xFF64748B)),
+                          const TextStyle(fontSize: 10, color: AppPalette.slate500),
                     ),
                   ),
 
@@ -1606,7 +1607,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                      border: Border.all(color: AppPalette.slate200),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1616,7 +1617,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w800,
-                            color: Color(0xFF475569),
+                            color: AppPalette.slate600,
                           ),
                         ),
                         const SizedBox(height: 4),
@@ -1633,8 +1634,8 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                                   ok ? Icons.check_circle : Icons.cancel,
                                   size: 13,
                                   color: ok
-                                      ? const Color(0xFF16A34A)
-                                      : const Color(0xFFDC2626),
+                                      ? AppPalette.green600
+                                      : AppPalette.red600,
                                 ),
                                 const SizedBox(width: 5),
                                 Expanded(
@@ -1644,8 +1645,8 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                                       fontSize: 10,
                                       fontWeight: FontWeight.w600,
                                       color: ok
-                                          ? const Color(0xFF15803D)
-                                          : const Color(0xFFB91C1C),
+                                          ? AppPalette.green700
+                                          : AppPalette.red700,
                                     ),
                                   ),
                                 ),
@@ -1663,13 +1664,13 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                      border: Border.all(color: AppPalette.slate200),
                     ),
                     child: Text(
                       _pingResultMessage!,
                       style: const TextStyle(
                         fontSize: 10.5,
-                        color: Color(0xFF334155),
+                        color: AppPalette.slate700,
                       ),
                     ),
                   ),
@@ -1708,13 +1709,13 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
             color: _connectEnabled
-                ? const Color(0xFFF0F9FF)
-                : const Color(0xFFF8FAFC),
+                ? AppPalette.sky50
+                : AppPalette.slate50,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: _connectEnabled
-                  ? const Color(0xFFBAE6FD)
-                  : const Color(0xFFE2E8F0),
+                  ? AppPalette.sky200
+                  : AppPalette.slate200,
             ),
           ),
           child: Column(
@@ -1726,8 +1727,8 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                     Icons.open_in_browser,
                     size: 16,
                     color: _connectEnabled
-                        ? const Color(0xFF0369A1)
-                        : const Color(0xFF94A3B8),
+                        ? AppPalette.sky700
+                        : AppPalette.slate400,
                   ),
                   const SizedBox(width: 8),
                   Expanded(
@@ -1739,8 +1740,8 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                         fontSize: 11.5,
                         fontWeight: FontWeight.w800,
                         color: _connectEnabled
-                            ? const Color(0xFF0C4A6E)
-                            : const Color(0xFF64748B),
+                            ? AppPalette.sky900
+                            : AppPalette.slate500,
                       ),
                     ),
                   ),
@@ -1758,7 +1759,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                   style: TextStyle(
                     fontSize: 10.5,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF0369A1),
+                    color: AppPalette.sky700,
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -1778,16 +1779,16 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                       showCheckmark: true,
                       visualDensity: VisualDensity.compact,
                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      selectedColor: const Color(0xFFE0F2FE),
-                      checkmarkColor: const Color(0xFF0284C7),
+                      selectedColor: AppPalette.sky100,
+                      checkmarkColor: AppPalette.sky600,
                       label: Text(
                         label,
                         style: TextStyle(
                           fontSize: 10.5,
                           fontWeight: FontWeight.w800,
                           color: selected
-                              ? const Color(0xFF0C4A6E)
-                              : const Color(0xFF475569),
+                              ? AppPalette.sky900
+                              : AppPalette.slate600,
                         ),
                       ),
                       onSelected: !_canEdit
@@ -1814,7 +1815,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: const Color(0xFFBAE6FD)),
+                      border: Border.all(color: AppPalette.sky200),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1824,7 +1825,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                             const Icon(
                               Icons.terminal,
                               size: 14,
-                              color: Color(0xFF0F172A),
+                              color: AppPalette.slate900,
                             ),
                             const SizedBox(width: 6),
                             const Expanded(
@@ -1833,7 +1834,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w800,
-                                  color: Color(0xFF0F172A),
+                                  color: AppPalette.slate900,
                                 ),
                               ),
                             ),
@@ -1842,7 +1843,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                                   ? _launchFrontendSshConnect
                                   : null,
                               style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFF0F172A),
+                                backgroundColor: AppPalette.slate900,
                                 visualDensity: VisualDensity.compact,
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 10,
@@ -1893,7 +1894,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: const Color(0xFFBAE6FD)),
+                      border: Border.all(color: AppPalette.sky200),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1903,7 +1904,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                             const Icon(
                               Icons.http,
                               size: 15,
-                              color: Color(0xFF0284C7),
+                              color: AppPalette.sky600,
                             ),
                             const SizedBox(width: 6),
                             const Expanded(
@@ -1912,7 +1913,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w800,
-                                  color: Color(0xFF0C4A6E),
+                                  color: AppPalette.sky900,
                                 ),
                               ),
                             ),
@@ -1952,7 +1953,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: const Color(0xFFBAE6FD)),
+                      border: Border.all(color: AppPalette.sky200),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1962,7 +1963,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                             const Icon(
                               Icons.lock_outline,
                               size: 14,
-                              color: Color(0xFF0369A1),
+                              color: AppPalette.sky700,
                             ),
                             const SizedBox(width: 6),
                             const Expanded(
@@ -1971,7 +1972,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w800,
-                                  color: Color(0xFF0C4A6E),
+                                  color: AppPalette.sky900,
                                 ),
                               ),
                             ),
@@ -1980,7 +1981,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                                   ? () => _launchFrontendWebConnect('https')
                                   : null,
                               style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFF0284C7),
+                                backgroundColor: AppPalette.sky600,
                                 visualDensity: VisualDensity.compact,
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 10,
@@ -2016,16 +2017,16 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
             margin: const EdgeInsets.only(bottom: 12),
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
+              color: AppPalette.slate50,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
+              border: Border.all(color: AppPalette.slate200),
             ),
             child: Row(
               children: [
                 const Icon(
                   Icons.photo_camera_outlined,
                   size: 18,
-                  color: Color(0xFF1D4ED8),
+                  color: AppPalette.blue700,
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -2037,7 +2038,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                         style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF0F172A),
+                          color: AppPalette.slate900,
                         ),
                       ),
                       Text(
@@ -2046,7 +2047,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                             : 'Bisel realista automático o busca foto en Internet',
                         style: const TextStyle(
                           fontSize: 10,
-                          color: Color(0xFF64748B),
+                          color: AppPalette.slate500,
                         ),
                       ),
                     ],
@@ -2073,7 +2074,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w700,
-            color: Color(0xFF0F172A),
+            color: AppPalette.slate900,
           ),
         ),
         const SizedBox(height: 10),
@@ -2188,7 +2189,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                 children: [
                   const Text(
                     'Cara Montaje',
-                    style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                    style: TextStyle(fontSize: 11, color: AppPalette.slate500),
                   ),
                   const SizedBox(height: 4),
                   DropdownButtonFormField<String>(
@@ -2219,7 +2220,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
-                  color: Color(0xFF0F172A),
+                  color: AppPalette.slate900,
                 ),
               ),
             ),
@@ -2253,7 +2254,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
             padding: EdgeInsets.only(bottom: 8),
             child: Text(
               'Añade variables extra como CPU, RAM, OS, Contrato, Consumo W...',
-              style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+              style: TextStyle(fontSize: 11, color: AppPalette.slate400),
             ),
           )
         else
@@ -2279,9 +2280,9 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
               margin: const EdgeInsets.only(bottom: 6),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
+                color: AppPalette.slate50,
                 borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
+                border: Border.all(color: AppPalette.slate200),
               ),
               child: Row(
                 children: [
@@ -2291,7 +2292,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                       style: const TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFF334155),
+                        color: AppPalette.slate700,
                       ),
                     ),
                   ),
@@ -2300,7 +2301,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                       '${entry.value}',
                       style: const TextStyle(
                         fontSize: 11,
-                        color: Color(0xFF0F172A),
+                        color: AppPalette.slate900,
                       ),
                     ),
                   ),
@@ -2311,7 +2312,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                     child: const Icon(
                       Icons.delete_outline,
                       size: 15,
-                      color: Color(0xFF94A3B8),
+                      color: AppPalette.slate400,
                     ),
                   ),
                 ],
@@ -2328,7 +2329,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
             icon: const Icon(Icons.save_outlined, size: 16),
             label: Text(_isSaving ? 'Guardando...' : 'Guardar Cambios del Equipo'),
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF1E3A8A),
+              backgroundColor: AppPalette.blue900,
             ),
           ),
           const SizedBox(height: 8),
@@ -2341,11 +2342,11 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
             icon: const Icon(
               Icons.delete_outline,
               size: 16,
-              color: Color(0xFFDC2626),
+              color: AppPalette.red600,
             ),
             label: const Text(
               'Desmontar Equipo del Rack',
-              style: TextStyle(color: Color(0xFFDC2626)),
+              style: TextStyle(color: AppPalette.red600),
             ),
           ),
         ],
@@ -2382,8 +2383,8 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
           color: isOk
-              ? const Color(0xFF86EFAC)
-              : (isFail ? const Color(0xFFFCA5A5) : const Color(0xFFCBD5E1)),
+              ? AppPalette.green300
+              : (isFail ? AppPalette.red300 : AppPalette.slate300),
         ),
       ),
       child: Column(
@@ -2391,7 +2392,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         children: [
           Row(
             children: [
-              Icon(icon, size: 14, color: const Color(0xFF1D4ED8)),
+              Icon(icon, size: 14, color: AppPalette.blue700),
               const SizedBox(width: 5),
               Expanded(
                 child: Text(
@@ -2399,7 +2400,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                   style: const TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
-                    color: Color(0xFF0F172A),
+                    color: AppPalette.slate900,
                   ),
                 ),
               ),
@@ -2409,7 +2410,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                   margin: const EdgeInsets.only(right: 6),
                   decoration: BoxDecoration(
                     color: isOk
-                        ? const Color(0xFFDCFCE7)
+                        ? AppPalette.green100
                         : const Color(0xFFFEE2E2),
                     borderRadius: BorderRadius.circular(4),
                   ),
@@ -2421,17 +2422,17 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                       fontSize: 9.5,
                       fontWeight: FontWeight.w800,
                       color: isOk
-                          ? const Color(0xFF15803D)
-                          : const Color(0xFFB91C1C),
+                          ? AppPalette.green700
+                          : AppPalette.red700,
                     ),
                   ),
                 ),
               // Selector IP vs FQDN para cada protocolo
               Container(
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF1F5F9),
+                  color: AppPalette.slate100,
                   borderRadius: BorderRadius.circular(5),
-                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                  border: Border.all(color: AppPalette.slate300),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -2446,7 +2447,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                           ),
                           decoration: BoxDecoration(
                             color: targetValue == opt.$1
-                                ? const Color(0xFF1D4ED8)
+                                ? AppPalette.blue700
                                 : Colors.transparent,
                             borderRadius: BorderRadius.circular(4),
                           ),
@@ -2457,7 +2458,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                               fontWeight: FontWeight.w800,
                               color: targetValue == opt.$1
                                   ? Colors.white
-                                  : const Color(0xFF475569),
+                                  : AppPalette.slate600,
                             ),
                           ),
                         ),
@@ -2494,7 +2495,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
       children: [
         Row(
           children: [
-            const Icon(Icons.cable, size: 18, color: Color(0xFF2563EB)),
+            const Icon(Icons.cable, size: 18, color: AppPalette.blue600),
             const SizedBox(width: 8),
             const Expanded(
               child: Text(
@@ -2502,7 +2503,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
-                  color: Color(0xFF0F172A),
+                  color: AppPalette.slate900,
                 ),
               ),
             ),
@@ -2519,9 +2520,9 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: const Color(0xFFF8FAFC),
+            color: AppPalette.slate50,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
+            border: Border.all(color: AppPalette.slate200),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -2536,7 +2537,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
               ),
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 6),
-                child: Icon(Icons.arrow_downward_rounded, size: 16, color: Color(0xFF64748B)),
+                child: Icon(Icons.arrow_downward_rounded, size: 16, color: AppPalette.slate500),
               ),
               _EndpointRow(
                 title: 'DESTINO',
@@ -2553,7 +2554,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         const SizedBox(height: 14),
         const Text(
           'Tipo de Cable (Red / Fibra / Electricidad)',
-          style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+          style: TextStyle(fontSize: 11, color: AppPalette.slate500),
         ),
         const SizedBox(height: 4),
         DropdownButtonFormField<String>(
@@ -2573,7 +2574,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         const SizedBox(height: 12),
         const Text(
           'Color del Cable',
-          style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+          style: TextStyle(fontSize: 11, color: AppPalette.slate500),
         ),
         const SizedBox(height: 6),
         Wrap(
@@ -2606,7 +2607,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         const SizedBox(height: 14),
         const Text(
           'Canaleta del Rack (Routing Channel)',
-          style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+          style: TextStyle(fontSize: 11, color: AppPalette.slate500),
         ),
         const SizedBox(height: 4),
         DropdownButtonFormField<String>(
@@ -2650,7 +2651,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
             icon: const Icon(Icons.save_outlined, size: 16),
             label: const Text('Guardar Propiedades del Cable'),
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF1E3A8A),
+              backgroundColor: AppPalette.blue900,
             ),
           ),
           const SizedBox(height: 8),
@@ -2663,11 +2664,11 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
             icon: const Icon(
               Icons.link_off,
               size: 16,
-              color: Color(0xFFDC2626),
+              color: AppPalette.red600,
             ),
             label: const Text(
               'Desconectar / Eliminar Cable',
-              style: TextStyle(color: Color(0xFFDC2626)),
+              style: TextStyle(color: AppPalette.red600),
             ),
           ),
         ],
@@ -2681,14 +2682,14 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
       isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
       filled: true,
-      fillColor: const Color(0xFFF8FAFC),
+      fillColor: AppPalette.slate50,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(6),
-        borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+        borderSide: const BorderSide(color: AppPalette.slate300),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(6),
-        borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+        borderSide: const BorderSide(color: AppPalette.slate300),
       ),
     );
   }
@@ -2720,7 +2721,7 @@ class _EndpointRow extends StatelessWidget {
                 style: const TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
-                  color: Color(0xFF64748B),
+                  color: AppPalette.slate500,
                 ),
               ),
               Text(
@@ -2728,7 +2729,7 @@ class _EndpointRow extends StatelessWidget {
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
-                  color: Color(0xFF0F172A),
+                  color: AppPalette.slate900,
                 ),
               ),
             ],
@@ -2772,13 +2773,13 @@ class _CompactInput extends StatelessWidget {
         children: [
           Text(
             label,
-            style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+            style: const TextStyle(fontSize: 11, color: AppPalette.slate500),
           ),
           const SizedBox(height: 4),
           TextField(
             controller: controller,
             maxLines: maxLines,
-            style: const TextStyle(fontSize: 12, color: Color(0xFF0F172A)),
+            style: const TextStyle(fontSize: 12, color: AppPalette.slate900),
             decoration: InputDecoration(
               isDense: true,
               contentPadding: const EdgeInsets.symmetric(
@@ -2786,14 +2787,14 @@ class _CompactInput extends StatelessWidget {
                 vertical: 9,
               ),
               filled: true,
-              fillColor: const Color(0xFFF8FAFC),
+              fillColor: AppPalette.slate50,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                borderSide: const BorderSide(color: AppPalette.slate300),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                borderSide: const BorderSide(color: AppPalette.slate300),
               ),
             ),
           ),

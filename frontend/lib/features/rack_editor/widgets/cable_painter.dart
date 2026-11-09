@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import '../../../core/theme.dart';
 import '../../../models/datacenter_models.dart';
 
 class ComputedCableRoute {
@@ -25,7 +26,7 @@ class ComputedCableRoute {
 }
 
 class CableGeometryBuilder {
-  static Color parseHexColor(String hex, {Color fallback = const Color(0xFF2563EB)}) {
+  static Color parseHexColor(String hex, {Color fallback = AppPalette.blue600}) {
     final cleaned = hex.replaceAll('#', '').trim();
     if (cleaned.length == 6) {
       final val = int.tryParse('FF$cleaned', radix: 16);
@@ -431,13 +432,13 @@ class RackCablePainter extends CustomPainter {
         radius: 6.0,
       );
       final previewPaint = Paint()
-        ..color = const Color(0xFF2563EB)
+        ..color = AppPalette.blue600
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.6
         ..strokeCap = StrokeCap.round;
       canvas.drawPath(previewPath, previewPaint);
-      canvas.drawCircle(p1, 4.5, Paint()..color = const Color(0xFF2563EB));
-      canvas.drawCircle(p2, 4.5, Paint()..color = const Color(0xFF10B981));
+      canvas.drawCircle(p1, 4.5, Paint()..color = AppPalette.blue600);
+      canvas.drawCircle(p2, 4.5, Paint()..color = AppPalette.emerald500);
     }
   }
 

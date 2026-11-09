@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/theme.dart';
 import '../../../models/datacenter_models.dart';
 
 class DeviceCatalogPanel extends StatefulWidget {
@@ -144,7 +145,7 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
       width: 265,
       decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(right: BorderSide(color: Color(0xFFE2E8F0))),
+        border: Border(right: BorderSide(color: AppPalette.slate200)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -159,7 +160,7 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
                     const Icon(
                       Icons.widgets_outlined,
                       size: 17,
-                      color: Color(0xFF1E3A8A),
+                      color: AppPalette.blue900,
                     ),
                     const SizedBox(width: 6),
                     const Expanded(
@@ -168,7 +169,7 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF0F172A),
+                          color: AppPalette.slate900,
                         ),
                       ),
                     ),
@@ -187,9 +188,9 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
+                    color: AppPalette.slate100,
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                    border: Border.all(color: AppPalette.slate300),
                   ),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
@@ -200,7 +201,7 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
                       style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFF0F172A),
+                        color: AppPalette.slate900,
                       ),
                       items: libraryGroups.map((g) {
                         final label =
@@ -275,14 +276,14 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
                       vertical: 8,
                     ),
                     filled: true,
-                    fillColor: const Color(0xFFF8FAFC),
+                    fillColor: AppPalette.slate50,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(6),
-                      borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                      borderSide: const BorderSide(color: AppPalette.slate200),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(6),
-                      borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                      borderSide: const BorderSide(color: AppPalette.slate200),
                     ),
                   ),
                 ),
@@ -311,8 +312,8 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(
                       color: isExpanded
-                          ? const Color(0xFF94A3B8)
-                          : const Color(0xFFE2E8F0),
+                          ? AppPalette.slate400
+                          : AppPalette.slate200,
                     ),
                   ),
                   child: Column(
@@ -337,8 +338,8 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
                                 _iconForCategory(cat),
                                 size: 15,
                                 color: (cat == 'pdu' || cat == 'ups')
-                                    ? const Color(0xFFDC2626)
-                                    : const Color(0xFF475569),
+                                    ? AppPalette.red600
+                                    : AppPalette.slate600,
                               ),
                               const SizedBox(width: 8),
                               Expanded(
@@ -347,7 +348,7 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
                                   style: const TextStyle(
                                     fontSize: 11.5,
                                     fontWeight: FontWeight.w600,
-                                    color: Color(0xFF1E293B),
+                                    color: AppPalette.slate800,
                                   ),
                                 ),
                               ),
@@ -355,7 +356,7 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
                                 '${items.length}',
                                 style: const TextStyle(
                                   fontSize: 10,
-                                  color: Color(0xFF94A3B8),
+                                  color: AppPalette.slate400,
                                 ),
                               ),
                             ],
@@ -366,7 +367,7 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
                         Container(
                           padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
                           decoration: const BoxDecoration(
-                            color: Color(0xFFF8FAFC),
+                            color: AppPalette.slate50,
                             borderRadius: BorderRadius.vertical(
                               bottom: Radius.circular(6),
                             ),
@@ -391,7 +392,7 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
                                         vertical: 8,
                                       ),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFF1E3A8A),
+                                        color: AppPalette.blue900,
                                         borderRadius: BorderRadius.circular(6),
                                       ),
                                       child: Row(
@@ -430,13 +431,13 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
                                       padding: const EdgeInsets.all(8),
                                       decoration: BoxDecoration(
                                         color: isSelected
-                                            ? const Color(0xFFDBEAFE)
+                                            ? AppPalette.blue100
                                             : Colors.white,
                                         borderRadius: BorderRadius.circular(5),
                                         border: Border.all(
                                           color: isSelected
-                                              ? const Color(0xFF2563EB)
-                                              : const Color(0xFFCBD5E1),
+                                              ? AppPalette.blue600
+                                              : AppPalette.slate300,
                                         ),
                                       ),
                                       child: Row(
@@ -444,7 +445,7 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
                                           const Icon(
                                             Icons.drag_indicator,
                                             size: 14,
-                                            color: Color(0xFF94A3B8),
+                                            color: AppPalette.slate400,
                                           ),
                                           const SizedBox(width: 6),
                                           Expanded(
@@ -462,7 +463,7 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
                                                           fontWeight:
                                                               FontWeight.w600,
                                                           color:
-                                                              Color(0xFF0F172A),
+                                                              AppPalette.slate900,
                                                         ),
                                                       ),
                                                     ),
@@ -499,7 +500,7 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
                                                   '${tpl.manufacturer} • ${tpl.uHeight}U • [${tpl.libraryGroup}]',
                                                   style: const TextStyle(
                                                     fontSize: 9.5,
-                                                    color: Color(0xFF64748B),
+                                                    color: AppPalette.slate500,
                                                   ),
                                                 ),
                                               ],

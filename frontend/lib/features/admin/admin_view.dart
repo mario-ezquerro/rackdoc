@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/theme.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_client.dart';
 import '../../models/datacenter_models.dart';
@@ -169,7 +170,7 @@ class _AdminViewState extends State<AdminView> {
             content: Text(
               '✓ Frecuencia de chequeo Heartbeat actualizada a cada $safeMins min.',
             ),
-            backgroundColor: const Color(0xFF15803D),
+            backgroundColor: AppPalette.green700,
           ),
         );
       }
@@ -199,7 +200,7 @@ class _AdminViewState extends State<AdminView> {
             content: Text(
               '✓ Comprobación en background completada: ⚪${mon['unmonitored_count'] ?? 0} Gris • 🟢${mon['online_count'] ?? 0} Verde • 🟠${mon['warning_count'] ?? 0} Naranja • 🔴${mon['offline_count'] ?? 0} Rojo',
             ),
-            backgroundColor: const Color(0xFF0F172A),
+            backgroundColor: AppPalette.slate900,
           ),
         );
       }
@@ -217,14 +218,14 @@ class _AdminViewState extends State<AdminView> {
   static Color _roleColor(String role) {
     switch (role) {
       case 'admin':
-        return const Color(0xFFDC2626);
+        return AppPalette.red600;
       case 'editor':
-        return const Color(0xFF2563EB);
+        return AppPalette.blue600;
       case 'operator':
-        return const Color(0xFF0D9488);
+        return AppPalette.teal600;
       case 'viewer':
       default:
-        return const Color(0xFF64748B);
+        return AppPalette.slate500;
     }
   }
 
@@ -568,7 +569,7 @@ class _AdminViewState extends State<AdminView> {
                     style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w800,
-                      color: Color(0xFF0F172A),
+                      color: AppPalette.slate900,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -584,16 +585,16 @@ class _AdminViewState extends State<AdminView> {
                         vertical: 4,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
+                        color: AppPalette.slate50,
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                        border: Border.all(color: AppPalette.slate300),
                       ),
                       child: Row(
                         children: [
                           const Icon(
                             Icons.groups_2_outlined,
                             size: 16,
-                            color: Color(0xFF1E3A8A),
+                            color: AppPalette.blue900,
                           ),
                           const SizedBox(width: 8),
                           Expanded(
@@ -638,7 +639,7 @@ class _AdminViewState extends State<AdminView> {
                             icon: const Icon(
                               Icons.delete_outline,
                               size: 15,
-                              color: Color(0xFFDC2626),
+                              color: AppPalette.red600,
                             ),
                             visualDensity: VisualDensity.compact,
                           ),
@@ -843,7 +844,7 @@ class _AdminViewState extends State<AdminView> {
                         style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF1E3A8A),
+                          color: AppPalette.blue900,
                         ),
                       ),
                       const SizedBox(height: 6),
@@ -861,7 +862,7 @@ class _AdminViewState extends State<AdminView> {
                             avatar: const Icon(
                               Icons.groups_2_outlined,
                               size: 14,
-                              color: Color(0xFF1E3A8A),
+                              color: AppPalette.blue900,
                             ),
                             label: Text(
                               '$shortGrp → ${rRole.toUpperCase()}',
@@ -896,7 +897,7 @@ class _AdminViewState extends State<AdminView> {
                     ],
                     const Text(
                       'Selecciona los usuarios o grupos del Directorio Activo y asígnales uno de los 4 roles de RackDoc:',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF475569)),
+                      style: TextStyle(fontSize: 12, color: AppPalette.slate600),
                     ),
                     const SizedBox(height: 8),
                     if (searching)
@@ -908,7 +909,7 @@ class _AdminViewState extends State<AdminView> {
                       Container(
                         height: 300,
                         decoration: BoxDecoration(
-                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                          border: Border.all(color: AppPalette.slate200),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: ListView.separated(
@@ -965,7 +966,7 @@ class _AdminViewState extends State<AdminView> {
                                                       vertical: 1.5,
                                                     ),
                                                 decoration: BoxDecoration(
-                                                  color: const Color(0xFFE0E7FF),
+                                                  color: AppPalette.indigo100,
                                                   borderRadius:
                                                       BorderRadius.circular(4),
                                                 ),
@@ -999,7 +1000,7 @@ class _AdminViewState extends State<AdminView> {
                                                   style: TextStyle(
                                                     fontSize: 9.5,
                                                     fontWeight: FontWeight.bold,
-                                                    color: Color(0xFF15803D),
+                                                    color: AppPalette.green700,
                                                   ),
                                                 ),
                                               ),
@@ -1010,7 +1011,7 @@ class _AdminViewState extends State<AdminView> {
                                           '$email • $dept',
                                           style: const TextStyle(
                                             fontSize: 11,
-                                            color: Color(0xFF64748B),
+                                            color: AppPalette.slate500,
                                           ),
                                         ),
                                       ],
@@ -1023,7 +1024,7 @@ class _AdminViewState extends State<AdminView> {
                                     style: const TextStyle(
                                       fontSize: 11.5,
                                       fontWeight: FontWeight.w700,
-                                      color: Color(0xFF0F172A),
+                                      color: AppPalette.slate900,
                                     ),
                                     items: const [
                                       DropdownMenuItem(
@@ -1139,13 +1140,13 @@ class _AdminViewState extends State<AdminView> {
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF0F172A),
+                        color: AppPalette.slate900,
                       ),
                     ),
                     SizedBox(height: 4),
                     Text(
                       'Credenciales admin por defecto configurables en .env / Docker (ADMIN_USERNAME=admin, ADMIN_PASSWORD=admin) + Conexión a uno o varios servidores AD.',
-                      style: TextStyle(fontSize: 12.5, color: Color(0xFF64748B)),
+                      style: TextStyle(fontSize: 12.5, color: AppPalette.slate500),
                     ),
                   ],
                 ),
@@ -1194,7 +1195,7 @@ class _AdminViewState extends State<AdminView> {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF86EFAC), width: 1.5),
+              border: Border.all(color: AppPalette.green300, width: 1.5),
               boxShadow: const [
                 BoxShadow(
                   color: Color(0x08000000),
@@ -1211,13 +1212,13 @@ class _AdminViewState extends State<AdminView> {
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFDCFCE7),
+                        color: AppPalette.green100,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: const Icon(
                         Icons.monitor_heart_rounded,
                         size: 20,
-                        color: Color(0xFF15803D),
+                        color: AppPalette.green700,
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -1230,14 +1231,14 @@ class _AdminViewState extends State<AdminView> {
                             style: TextStyle(
                               fontSize: 15.5,
                               fontWeight: FontWeight.w900,
-                              color: Color(0xFF0F172A),
+                              color: AppPalette.slate900,
                             ),
                           ),
                           Text(
                             'El backend comprueba periódicamente todos los equipos y sensores con Heartbeat activado. Por defecto cada 5 minutos (${_monitoringSettings['interval_minutes'] ?? 5} min actual).',
                             style: const TextStyle(
                               fontSize: 12,
-                              color: Color(0xFF475569),
+                              color: AppPalette.slate600,
                             ),
                           ),
                         ],
@@ -1245,7 +1246,7 @@ class _AdminViewState extends State<AdminView> {
                     ),
                     Switch.adaptive(
                       value: _monitoringSettings['background_enabled'] != false,
-                      activeTrackColor: const Color(0xFF16A34A),
+                      activeTrackColor: AppPalette.green600,
                       onChanged: (v) {
                         final curMins =
                             int.tryParse(_hbMinutesCtrl.text.trim()) ?? 5;
@@ -1273,7 +1274,7 @@ class _AdminViewState extends State<AdminView> {
                             : 'Comprobar Todos Ahora',
                       ),
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF0F172A),
+                        backgroundColor: AppPalette.slate900,
                       ),
                     ),
                   ],
@@ -1289,7 +1290,7 @@ class _AdminViewState extends State<AdminView> {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF1E293B),
+                        color: AppPalette.slate800,
                       ),
                     ),
                     for (final preset in const [1, 2, 5, 10, 15, 30, 60])
@@ -1303,13 +1304,13 @@ class _AdminViewState extends State<AdminView> {
                                         5) ==
                                     preset)
                                 ? Colors.white
-                                : const Color(0xFF0F172A),
+                                : AppPalette.slate900,
                           ),
                         ),
                         selected:
                             (_monitoringSettings['interval_minutes'] ?? 5) ==
                                 preset,
-                        selectedColor: const Color(0xFF15803D),
+                        selectedColor: AppPalette.green700,
                         checkmarkColor: Colors.white,
                         onSelected: _savingMonitoringSettings
                             ? null
@@ -1362,16 +1363,16 @@ class _AdminViewState extends State<AdminView> {
                         vertical: 5,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF1F5F9),
+                        color: AppPalette.slate100,
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                        border: Border.all(color: AppPalette.slate300),
                       ),
                       child: Text(
                         '⚪ Gris (Heartbeat desactivado): ${_monitoringSettings['unmonitored_count'] ?? 0}',
                         style: const TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFF475569),
+                          color: AppPalette.slate600,
                         ),
                       ),
                     ),
@@ -1381,16 +1382,16 @@ class _AdminViewState extends State<AdminView> {
                         vertical: 5,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF0FDF4),
+                        color: AppPalette.green50,
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: const Color(0xFF86EFAC)),
+                        border: Border.all(color: AppPalette.green300),
                       ),
                       child: Text(
                         '🟢 Verde (Todos los chequeos OK): ${_monitoringSettings['online_count'] ?? 0}',
                         style: const TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFF15803D),
+                          color: AppPalette.green700,
                         ),
                       ),
                     ),
@@ -1400,16 +1401,16 @@ class _AdminViewState extends State<AdminView> {
                         vertical: 5,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFFFBEB),
+                        color: AppPalette.amber50,
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: const Color(0xFFFCD34D)),
+                        border: Border.all(color: AppPalette.amber300),
                       ),
                       child: Text(
                         '🟠 Naranja (Fallo parcial 1+ chequeo): ${_monitoringSettings['warning_count'] ?? 0}',
                         style: const TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFFB45309),
+                          color: AppPalette.amber700,
                         ),
                       ),
                     ),
@@ -1419,16 +1420,16 @@ class _AdminViewState extends State<AdminView> {
                         vertical: 5,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFEF2F2),
+                        color: AppPalette.red50,
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: const Color(0xFFFCA5A5)),
+                        border: Border.all(color: AppPalette.red300),
                       ),
                       child: Text(
                         '🔴 Rojo (Fallo total Heartbeat): ${_monitoringSettings['offline_count'] ?? 0}',
                         style: const TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFFB91C1C),
+                          color: AppPalette.red700,
                         ),
                       ),
                     ),
@@ -1447,7 +1448,7 @@ class _AdminViewState extends State<AdminView> {
                 child: _RoleInfoCard(
                   roleCode: 'admin',
                   title: '1. Administrador (admin)',
-                  color: Color(0xFFDC2626),
+                  color: AppPalette.red600,
                   description:
                       'Control total: gestión de Usuarios, servidores Active Directory, edición de Sedes/Plantas/Racks/Librerías y conexión SSH/Telnet/Web.',
                 ),
@@ -1457,7 +1458,7 @@ class _AdminViewState extends State<AdminView> {
                 child: _RoleInfoCard(
                   roleCode: 'editor',
                   title: '2. Editor (editor)',
-                  color: Color(0xFF2563EB),
+                  color: AppPalette.blue600,
                   description:
                       'Permite crear, mover, editar y borrar Locations, Plantas, Racks, Equipos, Tomas Schuko y Cables + conectar por SSH/Telnet/Web.',
                 ),
@@ -1467,7 +1468,7 @@ class _AdminViewState extends State<AdminView> {
                 child: _RoleInfoCard(
                   roleCode: 'operator',
                   title: '3. Ver y Conectarse (operator)',
-                  color: Color(0xFF0D9488),
+                  color: AppPalette.teal600,
                   description:
                       'Modo lectura sobre el diseño físico del rack, PERO permite interactuar con cada host mediante SSH, Telnet, Web UI (iLO/iDRAC) y Ping.',
                 ),
@@ -1477,7 +1478,7 @@ class _AdminViewState extends State<AdminView> {
                 child: _RoleInfoCard(
                   roleCode: 'viewer',
                   title: '4. Solo Ver (viewer)',
-                  color: Color(0xFF64748B),
+                  color: AppPalette.slate500,
                   description:
                       'Auditoría y visualización estricta de mapas, plantas y racks. No puede modificar nada ni lanzar sesiones SSH/Telnet/Web.',
                 ),
@@ -1493,7 +1494,7 @@ class _AdminViewState extends State<AdminView> {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF93C5FD), width: 1.4),
+              border: Border.all(color: AppPalette.blue300, width: 1.4),
               boxShadow: const [
                 BoxShadow(
                   color: Color(0x08000000),
@@ -1510,13 +1511,13 @@ class _AdminViewState extends State<AdminView> {
                     Container(
                       padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFDBEAFE),
+                        color: AppPalette.blue100,
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: const Icon(
                         Icons.person_add_alt_1_rounded,
                         size: 18,
-                        color: Color(0xFF1D4ED8),
+                        color: AppPalette.blue700,
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -1529,14 +1530,14 @@ class _AdminViewState extends State<AdminView> {
                             style: TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.w800,
-                              color: Color(0xFF0F172A),
+                              color: AppPalette.slate900,
                             ),
                           ),
                           Text(
                             'Crea cuentas de usuario locales con contraseña propia y asígnales directamente cualquiera de los 4 roles RBAC.',
                             style: TextStyle(
                               fontSize: 11.5,
-                              color: Color(0xFF475569),
+                              color: AppPalette.slate600,
                             ),
                           ),
                         ],
@@ -1562,7 +1563,7 @@ class _AdminViewState extends State<AdminView> {
                           prefixIcon: const Icon(Icons.person_outline, size: 17),
                           isDense: true,
                           filled: true,
-                          fillColor: const Color(0xFFF8FAFC),
+                          fillColor: AppPalette.slate50,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
@@ -1580,7 +1581,7 @@ class _AdminViewState extends State<AdminView> {
                           prefixIcon: const Icon(Icons.badge_outlined, size: 17),
                           isDense: true,
                           filled: true,
-                          fillColor: const Color(0xFFF8FAFC),
+                          fillColor: AppPalette.slate50,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
@@ -1598,7 +1599,7 @@ class _AdminViewState extends State<AdminView> {
                           prefixIcon: const Icon(Icons.email_outlined, size: 17),
                           isDense: true,
                           filled: true,
-                          fillColor: const Color(0xFFF8FAFC),
+                          fillColor: AppPalette.slate50,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
@@ -1618,7 +1619,7 @@ class _AdminViewState extends State<AdminView> {
                           prefixIcon: const Icon(Icons.key_outlined, size: 17),
                           isDense: true,
                           filled: true,
-                          fillColor: const Color(0xFFF8FAFC),
+                          fillColor: AppPalette.slate50,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
@@ -1635,7 +1636,7 @@ class _AdminViewState extends State<AdminView> {
                           labelText: 'Rol RBAC',
                           isDense: true,
                           filled: true,
-                          fillColor: const Color(0xFFF8FAFC),
+                          fillColor: AppPalette.slate50,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
@@ -1667,7 +1668,7 @@ class _AdminViewState extends State<AdminView> {
                       onPressed:
                           _creatingLocalUser ? null : _submitQuickLocalUser,
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF1E3A8A),
+                        backgroundColor: AppPalette.blue900,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 14,
                           vertical: 14,
@@ -1692,7 +1693,7 @@ class _AdminViewState extends State<AdminView> {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
+              border: Border.all(color: AppPalette.slate200),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1702,7 +1703,7 @@ class _AdminViewState extends State<AdminView> {
                     const Icon(
                       Icons.account_tree_outlined,
                       size: 20,
-                      color: Color(0xFF1E3A8A),
+                      color: AppPalette.blue900,
                     ),
                     const SizedBox(width: 8),
                     Text(
@@ -1710,7 +1711,7 @@ class _AdminViewState extends State<AdminView> {
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF0F172A),
+                        color: AppPalette.slate900,
                       ),
                     ),
                     const Spacer(),
@@ -1730,9 +1731,9 @@ class _AdminViewState extends State<AdminView> {
                       width: 460,
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
+                        color: AppPalette.slate50,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                        border: Border.all(color: AppPalette.slate300),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1745,7 +1746,7 @@ class _AdminViewState extends State<AdminView> {
                                   vertical: 3,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFDBEAFE),
+                                  color: AppPalette.blue100,
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(
@@ -1753,7 +1754,7 @@ class _AdminViewState extends State<AdminView> {
                                   style: const TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.w800,
-                                    color: Color(0xFF1D4ED8),
+                                    color: AppPalette.blue700,
                                   ),
                                 ),
                               ),
@@ -1764,7 +1765,7 @@ class _AdminViewState extends State<AdminView> {
                                   style: const TextStyle(
                                     fontSize: 13.5,
                                     fontWeight: FontWeight.w800,
-                                    color: Color(0xFF0F172A),
+                                    color: AppPalette.slate900,
                                   ),
                                 ),
                               ),
@@ -1785,7 +1786,7 @@ class _AdminViewState extends State<AdminView> {
                                 icon: const Icon(
                                   Icons.delete_outline,
                                   size: 16,
-                                  color: Color(0xFFDC2626),
+                                  color: AppPalette.red600,
                                 ),
                                 tooltip: 'Eliminar servidor AD',
                                 visualDensity: VisualDensity.compact,
@@ -1797,7 +1798,7 @@ class _AdminViewState extends State<AdminView> {
                             'Host: ${ad.host} • Dominio: ${ad.domain}',
                             style: const TextStyle(
                               fontSize: 11.5,
-                              color: Color(0xFF334155),
+                              color: AppPalette.slate700,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -1805,7 +1806,7 @@ class _AdminViewState extends State<AdminView> {
                             'Base DN: ${ad.baseDn}',
                             style: const TextStyle(
                               fontSize: 11,
-                              color: Color(0xFF64748B),
+                              color: AppPalette.slate500,
                             ),
                           ),
                           if (ad.groupRoleMapping.isNotEmpty) ...[
@@ -1899,7 +1900,7 @@ class _AdminViewState extends State<AdminView> {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
+              border: Border.all(color: AppPalette.slate200),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1909,7 +1910,7 @@ class _AdminViewState extends State<AdminView> {
                     const Icon(
                       Icons.people_alt_outlined,
                       size: 20,
-                      color: Color(0xFF0F172A),
+                      color: AppPalette.slate900,
                     ),
                     const SizedBox(width: 8),
                     Text(
@@ -1917,13 +1918,13 @@ class _AdminViewState extends State<AdminView> {
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF0F172A),
+                        color: AppPalette.slate900,
                       ),
                     ),
                     const Spacer(),
                     const Text(
                       'Cambia el rol en el desplegable o pulsa "Probar Sesión" para verificar permisos en vivo',
-                      style: TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+                      style: TextStyle(fontSize: 11.5, color: AppPalette.slate500),
                     ),
                   ],
                 ),
@@ -1939,10 +1940,10 @@ class _AdminViewState extends State<AdminView> {
                     ),
                     decoration: BoxDecoration(
                       color: isCurrent
-                          ? const Color(0xFFEFF6FF)
+                          ? AppPalette.blue50
                           : Colors.transparent,
                       border: const Border(
-                        bottom: BorderSide(color: Color(0xFFF1F5F9)),
+                        bottom: BorderSide(color: AppPalette.slate100),
                       ),
                     ),
                     child: Row(
@@ -1974,7 +1975,7 @@ class _AdminViewState extends State<AdminView> {
                                     style: const TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w700,
-                                      color: Color(0xFF0F172A),
+                                      color: AppPalette.slate900,
                                     ),
                                   ),
                                   const SizedBox(width: 8),
@@ -1985,8 +1986,8 @@ class _AdminViewState extends State<AdminView> {
                                     ),
                                     decoration: BoxDecoration(
                                       color: u.authSource == 'ad'
-                                          ? const Color(0xFFFEF3C7)
-                                          : const Color(0xFFE2E8F0),
+                                          ? AppPalette.amber100
+                                          : AppPalette.slate200,
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: Text(
@@ -1997,8 +1998,8 @@ class _AdminViewState extends State<AdminView> {
                                         fontSize: 9.5,
                                         fontWeight: FontWeight.w800,
                                         color: u.authSource == 'ad'
-                                            ? const Color(0xFFB45309)
-                                            : const Color(0xFF334155),
+                                            ? AppPalette.amber700
+                                            : AppPalette.slate700,
                                       ),
                                     ),
                                   ),
@@ -2010,7 +2011,7 @@ class _AdminViewState extends State<AdminView> {
                                         vertical: 2,
                                       ),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFFDCFCE7),
+                                        color: AppPalette.green100,
                                         borderRadius: BorderRadius.circular(4),
                                       ),
                                       child: const Text(
@@ -2018,7 +2019,7 @@ class _AdminViewState extends State<AdminView> {
                                         style: TextStyle(
                                           fontSize: 9.5,
                                           fontWeight: FontWeight.w800,
-                                          color: Color(0xFF15803D),
+                                          color: AppPalette.green700,
                                         ),
                                       ),
                                     ),
@@ -2031,7 +2032,7 @@ class _AdminViewState extends State<AdminView> {
                                     : 'Sin email',
                                 style: const TextStyle(
                                   fontSize: 11,
-                                  color: Color(0xFF64748B),
+                                  color: AppPalette.slate500,
                                 ),
                               ),
                             ],
@@ -2123,7 +2124,7 @@ class _AdminViewState extends State<AdminView> {
                             icon: const Icon(
                               Icons.delete_outline,
                               size: 17,
-                              color: Color(0xFFDC2626),
+                              color: AppPalette.red600,
                             ),
                             tooltip: 'Eliminar usuario',
                           ),
@@ -2162,9 +2163,9 @@ class _RoleInfoCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         border: Border(
           top: BorderSide(color: color, width: 3.5),
-          left: const BorderSide(color: Color(0xFFE2E8F0)),
-          right: const BorderSide(color: Color(0xFFE2E8F0)),
-          bottom: const BorderSide(color: Color(0xFFE2E8F0)),
+          left: const BorderSide(color: AppPalette.slate200),
+          right: const BorderSide(color: AppPalette.slate200),
+          bottom: const BorderSide(color: AppPalette.slate200),
         ),
       ),
       child: Column(
@@ -2181,7 +2182,7 @@ class _RoleInfoCard extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             description,
-            style: const TextStyle(fontSize: 11, color: Color(0xFF475569)),
+            style: const TextStyle(fontSize: 11, color: AppPalette.slate600),
           ),
         ],
       ),
