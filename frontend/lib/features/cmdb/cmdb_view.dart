@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../core/widgets/avisos.dart';
+import '../../core/theme.dart';
 import 'package:flutter/services.dart';
 import '../../core/api_client.dart';
 
@@ -443,13 +445,7 @@ class _CmdbViewState extends State<CmdbView> {
         !cidrAlreadyInCmdb;
 
     if (selectedRows.isEmpty && !shouldCreateSubnet) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Marca al menos un dispositivo detectado en red (en rojo) para añadirlo a la CMDB.',
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(context).aviso('Marca al menos un dispositivo detectado en red (en rojo) para añadirlo a la CMDB.');
       return;
     }
 
@@ -539,7 +535,7 @@ class _CmdbViewState extends State<CmdbView> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: const Color(0xFF15803D),
+          backgroundColor: AppPalette.green700,
           content: Text(
             '✓ Añadido(s) $importedCount equipo(s) a la CMDB (estado actualizado en verde)${shouldCreateSubnet ? ' y registrada la subred $scannedCidr' : ''}.',
             style: const TextStyle(fontWeight: FontWeight.w800),
@@ -559,9 +555,7 @@ class _CmdbViewState extends State<CmdbView> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _importingDiscovered = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error importando en CMDB: $e')),
-      );
+      ScaffoldMessenger.of(context).aviso('Error importando en CMDB: $e');
     }
   }
 
@@ -574,8 +568,8 @@ class _CmdbViewState extends State<CmdbView> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: res['status'] == 'online'
-              ? const Color(0xFF15803D)
-              : const Color(0xFFB91C1C),
+              ? AppPalette.green700
+              : AppPalette.red700,
           content: Text(
             '[${asset['code']}] Heartbeat (${res['target']}): ${res['detail']}',
             style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
@@ -585,9 +579,7 @@ class _CmdbViewState extends State<CmdbView> {
       await _loadOverview(silent: true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error en Heartbeat: $e')),
-      );
+      ScaffoldMessenger.of(context).aviso('Error en Heartbeat: $e');
     } finally {
       if (mounted) {
         setState(() => _runningHeartbeatAssetId = null);
@@ -624,7 +616,7 @@ class _CmdbViewState extends State<CmdbView> {
     );
 
     return Container(
-      color: const Color(0xFFF8FAFC),
+      color: AppPalette.slate50,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -643,7 +635,7 @@ class _CmdbViewState extends State<CmdbView> {
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
       decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+        border: Border(bottom: BorderSide(color: AppPalette.slate200)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -654,7 +646,7 @@ class _CmdbViewState extends State<CmdbView> {
                 padding: const EdgeInsets.all(9),
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(
-                    colors: [Color(0xFF1E3A8A), Color(0xFF0284C7)],
+                    colors: [AppPalette.blue900, AppPalette.sky600],
                   ),
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -674,7 +666,7 @@ class _CmdbViewState extends State<CmdbView> {
                       style: TextStyle(
                         fontSize: 16.5,
                         fontWeight: FontWeight.w900,
-                        color: Color(0xFF0F172A),
+                        color: AppPalette.slate900,
                       ),
                     ),
                     SizedBox(height: 2),
@@ -682,7 +674,7 @@ class _CmdbViewState extends State<CmdbView> {
                       'Gestión unificada de servidores físicos, máquinas virtuales, contenedores y VIPs con separación de IP de Gestión (Heartbeat/Manager) e IPs de Operación/Servicio + Verificador Manual Anti-Conflictos.',
                       style: TextStyle(
                         fontSize: 11.5,
-                        color: Color(0xFF475569),
+                        color: AppPalette.slate600,
                       ),
                     ),
                   ],
@@ -694,9 +686,9 @@ class _CmdbViewState extends State<CmdbView> {
                   setState(() => _activeTab = 'verifier');
                 },
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF0369A1),
-                  side: const BorderSide(color: Color(0xFF38BDF8), width: 1.4),
-                  backgroundColor: const Color(0xFFF0F9FF),
+                  foregroundColor: AppPalette.sky700,
+                  side: const BorderSide(color: AppPalette.sky400, width: 1.4),
+                  backgroundColor: AppPalette.sky50,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
                     vertical: 10,
@@ -713,8 +705,8 @@ class _CmdbViewState extends State<CmdbView> {
                 OutlinedButton.icon(
                   onPressed: widget.onExportExcel,
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF15803D),
-                    side: const BorderSide(color: Color(0xFF86EFAC)),
+                    foregroundColor: AppPalette.green700,
+                    side: const BorderSide(color: AppPalette.green300),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
                       vertical: 10,
@@ -731,7 +723,7 @@ class _CmdbViewState extends State<CmdbView> {
                 FilledButton.icon(
                   onPressed: () => _openAssetEditorDialog(),
                   style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF1E3A8A),
+                    backgroundColor: AppPalette.blue900,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 14,
                       vertical: 10,
@@ -755,38 +747,38 @@ class _CmdbViewState extends State<CmdbView> {
                 icon: Icons.dns_rounded,
                 label: 'Total Máquinas (CIs)',
                 value: '${summary['total_assets'] ?? 0}',
-                color: const Color(0xFF1E3A8A),
+                color: AppPalette.blue900,
               ),
               _buildKpiChip(
                 icon: Icons.cloud_queue_rounded,
                 label: 'Máquinas Virtuales (VMs)',
                 value: '${summary['virtual_machines_count'] ?? 0}',
-                color: const Color(0xFF7C3AED),
+                color: AppPalette.violet600,
               ),
               _buildKpiChip(
                 icon: Icons.widgets_outlined,
                 label: 'Contenedores, Clusters & Cloud',
                 value: '${summary['containers_and_clusters_count'] ?? 0}',
-                color: const Color(0xFF0284C7),
+                color: AppPalette.sky600,
               ),
               _buildKpiChip(
                 icon: Icons.storage_rounded,
                 label: 'Equipos Físicos (Rack/Planta)',
                 value: '${summary['physical_assets_count'] ?? 0}',
-                color: const Color(0xFF0F766E),
+                color: AppPalette.teal700,
               ),
               _buildKpiChip(
                 icon: Icons.account_tree_rounded,
                 label: 'Hosts con Múltiples IPs (>1 IP)',
                 value: '${summary['multi_ip_assets_count'] ?? 0}',
-                color: const Color(0xFFD97706),
+                color: AppPalette.amber600,
               ),
               _buildKpiChip(
                 icon: Icons.lan_rounded,
                 label: 'IPs Documentadas / Subredes',
                 value:
                     '${summary['total_ip_addresses'] ?? 0} IPs en ${summary['total_subnets'] ?? 0} VLANs',
-                color: const Color(0xFF15803D),
+                color: AppPalette.green700,
               ),
             ],
           ),
@@ -821,7 +813,7 @@ class _CmdbViewState extends State<CmdbView> {
                 style: const TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF475569),
+                  color: AppPalette.slate600,
                 ),
               ),
               Text(
@@ -866,8 +858,8 @@ class _CmdbViewState extends State<CmdbView> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       decoration: const BoxDecoration(
-        color: Color(0xFFF1F5F9),
-        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+        color: AppPalette.slate100,
+        border: Border(bottom: BorderSide(color: AppPalette.slate200)),
       ),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
@@ -885,12 +877,12 @@ class _CmdbViewState extends State<CmdbView> {
                     vertical: 8,
                   ),
                   decoration: BoxDecoration(
-                    color: isSelected ? const Color(0xFF0F172A) : Colors.white,
+                    color: isSelected ? AppPalette.slate900 : Colors.white,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       color: isSelected
-                          ? const Color(0xFF0F172A)
-                          : const Color(0xFFCBD5E1),
+                          ? AppPalette.slate900
+                          : AppPalette.slate300,
                     ),
                   ),
                   child: Row(
@@ -899,8 +891,8 @@ class _CmdbViewState extends State<CmdbView> {
                         t.$2,
                         size: 16,
                         color: isSelected
-                            ? const Color(0xFF38BDF8)
-                            : const Color(0xFF475569),
+                            ? AppPalette.sky400
+                            : AppPalette.slate600,
                       ),
                       const SizedBox(width: 7),
                       Text(
@@ -911,7 +903,7 @@ class _CmdbViewState extends State<CmdbView> {
                               isSelected ? FontWeight.w800 : FontWeight.w600,
                           color: isSelected
                               ? Colors.white
-                              : const Color(0xFF334155),
+                              : AppPalette.slate700,
                         ),
                       ),
                     ],
@@ -970,7 +962,7 @@ class _CmdbViewState extends State<CmdbView> {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
+              backgroundColor: AppPalette.red600,
             ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Sí, Eliminar y Liberar IPs'),
@@ -992,7 +984,7 @@ class _CmdbViewState extends State<CmdbView> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        backgroundColor: const Color(0xFF15803D),
+        backgroundColor: AppPalette.green700,
         content: Text(
           'Se han eliminado $count equipo(s) y sus IPs han quedado libres.',
           style: const TextStyle(fontWeight: FontWeight.w800),
@@ -1033,7 +1025,7 @@ class _CmdbViewState extends State<CmdbView> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor:
-              nextVal ? const Color(0xFF15803D) : const Color(0xFF475569),
+              nextVal ? AppPalette.green700 : AppPalette.slate600,
           content: Text(
             nextVal
                 ? 'Heartbeat ACTIVADO para [${asset['code']}] (${_primaryIpOfAsset(asset)})'
@@ -1044,9 +1036,7 @@ class _CmdbViewState extends State<CmdbView> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error actualizando Heartbeat: $e')),
-      );
+      ScaffoldMessenger.of(context).aviso('Error actualizando Heartbeat: $e');
     }
   }
 
@@ -1058,7 +1048,7 @@ class _CmdbViewState extends State<CmdbView> {
       margin: const EdgeInsets.fromLTRB(16, 10, 16, 4),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFFEF2F2),
+        color: AppPalette.red50,
         borderRadius: BorderRadius.circular(9),
         border: Border.all(color: const Color(0xFFEF4444), width: 1.5),
       ),
@@ -1069,7 +1059,7 @@ class _CmdbViewState extends State<CmdbView> {
             children: [
               const Icon(
                 Icons.warning_amber_rounded,
-                color: Color(0xFFB91C1C),
+                color: AppPalette.red700,
                 size: 20,
               ),
               const SizedBox(width: 8),
@@ -1079,7 +1069,7 @@ class _CmdbViewState extends State<CmdbView> {
                   style: const TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w900,
-                    color: Color(0xFF991B1B),
+                    color: AppPalette.red800,
                   ),
                 ),
               ),
@@ -1108,7 +1098,7 @@ class _CmdbViewState extends State<CmdbView> {
                       vertical: 2,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFB91C1C),
+                      color: AppPalette.red700,
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
@@ -1137,7 +1127,7 @@ class _CmdbViewState extends State<CmdbView> {
                     FilledButton.icon(
                       onPressed: () => _openResolveCollisionDialog(c),
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFFB91C1C),
+                        backgroundColor: AppPalette.red700,
                         visualDensity: VisualDensity.compact,
                       ),
                       icon: const Icon(Icons.merge_type_rounded, size: 15),
@@ -1220,7 +1210,7 @@ class _CmdbViewState extends State<CmdbView> {
               children: [
                 const Icon(
                   Icons.merge_type_rounded,
-                  color: Color(0xFFB91C1C),
+                  color: AppPalette.red700,
                   size: 22,
                 ),
                 const SizedBox(width: 8),
@@ -1245,16 +1235,16 @@ class _CmdbViewState extends State<CmdbView> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFFFBEB),
+                        color: AppPalette.amber50,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFFCD34D)),
+                        border: Border.all(color: AppPalette.amber300),
                       ),
                       child: Text(
                         'La dirección IP $ipAddr figura simultáneamente en dos registros. Selecciona cómo deseas solucionarlo:',
                         style: const TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF92400E),
+                          color: AppPalette.amber800,
                         ),
                       ),
                     ),
@@ -1266,13 +1256,13 @@ class _CmdbViewState extends State<CmdbView> {
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
                           color: isRack
-                              ? const Color(0xFFEFF6FF)
-                              : const Color(0xFFF8FAFC),
+                              ? AppPalette.blue50
+                              : AppPalette.slate50,
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
                             color: isRack
                                 ? const Color(0xFF60A5FA)
-                                : const Color(0xFFCBD5E1),
+                                : AppPalette.slate300,
                           ),
                         ),
                         child: Row(
@@ -1283,8 +1273,8 @@ class _CmdbViewState extends State<CmdbView> {
                                   : Icons.radar_rounded,
                               size: 18,
                               color: isRack
-                                  ? const Color(0xFF1D4ED8)
-                                  : const Color(0xFF475569),
+                                  ? AppPalette.blue700
+                                  : AppPalette.slate600,
                             ),
                             const SizedBox(width: 8),
                             Expanded(
@@ -1302,7 +1292,7 @@ class _CmdbViewState extends State<CmdbView> {
                                     'Origen: ${isRack ? 'Montado en Rack (${a['physical_location_label']})' : 'Descubierto/Creado en CMDB'} • Hostname/FQDN: ${(a['fqdn'] ?? '').toString().isNotEmpty ? a['fqdn'] : (a['hostname'] ?? '-')} • Estado: ${(a['status'] ?? '').toString().toUpperCase()}',
                                     style: const TextStyle(
                                       fontSize: 11,
-                                      color: Color(0xFF475569),
+                                      color: AppPalette.slate600,
                                     ),
                                   ),
                                 ],
@@ -1320,14 +1310,14 @@ class _CmdbViewState extends State<CmdbView> {
                         action == 'merge'
                             ? Icons.radio_button_checked
                             : Icons.radio_button_off,
-                        color: const Color(0xFF2563EB),
+                        color: AppPalette.blue600,
                       ),
                       title: const Text(
                         '1. Es el mismo dispositivo físico: Unificar y alinear en un único equipo (Recomendado)',
                         style: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w900,
-                          color: Color(0xFF0F172A),
+                          color: AppPalette.slate900,
                         ),
                       ),
                       subtitle: const Text(
@@ -1386,7 +1376,7 @@ class _CmdbViewState extends State<CmdbView> {
                         action == 'reassign_or_clear'
                             ? Icons.radio_button_checked
                             : Icons.radio_button_off,
-                        color: const Color(0xFF2563EB),
+                        color: AppPalette.blue600,
                       ),
                       title: const Text(
                         '2. Son equipos distintos: Cambiar o liberar la IP de uno de ellos',
@@ -1458,14 +1448,14 @@ class _CmdbViewState extends State<CmdbView> {
                         action == 'delete_other'
                             ? Icons.radio_button_checked
                             : Icons.radio_button_off,
-                        color: const Color(0xFFB91C1C),
+                        color: AppPalette.red700,
                       ),
                       title: Text(
                         '3. Eliminar directamente el registro duplicado [${otherObj['code']}]',
                         style: const TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFFB91C1C),
+                          color: AppPalette.red700,
                         ),
                       ),
                       onTap: () => setModalState(() => action = 'delete_other'),
@@ -1481,7 +1471,7 @@ class _CmdbViewState extends State<CmdbView> {
               ),
               FilledButton.icon(
                 style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF15803D),
+                  backgroundColor: AppPalette.green700,
                 ),
                 onPressed: saving
                     ? null
@@ -1505,7 +1495,7 @@ class _CmdbViewState extends State<CmdbView> {
                           setState(() => _overview = updated);
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              backgroundColor: const Color(0xFF15803D),
+                              backgroundColor: AppPalette.green700,
                               content: Text(
                                 '✓ Colisión en IP $ipAddr resuelta y datos alineados entre Rack Editor y CMDB.',
                                 style: const TextStyle(
@@ -1517,11 +1507,7 @@ class _CmdbViewState extends State<CmdbView> {
                         } catch (e) {
                           if (!ctx.mounted) return;
                           setModalState(() => saving = false);
-                          ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(
-                              content: Text('Error resolviendo colisión: $e'),
-                            ),
-                          );
+                          ScaffoldMessenger.of(ctx).aviso('Error resolviendo colisión: $e');
                         }
                       },
                 icon: const Icon(Icons.check_circle_outline, size: 16),
@@ -1547,7 +1533,7 @@ class _CmdbViewState extends State<CmdbView> {
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
           decoration: const BoxDecoration(
             color: Colors.white,
-            border: Border(bottom: BorderSide(color: Color(0xFFCBD5E1))),
+            border: Border(bottom: BorderSide(color: AppPalette.slate300)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1606,14 +1592,14 @@ class _CmdbViewState extends State<CmdbView> {
                       height: 36,
                       padding: const EdgeInsets.symmetric(horizontal: 10),
                       decoration: BoxDecoration(
-                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                        border: Border.all(color: AppPalette.slate300),
                         borderRadius: BorderRadius.circular(7),
                       ),
                       child: DropdownButton<int?>(
                         value: _locationFilter,
                         style: const TextStyle(
                           fontSize: 11.5,
-                          color: Color(0xFF0F172A),
+                          color: AppPalette.slate900,
                           fontWeight: FontWeight.w700,
                         ),
                         items: [
@@ -1644,14 +1630,14 @@ class _CmdbViewState extends State<CmdbView> {
                       height: 36,
                       padding: const EdgeInsets.symmetric(horizontal: 10),
                       decoration: BoxDecoration(
-                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                        border: Border.all(color: AppPalette.slate300),
                         borderRadius: BorderRadius.circular(7),
                       ),
                       child: DropdownButton<String>(
                         value: _envFilter,
                         style: const TextStyle(
                           fontSize: 11.5,
-                          color: Color(0xFF0F172A),
+                          color: AppPalette.slate900,
                           fontWeight: FontWeight.w700,
                         ),
                         items: const [
@@ -1691,7 +1677,7 @@ class _CmdbViewState extends State<CmdbView> {
                     FilledButton.icon(
                       onPressed: _deleteSelectedInventoryAssets,
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFFDC2626),
+                        backgroundColor: AppPalette.red600,
                         visualDensity: VisualDensity.compact,
                       ),
                       icon: const Icon(Icons.delete_sweep_rounded, size: 16),
@@ -1756,7 +1742,7 @@ class _CmdbViewState extends State<CmdbView> {
                     style: const TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
-                      color: Color(0xFF475569),
+                      color: AppPalette.slate600,
                     ),
                   ),
                 ],
@@ -1767,9 +1753,9 @@ class _CmdbViewState extends State<CmdbView> {
         // Cabecera fija estilo Hoja de Cálculo Excel
         Container(
           decoration: const BoxDecoration(
-            color: Color(0xFFE2E8F0),
+            color: AppPalette.slate200,
             border: Border(
-              bottom: BorderSide(color: Color(0xFF94A3B8), width: 1.5),
+              bottom: BorderSide(color: AppPalette.slate400, width: 1.5),
             ),
           ),
           child: Row(
@@ -1779,7 +1765,7 @@ class _CmdbViewState extends State<CmdbView> {
                   width: 34,
                   alignment: Alignment.center,
                   decoration: const BoxDecoration(
-                    border: Border(right: BorderSide(color: Color(0xFFCBD5E1))),
+                    border: Border(right: BorderSide(color: AppPalette.slate300)),
                   ),
                   child: Checkbox(
                     value: allVisibleSelected,
@@ -1863,7 +1849,7 @@ class _CmdbViewState extends State<CmdbView> {
               ? const Center(
                   child: Text(
                     'No hay equipos o activos en la CMDB que coincidan con la búsqueda o filtro actual.',
-                    style: TextStyle(color: Color(0xFF64748B), fontSize: 13),
+                    style: TextStyle(color: AppPalette.slate500, fontSize: 13),
                   ),
                 )
               : ListView.builder(
@@ -1890,8 +1876,8 @@ class _CmdbViewState extends State<CmdbView> {
         padding: const EdgeInsets.symmetric(horizontal: 7),
         alignment: Alignment.centerLeft,
         decoration: BoxDecoration(
-          color: isSorted ? const Color(0xFFDBEAFE) : Colors.transparent,
-          border: const Border(right: BorderSide(color: Color(0xFFCBD5E1))),
+          color: isSorted ? AppPalette.blue100 : Colors.transparent,
+          border: const Border(right: BorderSide(color: AppPalette.slate300)),
         ),
         child: Row(
           children: [
@@ -1902,8 +1888,8 @@ class _CmdbViewState extends State<CmdbView> {
                   fontSize: 11,
                   fontWeight: FontWeight.w900,
                   color: isSorted
-                      ? const Color(0xFF1E3A8A)
-                      : const Color(0xFF1E293B),
+                      ? AppPalette.blue900
+                      : AppPalette.slate800,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -1917,8 +1903,8 @@ class _CmdbViewState extends State<CmdbView> {
                     : Icons.unfold_more_rounded,
                 size: isSorted ? 18 : 13,
                 color: isSorted
-                    ? const Color(0xFF1E3A8A)
-                    : const Color(0xFF64748B),
+                    ? AppPalette.blue900
+                    : AppPalette.slate500,
               ),
           ],
         ),
@@ -1941,7 +1927,7 @@ class _CmdbViewState extends State<CmdbView> {
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
       alignment: alignment,
       decoration: const BoxDecoration(
-        border: Border(right: BorderSide(color: Color(0xFFE2E8F0))),
+        border: Border(right: BorderSide(color: AppPalette.slate200)),
       ),
       child: child,
     );
@@ -1991,32 +1977,32 @@ class _CmdbViewState extends State<CmdbView> {
     final bool isSelected = _selectedInventoryAssetIds.contains(assetId);
     final Color badgeColor = _classBadgeColor(assetClass);
 
-    Color statusColor = const Color(0xFF64748B);
+    Color statusColor = AppPalette.slate500;
     String statusText = hbEnabled ? 'PEND.' : 'HB OFF';
     if (!hbEnabled) {
-      statusColor = const Color(0xFF64748B);
+      statusColor = AppPalette.slate500;
       statusText = 'HB OFF';
     } else if (status == 'online') {
-      statusColor = const Color(0xFF16A34A);
+      statusColor = AppPalette.green600;
       statusText =
           'ONLINE${pingMs != null ? ' ${pingMs.toStringAsFixed(0)}ms' : ''}';
     } else if (status == 'offline') {
-      statusColor = const Color(0xFFDC2626);
+      statusColor = AppPalette.red600;
       statusText = 'OFFLINE';
     } else if (status == 'warning') {
-      statusColor = const Color(0xFFD97706);
+      statusColor = AppPalette.amber600;
       statusText = 'WARN';
     }
 
     final Color rowBg = hasIpCollision
-        ? const Color(0xFFFEF2F2)
+        ? AppPalette.red50
         : isHighlighted
             ? const Color(0xFFFEF9C3)
             : isSelected
-                ? const Color(0xFFE0F2FE)
+                ? AppPalette.sky100
                 : isExpanded
-                    ? const Color(0xFFF0F9FF)
-                    : (rowIndex.isEven ? Colors.white : const Color(0xFFF8FAFC));
+                    ? AppPalette.sky50
+                    : (rowIndex.isEven ? Colors.white : AppPalette.slate50);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -2037,7 +2023,7 @@ class _CmdbViewState extends State<CmdbView> {
                       ? const Color(0xFFF87171)
                       : isHighlighted
                           ? const Color(0xFFEAB308)
-                          : const Color(0xFFCBD5E1),
+                          : AppPalette.slate300,
                   width: (hasIpCollision || isHighlighted) ? 1.5 : 0.8,
                 ),
               ),
@@ -2052,7 +2038,7 @@ class _CmdbViewState extends State<CmdbView> {
                       alignment: Alignment.center,
                       decoration: const BoxDecoration(
                         border: Border(
-                          right: BorderSide(color: Color(0xFFE2E8F0)),
+                          right: BorderSide(color: AppPalette.slate200),
                         ),
                       ),
                       child: Checkbox(
@@ -2075,7 +2061,7 @@ class _CmdbViewState extends State<CmdbView> {
                       style: const TextStyle(
                         fontSize: 10.5,
                         fontFamily: 'monospace',
-                        color: Color(0xFF64748B),
+                        color: AppPalette.slate500,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -2141,7 +2127,7 @@ class _CmdbViewState extends State<CmdbView> {
                         fontSize: 11,
                         fontWeight: FontWeight.w900,
                         fontFamily: 'monospace',
-                        color: Color(0xFF0F172A),
+                        color: AppPalette.slate900,
                       ),
                     ),
                     width: 108,
@@ -2152,7 +2138,7 @@ class _CmdbViewState extends State<CmdbView> {
                             'Sin IP',
                             style: TextStyle(
                               fontSize: 11,
-                              color: Color(0xFF94A3B8),
+                              color: AppPalette.slate400,
                             ),
                           )
                         : Row(
@@ -2168,8 +2154,8 @@ class _CmdbViewState extends State<CmdbView> {
                                             : Icons.lan_outlined,
                                         size: 13,
                                         color: hasIpCollision
-                                            ? const Color(0xFFB91C1C)
-                                            : const Color(0xFF0284C7),
+                                            ? AppPalette.red700
+                                            : AppPalette.sky600,
                                       ),
                                       const SizedBox(width: 4),
                                       Expanded(
@@ -2180,8 +2166,8 @@ class _CmdbViewState extends State<CmdbView> {
                                             fontWeight: FontWeight.w900,
                                             fontFamily: 'monospace',
                                             color: hasIpCollision
-                                                ? const Color(0xFFB91C1C)
-                                                : const Color(0xFF0369A1),
+                                                ? AppPalette.red700
+                                                : AppPalette.sky700,
                                             decoration:
                                                 TextDecoration.underline,
                                           ),
@@ -2210,7 +2196,7 @@ class _CmdbViewState extends State<CmdbView> {
                                         vertical: 1,
                                       ),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFFB91C1C),
+                                        color: AppPalette.red700,
                                         borderRadius: BorderRadius.circular(3),
                                       ),
                                       child: const Text(
@@ -2235,7 +2221,7 @@ class _CmdbViewState extends State<CmdbView> {
                         fontSize: 11,
                         fontFamily: 'monospace',
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFF334155),
+                        color: AppPalette.slate700,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -2247,7 +2233,7 @@ class _CmdbViewState extends State<CmdbView> {
                             'Sin Sede',
                             style: TextStyle(
                               fontSize: 10.5,
-                              color: Color(0xFF94A3B8),
+                              color: AppPalette.slate400,
                             ),
                           )
                         : Row(
@@ -2255,7 +2241,7 @@ class _CmdbViewState extends State<CmdbView> {
                               const Icon(
                                 Icons.location_on_outlined,
                                 size: 13,
-                                color: Color(0xFF0F766E),
+                                color: AppPalette.teal700,
                               ),
                               const SizedBox(width: 3),
                               Expanded(
@@ -2264,7 +2250,7 @@ class _CmdbViewState extends State<CmdbView> {
                                   style: const TextStyle(
                                     fontSize: 10.8,
                                     fontWeight: FontWeight.w800,
-                                    color: Color(0xFF0F766E),
+                                    color: AppPalette.teal700,
                                   ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -2279,7 +2265,7 @@ class _CmdbViewState extends State<CmdbView> {
                       style: const TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFF1E293B),
+                        color: AppPalette.slate800,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -2293,7 +2279,7 @@ class _CmdbViewState extends State<CmdbView> {
                       style: const TextStyle(
                         fontSize: 11,
                         fontFamily: 'monospace',
-                        color: Color(0xFF334155),
+                        color: AppPalette.slate700,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -2316,7 +2302,7 @@ class _CmdbViewState extends State<CmdbView> {
                             style: const TextStyle(
                               fontSize: 10.5,
                               fontFamily: 'monospace',
-                              color: Color(0xFF475569),
+                              color: AppPalette.slate600,
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -2329,7 +2315,7 @@ class _CmdbViewState extends State<CmdbView> {
                               vertical: 1,
                             ),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFDBEAFE),
+                              color: AppPalette.blue100,
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
@@ -2337,7 +2323,7 @@ class _CmdbViewState extends State<CmdbView> {
                               style: const TextStyle(
                                 fontSize: 9.5,
                                 fontWeight: FontWeight.w900,
-                                color: Color(0xFF1E3A8A),
+                                color: AppPalette.blue900,
                               ),
                             ),
                           ),
@@ -2391,7 +2377,7 @@ class _CmdbViewState extends State<CmdbView> {
                                   vertical: 2,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFE0F2FE),
+                                  color: AppPalette.sky100,
                                   borderRadius: BorderRadius.circular(4),
                                   border: Border.all(
                                     color: const Color(0xFF7DD3FC),
@@ -2403,7 +2389,7 @@ class _CmdbViewState extends State<CmdbView> {
                                     const Icon(
                                       Icons.developer_board_rounded,
                                       size: 12,
-                                      color: Color(0xFF0369A1),
+                                      color: AppPalette.sky700,
                                     ),
                                     const SizedBox(width: 3),
                                     Flexible(
@@ -2412,7 +2398,7 @@ class _CmdbViewState extends State<CmdbView> {
                                         style: const TextStyle(
                                           fontSize: 10,
                                           fontWeight: FontWeight.w900,
-                                          color: Color(0xFF0369A1),
+                                          color: AppPalette.sky700,
                                           decoration: TextDecoration.underline,
                                         ),
                                         overflow: TextOverflow.ellipsis,
@@ -2428,7 +2414,7 @@ class _CmdbViewState extends State<CmdbView> {
                             locLabel,
                             style: const TextStyle(
                               fontSize: 10.5,
-                              color: Color(0xFF64748B),
+                              color: AppPalette.slate500,
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -2490,7 +2476,7 @@ class _CmdbViewState extends State<CmdbView> {
                       os,
                       style: const TextStyle(
                         fontSize: 10.8,
-                        color: Color(0xFF334155),
+                        color: AppPalette.slate700,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -2522,7 +2508,7 @@ class _CmdbViewState extends State<CmdbView> {
                               : const Icon(
                                   Icons.network_ping_rounded,
                                   size: 16,
-                                  color: Color(0xFF0284C7),
+                                  color: AppPalette.sky600,
                                 ),
                         ),
                         if (widget.canEdit) ...[
@@ -2544,8 +2530,8 @@ class _CmdbViewState extends State<CmdbView> {
                                   : Icons.heart_broken_outlined,
                               size: 15,
                               color: hbEnabled
-                                  ? const Color(0xFF16A34A)
-                                  : const Color(0xFF94A3B8),
+                                  ? AppPalette.green600
+                                  : AppPalette.slate400,
                             ),
                           ),
                           IconButton(
@@ -2560,7 +2546,7 @@ class _CmdbViewState extends State<CmdbView> {
                             icon: const Icon(
                               Icons.add_link_rounded,
                               size: 16,
-                              color: Color(0xFF15803D),
+                              color: AppPalette.green700,
                             ),
                           ),
                           IconButton(
@@ -2576,7 +2562,7 @@ class _CmdbViewState extends State<CmdbView> {
                             icon: const Icon(
                               Icons.edit_outlined,
                               size: 16,
-                              color: Color(0xFF1E3A8A),
+                              color: AppPalette.blue900,
                             ),
                           ),
                           IconButton(
@@ -2592,7 +2578,7 @@ class _CmdbViewState extends State<CmdbView> {
                             icon: const Icon(
                               Icons.delete_outline_rounded,
                               size: 16,
-                              color: Color(0xFFDC2626),
+                              color: AppPalette.red600,
                             ),
                           ),
                         ],
@@ -2629,9 +2615,9 @@ class _CmdbViewState extends State<CmdbView> {
           Container(
             padding: const EdgeInsets.all(14),
             decoration: const BoxDecoration(
-              color: Color(0xFFF8FAFC),
+              color: AppPalette.slate50,
               border: Border(
-                bottom: BorderSide(color: Color(0xFF94A3B8), width: 1.2),
+                bottom: BorderSide(color: AppPalette.slate400, width: 1.2),
               ),
             ),
             child: _buildExpandedIpTableForAsset(asset, ips),
@@ -2651,11 +2637,11 @@ class _CmdbViewState extends State<CmdbView> {
           style: TextStyle(
             fontSize: 11.5,
             fontWeight: active ? FontWeight.w800 : FontWeight.w600,
-            color: active ? Colors.white : const Color(0xFF334155),
+            color: active ? Colors.white : AppPalette.slate700,
           ),
         ),
-        selectedColor: const Color(0xFF1E3A8A),
-        backgroundColor: const Color(0xFFF1F5F9),
+        selectedColor: AppPalette.blue900,
+        backgroundColor: AppPalette.slate100,
         onSelected: (_) => setState(() => _classFilter = key),
       ),
     );
@@ -2665,44 +2651,44 @@ class _CmdbViewState extends State<CmdbView> {
     switch (assetClass) {
       case 'virtual_machine':
       case 'virtual_appliance':
-        return const Color(0xFF7C3AED);
+        return AppPalette.violet600;
       case 'container_lxc':
-        return const Color(0xFF0284C7);
+        return AppPalette.sky600;
       case 'cluster_vip':
-        return const Color(0xFFD97706);
+        return AppPalette.amber600;
       case 'cloud_instance':
-        return const Color(0xFF4F46E5);
+        return AppPalette.indigo600;
       case 'physical_server':
-        return const Color(0xFF0F766E);
+        return AppPalette.teal700;
       case 'network_security':
-        return const Color(0xFF1E3A8A);
+        return AppPalette.blue900;
       case 'storage_san_nas':
         return const Color(0xFF9333EA);
       default:
-        return const Color(0xFF475569);
+        return AppPalette.slate600;
     }
   }
 
   Color _ipRoleColor(String role) {
     switch (role) {
       case 'mgmt_heartbeat':
-        return const Color(0xFF0284C7);
+        return AppPalette.sky600;
       case 'ilo_idrac':
-        return const Color(0xFF7C3AED);
+        return AppPalette.violet600;
       case 'primary_service':
-        return const Color(0xFF15803D);
+        return AppPalette.green700;
       case 'secondary_service':
-        return const Color(0xFF0D9488);
+        return AppPalette.teal600;
       case 'vip_cluster':
-        return const Color(0xFFD97706);
+        return AppPalette.amber600;
       case 'storage':
       case 'backup':
       case 'vmotion_replication':
-        return const Color(0xFF4F46E5);
+        return AppPalette.indigo600;
       case 'public_wan':
         return const Color(0xFFBE123C);
       default:
-        return const Color(0xFF475569);
+        return AppPalette.slate600;
     }
   }
 
@@ -2734,17 +2720,17 @@ class _CmdbViewState extends State<CmdbView> {
     final int? rackDevId =
         (asset['rack_device_id'] as int?) ?? (asset['host_rack_device_id'] as int?);
 
-    Color statusColor = const Color(0xFF64748B);
+    Color statusColor = AppPalette.slate500;
     String statusText = 'SIN MONITORIZAR';
     if (status == 'online') {
-      statusColor = const Color(0xFF16A34A);
+      statusColor = AppPalette.green600;
       statusText =
           'ONLINE${pingMs != null ? ' (${pingMs.toStringAsFixed(1)} ms)' : ''}';
     } else if (status == 'offline') {
-      statusColor = const Color(0xFFDC2626);
+      statusColor = AppPalette.red600;
       statusText = 'CAÍDO / OFFLINE';
     } else if (status == 'warning') {
-      statusColor = const Color(0xFFD97706);
+      statusColor = AppPalette.amber600;
       statusText = 'WARNING';
     }
 
@@ -2756,8 +2742,8 @@ class _CmdbViewState extends State<CmdbView> {
         borderRadius: BorderRadius.circular(10),
         side: BorderSide(
           color: isExpanded
-              ? const Color(0xFF38BDF8)
-              : const Color(0xFFE2E8F0),
+              ? AppPalette.sky400
+              : AppPalette.slate200,
           width: isExpanded ? 1.6 : 1.0,
         ),
       ),
@@ -2801,7 +2787,7 @@ class _CmdbViewState extends State<CmdbView> {
                   decoration: BoxDecoration(
                     color: syncSource == 'cmdb'
                         ? const Color(0xFFF3E8FF)
-                        : const Color(0xFFE0F2FE),
+                        : AppPalette.sky100,
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
@@ -2815,7 +2801,7 @@ class _CmdbViewState extends State<CmdbView> {
                       fontWeight: FontWeight.w800,
                       color: syncSource == 'cmdb'
                           ? const Color(0xFF6B21A8)
-                          : const Color(0xFF0369A1),
+                          : AppPalette.sky700,
                     ),
                   ),
                 ),
@@ -2831,7 +2817,7 @@ class _CmdbViewState extends State<CmdbView> {
                             style: const TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w900,
-                              color: Color(0xFF0F172A),
+                              color: AppPalette.slate900,
                             ),
                           ),
                           const SizedBox(width: 8),
@@ -2841,7 +2827,7 @@ class _CmdbViewState extends State<CmdbView> {
                               style: const TextStyle(
                                 fontSize: 13.5,
                                 fontWeight: FontWeight.w700,
-                                color: Color(0xFF1E293B),
+                                color: AppPalette.slate800,
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -2859,7 +2845,7 @@ class _CmdbViewState extends State<CmdbView> {
                               style: const TextStyle(
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w600,
-                                color: Color(0xFF475569),
+                                color: AppPalette.slate600,
                               ),
                             ),
                           if (fqdn.isNotEmpty)
@@ -2868,7 +2854,7 @@ class _CmdbViewState extends State<CmdbView> {
                               style: const TextStyle(
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w700,
-                                color: Color(0xFF0369A1),
+                                color: AppPalette.sky700,
                               ),
                             ),
                           if (os.isNotEmpty)
@@ -2876,7 +2862,7 @@ class _CmdbViewState extends State<CmdbView> {
                               'SO/FW: $os',
                               style: const TextStyle(
                                 fontSize: 11.5,
-                                color: Color(0xFF475569),
+                                color: AppPalette.slate600,
                               ),
                             ),
                           if (cores > 0 || ramGb > 0)
@@ -2885,7 +2871,7 @@ class _CmdbViewState extends State<CmdbView> {
                               style: const TextStyle(
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w600,
-                                color: Color(0xFF334155),
+                                color: AppPalette.slate700,
                               ),
                             ),
                         ],
@@ -2944,7 +2930,7 @@ class _CmdbViewState extends State<CmdbView> {
                       : const Icon(
                           Icons.network_ping_rounded,
                           size: 18,
-                          color: Color(0xFF0284C7),
+                          color: AppPalette.sky600,
                         ),
                 ),
                 if (rackId != null && widget.onNavigateToRackDevice != null)
@@ -2971,7 +2957,7 @@ class _CmdbViewState extends State<CmdbView> {
                       style: const TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFF64748B),
+                        color: AppPalette.slate500,
                       ),
                     ),
                   ),
@@ -2982,7 +2968,7 @@ class _CmdbViewState extends State<CmdbView> {
                     icon: const Icon(
                       Icons.add_link_rounded,
                       size: 19,
-                      color: Color(0xFF15803D),
+                      color: AppPalette.green700,
                     ),
                   ),
                   IconButton(
@@ -2991,7 +2977,7 @@ class _CmdbViewState extends State<CmdbView> {
                     icon: const Icon(
                       Icons.edit_outlined,
                       size: 18,
-                      color: Color(0xFF1E3A8A),
+                      color: AppPalette.blue900,
                     ),
                   ),
                   if (syncSource == 'cmdb')
@@ -3001,7 +2987,7 @@ class _CmdbViewState extends State<CmdbView> {
                       icon: const Icon(
                         Icons.delete_outline_rounded,
                         size: 18,
-                        color: Color(0xFFDC2626),
+                        color: AppPalette.red600,
                       ),
                     ),
                 ],
@@ -3030,17 +3016,17 @@ class _CmdbViewState extends State<CmdbView> {
                     avatar: const Icon(
                       Icons.add_rounded,
                       size: 15,
-                      color: Color(0xFF1E3A8A),
+                      color: AppPalette.blue900,
                     ),
                     label: const Text(
                       'Añadir IP (Servicio / VIP / Backup)',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF1E3A8A),
+                        color: AppPalette.blue900,
                       ),
                     ),
-                    backgroundColor: const Color(0xFFEFF6FF),
+                    backgroundColor: AppPalette.blue50,
                     side: const BorderSide(color: Color(0xFFBFDBFE)),
                     onPressed: () => _openAddSingleIpDialog(asset),
                   ),
@@ -3131,7 +3117,7 @@ class _CmdbViewState extends State<CmdbView> {
                   style: const TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF475569),
+                    color: AppPalette.slate600,
                   ),
                 ),
               ],
@@ -3140,7 +3126,7 @@ class _CmdbViewState extends State<CmdbView> {
                 '($iface)',
                 style: const TextStyle(
                   fontSize: 10,
-                  color: Color(0xFF64748B),
+                  color: AppPalette.slate500,
                 ),
               ),
             ],
@@ -3172,14 +3158,14 @@ class _CmdbViewState extends State<CmdbView> {
             const Icon(
               Icons.settings_ethernet_rounded,
               size: 16,
-              color: Color(0xFF1E3A8A),
+              color: AppPalette.blue900,
             ),
             Text(
               'Desglose de Interfaces de Red e IPs de ${asset['code']} (${ips.length} IPs configuradas)',
               style: const TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w800,
-                color: Color(0xFF0F172A),
+                color: AppPalette.slate900,
               ),
             ),
             if ((asset['location_label'] ?? '').toString().isNotEmpty)
@@ -3188,14 +3174,14 @@ class _CmdbViewState extends State<CmdbView> {
                 avatar: const Icon(
                   Icons.location_on_rounded,
                   size: 14,
-                  color: Color(0xFF0F766E),
+                  color: AppPalette.teal700,
                 ),
                 label: Text(
                   'Sede: ${asset['location_label']}',
                   style: const TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
-                    color: Color(0xFF0F766E),
+                    color: AppPalette.teal700,
                   ),
                 ),
               ),
@@ -3205,14 +3191,14 @@ class _CmdbViewState extends State<CmdbView> {
                 avatar: const Icon(
                   Icons.developer_board_rounded,
                   size: 14,
-                  color: Color(0xFF0369A1),
+                  color: AppPalette.sky700,
                 ),
                 label: Text(
                   'Ir al Rack: ${asset['physical_location_label']}',
                   style: const TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
-                    color: Color(0xFF0369A1),
+                    color: AppPalette.sky700,
                   ),
                 ),
                 onPressed: () =>
@@ -3239,7 +3225,7 @@ class _CmdbViewState extends State<CmdbView> {
               ),
             Text(
               'Propietario: ${asset['owner_team'] ?? '-'} • Resp: ${asset['responsible_person'] ?? '-'}',
-              style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+              style: const TextStyle(fontSize: 11, color: AppPalette.slate500),
             ),
           ],
         ),
@@ -3250,13 +3236,13 @@ class _CmdbViewState extends State<CmdbView> {
             style: const TextStyle(
               fontSize: 11.5,
               fontStyle: FontStyle.italic,
-              color: Color(0xFF475569),
+              color: AppPalette.slate600,
             ),
           ),
         ],
         const SizedBox(height: 8),
         Table(
-          border: TableBorder.all(color: const Color(0xFFE2E8F0)),
+          border: TableBorder.all(color: AppPalette.slate200),
           columnWidths: const {
             0: FlexColumnWidth(1.3),
             1: FlexColumnWidth(1.2),
@@ -3270,7 +3256,7 @@ class _CmdbViewState extends State<CmdbView> {
           },
           children: [
             const TableRow(
-              decoration: BoxDecoration(color: Color(0xFFF1F5F9)),
+              decoration: BoxDecoration(color: AppPalette.slate100),
               children: [
                 _TableHeaderCell('Dirección IP'),
                 _TableHeaderCell('Máscara de Red'),
@@ -3329,7 +3315,7 @@ class _CmdbViewState extends State<CmdbView> {
                             icon: const Icon(
                               Icons.edit_outlined,
                               size: 15,
-                              color: Color(0xFF1E3A8A),
+                              color: AppPalette.blue900,
                             ),
                             onPressed: () =>
                                 _openAssetEditorDialog(existing: asset),
@@ -3339,11 +3325,7 @@ class _CmdbViewState extends State<CmdbView> {
                           icon: const Icon(Icons.copy, size: 15),
                           onPressed: () {
                             Clipboard.setData(ClipboardData(text: addr));
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('IP $addr copiada al portapapeles'),
-                              ),
-                            );
+                            ScaffoldMessenger.of(context).aviso('IP $addr copiada al portapapeles');
                           },
                         ),
                         IconButton(
@@ -3351,7 +3333,7 @@ class _CmdbViewState extends State<CmdbView> {
                           icon: const Icon(
                             Icons.radar_rounded,
                             size: 16,
-                            color: Color(0xFF0284C7),
+                            color: AppPalette.sky600,
                           ),
                           onPressed: () {
                             _verifyIpCtrl.text = addr;
@@ -3374,7 +3356,7 @@ class _CmdbViewState extends State<CmdbView> {
                               if (!mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  backgroundColor: const Color(0xFF15803D),
+                                  backgroundColor: AppPalette.green700,
                                   content: Text(
                                     'IP $addr liberada (marcada como No Ocupada en el mapa IPAM).',
                                     style: const TextStyle(
@@ -3448,7 +3430,7 @@ class _CmdbViewState extends State<CmdbView> {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFCBD5E1)),
+              border: Border.all(color: AppPalette.slate300),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -3457,7 +3439,7 @@ class _CmdbViewState extends State<CmdbView> {
                   children: [
                     Icon(
                       Icons.verified_user_rounded,
-                      color: Color(0xFF0284C7),
+                      color: AppPalette.sky600,
                       size: 22,
                     ),
                     SizedBox(width: 8),
@@ -3467,7 +3449,7 @@ class _CmdbViewState extends State<CmdbView> {
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w900,
-                          color: Color(0xFF0F172A),
+                          color: AppPalette.slate900,
                         ),
                       ),
                     ),
@@ -3480,7 +3462,7 @@ class _CmdbViewState extends State<CmdbView> {
                   'y te permitirá decidir qué equipos o IPs encontradas quieres añadir a la CMDB y cuáles descartar.',
                   style: TextStyle(
                     fontSize: 12,
-                    color: Color(0xFF475569),
+                    color: AppPalette.slate600,
                     height: 1.4,
                   ),
                 ),
@@ -3517,7 +3499,7 @@ class _CmdbViewState extends State<CmdbView> {
                           ? null
                           : () => _runManualVerification(onlySuggestFree: false),
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF0F172A),
+                        backgroundColor: AppPalette.slate900,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
                           vertical: 14,
@@ -3547,7 +3529,7 @@ class _CmdbViewState extends State<CmdbView> {
                     Container(
                       height: 36,
                       width: 1,
-                      color: const Color(0xFFE2E8F0),
+                      color: AppPalette.slate200,
                     ),
                     const SizedBox(width: 8),
                     DropdownButtonHideUnderline(
@@ -3557,9 +3539,9 @@ class _CmdbViewState extends State<CmdbView> {
                           vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF8FAFC),
+                          color: AppPalette.slate50,
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFFCBD5E1)),
+                          border: Border.all(color: AppPalette.slate300),
                         ),
                         child: DropdownButton<int>(
                           value: _verifySelectedSubnetId,
@@ -3567,7 +3549,7 @@ class _CmdbViewState extends State<CmdbView> {
                           style: const TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w700,
-                            color: Color(0xFF0F172A),
+                            color: AppPalette.slate900,
                           ),
                           items: _subnets.map((s) {
                             return DropdownMenuItem<int>(
@@ -3585,7 +3567,7 @@ class _CmdbViewState extends State<CmdbView> {
                           ? null
                           : () => _runManualVerification(onlySuggestFree: true),
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFFDCFCE7),
+                        backgroundColor: AppPalette.green100,
                         foregroundColor: const Color(0xFF166534),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
@@ -3608,14 +3590,14 @@ class _CmdbViewState extends State<CmdbView> {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFEF2F2),
+                      color: AppPalette.red50,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFFFECACA)),
+                      border: Border.all(color: AppPalette.red200),
                     ),
                     child: Text(
                       'Error: $_verifyError',
                       style: const TextStyle(
-                        color: Color(0xFFB91C1C),
+                        color: AppPalette.red700,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -3629,15 +3611,15 @@ class _CmdbViewState extends State<CmdbView> {
                       vertical: 10,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF0FDF4),
+                      color: AppPalette.green50,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFF86EFAC)),
+                      border: Border.all(color: AppPalette.green300),
                     ),
                     child: Row(
                       children: [
                         const Icon(
                           Icons.check_circle_rounded,
-                          color: Color(0xFF15803D),
+                          color: AppPalette.green700,
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -3657,7 +3639,7 @@ class _CmdbViewState extends State<CmdbView> {
                               suggestedFree,
                             ),
                             style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFF15803D),
+                              backgroundColor: AppPalette.green700,
                             ),
                             icon: const Icon(Icons.add_link_rounded, size: 16),
                             label: const Text('Asignar a Host Existente'),
@@ -3688,38 +3670,38 @@ class _CmdbViewState extends State<CmdbView> {
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFF0F172A),
+                          color: AppPalette.slate900,
                         ),
                       ),
                       _buildScanFilterChip(
                         'detected_or_cmdb',
                         'Equipos Detectados / En CMDB ($detectedOrCmdbCount)',
-                        const Color(0xFF0F172A),
+                        AppPalette.slate900,
                       ),
                       _buildScanFilterChip(
                         'conflict_unregistered',
                         'Detectados NO en CMDB - Rojo ($conflictCount)',
-                        const Color(0xFFB91C1C),
+                        AppPalette.red700,
                       ),
                       _buildScanFilterChip(
                         'active_in_network',
                         'En CMDB y Activos - Verde ($activeInCmdbCount)',
-                        const Color(0xFF15803D),
+                        AppPalette.green700,
                       ),
                       _buildScanFilterChip(
                         'no_response',
                         'En CMDB Sin Respuesta ($noResponseCount)',
-                        const Color(0xFFB45309),
+                        AppPalette.amber700,
                       ),
                       _buildScanFilterChip(
                         'free_confirmed',
                         'IPs Libres / No Ocupadas ($freeCount)',
-                        const Color(0xFF0284C7),
+                        AppPalette.sky600,
                       ),
                       _buildScanFilterChip(
                         'all',
                         'Ver Rango Completo (${allResults.length})',
-                        const Color(0xFF475569),
+                        AppPalette.slate600,
                       ),
                     ],
                   ),
@@ -3728,9 +3710,9 @@ class _CmdbViewState extends State<CmdbView> {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
+                        color: AppPalette.slate50,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                        border: Border.all(color: AppPalette.slate300),
                       ),
                       child: Wrap(
                         spacing: 10,
@@ -3739,14 +3721,14 @@ class _CmdbViewState extends State<CmdbView> {
                         children: [
                           const Icon(
                             Icons.playlist_add_check_rounded,
-                            color: Color(0xFF1E3A8A),
+                            color: AppPalette.blue900,
                           ),
                           Text(
                             'Seleccionados para añadir a CMDB: ${_selectedDiscoveredIps.length}',
                             style: const TextStyle(
                               fontSize: 12.5,
                               fontWeight: FontWeight.w900,
-                              color: Color(0xFF0F172A),
+                              color: AppPalette.slate900,
                             ),
                           ),
                           OutlinedButton(
@@ -3786,7 +3768,7 @@ class _CmdbViewState extends State<CmdbView> {
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
-                                  color: const Color(0xFFCBD5E1),
+                                  color: AppPalette.slate300,
                                 ),
                               ),
                               child: DropdownButton<String>(
@@ -3794,7 +3776,7 @@ class _CmdbViewState extends State<CmdbView> {
                                 style: const TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
-                                  color: Color(0xFF0F172A),
+                                  color: AppPalette.slate900,
                                 ),
                                 items: _assetClassLabels.entries.map((e) {
                                   return DropdownMenuItem<String>(
@@ -3820,7 +3802,7 @@ class _CmdbViewState extends State<CmdbView> {
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
-                                  color: const Color(0xFFCBD5E1),
+                                  color: AppPalette.slate300,
                                 ),
                               ),
                               child: DropdownButton<int?>(
@@ -3833,7 +3815,7 @@ class _CmdbViewState extends State<CmdbView> {
                                 style: const TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
-                                  color: Color(0xFF0F172A),
+                                  color: AppPalette.slate900,
                                 ),
                                 items: [
                                   const DropdownMenuItem<int?>(
@@ -3878,7 +3860,7 @@ class _CmdbViewState extends State<CmdbView> {
                                 : () =>
                                     _importSelectedDiscoveredToCmdb(allResults),
                             style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFF1E3A8A),
+                              backgroundColor: AppPalette.blue900,
                             ),
                             icon: _importingDiscovered
                                 ? const SizedBox(
@@ -3917,21 +3899,21 @@ class _CmdbViewState extends State<CmdbView> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
+                border: Border.all(color: AppPalette.slate200),
               ),
               child: const Column(
                 children: [
                   Icon(
                     Icons.network_check_rounded,
                     size: 46,
-                    color: Color(0xFF94A3B8),
+                    color: AppPalette.slate400,
                   ),
                   SizedBox(height: 8),
                   Text(
                     'Introduce una IP, rango o red CIDR (ej. 1.1.1.1/24 o 10.20.20.0/24) y pulsa "Analizar IP / Rango CIDR Ahora".',
                     style: TextStyle(
                       fontSize: 13,
-                      color: Color(0xFF64748B),
+                      color: AppPalette.slate500,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -3991,27 +3973,27 @@ class _CmdbViewState extends State<CmdbView> {
             .toList();
 
     // Por defecto (free_confirmed): azul/pizarra informativo (IP libre, sin equipo en red)
-    Color borderCol = const Color(0xFFBAE6FD);
-    Color headerBg = const Color(0xFFF0F9FF);
-    Color badgeCol = const Color(0xFF0284C7);
+    Color borderCol = AppPalette.sky200;
+    Color headerBg = AppPalette.sky50;
+    Color badgeCol = AppPalette.sky600;
     IconData vIcon = Icons.check_circle_outline_rounded;
 
     if (verdict == 'conflict_unregistered') {
       // ROJO: Dispositivo detectado en red pendiente de añadir a CMDB
-      borderCol = const Color(0xFFFCA5A5);
-      headerBg = const Color(0xFFFEF2F2);
-      badgeCol = const Color(0xFFB91C1C);
+      borderCol = AppPalette.red300;
+      headerBg = AppPalette.red50;
+      badgeCol = AppPalette.red700;
       vIcon = Icons.warning_amber_rounded;
     } else if (verdict == 'active_in_network') {
       // VERDE: Dispositivo añadido a la CMDB y activo en red
-      borderCol = const Color(0xFF86EFAC);
-      headerBg = const Color(0xFFF0FDF4);
-      badgeCol = const Color(0xFF15803D);
+      borderCol = AppPalette.green300;
+      headerBg = AppPalette.green50;
+      badgeCol = AppPalette.green700;
       vIcon = Icons.check_circle_rounded;
     } else if (verdict == 'no_response') {
-      borderCol = const Color(0xFFFCD34D);
-      headerBg = const Color(0xFFFFFBEB);
-      badgeCol = const Color(0xFFB45309);
+      borderCol = AppPalette.amber300;
+      headerBg = AppPalette.amber50;
+      badgeCol = AppPalette.amber700;
       vIcon = Icons.help_outline_rounded;
     }
 
@@ -4043,7 +4025,7 @@ class _CmdbViewState extends State<CmdbView> {
                     verdict == 'conflict_unregistered')
                   Checkbox(
                     value: isSelectedForImport,
-                    activeColor: const Color(0xFF1E3A8A),
+                    activeColor: AppPalette.blue900,
                     visualDensity: VisualDensity.compact,
                     onChanged: (v) {
                       setState(() {
@@ -4087,7 +4069,7 @@ class _CmdbViewState extends State<CmdbView> {
                   '(${r['elapsed_ms'] ?? '--'} ms)',
                   style: const TextStyle(
                     fontSize: 11,
-                    color: Color(0xFF475569),
+                    color: AppPalette.slate600,
                   ),
                 ),
                 if (widget.canEdit &&
@@ -4103,7 +4085,7 @@ class _CmdbViewState extends State<CmdbView> {
                             );
                           },
                     style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFB91C1C),
+                      backgroundColor: AppPalette.red700,
                       visualDensity: VisualDensity.compact,
                     ),
                     icon: const Icon(Icons.add_task_rounded, size: 15),
@@ -4169,8 +4151,8 @@ class _CmdbViewState extends State<CmdbView> {
                       });
                     },
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF15803D),
-                      side: const BorderSide(color: Color(0xFF86EFAC)),
+                      foregroundColor: AppPalette.green700,
+                      side: const BorderSide(color: AppPalette.green300),
                       visualDensity: VisualDensity.compact,
                     ),
                     icon: const Icon(Icons.table_chart_outlined, size: 15),
@@ -4191,7 +4173,7 @@ class _CmdbViewState extends State<CmdbView> {
                     });
                   },
                   style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF64748B),
+                    foregroundColor: AppPalette.slate500,
                     visualDensity: VisualDensity.compact,
                   ),
                   icon: const Icon(Icons.close_rounded, size: 15),
@@ -4213,7 +4195,7 @@ class _CmdbViewState extends State<CmdbView> {
                   style: const TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF1E293B),
+                    color: AppPalette.slate800,
                   ),
                 ),
                 if (owners.isNotEmpty) ...[
@@ -4286,10 +4268,10 @@ class _CmdbViewState extends State<CmdbView> {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: active ? const Color(0xFFEFF6FF) : const Color(0xFFF8FAFC),
+        color: active ? AppPalette.blue50 : AppPalette.slate50,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: active ? const Color(0xFF60A5FA) : const Color(0xFFE2E8F0),
+          color: active ? const Color(0xFF60A5FA) : AppPalette.slate200,
         ),
       ),
       child: Column(
@@ -4303,8 +4285,8 @@ class _CmdbViewState extends State<CmdbView> {
                     : Icons.sensors_off_rounded,
                 size: 15,
                 color: active
-                    ? const Color(0xFF1D4ED8)
-                    : const Color(0xFF64748B),
+                    ? AppPalette.blue700
+                    : AppPalette.slate500,
               ),
               const SizedBox(width: 6),
               Expanded(
@@ -4314,8 +4296,8 @@ class _CmdbViewState extends State<CmdbView> {
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
                     color: active
-                        ? const Color(0xFF1E3A8A)
-                        : const Color(0xFF475569),
+                        ? AppPalette.blue900
+                        : AppPalette.slate600,
                   ),
                 ),
               ),
@@ -4324,7 +4306,7 @@ class _CmdbViewState extends State<CmdbView> {
           const SizedBox(height: 4),
           Text(
             detail,
-            style: const TextStyle(fontSize: 11, color: Color(0xFF334155)),
+            style: const TextStyle(fontSize: 11, color: AppPalette.slate700),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
@@ -4424,7 +4406,7 @@ class _CmdbViewState extends State<CmdbView> {
           width: 355,
           decoration: const BoxDecoration(
             color: Colors.white,
-            border: Border(right: BorderSide(color: Color(0xFFE2E8F0))),
+            border: Border(right: BorderSide(color: AppPalette.slate200)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -4436,7 +4418,7 @@ class _CmdbViewState extends State<CmdbView> {
                     const Icon(
                       Icons.lan_rounded,
                       size: 18,
-                      color: Color(0xFF1E3A8A),
+                      color: AppPalette.blue900,
                     ),
                     const SizedBox(width: 8),
                     const Expanded(
@@ -4483,14 +4465,14 @@ class _CmdbViewState extends State<CmdbView> {
                       elevation: 0,
                       margin: const EdgeInsets.only(bottom: 8),
                       color: isSel
-                          ? const Color(0xFFEFF6FF)
-                          : const Color(0xFFF8FAFC),
+                          ? AppPalette.blue50
+                          : AppPalette.slate50,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                         side: BorderSide(
                           color: isSel
-                              ? const Color(0xFF2563EB)
-                              : const Color(0xFFE2E8F0),
+                              ? AppPalette.blue600
+                              : AppPalette.slate200,
                           width: isSel ? 1.5 : 1.0,
                         ),
                       ),
@@ -4524,7 +4506,7 @@ class _CmdbViewState extends State<CmdbView> {
                                         vertical: 2,
                                       ),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFF1E3A8A),
+                                        color: AppPalette.blue900,
                                         borderRadius: BorderRadius.circular(4),
                                       ),
                                       child: Text(
@@ -4547,7 +4529,7 @@ class _CmdbViewState extends State<CmdbView> {
                                         child: Icon(
                                           Icons.edit_outlined,
                                           size: 15,
-                                          color: Color(0xFF475569),
+                                          color: AppPalette.slate600,
                                         ),
                                       ),
                                     ),
@@ -4572,7 +4554,7 @@ class _CmdbViewState extends State<CmdbView> {
                                 style: const TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
-                                  color: Color(0xFF334155),
+                                  color: AppPalette.slate700,
                                 ),
                               ),
                               if ((s['location_label'] ?? '')
@@ -4584,7 +4566,7 @@ class _CmdbViewState extends State<CmdbView> {
                                     const Icon(
                                       Icons.location_on_rounded,
                                       size: 12,
-                                      color: Color(0xFF0F766E),
+                                      color: AppPalette.teal700,
                                     ),
                                     const SizedBox(width: 3),
                                     Expanded(
@@ -4593,7 +4575,7 @@ class _CmdbViewState extends State<CmdbView> {
                                         style: const TextStyle(
                                           fontSize: 10.5,
                                           fontWeight: FontWeight.w800,
-                                          color: Color(0xFF0F766E),
+                                          color: AppPalette.teal700,
                                         ),
                                         overflow: TextOverflow.ellipsis,
                                       ),
@@ -4607,16 +4589,16 @@ class _CmdbViewState extends State<CmdbView> {
                                 style: const TextStyle(
                                   fontSize: 10,
                                   fontFamily: 'monospace',
-                                  color: Color(0xFF475569),
+                                  color: AppPalette.slate600,
                                 ),
                               ),
                               const SizedBox(height: 6),
                               LinearProgressIndicator(
                                 value: (pct / 100.0).clamp(0.0, 1.0),
-                                backgroundColor: const Color(0xFFE2E8F0),
+                                backgroundColor: AppPalette.slate200,
                                 color: pct > 80
                                     ? Colors.redAccent
-                                    : const Color(0xFF0284C7),
+                                    : AppPalette.sky600,
                                 minHeight: 6,
                                 borderRadius: BorderRadius.circular(4),
                               ),
@@ -4625,7 +4607,7 @@ class _CmdbViewState extends State<CmdbView> {
                                 'Ocupadas: ${s['occupied_count']} / ${s['total_usable']} útiles (${pct.toStringAsFixed(1)}%) • GW: ${s['gateway'] ?? '-'}',
                                 style: const TextStyle(
                                   fontSize: 10.5,
-                                  color: Color(0xFF64748B),
+                                  color: AppPalette.slate500,
                                 ),
                               ),
                             ],
@@ -4666,7 +4648,7 @@ class _CmdbViewState extends State<CmdbView> {
                                   'Mostrando las $totalAddresses direcciones de la máscara /$prefixLen ($subnetMask): incluyendo Dirección de Red ($networkAddress), $totalUsable hosts útiles ($firstUsableIp a $lastUsableIp) y Dirección de Broadcast ($broadcastAddress).',
                                   style: const TextStyle(
                                     fontSize: 11.5,
-                                    color: Color(0xFF475569),
+                                    color: AppPalette.slate600,
                                   ),
                                 ),
                               ],
@@ -4721,9 +4703,9 @@ class _CmdbViewState extends State<CmdbView> {
                           vertical: 9,
                         ),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF8FAFC),
+                          color: AppPalette.slate50,
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFFCBD5E1)),
+                          border: Border.all(color: AppPalette.slate300),
                         ),
                         child: Wrap(
                           spacing: 14,
@@ -4734,14 +4716,14 @@ class _CmdbViewState extends State<CmdbView> {
                               icon: Icons.tag_rounded,
                               label: 'Máscara',
                               value: '$subnetMask (/$prefixLen)',
-                              color: const Color(0xFF0F172A),
+                              color: AppPalette.slate900,
                             ),
                             _buildSubnetSpecPill(
                               icon: Icons.hub_rounded,
                               label: 'Dirección de Red (No asignable)',
                               value: networkAddress,
                               color: const Color(0xFF3730A3),
-                              bgColor: const Color(0xFFE0E7FF),
+                              bgColor: AppPalette.indigo100,
                             ),
                             _buildSubnetSpecPill(
                               icon: Icons.podcasts_rounded,
@@ -4754,14 +4736,14 @@ class _CmdbViewState extends State<CmdbView> {
                               icon: Icons.swap_horiz_rounded,
                               label: 'Rango Hosts Útiles',
                               value: '$firstUsableIp ➔ $lastUsableIp ($totalUsable IPs)',
-                              color: const Color(0xFF0369A1),
+                              color: AppPalette.sky700,
                             ),
                             _buildSubnetSpecPill(
                               icon: Icons.router_rounded,
                               label: 'Gateway',
                               value: gwIp.isEmpty ? '-' : gwIp,
-                              color: const Color(0xFFB45309),
-                              bgColor: const Color(0xFFFEF3C7),
+                              color: AppPalette.amber700,
+                              bgColor: AppPalette.amber100,
                             ),
                             _buildSubnetSpecPill(
                               icon: Icons.location_on_rounded,
@@ -4772,7 +4754,7 @@ class _CmdbViewState extends State<CmdbView> {
                                   ? (selectedSubnet['location_label'])
                                       .toString()
                                   : 'Sin Sede específica',
-                              color: const Color(0xFF0F766E),
+                              color: AppPalette.teal700,
                               bgColor: const Color(0xFFF0FDFA),
                             ),
                           ],
@@ -4789,7 +4771,7 @@ class _CmdbViewState extends State<CmdbView> {
                               crossAxisAlignment: WrapCrossAlignment.center,
                               children: [
                                 _buildLegendDot(
-                                  const Color(0xFFE0E7FF),
+                                  AppPalette.indigo100,
                                   const Color(0xFF4338CA),
                                   'DIR. RED ($networkAddress)',
                                 ),
@@ -4799,23 +4781,23 @@ class _CmdbViewState extends State<CmdbView> {
                                   'BROADCAST ($broadcastAddress)',
                                 ),
                                 _buildLegendDot(
-                                  const Color(0xFFFEF3C7),
-                                  const Color(0xFFF59E0B),
+                                  AppPalette.amber100,
+                                  AppPalette.amber500,
                                   'Gateway ($gwIp)',
                                 ),
                                 _buildLegendDot(
-                                  const Color(0xFFE0F2FE),
-                                  const Color(0xFF0284C7),
+                                  AppPalette.sky100,
+                                  AppPalette.sky600,
                                   'Ocupada (Heartbeat)',
                                 ),
                                 _buildLegendDot(
-                                  const Color(0xFFDCFCE7),
-                                  const Color(0xFF16A34A),
+                                  AppPalette.green100,
+                                  AppPalette.green600,
                                   'Ocupada (Servicio/VIP)',
                                 ),
                                 _buildLegendDot(
-                                  const Color(0xFFF8FAFC),
-                                  const Color(0xFFCBD5E1),
+                                  AppPalette.slate50,
+                                  AppPalette.slate300,
                                   'IP Libre Asignable',
                                 ),
                               ],
@@ -4866,7 +4848,7 @@ class _CmdbViewState extends State<CmdbView> {
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                            border: Border.all(color: AppPalette.slate200),
                           ),
                           child: GridView.builder(
                             gridDelegate:
@@ -4899,13 +4881,13 @@ class _CmdbViewState extends State<CmdbView> {
                                           ? '.${parts.last}'
                                           : ipStr);
 
-                              Color bg = const Color(0xFFF8FAFC);
-                              Color border = const Color(0xFFE2E8F0);
-                              Color txt = const Color(0xFF475569);
+                              Color bg = AppPalette.slate50;
+                              Color border = AppPalette.slate200;
+                              Color txt = AppPalette.slate600;
                               String roleBadge = 'Libre';
 
                               if (isNetworkAddr) {
-                                bg = const Color(0xFFE0E7FF);
+                                bg = AppPalette.indigo100;
                                 border = const Color(0xFF4338CA);
                                 txt = const Color(0xFF312E81);
                                 roleBadge = 'DIR. RED';
@@ -4915,17 +4897,17 @@ class _CmdbViewState extends State<CmdbView> {
                                 txt = const Color(0xFF701A75);
                                 roleBadge = 'BROADCAST';
                               } else if (isGw) {
-                                bg = const Color(0xFFFEF3C7);
-                                border = const Color(0xFFF59E0B);
-                                txt = const Color(0xFF92400E);
+                                bg = AppPalette.amber100;
+                                border = AppPalette.amber500;
+                                txt = AppPalette.amber800;
                                 roleBadge = 'GATEWAY';
                               } else if (isOccupied) {
                                 bg = isHb
-                                    ? const Color(0xFFE0F2FE)
-                                    : const Color(0xFFDCFCE7);
+                                    ? AppPalette.sky100
+                                    : AppPalette.green100;
                                 border = isHb
-                                    ? const Color(0xFF0284C7)
-                                    : const Color(0xFF16A34A);
+                                    ? AppPalette.sky600
+                                    : AppPalette.green600;
                                 txt = isHb
                                     ? const Color(0xFF075985)
                                     : const Color(0xFF14532D);
@@ -5079,7 +5061,7 @@ class _CmdbViewState extends State<CmdbView> {
           style: const TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w700,
-            color: Color(0xFF334155),
+            color: AppPalette.slate700,
           ),
         ),
       ],
@@ -5100,7 +5082,7 @@ class _CmdbViewState extends State<CmdbView> {
               style: const TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w800,
-                color: Color(0xFF475569),
+                color: AppPalette.slate600,
               ),
             ),
           ),
@@ -5111,7 +5093,7 @@ class _CmdbViewState extends State<CmdbView> {
                 fontSize: 12,
                 fontFamily: mono ? 'monospace' : null,
                 fontWeight: mono ? FontWeight.w800 : FontWeight.w600,
-                color: const Color(0xFF0F172A),
+                color: AppPalette.slate900,
               ),
             ),
           ),
@@ -5164,8 +5146,8 @@ class _CmdbViewState extends State<CmdbView> {
                   ? Icons.computer_rounded
                   : Icons.check_box_outline_blank_rounded,
               color: allocated != null
-                  ? const Color(0xFF0284C7)
-                  : const Color(0xFF15803D),
+                  ? AppPalette.sky600
+                  : AppPalette.green700,
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -5192,7 +5174,7 @@ class _CmdbViewState extends State<CmdbView> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFE0E7FF),
+                      color: AppPalette.indigo100,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: const Color(0xFF4338CA)),
                     ),
@@ -5230,9 +5212,9 @@ class _CmdbViewState extends State<CmdbView> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFEF3C7),
+                      color: AppPalette.amber100,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFFF59E0B)),
+                      border: Border.all(color: AppPalette.amber500),
                     ),
                     child: const Text(
                       'Esta IP es la Puerta de Enlace (Gateway) configurada para esta subred.',
@@ -5243,9 +5225,9 @@ class _CmdbViewState extends State<CmdbView> {
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF8FAFC),
+                      color: AppPalette.slate50,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFFCBD5E1)),
+                      border: Border.all(color: AppPalette.slate300),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -5259,7 +5241,7 @@ class _CmdbViewState extends State<CmdbView> {
                               ),
                               decoration: BoxDecoration(
                                 color: status == 'online'
-                                    ? const Color(0xFFDCFCE7)
+                                    ? AppPalette.green100
                                     : const Color(0xFFFEE2E2),
                                 borderRadius: BorderRadius.circular(6),
                               ),
@@ -5271,8 +5253,8 @@ class _CmdbViewState extends State<CmdbView> {
                                   fontSize: 11,
                                   fontWeight: FontWeight.w900,
                                   color: status == 'online'
-                                      ? const Color(0xFF15803D)
-                                      : const Color(0xFFB91C1C),
+                                      ? AppPalette.green700
+                                      : AppPalette.red700,
                                 ),
                               ),
                             ),
@@ -5283,7 +5265,7 @@ class _CmdbViewState extends State<CmdbView> {
                                 vertical: 4,
                               ),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFE0F2FE),
+                                color: AppPalette.sky100,
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
@@ -5295,7 +5277,7 @@ class _CmdbViewState extends State<CmdbView> {
                                 style: const TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w800,
-                                  color: Color(0xFF0369A1),
+                                  color: AppPalette.sky700,
                                 ),
                               ),
                             ),
@@ -5387,7 +5369,7 @@ class _CmdbViewState extends State<CmdbView> {
                             style: TextStyle(
                               fontSize: 11.5,
                               fontWeight: FontWeight.w800,
-                              color: Color(0xFF334155),
+                              color: AppPalette.slate700,
                             ),
                           ),
                           const SizedBox(height: 6),
@@ -5417,9 +5399,9 @@ class _CmdbViewState extends State<CmdbView> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFEF2F2),
+                        color: AppPalette.red50,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFFECACA)),
+                        border: Border.all(color: AppPalette.red200),
                       ),
                       child: Wrap(
                         spacing: 8,
@@ -5429,14 +5411,14 @@ class _CmdbViewState extends State<CmdbView> {
                           const Icon(
                             Icons.cleaning_services_rounded,
                             size: 16,
-                            color: Color(0xFFB91C1C),
+                            color: AppPalette.red700,
                           ),
                           const Text(
                             '¿El equipo ya no está o quieres liberar esta IP?',
                             style: TextStyle(
                               fontSize: 11.5,
                               fontWeight: FontWeight.w800,
-                              color: Color(0xFF991B1B),
+                              color: AppPalette.red800,
                             ),
                           ),
                           if (ipId != null)
@@ -5448,7 +5430,7 @@ class _CmdbViewState extends State<CmdbView> {
                                 if (!mounted) return;
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    backgroundColor: const Color(0xFF15803D),
+                                    backgroundColor: AppPalette.green700,
                                     content: Text(
                                       'La IP $ipStr ha quedado marcada como NO OCUPADA (Libre) en el mapa IPAM.',
                                       style: const TextStyle(
@@ -5459,8 +5441,8 @@ class _CmdbViewState extends State<CmdbView> {
                                 );
                               },
                               style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFFB91C1C),
-                                side: const BorderSide(color: Color(0xFFFCA5A5)),
+                                foregroundColor: AppPalette.red700,
+                                side: const BorderSide(color: AppPalette.red300),
                                 visualDensity: VisualDensity.compact,
                               ),
                               icon: const Icon(Icons.link_off_rounded, size: 15),
@@ -5481,7 +5463,7 @@ class _CmdbViewState extends State<CmdbView> {
                                 if (!mounted) return;
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    backgroundColor: const Color(0xFF15803D),
+                                    backgroundColor: AppPalette.green700,
                                     content: Text(
                                       'Equipo ${allocated['asset_code']} eliminado e IP $ipStr marcada como NO OCUPADA (Libre).',
                                       style: const TextStyle(
@@ -5492,7 +5474,7 @@ class _CmdbViewState extends State<CmdbView> {
                                 );
                               },
                               style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFFDC2626),
+                                backgroundColor: AppPalette.red600,
                                 visualDensity: VisualDensity.compact,
                               ),
                               icon: const Icon(
@@ -5560,7 +5542,7 @@ class _CmdbViewState extends State<CmdbView> {
                 });
               },
               style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF1E3A8A),
+                backgroundColor: AppPalette.blue900,
               ),
               icon: const Icon(Icons.table_rows_rounded, size: 16),
               label: const Text('Ir a su Casilla en Inventario CMDB'),
@@ -5619,13 +5601,13 @@ class _CmdbViewState extends State<CmdbView> {
           style: TextStyle(
             fontSize: 15,
             fontWeight: FontWeight.w900,
-            color: Color(0xFF0F172A),
+            color: AppPalette.slate900,
           ),
         ),
         const SizedBox(height: 4),
         const Text(
           'Permite visualizar qué Máquinas Virtuales (VMs), Contenedores o Clusters dependen de cada servidor físico del Rack, además de las instancias Cloud o autónomas que no están en ningún rack.',
-          style: TextStyle(fontSize: 12, color: Color(0xFF475569)),
+          style: TextStyle(fontSize: 12, color: AppPalette.slate600),
         ),
         const SizedBox(height: 14),
         ...hosts.map((h) {
@@ -5644,7 +5626,7 @@ class _CmdbViewState extends State<CmdbView> {
             color: Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
-              side: const BorderSide(color: Color(0xFFCBD5E1)),
+              side: const BorderSide(color: AppPalette.slate300),
             ),
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -5656,12 +5638,12 @@ class _CmdbViewState extends State<CmdbView> {
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF0F766E).withValues(alpha: 0.12),
+                          color: AppPalette.teal700.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: const Icon(
                           Icons.dns_rounded,
-                          color: Color(0xFF0F766E),
+                          color: AppPalette.teal700,
                           size: 20,
                         ),
                       ),
@@ -5681,7 +5663,7 @@ class _CmdbViewState extends State<CmdbView> {
                               'Ubicación: Rack ${h['rack_code']} (U${h['start_u']}) • IP Gestión Host: ${h['ip_address']} • VMs/CIs alojados: ${hostedAssets.length}',
                               style: const TextStyle(
                                 fontSize: 11.5,
-                                color: Color(0xFF475569),
+                                color: AppPalette.slate600,
                               ),
                             ),
                           ],
@@ -5711,7 +5693,7 @@ class _CmdbViewState extends State<CmdbView> {
                         'Sin máquinas virtuales vinculadas actualmente a este servidor físico.',
                         style: TextStyle(
                           fontSize: 12,
-                          color: Color(0xFF64748B),
+                          color: AppPalette.slate500,
                         ),
                       ),
                     )
@@ -5728,7 +5710,7 @@ class _CmdbViewState extends State<CmdbView> {
           color: Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
-            side: const BorderSide(color: Color(0xFFCBD5E1)),
+            side: const BorderSide(color: AppPalette.slate300),
           ),
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -5740,12 +5722,12 @@ class _CmdbViewState extends State<CmdbView> {
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF4F46E5).withValues(alpha: 0.12),
+                        color: AppPalette.indigo600.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: const Icon(
                         Icons.cloud_done_rounded,
-                        color: Color(0xFF4F46E5),
+                        color: AppPalette.indigo600,
                         size: 20,
                       ),
                     ),
@@ -5765,7 +5747,7 @@ class _CmdbViewState extends State<CmdbView> {
                             'Máquinas gestionadas directamente en la CMDB que corren en Cloud (AWS/Azure/GCP), clusters externos o sedes sin rack (${standaloneAssets.length} máquinas)',
                             style: const TextStyle(
                               fontSize: 11.5,
-                              color: Color(0xFF475569),
+                              color: AppPalette.slate600,
                             ),
                           ),
                         ],
@@ -6045,13 +6027,13 @@ class _CmdbViewState extends State<CmdbView> {
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
                         color: liveCheckResult!['can_safely_assign'] == true
-                            ? const Color(0xFFF0FDF4)
-                            : const Color(0xFFFEF2F2),
+                            ? AppPalette.green50
+                            : AppPalette.red50,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
                           color: liveCheckResult!['can_safely_assign'] == true
-                              ? const Color(0xFF86EFAC)
-                              : const Color(0xFFFCA5A5),
+                              ? AppPalette.green300
+                              : AppPalette.red300,
                         ),
                       ),
                       child: Text(
@@ -6061,7 +6043,7 @@ class _CmdbViewState extends State<CmdbView> {
                           fontWeight: FontWeight.w800,
                           color: liveCheckResult!['can_safely_assign'] == true
                               ? const Color(0xFF14532D)
-                              : const Color(0xFFB91C1C),
+                              : AppPalette.red700,
                         ),
                       ),
                     ),
@@ -6176,7 +6158,7 @@ class _CmdbViewState extends State<CmdbView> {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF0369A1),
+                        color: AppPalette.sky700,
                       ),
                     ),
                     onChanged: (v) =>
@@ -6614,13 +6596,13 @@ class _CmdbViewState extends State<CmdbView> {
                     ),
                     decoration: BoxDecoration(
                       color: monitoringEnabled
-                          ? const Color(0xFFF0FDF4)
-                          : const Color(0xFFF8FAFC),
+                          ? AppPalette.green50
+                          : AppPalette.slate50,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
                         color: monitoringEnabled
-                            ? const Color(0xFF86EFAC)
-                            : const Color(0xFFCBD5E1),
+                            ? AppPalette.green300
+                            : AppPalette.slate300,
                       ),
                     ),
                     child: Row(
@@ -6687,7 +6669,7 @@ class _CmdbViewState extends State<CmdbView> {
                       const Icon(
                         Icons.lan_rounded,
                         size: 18,
-                        color: Color(0xFF1E3A8A),
+                        color: AppPalette.blue900,
                       ),
                       const SizedBox(width: 8),
                       const Expanded(
@@ -6731,13 +6713,13 @@ class _CmdbViewState extends State<CmdbView> {
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
                         color: isHb
-                            ? const Color(0xFFF0F9FF)
-                            : const Color(0xFFF8FAFC),
+                            ? AppPalette.sky50
+                            : AppPalette.slate50,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
                           color: isHb
-                              ? const Color(0xFF38BDF8)
-                              : const Color(0xFFCBD5E1),
+                              ? AppPalette.sky400
+                              : AppPalette.slate300,
                         ),
                       ),
                       child: Column(
@@ -6816,8 +6798,8 @@ class _CmdbViewState extends State<CmdbView> {
                                   },
                                   child: Chip(
                                     backgroundColor: isHb
-                                        ? const Color(0xFF0284C7)
-                                        : const Color(0xFFE2E8F0),
+                                        ? AppPalette.sky600
+                                        : AppPalette.slate200,
                                     label: Text(
                                       isHb ? '★ Heartbeat ON' : 'Marcar Heartbeat',
                                       style: TextStyle(
@@ -6825,7 +6807,7 @@ class _CmdbViewState extends State<CmdbView> {
                                         fontWeight: FontWeight.w800,
                                         color: isHb
                                             ? Colors.white
-                                            : const Color(0xFF475569),
+                                            : AppPalette.slate600,
                                       ),
                                     ),
                                   ),
@@ -6978,7 +6960,7 @@ class _CmdbViewState extends State<CmdbView> {
                             children: [
                               const Icon(
                                 Icons.warning_amber_rounded,
-                                color: Color(0xFFB91C1C),
+                                color: AppPalette.red700,
                               ),
                               const SizedBox(width: 8),
                               Expanded(
@@ -7008,7 +6990,7 @@ class _CmdbViewState extends State<CmdbView> {
                             ),
                             FilledButton.icon(
                               style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFF15803D),
+                                backgroundColor: AppPalette.green700,
                               ),
                               onPressed: () => Navigator.pop(dCtx, 'merge'),
                               icon: const Icon(
@@ -7105,9 +7087,7 @@ class _CmdbViewState extends State<CmdbView> {
                   await _loadOverview(silent: true);
                 } catch (e) {
                   if (!ctx.mounted) return;
-                  ScaffoldMessenger.of(ctx).showSnackBar(
-                    SnackBar(content: Text('Error guardando en CMDB: $e')),
-                  );
+                  ScaffoldMessenger.of(ctx).aviso('Error guardando en CMDB: $e');
                 }
               },
               icon: const Icon(Icons.save_rounded, size: 16),
@@ -7212,7 +7192,7 @@ class _CmdbViewState extends State<CmdbView> {
                         width: double.infinity,
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF0F9FF),
+                          color: AppPalette.sky50,
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(color: const Color(0xFF7DD3FC)),
                         ),
@@ -7224,7 +7204,7 @@ class _CmdbViewState extends State<CmdbView> {
                               style: const TextStyle(
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w900,
-                                color: Color(0xFF0C4A6E),
+                                color: AppPalette.sky900,
                               ),
                             ),
                             const SizedBox(height: 4),
@@ -7237,7 +7217,7 @@ class _CmdbViewState extends State<CmdbView> {
                                 fontSize: 11,
                                 fontFamily: 'monospace',
                                 fontWeight: FontWeight.w700,
-                                color: Color(0xFF0369A1),
+                                color: AppPalette.sky700,
                               ),
                             ),
                           ],
@@ -7375,11 +7355,7 @@ class _CmdbViewState extends State<CmdbView> {
                           await _loadOverview(silent: true);
                         } catch (e) {
                           if (!ctx.mounted) return;
-                          ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(
-                              content: Text('Error guardando subred: $e'),
-                            ),
-                          );
+                          ScaffoldMessenger.of(ctx).aviso('Error guardando subred: $e');
                         }
                       },
                 icon: const Icon(Icons.save, size: 16),
@@ -7524,7 +7500,7 @@ class _TableHeaderCell extends StatelessWidget {
         style: const TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w900,
-          color: Color(0xFF334155),
+          color: AppPalette.slate700,
         ),
       ),
     );
@@ -7551,7 +7527,7 @@ class _TableBodyCell extends StatelessWidget {
           fontSize: 11.5,
           fontFamily: mono ? 'monospace' : null,
           fontWeight: bold ? FontWeight.w800 : FontWeight.w500,
-          color: const Color(0xFF1E293B),
+          color: AppPalette.slate800,
         ),
       ),
     );

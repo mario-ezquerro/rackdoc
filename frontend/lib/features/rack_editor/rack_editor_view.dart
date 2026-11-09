@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../../core/widgets/avisos.dart';
+import '../../core/theme.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_client.dart';
@@ -258,12 +260,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         ),
       );
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('No se pudo deshacer el movimiento: $e'),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      messenger.avisoError('No se pudo deshacer el movimiento: $e');
     }
   }
 
@@ -323,7 +320,7 @@ class _RackEditorViewState extends State<RackEditorView> {
           ),
           FilledButton.icon(
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
+              backgroundColor: AppPalette.red600,
             ),
             onPressed: () => Navigator.pop(ctx, true),
             icon: const Icon(Icons.delete_outline, size: 16),
@@ -337,16 +334,9 @@ class _RackEditorViewState extends State<RackEditorView> {
       try {
         await widget.api.deleteRack(rack.id);
         widget.onBackToLocations();
-        messenger.showSnackBar(
-          SnackBar(content: Text('Rack "${rack.code}" eliminado.')),
-        );
+        messenger.aviso('Rack "${rack.code}" eliminado.');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Error eliminando rack: $e'),
-            backgroundColor: Colors.red.shade700,
-          ),
-        );
+        messenger.avisoError('Error eliminando rack: $e');
       }
     }
   }
@@ -770,16 +760,9 @@ class _RackEditorViewState extends State<RackEditorView> {
         clamped,
         excludeDeviceId: dev.id,
       );
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            blocker != null
+      messenger.avisoError(blocker != null
                 ? 'No se puede ampliar "${dev.code}" a ${clamped}U en U${dev.startU}-U${dev.startU + clamped - 1}: choca con "${blocker.code}" (U${blocker.startU}).'
-                : 'No cabe "${dev.code}" con ${clamped}U en U${dev.startU} (excede U${rack.totalUnits}).',
-          ),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+                : 'No cabe "${dev.code}" con ${clamped}U en U${dev.startU} (excede U${rack.totalUnits}).');
       return;
     }
 
@@ -797,9 +780,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         ),
       );
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-      );
+      messenger.avisoError('$e');
     }
   }
 
@@ -814,14 +795,7 @@ class _RackEditorViewState extends State<RackEditorView> {
     final messenger = ScaffoldMessenger.of(context);
 
     if (targetStartU < 1 || targetEndU > rack.totalUnits) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            'No se puede colocar "${dev.code}" ($uHeight U) en U$targetStartU: necesita hasta U$targetEndU y el rack tiene ${rack.totalUnits}U.',
-          ),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      messenger.avisoError('No se puede colocar "${dev.code}" ($uHeight U) en U$targetStartU: necesita hasta U$targetEndU y el rack tiene ${rack.totalUnits}U.');
       return;
     }
 
@@ -837,14 +811,7 @@ class _RackEditorViewState extends State<RackEditorView> {
       final blockerRange = blocker.uHeight > 1
           ? 'U${blocker.startU}-U${blocker.endU}'
           : 'U${blocker.startU}';
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            'No hay suficientes "U" libres en $rangeLabel para "${dev.code}" (${uHeight}U): ocupado por "${blocker.code}" ($blockerRange).',
-          ),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      messenger.avisoError('No hay suficientes "U" libres en $rangeLabel para "${dev.code}" (${uHeight}U): ocupado por "${blocker.code}" ($blockerRange).');
       return;
     }
 
@@ -879,12 +846,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         ),
       );
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('No se pudo mover a U$targetStartU: $e'),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      messenger.avisoError('No se pudo mover a U$targetStartU: $e');
     }
   }
 
@@ -917,7 +879,7 @@ class _RackEditorViewState extends State<RackEditorView> {
               children: [
                 Text(
                   'Solo se muestran las posiciones que tienen ${uHeight}U libres consecutivas en el rack (o también puedes arrastrar el equipo directamente con el ratón):',
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF475569)),
+                  style: const TextStyle(fontSize: 12, color: AppPalette.slate600),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
@@ -979,9 +941,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         ),
       );
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-      );
+      messenger.avisoError('$e');
     }
   }
 
@@ -1173,13 +1133,7 @@ class _RackEditorViewState extends State<RackEditorView> {
     final miniTemplates =
         widget.templates.where((t) => t.isTrayMiniDevice).toList();
     if (miniTemplates.isEmpty) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text(
-            'No se encontraron plantillas en la librería "Bandeja - Equipos Mini".',
-          ),
-        ),
-      );
+      messenger.aviso('No se encontraron plantillas en la librería "Bandeja - Equipos Mini".');
       return;
     }
 
@@ -1255,7 +1209,7 @@ class _RackEditorViewState extends State<RackEditorView> {
             children: [
               const Icon(
                 Icons.inbox_outlined,
-                color: Color(0xFF1D4ED8),
+                color: AppPalette.blue700,
                 size: 22,
               ),
               const SizedBox(width: 8),
@@ -1280,13 +1234,13 @@ class _RackEditorViewState extends State<RackEditorView> {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFEFF6FF),
+                      color: AppPalette.blue50,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFF93C5FD)),
+                      border: Border.all(color: AppPalette.blue300),
                     ),
                     child: const Text(
                       '💡 En una Bandeja puedes colocar hasta 4 equipos pequeños o de sobremesa (Routers, Mini-Switches, ONTs, Mini-PCs). Puedes definir sus bocas RJ45, SFP Fibra y Tomas Eléctricas tanto por DELANTE (Front) como por DETRÁS (Back).',
-                      style: TextStyle(fontSize: 11.5, color: Color(0xFF1E3A8A)),
+                      style: TextStyle(fontSize: 11.5, color: AppPalette.blue900),
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -1295,7 +1249,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     style: const TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w800,
-                      color: Color(0xFF0F172A),
+                      color: AppPalette.slate900,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -1303,16 +1257,16 @@ class _RackEditorViewState extends State<RackEditorView> {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
+                        color: AppPalette.slate50,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        border: Border.all(color: AppPalette.slate200),
                       ),
                       child: const Row(
                         children: [
                           Icon(
                             Icons.info_outline,
                             size: 16,
-                            color: Color(0xFF64748B),
+                            color: AppPalette.slate500,
                           ),
                           SizedBox(width: 8),
                           Expanded(
@@ -1320,7 +1274,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                               'La bandeja está vacía. Selecciona abajo un Router, Switch o Mini-PC para colocarlo encima.',
                               style: TextStyle(
                                 fontSize: 11.5,
-                                color: Color(0xFF64748B),
+                                color: AppPalette.slate500,
                               ),
                             ),
                           ),
@@ -1338,9 +1292,9 @@ class _RackEditorViewState extends State<RackEditorView> {
                           vertical: 8,
                         ),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF8FAFC),
+                          color: AppPalette.slate50,
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFFCBD5E1)),
+                          border: Border.all(color: AppPalette.slate300),
                         ),
                         child: Row(
                           children: [
@@ -1350,7 +1304,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                 vertical: 3,
                               ),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF1E293B),
+                                color: AppPalette.slate800,
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
@@ -1372,14 +1326,14 @@ class _RackEditorViewState extends State<RackEditorView> {
                                     style: const TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w700,
-                                      color: Color(0xFF0F172A),
+                                      color: AppPalette.slate900,
                                     ),
                                   ),
                                   Text(
                                     'Modelo: ${it['manufacturer'] ?? ''} ${it['model_name'] ?? ''}${it['ip_address']?.toString().isNotEmpty == true ? ' • IP: ${it['ip_address']}' : ''}',
                                     style: const TextStyle(
                                       fontSize: 10.5,
-                                      color: Color(0xFF64748B),
+                                      color: AppPalette.slate500,
                                     ),
                                   ),
                                 ],
@@ -1394,7 +1348,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                               icon: const Icon(
                                 Icons.delete_outline,
                                 size: 17,
-                                color: Color(0xFFDC2626),
+                                color: AppPalette.red600,
                               ),
                               tooltip: 'Sacar este equipo de la bandeja',
                               visualDensity: VisualDensity.compact,
@@ -1410,7 +1364,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     style: TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w800,
-                      color: Color(0xFF1E3A8A),
+                      color: AppPalette.blue900,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -1498,7 +1452,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
-                      color: Color(0xFF334155),
+                      color: AppPalette.slate700,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -1658,17 +1612,9 @@ class _RackEditorViewState extends State<RackEditorView> {
         setState(() {
           _selectedDeviceId = trayDev.id;
         });
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Bandeja "${trayDev.code}" actualizada con ${items.length} equipo(s) alojado(s) y sus bocas RJ45/Fibra/PSU sincronizadas.',
-            ),
-          ),
-        );
+        messenger.aviso('Bandeja "${trayDev.code}" actualizada con ${items.length} equipo(s) alojado(s) y sus bocas RJ45/Fibra/PSU sincronizadas.');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        messenger.avisoError('$e');
       }
     }
   }
@@ -1803,12 +1749,12 @@ class _RackEditorViewState extends State<RackEditorView> {
                 Container(
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFDBEAFE),
+                    color: AppPalette.blue100,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Icon(
                     Icons.add_circle_outline,
-                    color: Color(0xFF1D4ED8),
+                    color: AppPalette.blue700,
                     size: 20,
                   ),
                 ),
@@ -1828,7 +1774,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         'Selecciona primero el Grupo, luego la Categoría y finalmente el Dispositivo concreto',
                         style: TextStyle(
                           fontSize: 11,
-                          color: Color(0xFF64748B),
+                          color: AppPalette.slate500,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -1850,7 +1796,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF1E3A8A),
+                        color: AppPalette.blue900,
                         letterSpacing: 0.3,
                       ),
                     ),
@@ -1911,7 +1857,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFF1E3A8A),
+                          color: AppPalette.blue900,
                           letterSpacing: 0.3,
                         ),
                       ),
@@ -1973,7 +1919,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                       style: const TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF0F172A),
+                        color: AppPalette.slate900,
                         letterSpacing: 0.3,
                       ),
                     ),
@@ -2020,7 +1966,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                   ),
                                   decoration: BoxDecoration(
                                     color: itemFits
-                                        ? const Color(0xFFDCFCE7)
+                                        ? AppPalette.green100
                                         : const Color(0xFFFEE2E2),
                                     borderRadius: BorderRadius.circular(4),
                                   ),
@@ -2033,7 +1979,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                       fontWeight: FontWeight.w800,
                                       color: itemFits
                                           ? const Color(0xFF166534)
-                                          : const Color(0xFF991B1B),
+                                          : AppPalette.red800,
                                     ),
                                   ),
                                 ),
@@ -2058,13 +2004,13 @@ class _RackEditorViewState extends State<RackEditorView> {
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
                           color: fits
-                              ? const Color(0xFFF8FAFC)
-                              : const Color(0xFFFEF2F2),
+                              ? AppPalette.slate50
+                              : AppPalette.red50,
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
                             color: fits
-                                ? const Color(0xFFCBD5E1)
-                                : const Color(0xFFFCA5A5),
+                                ? AppPalette.slate300
+                                : AppPalette.red300,
                           ),
                         ),
                         child: Column(
@@ -2078,8 +2024,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                                       : Icons.warning_amber_rounded,
                                   size: 16,
                                   color: fits
-                                      ? const Color(0xFF16A34A)
-                                      : const Color(0xFFDC2626),
+                                      ? AppPalette.green600
+                                      : AppPalette.red600,
                                 ),
                                 const SizedBox(width: 6),
                                 Expanded(
@@ -2088,7 +2034,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                     style: const TextStyle(
                                       fontSize: 12.5,
                                       fontWeight: FontWeight.w800,
-                                      color: Color(0xFF0F172A),
+                                      color: AppPalette.slate900,
                                     ),
                                   ),
                                 ),
@@ -2101,7 +2047,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                   : '• Posición en Rack: U$targetU${tpl.uHeight > 1 ? ' a U${targetU + tpl.uHeight - 1}' : ''} (${tpl.uHeight}U • ${tpl.isFullDepth ? 'Profundidad Completa Front+Back' : 'Cara ${face.toUpperCase()}'})',
                               style: const TextStyle(
                                 fontSize: 11.2,
-                                color: Color(0xFF334155),
+                                color: AppPalette.slate700,
                               ),
                             ),
                             const SizedBox(height: 3),
@@ -2109,7 +2055,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                               '• Bocas por defecto — Front: ${counts['front_rj45']} RJ45, ${counts['front_sfp']} SFP, ${counts['front_psu']} PSU, ${counts['front_schuko']} Schuko | Back: ${counts['back_rj45']} RJ45, ${counts['back_sfp']} SFP, ${counts['back_psu']} PSU, ${counts['back_schuko']} Schuko (personalizables en el siguiente paso)',
                               style: const TextStyle(
                                 fontSize: 10.8,
-                                color: Color(0xFF475569),
+                                color: AppPalette.slate600,
                               ),
                             ),
                             if (!fits) ...[
@@ -2119,7 +2065,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                 style: const TextStyle(
                                   fontSize: 10.8,
                                   fontWeight: FontWeight.w700,
-                                  color: Color(0xFFDC2626),
+                                  color: AppPalette.red600,
                                 ),
                               ),
                             ],
@@ -2200,14 +2146,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         orElse: () => tpl,
       );
       if (!_canFitAtU(rack, targetStartU, 1)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Para colocar "${tpl.modelName}" en U$targetStartU hace falta una Bandeja en esa U o que U$targetStartU esté libre.',
-            ),
-            backgroundColor: Colors.red.shade700,
-          ),
-        );
+        ScaffoldMessenger.of(context).avisoError('Para colocar "${tpl.modelName}" en U$targetStartU hace falta una Bandeja en esa U o que U$targetStartU esté libre.');
         return;
       }
       try {
@@ -2243,19 +2182,11 @@ class _RackEditorViewState extends State<RackEditorView> {
           _selectedTemplateForClick = null;
         });
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Bandeja BDJ$trayCount montada en U$targetStartU con "${tpl.manufacturer} ${tpl.modelName}" alojado encima. Pulsa "+ Equipos en Bandeja" para meter más.',
-              ),
-            ),
-          );
+          ScaffoldMessenger.of(context).aviso('Bandeja BDJ$trayCount montada en U$targetStartU con "${tpl.manufacturer} ${tpl.modelName}" alojado encima. Pulsa "+ Equipos en Bandeja" para meter más.');
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-          );
+          ScaffoldMessenger.of(context).avisoError('$e');
         }
       }
       return;
@@ -2270,14 +2201,7 @@ class _RackEditorViewState extends State<RackEditorView> {
           : (blocker != null
               ? 'choca con "${blocker.code}" en U${blocker.startU}'
               : 'las unidades U no están libres');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'No se puede montar "${tpl.modelName}" (${tpl.uHeight}U) en U$targetStartU${tpl.uHeight > 1 ? '-U$targetEndU' : ''}: necesita ${tpl.uHeight}U libres consecutivas ($reason).',
-          ),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      ScaffoldMessenger.of(context).avisoError('No se puede montar "${tpl.modelName}" (${tpl.uHeight}U) en U$targetStartU${tpl.uHeight > 1 ? '-U$targetEndU' : ''}: necesita ${tpl.uHeight}U libres consecutivas ($reason).');
       return;
     }
 
@@ -2335,16 +2259,16 @@ class _RackEditorViewState extends State<RackEditorView> {
                     padding: const EdgeInsets.all(8),
                     margin: const EdgeInsets.only(bottom: 10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFEFF6FF),
+                      color: AppPalette.blue50,
                       borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: const Color(0xFF93C5FD)),
+                      border: Border.all(color: AppPalette.blue300),
                     ),
                     child: const Row(
                       children: [
                         Icon(
                           Icons.sync_alt,
                           size: 16,
-                          color: Color(0xFF1D4ED8),
+                          color: AppPalette.blue700,
                         ),
                         SizedBox(width: 8),
                         Expanded(
@@ -2352,7 +2276,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             'Puedes personalizar cuántas bocas RJ45, SFP Fibra, Tomas PSU y Schuko lleva este equipo tanto por DELANTE (Front) como por DETRÁS (Back).',
                             style: TextStyle(
                               fontSize: 11,
-                              color: Color(0xFF1E3A8A),
+                              color: AppPalette.blue900,
                             ),
                           ),
                         ),
@@ -2450,7 +2374,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF0F172A),
+                        color: AppPalette.slate900,
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -2507,7 +2431,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF1E3A8A),
+                        color: AppPalette.blue900,
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -2603,7 +2527,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     children: [
                       const Icon(
                         Icons.warning_amber_rounded,
-                        color: Color(0xFFDC2626),
+                        color: AppPalette.red600,
                       ),
                       const SizedBox(width: 8),
                       Expanded(
@@ -2626,9 +2550,9 @@ class _RackEditorViewState extends State<RackEditorView> {
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFFEF2F2),
+                            color: AppPalette.red50,
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFFFCA5A5)),
+                            border: Border.all(color: AppPalette.red300),
                           ),
                           child: Text(
                             'La IP $targetIp ya figura en la CMDB asociada al activo:\n'
@@ -2648,7 +2572,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             selAct == 'merge'
                                 ? Icons.radio_button_checked
                                 : Icons.radio_button_off,
-                            color: const Color(0xFF2563EB),
+                            color: AppPalette.blue600,
                           ),
                           title: const Text(
                             'Es el mismo equipo: Unificar con el activo existente en CMDB (Recomendado)',
@@ -2670,7 +2594,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             selAct == 'reassign_or_clear'
                                 ? Icons.radio_button_checked
                                 : Icons.radio_button_off,
-                            color: const Color(0xFF2563EB),
+                            color: AppPalette.blue600,
                           ),
                           title: const Text(
                             'Son equipos distintos: Reasignar la IP a este equipo del Rack y liberarla del otro',
@@ -2773,9 +2697,7 @@ class _RackEditorViewState extends State<RackEditorView> {
       });
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        ScaffoldMessenger.of(context).avisoError('$e');
       }
     }
   }
@@ -2801,24 +2723,12 @@ class _RackEditorViewState extends State<RackEditorView> {
     }
 
     if (!_canEdit) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Modo lectura: tu rol actual no permite crear nuevos cables.',
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(context).aviso('Modo lectura: tu rol actual no permite crear nuevos cables.');
       return;
     }
 
     if (existingConn != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'La boca ${dev.code}:${port.portNumber} ya está ocupada por un cable. Selecciónala sin cable activo para editarla o desconectarla.',
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(context).aviso('La boca ${dev.code}:${port.portNumber} ya está ocupada por un cable. Selecciónala sin cable activo para editarla o desconectarla.');
       return;
     }
 
@@ -2927,7 +2837,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
+                    color: AppPalette.slate100,
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Row(
@@ -3028,7 +2938,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                 const SizedBox(height: 10),
                 const Text(
                   'Color Identificativo del Cable',
-                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                  style: TextStyle(fontSize: 11, color: AppPalette.slate500),
                 ),
                 const SizedBox(height: 6),
                 Wrap(
@@ -3146,9 +3056,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         });
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-          );
+          ScaffoldMessenger.of(context).avisoError('$e');
         }
       }
     }
@@ -3170,24 +3078,13 @@ class _RackEditorViewState extends State<RackEditorView> {
     try {
       otherRacks = await widget.api.getInterRackTargets(rack.id);
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Error obteniendo otros racks: $e'),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      messenger.avisoError('Error obteniendo otros racks: $e');
       return;
     }
 
     if (otherRacks.isEmpty) {
       if (!mounted) return;
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text(
-            'No hay otros Racks dados de alta en el Datacenter para conectar fibra/cable Inter-Rack.',
-          ),
-        ),
-      );
+      messenger.aviso('No hay otros Racks dados de alta en el Datacenter para conectar fibra/cable Inter-Rack.');
       return;
     }
 
@@ -3202,11 +3099,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         rack.devices.where((d) => !d.isExternalFeed && d.ports.isNotEmpty).toList();
     if (localDevices.isEmpty) {
       if (!mounted) return;
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Este rack no tiene equipos con puertos para conectar.'),
-        ),
-      );
+      messenger.aviso('Este rack no tiene equipos con puertos para conectar.');
       return;
     }
 
@@ -3275,7 +3168,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         builder: (ctx, setModal) => AlertDialog(
           title: const Row(
             children: [
-              Icon(Icons.cable, color: Color(0xFF0284C7), size: 22),
+              Icon(Icons.cable, color: AppPalette.sky600, size: 22),
               SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -3295,13 +3188,13 @@ class _RackEditorViewState extends State<RackEditorView> {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF0F9FF),
+                      color: AppPalette.sky50,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFFBAE6FD)),
+                      border: Border.all(color: AppPalette.sky200),
                     ),
                     child: const Text(
                       '💡 Las fibras o cables entre Racks se trazan hacia la Bandeja Aérea Inter-Rack superior con una etiqueta interactiva (⇢ RACK destino) que te permite saltar al otro Rack con 1 clic.',
-                      style: TextStyle(fontSize: 11.5, color: Color(0xFF0369A1)),
+                      style: TextStyle(fontSize: 11.5, color: AppPalette.sky700),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -3311,7 +3204,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     style: const TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w800,
-                      color: Color(0xFF1E3A8A),
+                      color: AppPalette.blue900,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -3638,17 +3531,9 @@ class _RackEditorViewState extends State<RackEditorView> {
           _selectedConnectionId = created.id;
           _selectedDeviceId = null;
         });
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Fibra / Cable Inter-Rack conectado hacia ${selectedTargetRack['code']} (${selectedTargetDev?['code']}:${selectedTargetPort!['port_number']}).',
-            ),
-          ),
-        );
+        messenger.aviso('Fibra / Cable Inter-Rack conectado hacia ${selectedTargetRack['code']} (${selectedTargetDev?['code']}:${selectedTargetPort!['port_number']}).');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        messenger.avisoError('$e');
       }
     }
   }
@@ -3723,7 +3608,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                 children: [
                   const Icon(
                     Icons.photo_camera_outlined,
-                    color: Color(0xFF1D4ED8),
+                    color: AppPalette.blue700,
                     size: 20,
                   ),
                   const SizedBox(width: 8),
@@ -3749,7 +3634,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         'Busca referencias fotográficas en Internet (Wikimedia Commons), pega una URL de imagen de catálogo del fabricante o sube una foto local:',
                         style: TextStyle(
                           fontSize: 11.5,
-                          color: Color(0xFF475569),
+                          color: AppPalette.slate600,
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -3787,7 +3672,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                           'Aviso: $searchError',
                           style: const TextStyle(
                             fontSize: 11,
-                            color: Color(0xFFDC2626),
+                            color: AppPalette.red600,
                           ),
                         )
                       else if (searchResults.isNotEmpty) ...[
@@ -3796,7 +3681,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
-                            color: Color(0xFF1E293B),
+                            color: AppPalette.slate800,
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -3821,13 +3706,13 @@ class _RackEditorViewState extends State<RackEditorView> {
                                   padding: const EdgeInsets.all(6),
                                   decoration: BoxDecoration(
                                     color: isSel
-                                        ? const Color(0xFFDBEAFE)
-                                        : const Color(0xFFF8FAFC),
+                                        ? AppPalette.blue100
+                                        : AppPalette.slate50,
                                     borderRadius: BorderRadius.circular(8),
                                     border: Border.all(
                                       color: isSel
-                                          ? const Color(0xFF2563EB)
-                                          : const Color(0xFFCBD5E1),
+                                          ? AppPalette.blue600
+                                          : AppPalette.slate300,
                                       width: isSel ? 2.2 : 1.0,
                                     ),
                                   ),
@@ -3901,7 +3786,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                           width: double.infinity,
                           padding: const EdgeInsets.all(6),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF0F172A),
+                            color: AppPalette.slate900,
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Image.network(
@@ -3982,9 +3867,7 @@ class _RackEditorViewState extends State<RackEditorView> {
           ),
         );
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        messenger.avisoError('$e');
       }
     }
   }
@@ -4016,9 +3899,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         ),
       );
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-      );
+      messenger.avisoError('$e');
     }
   }
 
@@ -4094,7 +3975,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         : 'Las tomas eléctricas exteriores representan enchufes Schuko o acometidas fuera del bastidor a las que puedes enchufar equipos o regletas del rack.',
                     style: const TextStyle(
                       fontSize: 11.5,
-                      color: Color(0xFF475569),
+                      color: AppPalette.slate600,
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -4175,7 +4056,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
-                            color: Color(0xFF475569),
+                            color: AppPalette.slate600,
                           ),
                         ),
                         for (final preset in [4, 6, 8, 12, 16, 24])
@@ -4215,7 +4096,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     style: const TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFF1E293B),
+                      color: AppPalette.slate800,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -4308,9 +4189,7 @@ class _RackEditorViewState extends State<RackEditorView> {
           ),
         );
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        messenger.avisoError('$e');
       }
     }
   }
@@ -4327,7 +4206,7 @@ class _RackEditorViewState extends State<RackEditorView> {
           content: Text(
             'Debe existir como mínimo 1 toma eléctrica exterior en el rack.',
           ),
-          backgroundColor: Color(0xFFD97706),
+          backgroundColor: AppPalette.amber600,
         ),
       );
       return;
@@ -4336,13 +4215,9 @@ class _RackEditorViewState extends State<RackEditorView> {
     try {
       await widget.api.deleteExternalOutlet(ext.id);
       await _loadRack();
-      messenger.showSnackBar(
-        SnackBar(content: Text('Toma exterior "${ext.code}" eliminada.')),
-      );
+      messenger.aviso('Toma exterior "${ext.code}" eliminada.');
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-      );
+      messenger.avisoError('$e');
     }
   }
 
@@ -4377,7 +4252,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                   'Se han exportado ${exported['count'] ?? 0} plantillas en formato JSON estándar de RackDoc. Puedes copiar este JSON para guardarlo o importarlo en otro grupo/instancia:',
                   style: const TextStyle(
                     fontSize: 12,
-                    color: Color(0xFF475569),
+                    color: AppPalette.slate600,
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -4385,7 +4260,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                   height: 280,
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0F172A),
+                    color: AppPalette.slate900,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: SingleChildScrollView(
@@ -4394,7 +4269,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                       style: const TextStyle(
                         fontFamily: 'monospace',
                         fontSize: 11,
-                        color: Color(0xFFE2E8F0),
+                        color: AppPalette.slate200,
                       ),
                     ),
                   ),
@@ -4411,13 +4286,7 @@ class _RackEditorViewState extends State<RackEditorView> {
               onPressed: () async {
                 await Clipboard.setData(ClipboardData(text: prettyJson));
                 if (ctx.mounted) Navigator.pop(ctx);
-                messenger.showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'JSON de la librería copiado al portapapeles.',
-                    ),
-                  ),
-                );
+                messenger.aviso('JSON de la librería copiado al portapapeles.');
               },
               icon: const Icon(Icons.copy, size: 16),
               label: const Text('Copiar JSON'),
@@ -4426,9 +4295,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         ),
       );
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('Error exportando librería: $e')),
-      );
+      messenger.aviso('Error exportando librería: $e');
     }
   }
 
@@ -4546,20 +4413,9 @@ class _RackEditorViewState extends State<RackEditorView> {
         );
         widget.onTemplatesChanged();
         setState(() => _selectedLibraryGroup = targetGroup);
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Librería "$targetGroup" importada: ${res['created']} creados, ${res['updated']} actualizados.',
-            ),
-          ),
-        );
+        messenger.aviso('Librería "$targetGroup" importada: ${res['created']} creados, ${res['updated']} actualizados.');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Error importando JSON: $e'),
-            backgroundColor: Colors.red.shade700,
-          ),
-        );
+        messenger.avisoError('Error importando JSON: $e');
       }
     }
   }
@@ -4612,7 +4468,7 @@ class _RackEditorViewState extends State<RackEditorView> {
           children: [
             const Icon(
               Icons.settings_input_component_rounded,
-              color: Color(0xFF1D4ED8),
+              color: AppPalette.blue700,
               size: 20,
             ),
             const SizedBox(width: 8),
@@ -4635,7 +4491,7 @@ class _RackEditorViewState extends State<RackEditorView> {
             children: [
               const Text(
                 'Define cuántas bocas RJ45 (Cobre), SFP/Fibra Óptica, Tomas Eléctricas PSU (C14) y Enchufes Schuko tiene este equipo tanto por DELANTE (Front) como por DETRÁS (Back):',
-                style: TextStyle(fontSize: 11.5, color: Color(0xFF475569)),
+                style: TextStyle(fontSize: 11.5, color: AppPalette.slate600),
               ),
               const SizedBox(height: 14),
               const Text(
@@ -4643,7 +4499,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w800,
-                  color: Color(0xFF0F172A),
+                  color: AppPalette.slate900,
                 ),
               ),
               const SizedBox(height: 6),
@@ -4700,7 +4556,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w800,
-                  color: Color(0xFF1E3A8A),
+                  color: AppPalette.blue900,
                 ),
               ),
               const SizedBox(height: 6),
@@ -4791,17 +4647,9 @@ class _RackEditorViewState extends State<RackEditorView> {
           'custom_fields': updatedCustom,
         });
         await _loadRack();
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Bocas Front y Back de "${dev.code}" actualizadas correctamente.',
-            ),
-          ),
-        );
+        messenger.aviso('Bocas Front y Back de "${dev.code}" actualizadas correctamente.');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        messenger.avisoError('$e');
       }
     }
   }
@@ -4884,7 +4732,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                 children: [
                   const Text(
                     'Grupo / Librería (selecciona uno existente o escribe uno nuevo):',
-                    style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                    style: TextStyle(fontSize: 11, color: AppPalette.slate500),
                   ),
                   const SizedBox(height: 6),
                   Wrap(
@@ -5043,7 +4891,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     style: TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w800,
-                      color: Color(0xFF0F172A),
+                      color: AppPalette.slate900,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -5100,7 +4948,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     style: TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w800,
-                      color: Color(0xFF1E3A8A),
+                      color: AppPalette.blue900,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -5307,7 +5155,7 @@ class _RackEditorViewState extends State<RackEditorView> {
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             decoration: const BoxDecoration(
               color: Colors.white,
-              border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+              border: Border(bottom: BorderSide(color: AppPalette.slate200)),
             ),
             child: Row(
               children: [
@@ -5325,7 +5173,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     style: const TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.w700,
-                      color: Color(0xFF0F172A),
+                      color: AppPalette.slate900,
                     ),
                   ),
                   InkWell(
@@ -5334,7 +5182,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                       'PBX  >  Locations  >  ${bc['location_code']}  >  ${bc['room_name']?.toString().split(' ').first ?? '28'}  >  ${rack.code}',
                       style: const TextStyle(
                         fontSize: 11,
-                        color: Color(0xFF64748B),
+                        color: AppPalette.slate500,
                       ),
                     ),
                   ),
@@ -5365,14 +5213,14 @@ class _RackEditorViewState extends State<RackEditorView> {
                         vertical: 5,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
+                        color: AppPalette.slate50,
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
                           color: offlineCnt > 0
-                              ? const Color(0xFFFCA5A5)
+                              ? AppPalette.red300
                               : (warnCnt > 0
                                   ? const Color(0xFFFDE68A)
-                                  : const Color(0xFFCBD5E1)),
+                                  : AppPalette.slate300),
                         ),
                       ),
                       child: Row(
@@ -5381,7 +5229,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                           const Icon(
                             Icons.monitor_heart_outlined,
                             size: 14,
-                            color: Color(0xFF0F172A),
+                            color: AppPalette.slate900,
                           ),
                           const SizedBox(width: 5),
                           const Text(
@@ -5389,7 +5237,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w800,
-                              color: Color(0xFF0F172A),
+                              color: AppPalette.slate900,
                             ),
                           ),
                           const SizedBox(width: 6),
@@ -5398,7 +5246,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             width: 7,
                             height: 7,
                             decoration: const BoxDecoration(
-                              color: Color(0xFF94A3B8),
+                              color: AppPalette.slate400,
                               shape: BoxShape.circle,
                             ),
                           ),
@@ -5408,7 +5256,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             style: const TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w800,
-                              color: Color(0xFF64748B),
+                              color: AppPalette.slate500,
                             ),
                           ),
                           const SizedBox(width: 7),
@@ -5417,7 +5265,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             width: 7,
                             height: 7,
                             decoration: const BoxDecoration(
-                              color: Color(0xFF16A34A),
+                              color: AppPalette.green600,
                               shape: BoxShape.circle,
                             ),
                           ),
@@ -5427,7 +5275,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             style: const TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w800,
-                              color: Color(0xFF15803D),
+                              color: AppPalette.green700,
                             ),
                           ),
                           const SizedBox(width: 7),
@@ -5436,7 +5284,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             width: 7,
                             height: 7,
                             decoration: const BoxDecoration(
-                              color: Color(0xFFD97706),
+                              color: AppPalette.amber600,
                               shape: BoxShape.circle,
                             ),
                           ),
@@ -5446,7 +5294,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             style: const TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w800,
-                              color: Color(0xFFB45309),
+                              color: AppPalette.amber700,
                             ),
                           ),
                           const SizedBox(width: 7),
@@ -5455,7 +5303,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             width: 7,
                             height: 7,
                             decoration: const BoxDecoration(
-                              color: Color(0xFFDC2626),
+                              color: AppPalette.red600,
                               shape: BoxShape.circle,
                             ),
                           ),
@@ -5465,7 +5313,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             style: const TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w800,
-                              color: Color(0xFFB91C1C),
+                              color: AppPalette.red700,
                             ),
                           ),
                         ],
@@ -5506,8 +5354,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                                     : Icons.dns_outlined),
                             size: 16,
                             color: isAlarm
-                                ? const Color(0xFFDC2626)
-                                : const Color(0xFF334155),
+                                ? AppPalette.red600
+                                : AppPalette.slate700,
                           ),
                           const SizedBox(width: 8),
                           Expanded(
@@ -5520,8 +5368,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                                     ? FontWeight.w800
                                     : FontWeight.w600,
                                 color: isAlarm
-                                    ? const Color(0xFFB91C1C)
-                                    : const Color(0xFF0F172A),
+                                    ? AppPalette.red700
+                                    : AppPalette.slate900,
                               ),
                             ),
                           ),
@@ -5538,10 +5386,10 @@ class _RackEditorViewState extends State<RackEditorView> {
                   ),
                   decoration: BoxDecoration(
                     color: _highlightedDeviceId != null
-                        ? const Color(0xFFE2E8F0)
-                        : const Color(0xFFF8FAFC),
+                        ? AppPalette.slate200
+                        : AppPalette.slate50,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                    border: Border.all(color: AppPalette.slate300),
                   ),
                   child: const Row(
                     mainAxisSize: MainAxisSize.min,
@@ -5549,7 +5397,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                       Icon(
                         Icons.search_rounded,
                         size: 15,
-                        color: Color(0xFF334155),
+                        color: AppPalette.slate700,
                       ),
                       SizedBox(width: 5),
                       Text(
@@ -5557,14 +5405,14 @@ class _RackEditorViewState extends State<RackEditorView> {
                         style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF1E293B),
+                          color: AppPalette.slate800,
                         ),
                       ),
                       SizedBox(width: 3),
                       Icon(
                         Icons.arrow_drop_down,
                         size: 16,
-                        color: Color(0xFF475569),
+                        color: AppPalette.slate600,
                       ),
                     ],
                   ),
@@ -5575,9 +5423,9 @@ class _RackEditorViewState extends State<RackEditorView> {
               Container(
                 margin: const EdgeInsets.only(right: 10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF8FAFC),
+                  color: AppPalette.slate50,
                   borderRadius: BorderRadius.circular(7),
-                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                  border: Border.all(color: AppPalette.slate300),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -5610,9 +5458,9 @@ class _RackEditorViewState extends State<RackEditorView> {
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFEFF6FF),
+                    color: AppPalette.blue50,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFF93C5FD)),
+                    border: Border.all(color: AppPalette.blue300),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -5622,7 +5470,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         style: const TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFF1E3A8A),
+                          color: AppPalette.blue900,
                         ),
                       ),
                       IconButton(
@@ -5658,7 +5506,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: const Color(0xFF93C5FD)),
+                          border: Border.all(color: AppPalette.blue300),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -5675,7 +5523,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                 child: Icon(
                                   Icons.remove,
                                   size: 12,
-                                  color: Color(0xFF1D4ED8),
+                                  color: AppPalette.blue700,
                                 ),
                               ),
                             ),
@@ -5688,7 +5536,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                 style: const TextStyle(
                                   fontSize: 10.5,
                                   fontWeight: FontWeight.w800,
-                                  color: Color(0xFF1E3A8A),
+                                  color: AppPalette.blue900,
                                 ),
                               ),
                             ),
@@ -5704,7 +5552,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                 child: Icon(
                                   Icons.add,
                                   size: 12,
-                                  color: Color(0xFF1D4ED8),
+                                  color: AppPalette.blue700,
                                 ),
                               ),
                             ),
@@ -5782,7 +5630,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                       TextButton.icon(
                         onPressed: () => _quickDeleteDevice(selDev),
                         style: TextButton.styleFrom(
-                          foregroundColor: const Color(0xFFDC2626),
+                          foregroundColor: AppPalette.red600,
                         ),
                         icon: const Icon(Icons.delete_outline, size: 15),
                         label: const Text(
@@ -5806,9 +5654,9 @@ class _RackEditorViewState extends State<RackEditorView> {
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFEF2F2),
+                    color: AppPalette.red50,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFFCA5A5)),
+                    border: Border.all(color: AppPalette.red300),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -5818,7 +5666,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF991B1B),
+                          color: AppPalette.red800,
                         ),
                       ),
                       const SizedBox(width: 6),
@@ -5829,7 +5677,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                           await _loadRack();
                         },
                         style: TextButton.styleFrom(
-                          foregroundColor: const Color(0xFFDC2626),
+                          foregroundColor: AppPalette.red600,
                         ),
                         icon: const Icon(Icons.link_off, size: 15),
                         label: const Text(
@@ -5852,9 +5700,9 @@ class _RackEditorViewState extends State<RackEditorView> {
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFDBEAFE),
+                    color: AppPalette.blue100,
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: const Color(0xFF2563EB)),
+                    border: Border.all(color: AppPalette.blue600),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -5862,7 +5710,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                       const Icon(
                         Icons.cable,
                         size: 15,
-                        color: Color(0xFF1D4ED8),
+                        color: AppPalette.blue700,
                       ),
                       const SizedBox(width: 6),
                       Text(
@@ -5870,7 +5718,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF1E3A8A),
+                          color: AppPalette.blue900,
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -5893,7 +5741,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             vertical: 3,
                           ),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF1D4ED8),
+                            color: AppPalette.blue700,
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: const Row(
@@ -5926,7 +5774,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         child: const Icon(
                           Icons.close,
                           size: 15,
-                          color: Color(0xFF1E3A8A),
+                          color: AppPalette.blue900,
                         ),
                       ),
                     ],
@@ -5941,8 +5789,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                     style: TextStyle(fontSize: 12),
                   ),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF0F172A),
-                    side: const BorderSide(color: Color(0xFF94A3B8)),
+                    foregroundColor: AppPalette.slate900,
+                    side: const BorderSide(color: AppPalette.slate400),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -5954,13 +5802,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     await widget.api.pingAllRackDevices(rack.id);
                     await _loadRack();
                     if (mounted) {
-                      messenger.showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Chequeo de Ping completado en todos los equipos del rack.',
-                          ),
-                        ),
-                      );
+                      messenger.aviso('Chequeo de Ping completado en todos los equipos del rack.');
                     }
                   },
                   icon: const Icon(Icons.network_ping, size: 16),
@@ -5984,8 +5826,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                 OutlinedButton.icon(
                   onPressed: _confirmDeleteCurrentRack,
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFFDC2626),
-                    side: const BorderSide(color: Color(0xFFFCA5A5)),
+                    foregroundColor: AppPalette.red600,
+                    side: const BorderSide(color: AppPalette.red300),
                   ),
                   icon: const Icon(Icons.delete_outline, size: 16),
                   label: const Text(
@@ -6098,7 +5940,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                       rack: rack,
                                       face: 'front',
                                       faceBannerLabel: 'FRONT (DELANTE)',
-                                      faceBannerColor: const Color(0xFF0F172A),
+                                      faceBannerColor: AppPalette.slate900,
                                       outerLeft: _rackOuterLeft,
                                       innerLeft: _rackInnerLeft,
                                       occupiedUsOnFace: occupiedUsFront,
@@ -6124,12 +5966,12 @@ class _RackEditorViewState extends State<RackEditorView> {
                                                 vertical: 4,
                                               ),
                                               decoration: BoxDecoration(
-                                                color: const Color(0xFF1E293B),
+                                                color: AppPalette.slate800,
                                                 borderRadius:
                                                     BorderRadius.circular(12),
                                                 border: Border.all(
                                                   color:
-                                                      const Color(0xFF38BDF8),
+                                                      AppPalette.sky400,
                                                 ),
                                               ),
                                               child: const Text(
@@ -6148,7 +5990,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                                     const EdgeInsets.symmetric(
                                                   vertical: 6,
                                                 ),
-                                                color: const Color(0xFFCBD5E1),
+                                                color: AppPalette.slate300,
                                               ),
                                             ),
                                           ],
@@ -6161,7 +6003,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                       rack: rack,
                                       face: 'back',
                                       faceBannerLabel: 'BACK (DETRÁS)',
-                                      faceBannerColor: const Color(0xFF1E3A8A),
+                                      faceBannerColor: AppPalette.blue900,
                                       outerLeft: _backRackOuterLeft,
                                       innerLeft: _backRackInnerLeft,
                                       occupiedUsOnFace: occupiedUsBack,
@@ -6177,8 +6019,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                                           ? 'FRONT (DELANTE)'
                                           : 'BACK (DETRÁS)',
                                       faceBannerColor: _activeFace == 'front'
-                                          ? const Color(0xFF0F172A)
-                                          : const Color(0xFF1E3A8A),
+                                          ? AppPalette.slate900
+                                          : AppPalette.blue900,
                                       outerLeft: _rackOuterLeft,
                                       innerLeft: _rackInnerLeft,
                                       occupiedUsOnFace: _activeFace == 'front'
@@ -6346,7 +6188,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                                   const Icon(
                                                     Icons.label_important,
                                                     size: 11,
-                                                    color: Color(0xFF38BDF8),
+                                                    color: AppPalette.sky400,
                                                   ),
                                                   const SizedBox(width: 3),
                                                   Text(
@@ -6394,7 +6236,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                                         Icons.open_in_new,
                                                         size: 10,
                                                         color:
-                                                            Color(0xFF38BDF8),
+                                                            AppPalette.sky400,
                                                       ),
                                                     ),
                                                   ),
@@ -6461,8 +6303,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                                                   gradient:
                                                       const LinearGradient(
                                                     colors: [
-                                                      Color(0xFF0284C7),
-                                                      Color(0xFF2563EB),
+                                                      AppPalette.sky600,
+                                                      AppPalette.blue600,
                                                     ],
                                                   ),
                                                   borderRadius:
@@ -6530,12 +6372,12 @@ class _RackEditorViewState extends State<RackEditorView> {
                                         vertical: 6,
                                       ),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFF0F172A),
+                                        color: AppPalette.slate900,
                                         borderRadius: BorderRadius.circular(10),
                                         border: Border.all(
                                           color: outboundConnections.isNotEmpty
-                                              ? const Color(0xFF10B981)
-                                              : const Color(0xFF475569),
+                                              ? AppPalette.emerald500
+                                              : AppPalette.slate600,
                                           width: 1.5,
                                         ),
                                         boxShadow: const [
@@ -6551,7 +6393,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                           const Icon(
                                             Icons.compare_arrows_rounded,
                                             size: 16,
-                                            color: Color(0xFF38BDF8),
+                                            color: AppPalette.sky400,
                                           ),
                                           const SizedBox(width: 6),
                                           Text(
@@ -6568,7 +6410,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                                 ? const Text(
                                                     'Ningún cable sale a otro Rack aún. Pulsa "+ Conectar con Otro Rack" para enlazar fibras/cables entre Racks.',
                                                     style: TextStyle(
-                                                      color: Color(0xFF94A3B8),
+                                                      color: AppPalette.slate400,
                                                       fontSize: 10,
                                                     ),
                                                     overflow:
@@ -6746,7 +6588,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                                 ),
                                                 decoration: BoxDecoration(
                                                   color:
-                                                      const Color(0xFF0284C7),
+                                                      AppPalette.sky600,
                                                   borderRadius:
                                                       BorderRadius.circular(6),
                                                 ),
@@ -6822,7 +6664,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                       color: const Color(0xEE0F172A),
                                       borderRadius: BorderRadius.circular(20),
                                       border: Border.all(
-                                        color: const Color(0xFF38BDF8),
+                                        color: AppPalette.sky400,
                                         width: 1.4,
                                       ),
                                     ),
@@ -6832,7 +6674,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                         Icon(
                                           Icons.pan_tool_alt_rounded,
                                           size: 15,
-                                          color: Color(0xFF38BDF8),
+                                          color: AppPalette.sky400,
                                         ),
                                         SizedBox(width: 6),
                                         Text(
@@ -6864,7 +6706,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(8),
                                 border:
-                                    Border.all(color: const Color(0xFFCBD5E1)),
+                                    Border.all(color: AppPalette.slate300),
                                 boxShadow: const [
                                   BoxShadow(
                                     color: Color(0x0D000000),
@@ -6924,7 +6766,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(6),
                                 border:
-                                    Border.all(color: const Color(0xFFCBD5E1)),
+                                    Border.all(color: AppPalette.slate300),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -6964,13 +6806,13 @@ class _RackEditorViewState extends State<RackEditorView> {
                                 ),
                                 decoration: BoxDecoration(
                                   color: _showEquipmentPhotos
-                                      ? const Color(0xFF0F172A)
+                                      ? AppPalette.slate900
                                       : Colors.white,
                                   borderRadius: BorderRadius.circular(6),
                                   border: Border.all(
                                     color: _showEquipmentPhotos
-                                        ? const Color(0xFF38BDF8)
-                                        : const Color(0xFFCBD5E1),
+                                        ? AppPalette.sky400
+                                        : AppPalette.slate300,
                                   ),
                                 ),
                                 child: Row(
@@ -6982,8 +6824,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                                           : Icons.photo_camera_outlined,
                                       size: 14,
                                       color: _showEquipmentPhotos
-                                          ? const Color(0xFF38BDF8)
-                                          : const Color(0xFF475569),
+                                          ? AppPalette.sky400
+                                          : AppPalette.slate600,
                                     ),
                                     const SizedBox(width: 5),
                                     Text(
@@ -6995,7 +6837,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                         fontWeight: FontWeight.w700,
                                         color: _showEquipmentPhotos
                                             ? Colors.white
-                                            : const Color(0xFF475569),
+                                            : AppPalette.slate600,
                                       ),
                                     ),
                                   ],
@@ -7015,21 +6857,21 @@ class _RackEditorViewState extends State<RackEditorView> {
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(6),
                                 border:
-                                    Border.all(color: const Color(0xFFCBD5E1)),
+                                    Border.all(color: AppPalette.slate300),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   _FilterChipBtn(
                                     label: 'Todos',
-                                    color: const Color(0xFF0F172A),
+                                    color: AppPalette.slate900,
                                     active: _cableFilter == 'all',
                                     onTap: () =>
                                         setState(() => _cableFilter = 'all'),
                                   ),
                                   _FilterChipBtn(
                                     label: 'Red UTP',
-                                    color: const Color(0xFF2563EB),
+                                    color: AppPalette.blue600,
                                     active: _cableFilter == 'network',
                                     onTap: () => setState(
                                       () => _cableFilter = 'network',
@@ -7037,14 +6879,14 @@ class _RackEditorViewState extends State<RackEditorView> {
                                   ),
                                   _FilterChipBtn(
                                     label: 'Fibra',
-                                    color: const Color(0xFFF59E0B),
+                                    color: AppPalette.amber500,
                                     active: _cableFilter == 'fiber',
                                     onTap: () =>
                                         setState(() => _cableFilter = 'fiber'),
                                   ),
                                   _FilterChipBtn(
                                     label: 'Electricidad',
-                                    color: const Color(0xFFDC2626),
+                                    color: AppPalette.red600,
                                     active: _cableFilter == 'power',
                                     onTap: () =>
                                         setState(() => _cableFilter = 'power'),
@@ -7071,13 +6913,13 @@ class _RackEditorViewState extends State<RackEditorView> {
                                   ),
                                   decoration: BoxDecoration(
                                     color: _isPanHandMode
-                                        ? const Color(0xFF0F172A)
+                                        ? AppPalette.slate900
                                         : Colors.white,
                                     borderRadius: BorderRadius.circular(6),
                                     border: Border.all(
                                       color: _isPanHandMode
-                                          ? const Color(0xFF38BDF8)
-                                          : const Color(0xFFCBD5E1),
+                                          ? AppPalette.sky400
+                                          : AppPalette.slate300,
                                     ),
                                   ),
                                   child: Row(
@@ -7087,8 +6929,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                                         Icons.pan_tool_alt_rounded,
                                         size: 14,
                                         color: _isPanHandMode
-                                            ? const Color(0xFF38BDF8)
-                                            : const Color(0xFF475569),
+                                            ? AppPalette.sky400
+                                            : AppPalette.slate600,
                                       ),
                                       const SizedBox(width: 5),
                                       Text(
@@ -7100,7 +6942,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                           fontWeight: FontWeight.w700,
                                           color: _isPanHandMode
                                               ? Colors.white
-                                              : const Color(0xFF475569),
+                                              : AppPalette.slate600,
                                         ),
                                       ),
                                     ],
@@ -7127,10 +6969,10 @@ class _RackEditorViewState extends State<RackEditorView> {
                                     decoration: BoxDecoration(
                                       color: _undoStack.isNotEmpty
                                           ? Colors.white
-                                          : const Color(0xFFF8FAFC),
+                                          : AppPalette.slate50,
                                       borderRadius: BorderRadius.circular(6),
                                       border: Border.all(
-                                        color: const Color(0xFFCBD5E1),
+                                        color: AppPalette.slate300,
                                       ),
                                     ),
                                     child: Row(
@@ -7140,8 +6982,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                                           Icons.undo_rounded,
                                           size: 14,
                                           color: _undoStack.isNotEmpty
-                                              ? const Color(0xFF0F172A)
-                                              : const Color(0xFF94A3B8),
+                                              ? AppPalette.slate900
+                                              : AppPalette.slate400,
                                         ),
                                         const SizedBox(width: 4),
                                         Text(
@@ -7152,8 +6994,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                                             fontSize: 11.5,
                                             fontWeight: FontWeight.w700,
                                             color: _undoStack.isNotEmpty
-                                                ? const Color(0xFF0F172A)
-                                                : const Color(0xFF94A3B8),
+                                                ? AppPalette.slate900
+                                                : AppPalette.slate400,
                                           ),
                                         ),
                                       ],
@@ -7245,9 +7087,9 @@ class _RackEditorViewState extends State<RackEditorView> {
         height: 22,
         child: Container(
           decoration: BoxDecoration(
-            color: const Color(0xFFF8FAFC),
+            color: AppPalette.slate50,
             border: Border.all(
-              color: const Color(0xFF334155),
+              color: AppPalette.slate700,
               width: 1.4,
             ),
           ),
@@ -7258,7 +7100,7 @@ class _RackEditorViewState extends State<RackEditorView> {
               decoration: const BoxDecoration(
                 border: Border(
                   top: BorderSide(
-                    color: Color(0xFF334155),
+                    color: AppPalette.slate700,
                     width: 1.2,
                   ),
                 ),
@@ -7278,9 +7120,9 @@ class _RackEditorViewState extends State<RackEditorView> {
           decoration: BoxDecoration(
             color: Colors.white,
             border: Border(
-              top: const BorderSide(color: Color(0xFF334155), width: 1.3),
-              left: const BorderSide(color: Color(0xFF334155), width: 1.3),
-              right: const BorderSide(color: Color(0xFF334155), width: 1.3),
+              top: const BorderSide(color: AppPalette.slate700, width: 1.3),
+              left: const BorderSide(color: AppPalette.slate700, width: 1.3),
+              right: const BorderSide(color: AppPalette.slate700, width: 1.3),
             ),
           ),
           child: Row(
@@ -7289,7 +7131,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                 width: 24,
                 decoration: const BoxDecoration(
                   border: Border(
-                    right: BorderSide(color: Color(0xFF475569), width: 1.1),
+                    right: BorderSide(color: AppPalette.slate600, width: 1.1),
                   ),
                 ),
               ),
@@ -7297,9 +7139,9 @@ class _RackEditorViewState extends State<RackEditorView> {
                 child: Container(
                   margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
+                    color: AppPalette.slate50,
                     border: Border.all(
-                      color: const Color(0xFF64748B),
+                      color: AppPalette.slate500,
                       width: 0.9,
                     ),
                   ),
@@ -7309,7 +7151,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                 width: 24,
                 decoration: const BoxDecoration(
                   border: Border(
-                    left: BorderSide(color: Color(0xFF475569), width: 1.1),
+                    left: BorderSide(color: AppPalette.slate600, width: 1.1),
                   ),
                 ),
               ),
@@ -7329,7 +7171,7 @@ class _RackEditorViewState extends State<RackEditorView> {
           decoration: BoxDecoration(
             color: Colors.white,
             border: Border.all(
-              color: const Color(0xFF334155),
+              color: AppPalette.slate700,
               width: 1.4,
             ),
           ),
@@ -7337,7 +7179,7 @@ class _RackEditorViewState extends State<RackEditorView> {
             decoration: BoxDecoration(
               color: Colors.white,
               border: Border.all(
-                color: const Color(0xFF475569),
+                color: AppPalette.slate600,
                 width: 1.15,
               ),
             ),
@@ -7367,7 +7209,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         top: _rackTopMargin,
         width: 1.5,
         height: rack.totalUnits * _uHeightPx,
-        child: Container(color: const Color(0xFF475569)),
+        child: Container(color: AppPalette.slate600),
       ),
 
       // B. Regla numerada de Unidades U (42 .. 1) y Slots vacíos
@@ -7386,7 +7228,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                 child: Container(
                   width: 6,
                   height: 1.3,
-                  color: const Color(0xFF475569),
+                  color: AppPalette.slate600,
                 ),
               ),
               if (u == 1)
@@ -7396,7 +7238,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                   child: Container(
                     width: 6,
                     height: 1.3,
-                    color: const Color(0xFF475569),
+                    color: AppPalette.slate600,
                   ),
                 ),
               Center(
@@ -7407,7 +7249,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     style: const TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w500,
-                      color: Color(0xFF334155),
+                      color: AppPalette.slate700,
                     ),
                   ),
                 ),
@@ -7476,11 +7318,11 @@ class _RackEditorViewState extends State<RackEditorView> {
                     child: Container(
                     decoration: BoxDecoration(
                       color: isHovering
-                          ? const Color(0xFFDBEAFE)
+                          ? AppPalette.blue100
                           : Colors.transparent,
                       border: Border(
                         bottom: BorderSide(
-                          color: const Color(0xFFE2E8F0)
+                          color: AppPalette.slate200
                               .withValues(alpha: 0.55),
                           width: 0.7,
                         ),
@@ -7494,8 +7336,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                           shape: BoxShape.circle,
                           border: Border.all(
                             color: isHovering
-                                ? const Color(0xFF2563EB)
-                                : const Color(0xFF64748B),
+                                ? AppPalette.blue600
+                                : AppPalette.slate500,
                             width: 1.2,
                           ),
                         ),
@@ -7503,8 +7345,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                           Icons.add,
                           size: 13,
                           color: isHovering
-                              ? const Color(0xFF2563EB)
-                              : const Color(0xFF64748B),
+                              ? AppPalette.blue600
+                              : AppPalette.slate500,
                         ),
                       ),
                     ),
@@ -7572,13 +7414,13 @@ class _RackEditorViewState extends State<RackEditorView> {
                 child: Container(
                   decoration: BoxDecoration(
                     color: (canFit
-                            ? const Color(0xFF16A34A)
-                            : const Color(0xFFDC2626))
+                            ? AppPalette.green600
+                            : AppPalette.red600)
                         .withValues(alpha: 0.22),
                     border: Border.all(
                       color: canFit
-                          ? const Color(0xFF16A34A)
-                          : const Color(0xFFDC2626),
+                          ? AppPalette.green600
+                          : AppPalette.red600,
                       width: 2.2,
                     ),
                     borderRadius: BorderRadius.circular(4),
@@ -7591,8 +7433,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                       ),
                       decoration: BoxDecoration(
                         color: canFit
-                            ? const Color(0xFF15803D)
-                            : const Color(0xFFB91C1C),
+                            ? AppPalette.green700
+                            : AppPalette.red700,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
@@ -7644,7 +7486,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                           decoration: BoxDecoration(
                             color: Colors.white,
                             border: Border.all(
-                              color: const Color(0xFF64748B),
+                              color: AppPalette.slate500,
                               width: 0.8,
                             ),
                           ),
@@ -7669,7 +7511,7 @@ class _RackEditorViewState extends State<RackEditorView> {
     if (t == 'printer') {
       return (
         icon: Icons.print_rounded,
-        color: const Color(0xFF4F46E5),
+        color: AppPalette.indigo600,
         typeLabel: 'Impresora Red',
       );
     }
@@ -7683,49 +7525,49 @@ class _RackEditorViewState extends State<RackEditorView> {
     if (t == 'access_control') {
       return (
         icon: Icons.fingerprint_rounded,
-        color: const Color(0xFFEA580C),
+        color: AppPalette.orange600,
         typeLabel: 'Control Acceso',
       );
     }
     if (t == 'access_point') {
       return (
         icon: Icons.wifi_rounded,
-        color: const Color(0xFF0284C7),
+        color: AppPalette.sky600,
         typeLabel: 'Punto Wi-Fi AP',
       );
     }
     if (t == 'desktop') {
       return (
         icon: Icons.desktop_windows_rounded,
-        color: const Color(0xFF2563EB),
+        color: AppPalette.blue600,
         typeLabel: 'Ordenador / PC',
       );
     }
     if (t == 'phone') {
       return (
         icon: Icons.phone_in_talk_rounded,
-        color: const Color(0xFF0D9488),
+        color: AppPalette.teal600,
         typeLabel: 'Teléfono VoIP',
       );
     }
     if (t == 'tv_display') {
       return (
         icon: Icons.tv_rounded,
-        color: const Color(0xFF7C3AED),
+        color: AppPalette.violet600,
         typeLabel: 'Pantalla / TV',
       );
     }
     if (t == 'telecom_outlet') {
       return (
         icon: Icons.settings_ethernet_rounded,
-        color: const Color(0xFFD97706),
+        color: AppPalette.amber600,
         typeLabel: 'Roseta RJ45',
       );
     }
     if (t.contains('temp')) {
       return (
         icon: Icons.thermostat_rounded,
-        color: const Color(0xFFEA580C),
+        color: AppPalette.orange600,
         typeLabel: 'Sensor Temp.',
       );
     }
@@ -7746,20 +7588,20 @@ class _RackEditorViewState extends State<RackEditorView> {
     if (t.contains('smoke') || t.contains('fire')) {
       return (
         icon: Icons.local_fire_department_rounded,
-        color: const Color(0xFFDC2626),
+        color: AppPalette.red600,
         typeLabel: 'Detector Humo',
       );
     }
     if (t.contains('water') || t.contains('leak')) {
       return (
         icon: Icons.waves_rounded,
-        color: const Color(0xFF2563EB),
+        color: AppPalette.blue600,
         typeLabel: 'Sensor Fuga Agua',
       );
     }
     return (
       icon: Icons.sensors_rounded,
-      color: const Color(0xFF0D9488),
+      color: AppPalette.teal600,
       typeLabel: 'Equipo / Sensor',
     );
   }
@@ -7849,7 +7691,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         builder: (ctx, setModal) => AlertDialog(
           title: Row(
             children: [
-              const Icon(Icons.hub_rounded, color: Color(0xFF0D9488), size: 22),
+              const Icon(Icons.hub_rounded, color: AppPalette.teal600, size: 22),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -7963,7 +7805,7 @@ class _RackEditorViewState extends State<RackEditorView> {
             ),
             FilledButton.icon(
               style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF0D9488),
+                backgroundColor: AppPalette.teal600,
               ),
               onPressed: () => Navigator.pop(ctx, true),
               icon: const Icon(Icons.add_link, size: 16),
@@ -7992,17 +7834,9 @@ class _RackEditorViewState extends State<RackEditorView> {
           'linked_rack_device_code': '',
         });
         await _loadRack();
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Equipo de planta "${codeCtrl.text.trim()}" añadido al recuadro de ${rack.code}. Haz clic en su icono para unirlo a un Switch o Patch Panel.',
-            ),
-          ),
-        );
+        messenger.aviso('Equipo de planta "${codeCtrl.text.trim()}" añadido al recuadro de ${rack.code}. Haz clic en su icono para unirlo a un Switch o Patch Panel.');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        messenger.avisoError('$e');
       }
     }
   }
@@ -8039,7 +7873,7 @@ class _RackEditorViewState extends State<RackEditorView> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
-                color: const Color(0xFF0F172A),
+                color: AppPalette.slate900,
                 borderRadius: BorderRadius.circular(8),
                 boxShadow: const [
                   BoxShadow(
@@ -8073,7 +7907,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         Text(
                           'Impresoras, APs, Cámaras, Sensores, Schuko y Fibra',
                           style: TextStyle(
-                            color: Color(0xFF94A3B8),
+                            color: AppPalette.slate400,
                             fontSize: 8.5,
                           ),
                         ),
@@ -8089,7 +7923,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                           vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF0D9488),
+                          color: AppPalette.teal600,
                           borderRadius: BorderRadius.circular(5),
                         ),
                         child: const Row(
@@ -8120,7 +7954,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                           vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFDC2626),
+                          color: AppPalette.red600,
                           borderRadius: BorderRadius.circular(5),
                         ),
                         child: const Row(
@@ -8151,7 +7985,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                           vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF0284C7),
+                          color: AppPalette.sky600,
                           borderRadius: BorderRadius.circular(5),
                         ),
                         child: const Row(
@@ -8210,7 +8044,7 @@ class _RackEditorViewState extends State<RackEditorView> {
       height: cardHeight,
       child: Container(
         decoration: BoxDecoration(
-          color: isFloorBox ? const Color(0xFFF8FAFC) : Colors.white,
+          color: isFloorBox ? AppPalette.slate50 : Colors.white,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: feedColor, width: 2.2),
           boxShadow: [
@@ -8356,7 +8190,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                       style: const TextStyle(
                         fontSize: 9.0,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFF475569),
+                        color: AppPalette.slate600,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -8368,9 +8202,9 @@ class _RackEditorViewState extends State<RackEditorView> {
                         vertical: 1,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF1F5F9),
+                        color: AppPalette.slate100,
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                        border: Border.all(color: AppPalette.slate300),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -8387,7 +8221,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                               child: Icon(
                                 Icons.remove,
                                 size: 11,
-                                color: Color(0xFF0F172A),
+                                color: AppPalette.slate900,
                               ),
                             ),
                           ),
@@ -8398,7 +8232,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                               style: const TextStyle(
                                 fontSize: 9.5,
                                 fontWeight: FontWeight.w800,
-                                color: Color(0xFF0F172A),
+                                color: AppPalette.slate900,
                               ),
                             ),
                           ),
@@ -8414,7 +8248,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                               child: Icon(
                                 Icons.add,
                                 size: 11,
-                                color: Color(0xFF0F172A),
+                                color: AppPalette.slate900,
                               ),
                             ),
                           ),
@@ -8434,12 +8268,12 @@ class _RackEditorViewState extends State<RackEditorView> {
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                    border: Border.all(color: AppPalette.slate300),
                   ),
                   child: const Text(
                     'Sin impresoras, cámaras, APs o sensores vinculados a este Rack. Pulsa "+Planta" arriba o vincúlalos en 2. Datacenters.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 9.2, color: Color(0xFF64748B)),
+                    style: TextStyle(fontSize: 9.2, color: AppPalette.slate500),
                   ),
                 ),
               ),
@@ -8499,7 +8333,7 @@ class _RackEditorViewState extends State<RackEditorView> {
       final leftPx = localCenter.dx - tileW / 2.0;
       final topPx = localCenter.dy - tileH / 2.0;
       final borderCol = isPending
-          ? const Color(0xFFF59E0B)
+          ? AppPalette.amber500
           : (isConnected ? (connectedColor) : meta.color);
 
       return Positioned(
@@ -8565,7 +8399,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                           style: const TextStyle(
                             fontSize: 9.2,
                             fontWeight: FontWeight.w900,
-                            color: Color(0xFF0F172A),
+                            color: AppPalette.slate900,
                           ),
                         ),
                       ),
@@ -8574,11 +8408,11 @@ class _RackEditorViewState extends State<RackEditorView> {
                         height: 9,
                         decoration: BoxDecoration(
                           color: isConnected
-                              ? const Color(0xFF16A34A)
-                              : const Color(0xFFCBD5E1),
+                              ? AppPalette.green600
+                              : AppPalette.slate300,
                           borderRadius: BorderRadius.circular(2),
                           border: Border.all(
-                            color: const Color(0xFF0F172A),
+                            color: AppPalette.slate900,
                             width: 0.8,
                           ),
                         ),
@@ -8592,7 +8426,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     style: const TextStyle(
                       fontSize: 7.6,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFF475569),
+                      color: AppPalette.slate600,
                     ),
                   ),
                   Container(
@@ -8603,10 +8437,10 @@ class _RackEditorViewState extends State<RackEditorView> {
                     ),
                     decoration: BoxDecoration(
                       color: isPending
-                          ? const Color(0xFFD97706)
+                          ? AppPalette.amber600
                           : (connectedTargetLabel != null
                               ? borderCol
-                              : const Color(0xFFF1F5F9)),
+                              : AppPalette.slate100),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
@@ -8623,7 +8457,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         fontWeight: FontWeight.w800,
                         color: (isPending || connectedTargetLabel != null)
                             ? Colors.white
-                            : const Color(0xFF334155),
+                            : AppPalette.slate700,
                       ),
                     ),
                   ),
@@ -8661,7 +8495,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                   height: socketSize - 4,
                   decoration: BoxDecoration(
                     color: isPending
-                        ? const Color(0xFF10B981)
+                        ? AppPalette.emerald500
                         : (isConnected
                             ? feedColor
                             : feedColor.withValues(alpha: 0.12)),
@@ -8680,7 +8514,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         decoration: BoxDecoration(
                           color: isConnected
                               ? Colors.white
-                              : const Color(0xFF0F172A),
+                              : AppPalette.slate900,
                           shape: BoxShape.circle,
                           border: Border.all(
                             color: isConnected ? feedColor : Colors.white,
@@ -8695,7 +8529,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         decoration: BoxDecoration(
                           color: isConnected
                               ? Colors.white
-                              : const Color(0xFF0F172A),
+                              : AppPalette.slate900,
                           shape: BoxShape.circle,
                           border: Border.all(
                             color: isConnected ? feedColor : Colors.white,
@@ -8712,7 +8546,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                   style: TextStyle(
                     fontSize: 7.8,
                     fontWeight: FontWeight.w800,
-                    color: isConnected ? feedColor : const Color(0xFF334155),
+                    color: isConnected ? feedColor : AppPalette.slate700,
                   ),
                 ),
               ],
@@ -8741,7 +8575,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                 height: socketSize,
                 decoration: BoxDecoration(
                   color: isPending
-                      ? const Color(0xFF10B981)
+                      ? AppPalette.emerald500
                       : (isConnected
                           ? feedColor
                           : feedColor.withValues(alpha: 0.10)),
@@ -8779,7 +8613,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                           decoration: BoxDecoration(
                             color: isConnected
                                 ? Colors.white
-                                : const Color(0xFF0F172A),
+                                : AppPalette.slate900,
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -8790,7 +8624,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                           decoration: BoxDecoration(
                             color: isConnected
                                 ? Colors.white
-                                : const Color(0xFF0F172A),
+                                : AppPalette.slate900,
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -8805,7 +8639,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                 style: TextStyle(
                   fontSize: 8.5,
                   fontWeight: FontWeight.w800,
-                  color: isConnected ? feedColor : const Color(0xFF334155),
+                  color: isConnected ? feedColor : AppPalette.slate700,
                 ),
               ),
             ],
@@ -8842,12 +8676,12 @@ class _RackEditorViewState extends State<RackEditorView> {
     final isOnline = dev.status == 'online';
     final isOffline = dev.status == 'offline';
     final statusColor = !dev.monitoringEnabled
-        ? const Color(0xFF94A3B8)
+        ? AppPalette.slate400
         : (isOnline
-            ? const Color(0xFF16A34A)
+            ? AppPalette.green600
             : (isOffline
-                ? const Color(0xFFDC2626)
-                : const Color(0xFFD97706)));
+                ? AppPalette.red600
+                : AppPalette.amber600));
 
     Widget buildChassisContent({required bool isDropTarget}) {
       return Container(
@@ -8856,28 +8690,28 @@ class _RackEditorViewState extends State<RackEditorView> {
           color: isDropTarget
               ? const Color(0xFFFEE2E2)
               : (isHovered
-                  ? const Color(0xFFDBEAFE)
+                  ? AppPalette.blue100
                   : ((isHighlighted || isSelected)
                       ? const Color(0xFFD1D5DB)
                       : (isTray
-                          ? const Color(0xFFF1F5F9)
+                          ? AppPalette.slate100
                           : (isRearAutoView
-                              ? const Color(0xFFF8FAFC)
+                              ? AppPalette.slate50
                               : Colors.white)))),
           border: Border.symmetric(
             horizontal: BorderSide(
               color: isHovered
-                  ? const Color(0xFF0284C7)
+                  ? AppPalette.sky600
                   : ((isHighlighted || isSelected)
-                      ? const Color(0xFF1E293B)
-                      : const Color(0xFFCBD5E1)),
+                      ? AppPalette.slate800
+                      : AppPalette.slate300),
               width: (isHovered || isHighlighted || isSelected) ? 2.0 : 0.9,
             ),
             vertical: (isHovered || isHighlighted || isSelected)
                 ? BorderSide(
                     color: isHovered
-                        ? const Color(0xFF0284C7)
-                        : const Color(0xFF1E293B),
+                        ? AppPalette.sky600
+                        : AppPalette.slate800,
                     width: 1.4,
                   )
                 : BorderSide.none,
@@ -8885,7 +8719,7 @@ class _RackEditorViewState extends State<RackEditorView> {
           boxShadow: isHovered
               ? [
                   BoxShadow(
-                    color: const Color(0xFF0284C7).withValues(alpha: 0.30),
+                    color: AppPalette.sky600.withValues(alpha: 0.30),
                     blurRadius: 9,
                     spreadRadius: 1,
                   ),
@@ -8893,7 +8727,7 @@ class _RackEditorViewState extends State<RackEditorView> {
               : ((isHighlighted || isSelected)
                   ? [
                       BoxShadow(
-                        color: const Color(0xFF475569).withValues(alpha: 0.28),
+                        color: AppPalette.slate600.withValues(alpha: 0.28),
                         blurRadius: 8,
                         spreadRadius: 1,
                       ),
@@ -8916,8 +8750,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                     ),
                     decoration: BoxDecoration(
                       color: isHovered
-                          ? const Color(0xFF0284C7)
-                          : const Color(0xFF334155),
+                          ? AppPalette.sky600
+                          : AppPalette.slate700,
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
@@ -8996,7 +8830,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         style: const TextStyle(
                           fontSize: 10.5,
                           fontWeight: FontWeight.w900,
-                          color: Color(0xFF0F172A),
+                          color: AppPalette.slate900,
                         ),
                       ),
                     ],
@@ -9022,7 +8856,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                           color: Colors.white.withValues(alpha: 0.90),
                           borderRadius: BorderRadius.circular(3),
                           border: Border.all(
-                            color: const Color(0xFF94A3B8),
+                            color: AppPalette.slate400,
                             width: 0.6,
                           ),
                         )
@@ -9032,7 +8866,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     style: const TextStyle(
                       fontSize: 8.2,
                       fontWeight: FontWeight.w700,
-                      color: Color(0xFF334155),
+                      color: AppPalette.slate700,
                     ),
                   ),
                 ),
@@ -9161,10 +8995,10 @@ class _RackEditorViewState extends State<RackEditorView> {
                 height: heightPx.clamp(38.0, 120.0),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0F172A).withValues(alpha: 0.92),
+                  color: AppPalette.slate900.withValues(alpha: 0.92),
                   borderRadius: BorderRadius.circular(6),
                   border: Border.all(
-                    color: const Color(0xFF38BDF8),
+                    color: AppPalette.sky400,
                     width: 2.0,
                   ),
                 ),
@@ -9172,7 +9006,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                   children: [
                     const Icon(
                       Icons.open_with_rounded,
-                      color: Color(0xFF38BDF8),
+                      color: AppPalette.sky400,
                       size: 18,
                     ),
                     const SizedBox(width: 10),
@@ -9194,9 +9028,9 @@ class _RackEditorViewState extends State<RackEditorView> {
             childWhenDragging: IgnorePointer(
               child: Container(
                 decoration: BoxDecoration(
-                  color: const Color(0xFFEFF6FF).withValues(alpha: 0.60),
+                  color: AppPalette.blue50.withValues(alpha: 0.60),
                   border: Border.all(
-                    color: const Color(0xFF3B82F6),
+                    color: AppPalette.blue500,
                     width: 1.5,
                   ),
                 ),
@@ -9206,7 +9040,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     style: const TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w700,
-                      color: Color(0xFF1D4ED8),
+                      color: AppPalette.blue700,
                     ),
                   ),
                 ),
@@ -9252,7 +9086,7 @@ class _RackEditorViewState extends State<RackEditorView> {
               top: Radius.circular(6),
               bottom: Radius.circular(3),
             ),
-            color: const Color(0xFF0F172A).withValues(alpha: 0.94),
+            color: AppPalette.slate900.withValues(alpha: 0.94),
             child: Container(
               padding: const EdgeInsets.symmetric(
                 horizontal: 5,
@@ -9264,7 +9098,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                   bottom: Radius.circular(3),
                 ),
                 border: Border.all(
-                  color: const Color(0xFF38BDF8).withValues(alpha: 0.55),
+                  color: AppPalette.sky400.withValues(alpha: 0.55),
                   width: 0.8,
                 ),
               ),
@@ -9278,7 +9112,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                       style: const TextStyle(
                         fontSize: 9.0,
                         fontWeight: FontWeight.w900,
-                        color: Color(0xFF38BDF8),
+                        color: AppPalette.sky400,
                       ),
                     ),
                   ),
@@ -9346,7 +9180,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                           style: const TextStyle(
                             fontSize: 9.5,
                             fontWeight: FontWeight.bold,
-                            color: Color(0xFF93C5FD),
+                            color: AppPalette.blue300,
                           ),
                         ),
                       ),
@@ -9359,9 +9193,9 @@ class _RackEditorViewState extends State<RackEditorView> {
                       vertical: 0.5,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1E293B),
+                      color: AppPalette.slate800,
                       borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: const Color(0xFF475569)),
+                      border: Border.all(color: AppPalette.slate600),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -9378,7 +9212,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             child: Icon(
                               Icons.remove,
                               size: 11,
-                              color: Color(0xFF38BDF8),
+                              color: AppPalette.sky400,
                             ),
                           ),
                         ),
@@ -9405,7 +9239,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             child: Icon(
                               Icons.add,
                               size: 11,
-                              color: Color(0xFF38BDF8),
+                              color: AppPalette.sky400,
                             ),
                           ),
                         ),
@@ -9425,7 +9259,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             vertical: 1,
                           ),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF7C3AED),
+                            color: AppPalette.violet600,
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Row(
@@ -9460,7 +9294,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         child: Icon(
                           Icons.photo_camera_outlined,
                           size: 12.5,
-                          color: Color(0xFF38BDF8),
+                          color: AppPalette.sky400,
                         ),
                       ),
                     ),
@@ -9548,26 +9382,26 @@ class _RackEditorViewState extends State<RackEditorView> {
                 height: 28,
                 margin: const EdgeInsets.symmetric(horizontal: 5),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF1F5F9),
+                  color: AppPalette.slate100,
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: const Color(0xFF475569),
+                    color: AppPalette.slate600,
                     width: 1.4,
                   ),
                 ),
                 child: const Icon(
                   Icons.cyclone,
                   size: 17,
-                  color: Color(0xFF0284C7),
+                  color: AppPalette.sky600,
                 ),
               ),
             const SizedBox(width: 6),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
               decoration: BoxDecoration(
-                color: const Color(0xFF0F172A),
+                color: AppPalette.slate900,
                 borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: const Color(0xFF10B981)),
+                border: Border.all(color: AppPalette.emerald500),
               ),
               child: const Text(
                 '21.4°C • FAN OK',
@@ -9590,14 +9424,14 @@ class _RackEditorViewState extends State<RackEditorView> {
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
           decoration: BoxDecoration(
-            color: const Color(0xFFE2E8F0).withValues(alpha: 0.55),
+            color: AppPalette.slate200.withValues(alpha: 0.55),
             borderRadius: BorderRadius.circular(3),
             border: Border(
-              bottom: const BorderSide(color: Color(0xFF334155), width: 3.5),
-              left: const BorderSide(color: Color(0xFF64748B), width: 1.5),
-              right: const BorderSide(color: Color(0xFF64748B), width: 1.5),
+              bottom: const BorderSide(color: AppPalette.slate700, width: 3.5),
+              left: const BorderSide(color: AppPalette.slate500, width: 1.5),
+              right: const BorderSide(color: AppPalette.slate500, width: 1.5),
               top: BorderSide(
-                color: const Color(0xFF94A3B8).withValues(alpha: 0.45),
+                color: AppPalette.slate400.withValues(alpha: 0.45),
                 width: 0.8,
               ),
             ),
@@ -9610,7 +9444,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                       const Icon(
                         Icons.inbox_outlined,
                         size: 13,
-                        color: Color(0xFF475569),
+                        color: AppPalette.slate600,
                       ),
                       const SizedBox(width: 6),
                       Text(
@@ -9618,7 +9452,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         style: const TextStyle(
                           fontSize: 8.5,
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFF334155),
+                          color: AppPalette.slate700,
                           letterSpacing: 0.3,
                         ),
                       ),
@@ -9644,11 +9478,11 @@ class _RackEditorViewState extends State<RackEditorView> {
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF1E293B)
+                              color: AppPalette.slate800
                                   .withValues(alpha: 0.88),
                               borderRadius: BorderRadius.circular(4),
                               border: Border.all(
-                                color: const Color(0xFF64748B),
+                                color: AppPalette.slate500,
                                 width: 1.1,
                               ),
                             ),
@@ -9679,7 +9513,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                                             ? Icons.computer
                                             : Icons.router_outlined),
                                     size: 11,
-                                    color: const Color(0xFF38BDF8),
+                                    color: AppPalette.sky400,
                                   ),
                                   const SizedBox(width: 4),
                                   Expanded(
@@ -9724,7 +9558,7 @@ class _RackEditorViewState extends State<RackEditorView> {
     final isBack = face.toLowerCase() == 'back';
 
     // Color de acento de marca oficial
-    Color brandAccent = const Color(0xFF0284C7);
+    Color brandAccent = AppPalette.sky600;
     if (mfgLow.contains('hpe') || mfgLow.contains('hewlett')) {
       brandAccent = const Color(0xFF01A982); // HPE Green
     } else if (mfgLow.contains('dell')) {
@@ -9734,9 +9568,9 @@ class _RackEditorViewState extends State<RackEditorView> {
     } else if (mfgLow.contains('forti')) {
       brandAccent = const Color(0xFFEE3124); // Fortinet Red
     } else if (mfgLow.contains('mikrotik')) {
-      brandAccent = const Color(0xFF2563EB);
+      brandAccent = AppPalette.blue600;
     } else if (mfgLow.contains('apc') || mfgLow.contains('schneider')) {
-      brandAccent = const Color(0xFF10B981);
+      brandAccent = AppPalette.emerald500;
     } else if (mfgLow.contains('netapp')) {
       brandAccent = const Color(0xFF0067C5);
     } else if (mfgLow.contains('pure')) {
@@ -9759,18 +9593,18 @@ class _RackEditorViewState extends State<RackEditorView> {
             end: Alignment.bottomCenter,
             colors: isPassive
                 ? [
-                    const Color(0xFF334155).withValues(alpha: 0.72),
-                    const Color(0xFF1E293B).withValues(alpha: 0.78),
+                    AppPalette.slate700.withValues(alpha: 0.72),
+                    AppPalette.slate800.withValues(alpha: 0.78),
                   ]
                 : [
-                    const Color(0xFF475569).withValues(alpha: 0.72),
-                    const Color(0xFF1E293B).withValues(alpha: 0.80),
-                    const Color(0xFF0F172A).withValues(alpha: 0.84),
+                    AppPalette.slate600.withValues(alpha: 0.72),
+                    AppPalette.slate800.withValues(alpha: 0.80),
+                    AppPalette.slate900.withValues(alpha: 0.84),
                   ],
           ),
           borderRadius: BorderRadius.circular(2),
           border: Border.all(
-            color: const Color(0xFF64748B).withValues(alpha: 0.65),
+            color: AppPalette.slate500.withValues(alpha: 0.65),
             width: 0.8,
           ),
         ),
@@ -9788,10 +9622,10 @@ class _RackEditorViewState extends State<RackEditorView> {
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0F172A).withValues(alpha: 0.85),
+                    color: AppPalette.slate900.withValues(alpha: 0.85),
                     borderRadius: BorderRadius.circular(3),
                     border: Border.all(
-                      color: const Color(0xFF94A3B8).withValues(alpha: 0.55),
+                      color: AppPalette.slate400.withValues(alpha: 0.55),
                       width: 0.8,
                     ),
                   ),
@@ -9799,7 +9633,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     child: Icon(
                       Icons.cyclone,
                       size: 13,
-                      color: Color(0xFF94A3B8),
+                      color: AppPalette.slate400,
                     ),
                   ),
                 ),
@@ -9808,10 +9642,10 @@ class _RackEditorViewState extends State<RackEditorView> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0F172A).withValues(alpha: 0.82),
+                  color: AppPalette.slate900.withValues(alpha: 0.82),
                   borderRadius: BorderRadius.circular(3),
                   border: Border.all(
-                    color: const Color(0xFF10B981).withValues(alpha: 0.75),
+                    color: AppPalette.emerald500.withValues(alpha: 0.75),
                     width: 0.9,
                   ),
                 ),
@@ -9822,7 +9656,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                       width: 5,
                       height: 10,
                       decoration: BoxDecoration(
-                        color: const Color(0xFF10B981),
+                        color: AppPalette.emerald500,
                         borderRadius: BorderRadius.circular(1),
                       ),
                     ),
@@ -9830,7 +9664,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     Text(
                       'REAR CHASSIS • ${mfg.toUpperCase()} DUAL PSU HOT-SWAP',
                       style: const TextStyle(
-                        color: Color(0xFFE2E8F0),
+                        color: AppPalette.slate200,
                         fontSize: 7.2,
                         fontWeight: FontWeight.w800,
                       ),
@@ -9842,7 +9676,7 @@ class _RackEditorViewState extends State<RackEditorView> {
               const Text(
                 'REAR TERMINATION BAR • IDC KRONE / GROUNDING',
                 style: TextStyle(
-                  color: Color(0xFFCBD5E1),
+                  color: AppPalette.slate300,
                   fontSize: 7.5,
                   fontWeight: FontWeight.w700,
                 ),
@@ -9863,19 +9697,19 @@ class _RackEditorViewState extends State<RackEditorView> {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [
-              const Color(0xFF1E293B).withValues(alpha: 0.86),
-              const Color(0xFF0F172A).withValues(alpha: 0.92),
+              AppPalette.slate800.withValues(alpha: 0.86),
+              AppPalette.slate900.withValues(alpha: 0.92),
             ],
           ),
           borderRadius: BorderRadius.circular(2),
           border: Border(
             left: BorderSide(color: brandAccent, width: 4),
             top: BorderSide(
-              color: const Color(0xFF64748B).withValues(alpha: 0.6),
+              color: AppPalette.slate500.withValues(alpha: 0.6),
               width: 0.8,
             ),
             bottom: BorderSide(
-              color: const Color(0xFF475569).withValues(alpha: 0.8),
+              color: AppPalette.slate600.withValues(alpha: 0.8),
               width: 1.0,
             ),
           ),
@@ -9924,11 +9758,11 @@ class _RackEditorViewState extends State<RackEditorView> {
                               vertical: 1.0,
                             ),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF334155)
+                              color: AppPalette.slate700
                                   .withValues(alpha: 0.92),
                               borderRadius: BorderRadius.circular(2),
                               border: Border.all(
-                                color: const Color(0xFF94A3B8)
+                                color: AppPalette.slate400
                                     .withValues(alpha: 0.55),
                                 width: 0.8,
                               ),
@@ -9994,8 +9828,8 @@ class _RackEditorViewState extends State<RackEditorView> {
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
-              const Color(0xFF0F172A).withValues(alpha: 0.88),
-              const Color(0xFF1E293B).withValues(alpha: 0.85),
+              AppPalette.slate900.withValues(alpha: 0.88),
+              AppPalette.slate800.withValues(alpha: 0.85),
             ],
           ),
           borderRadius: BorderRadius.circular(2),
@@ -10009,10 +9843,10 @@ class _RackEditorViewState extends State<RackEditorView> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: const Color(0xFF0284C7).withValues(alpha: 0.28),
+                color: AppPalette.sky600.withValues(alpha: 0.28),
                 borderRadius: BorderRadius.circular(4),
                 border: Border.all(
-                  color: const Color(0xFF38BDF8),
+                  color: AppPalette.sky400,
                   width: 1.1,
                 ),
               ),
@@ -10042,19 +9876,19 @@ class _RackEditorViewState extends State<RackEditorView> {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Color(0xFF0F172A),
-              Color(0xFF1E293B),
+              AppPalette.slate900,
+              AppPalette.slate800,
               Color(0xFF090D16),
             ],
           ),
           borderRadius: BorderRadius.circular(2),
-          border: Border.all(color: const Color(0xFF475569), width: 1.2),
+          border: Border.all(color: AppPalette.slate600, width: 1.2),
         ),
         child: Center(
           child: Text(
             'PASACABLES DE CEPILLO 19" • ${mfg.toUpperCase()} HIGH-DENSITY BRUSH STRIP',
             style: const TextStyle(
-              color: Color(0xFF94A3B8),
+              color: AppPalette.slate400,
               fontSize: 7.8,
               fontWeight: FontWeight.w800,
               letterSpacing: 0.8,
@@ -10071,12 +9905,12 @@ class _RackEditorViewState extends State<RackEditorView> {
           gradient: LinearGradient(
             colors: cat == 'patchbox'
                 ? [
-                    const Color(0xFF1E293B).withValues(alpha: 0.88),
-                    const Color(0xFF0F172A).withValues(alpha: 0.92),
+                    AppPalette.slate800.withValues(alpha: 0.88),
+                    AppPalette.slate900.withValues(alpha: 0.92),
                   ]
                 : [
-                    const Color(0xFF334155).withValues(alpha: 0.82),
-                    const Color(0xFF1E293B).withValues(alpha: 0.86),
+                    AppPalette.slate700.withValues(alpha: 0.82),
+                    AppPalette.slate800.withValues(alpha: 0.86),
                   ],
           ),
           borderRadius: BorderRadius.circular(2),
@@ -10094,8 +9928,8 @@ class _RackEditorViewState extends State<RackEditorView> {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            const Color(0xFF1E293B).withValues(alpha: 0.78),
-            const Color(0xFF0F172A).withValues(alpha: 0.84),
+            AppPalette.slate800.withValues(alpha: 0.78),
+            AppPalette.slate900.withValues(alpha: 0.84),
           ],
         ),
         borderRadius: BorderRadius.circular(2),
@@ -10114,7 +9948,7 @@ class _RackEditorViewState extends State<RackEditorView> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
             decoration: BoxDecoration(
-              color: const Color(0xFF0F172A).withValues(alpha: 0.85),
+              color: AppPalette.slate900.withValues(alpha: 0.85),
               borderRadius: BorderRadius.circular(3),
               border: Border.all(color: brandAccent, width: 0.9),
             ),
@@ -10159,12 +9993,12 @@ class _RackEditorViewState extends State<RackEditorView> {
     return Container(
       decoration: BoxDecoration(
         color: isActiveTarget
-            ? const Color(0xFFBAE6FD)
+            ? AppPalette.sky200
             : const Color(0xFFDDE3EC),
         border: Border.symmetric(
           vertical: BorderSide(
             color: isActiveTarget
-                ? const Color(0xFF0284C7)
+                ? AppPalette.sky600
                 : const Color(0xFFB4BFCE),
             width: isActiveTarget ? 1.1 : 0.9,
           ),
@@ -10179,9 +10013,9 @@ class _RackEditorViewState extends State<RackEditorView> {
                   width: 3.6,
                   height: 3.6,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
+                    color: AppPalette.slate50,
                     border: Border.all(
-                      color: const Color(0xFF64748B),
+                      color: AppPalette.slate500,
                       width: 0.75,
                     ),
                   ),
@@ -10209,7 +10043,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                             style: const TextStyle(
                               fontSize: 7.4,
                               fontWeight: FontWeight.w900,
-                              color: Color(0xFF0F172A),
+                              color: AppPalette.slate900,
                               letterSpacing: 0.1,
                               height: 1.0,
                             ),
@@ -10224,9 +10058,9 @@ class _RackEditorViewState extends State<RackEditorView> {
                   width: 3.6,
                   height: 3.6,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
+                    color: AppPalette.slate50,
                     border: Border.all(
-                      color: const Color(0xFF64748B),
+                      color: AppPalette.slate500,
                       width: 0.75,
                     ),
                   ),
@@ -10250,9 +10084,9 @@ class _RackEditorViewState extends State<RackEditorView> {
                       width: 4.2,
                       height: 4.2,
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
+                        color: AppPalette.slate50,
                         border: Border.all(
-                          color: const Color(0xFF64748B),
+                          color: AppPalette.slate500,
                           width: 0.85,
                         ),
                       ),
@@ -10319,8 +10153,8 @@ class _RackEditorViewState extends State<RackEditorView> {
       const cassetteW = 15.6;
       final cassetteH = (devHeight - 4.0).clamp(26.0, 34.0);
       final activeColor = isPendingSource
-          ? const Color(0xFF10B981)
-          : (connectedColor ?? const Color(0xFF0F172A));
+          ? AppPalette.emerald500
+          : (connectedColor ?? AppPalette.slate900);
       return Positioned(
         left: centerX - cassetteW / 2,
         top: (devHeight - cassetteH) / 2,
@@ -10340,7 +10174,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                 color: activeColor,
                 borderColor: isPendingSource
                     ? Colors.amber
-                    : (connectedColor ?? const Color(0xFF64748B)),
+                    : (connectedColor ?? AppPalette.slate500),
                 label: shortLabel,
               ),
             ),
@@ -10379,23 +10213,23 @@ class _RackEditorViewState extends State<RackEditorView> {
     Color jackFill;
     Color jackBorder;
     if (isPendingSource) {
-      jackFill = const Color(0xFF10B981);
+      jackFill = AppPalette.emerald500;
       jackBorder = Colors.amber;
     } else if (isConnected) {
       jackFill = (isFiberCoupler || isSfpCage) ? Colors.white : connectedColor;
       jackBorder = connectedColor;
     } else if (isFiberCoupler || isSfpCage) {
       jackFill = Colors.white;
-      jackBorder = const Color(0xFF334155);
+      jackBorder = AppPalette.slate700;
     } else if (isMalePlug) {
-      jackFill = const Color(0xFFEA580C);
+      jackFill = AppPalette.orange600;
       jackBorder = const Color(0xFFFACC15);
     } else if (isPower) {
       jackFill = const Color(0xFF450A0A);
-      jackBorder = const Color(0xFF991B1B);
+      jackBorder = AppPalette.red800;
     } else {
-      jackFill = const Color(0xFF0F172A);
-      jackBorder = const Color(0xFF475569);
+      jackFill = AppPalette.slate900;
+      jackBorder = AppPalette.slate600;
     }
 
     final halfWidth = isMalePlug ? 16.0 : (isDenseFace ? 8.0 : 10.0);
@@ -10432,7 +10266,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         ? connectedColor
                         : (isMalePlug
                             ? const Color(0xFFC2410C)
-                            : const Color(0xFF334155)),
+                            : AppPalette.slate700),
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.visible,
@@ -10494,8 +10328,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                     isConnected: isConnected,
                     isPending: isPendingSource,
                     color: isPendingSource
-                        ? const Color(0xFF10B981)
-                        : (connectedColor ?? const Color(0xFF0F172A)),
+                        ? AppPalette.emerald500
+                        : (connectedColor ?? AppPalette.slate900),
                     borderColor: jackBorder,
                     latchDown: labelBelow,
                   ),
@@ -10511,7 +10345,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     fontWeight: FontWeight.w700,
                     color: isConnected
                         ? connectedColor
-                        : const Color(0xFF334155),
+                        : AppPalette.slate700,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.visible,
@@ -10543,7 +10377,7 @@ class _FaceToggleButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         decoration: BoxDecoration(
-          color: active ? const Color(0xFF0F172A) : Colors.transparent,
+          color: active ? AppPalette.slate900 : Colors.transparent,
           borderRadius: BorderRadius.circular(5),
         ),
         child: Text(
@@ -10551,7 +10385,7 @@ class _FaceToggleButton extends StatelessWidget {
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w700,
-            color: active ? Colors.white : const Color(0xFF475569),
+            color: active ? Colors.white : AppPalette.slate600,
           ),
         ),
       ),
@@ -10589,7 +10423,7 @@ class _FilterChipBtn extends StatelessWidget {
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w600,
-            color: active ? Colors.white : const Color(0xFF475569),
+            color: active ? Colors.white : AppPalette.slate600,
           ),
         ),
       ),
@@ -10657,7 +10491,7 @@ class _TechnicalPortPainter extends CustomPainter {
       Paint()
         ..color = (isConnected || isPending)
             ? color.withValues(alpha: 0.14)
-            : const Color(0xFFF8FAFC)
+            : AppPalette.slate50
         ..style = PaintingStyle.fill,
     );
     canvas.drawRRect(
@@ -10665,7 +10499,7 @@ class _TechnicalPortPainter extends CustomPainter {
       Paint()
         ..color = (isConnected || isPending)
             ? borderColor
-            : const Color(0xFF64748B)
+            : AppPalette.slate500
         ..style = PaintingStyle.stroke
         ..strokeWidth = (isConnected || isPending) ? 1.0 : 0.75,
     );
@@ -10709,7 +10543,7 @@ class _TechnicalPortPainter extends CustomPainter {
     canvas.drawPath(
       path,
       Paint()
-        ..color = (isConnected || isPending) ? color : const Color(0xFF0F172A)
+        ..color = (isConnected || isPending) ? color : AppPalette.slate900
         ..style = PaintingStyle.fill,
     );
 
@@ -10727,7 +10561,7 @@ class _TechnicalPortPainter extends CustomPainter {
       );
     } else {
       // Dos destellos blancos superiores en las esquinas de la cavidad 8P8C (como en la imagen de referencia)
-      final dotPaint = Paint()..color = const Color(0xFFF1F5F9);
+      final dotPaint = Paint()..color = AppPalette.slate100;
       final dotY = latchDown ? (bottom - stepH - 1.8) : (top + stepH + 0.55);
       canvas.drawRect(Rect.fromLTWH(left + 0.8, dotY, 1.35, 1.35), dotPaint);
       canvas.drawRect(
@@ -10759,7 +10593,7 @@ class _TechnicalPortPainter extends CustomPainter {
       Paint()
         ..color = (isConnected || isPending)
             ? borderColor
-            : const Color(0xFF94A3B8)
+            : AppPalette.slate400
         ..style = PaintingStyle.stroke
         ..strokeWidth = (isConnected || isPending) ? 1.15 : 0.8,
     );
@@ -10771,7 +10605,7 @@ class _TechnicalPortPainter extends CustomPainter {
       Paint()
         ..color = (isConnected || isPending)
             ? color
-            : const Color(0xFF475569),
+            : AppPalette.slate600,
     );
 
     // Número del casete (1..24) en el centro
@@ -10783,7 +10617,7 @@ class _TechnicalPortPainter extends CustomPainter {
             fontSize: 6.2,
             height: 1.0,
             fontWeight: FontWeight.w800,
-            color: (isConnected || isPending) ? color : const Color(0xFF0F172A),
+            color: (isConnected || isPending) ? color : AppPalette.slate900,
           ),
         ),
         textDirection: TextDirection.ltr,
@@ -10819,7 +10653,7 @@ class _TechnicalPortPainter extends CustomPainter {
     );
     final strokeColor = (isConnected || isPending)
         ? borderColor
-        : const Color(0xFF334155);
+        : AppPalette.slate700;
     canvas.drawRRect(
       rrect,
       Paint()
@@ -10831,7 +10665,7 @@ class _TechnicalPortPainter extends CustomPainter {
     // Dos ranuras horizontales internas de guía óptica [=]
     final innerColor = (isConnected || isPending)
         ? color
-        : const Color(0xFF475569);
+        : AppPalette.slate600;
     final slotW = rect.width - 4.4;
     final topSlot = Rect.fromLTWH(rect.left + 2.2, rect.top + 2.1, slotW, 1.4);
     final bottomSlot = Rect.fromLTWH(
@@ -10857,7 +10691,7 @@ class _TechnicalPortPainter extends CustomPainter {
     );
     final strokeColor = (isConnected || isPending)
         ? borderColor
-        : const Color(0xFF334155);
+        : AppPalette.slate700;
     canvas.drawRRect(
       rrect,
       Paint()

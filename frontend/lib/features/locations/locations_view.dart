@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../core/widgets/avisos.dart';
+import '../../core/theme.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -175,9 +177,7 @@ class _LocationsViewState extends State<LocationsView> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error buscando en OpenStreetMap: $e')),
-      );
+      ScaffoldMessenger.of(context).aviso('Error buscando en OpenStreetMap: $e');
     } finally {
       if (mounted) setState(() => _searchingOsm = false);
     }
@@ -215,12 +215,7 @@ class _LocationsViewState extends State<LocationsView> {
         ),
       );
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Error guardando coordenadas: $e'),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      messenger.avisoError('Error guardando coordenadas: $e');
     }
   }
 
@@ -241,7 +236,7 @@ class _LocationsViewState extends State<LocationsView> {
           ),
           FilledButton.icon(
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
+              backgroundColor: AppPalette.red600,
             ),
             onPressed: () => Navigator.pop(ctx, true),
             icon: const Icon(Icons.delete_outline, size: 16),
@@ -258,16 +253,9 @@ class _LocationsViewState extends State<LocationsView> {
           _selectedLocationId = null;
         }
         widget.onRefresh();
-        messenger.showSnackBar(
-          SnackBar(content: Text('Datacenter "${loc.code}" eliminado.')),
-        );
+        messenger.aviso('Datacenter "${loc.code}" eliminado.');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Error eliminando Datacenter: $e'),
-            backgroundColor: Colors.red.shade700,
-          ),
-        );
+        messenger.avisoError('Error eliminando Datacenter: $e');
       }
     }
   }
@@ -289,20 +277,9 @@ class _LocationsViewState extends State<LocationsView> {
       );
       setState(() => _mapViewMode = 'custom_plan');
       widget.onRefresh();
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            'Mapa general (${picked.name}) subido. Ahora puedes arrastrar y dimensionar tus Datacenters sobre él.',
-          ),
-        ),
-      );
+      messenger.aviso('Mapa general (${picked.name}) subido. Ahora puedes arrastrar y dimensionar tus Datacenters sobre él.');
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Error subiendo mapa: $e'),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      messenger.avisoError('Error subiendo mapa: $e');
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -390,9 +367,9 @@ class _LocationsViewState extends State<LocationsView> {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF1F5F9),
+                      color: AppPalette.slate100,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFFCBD5E1)),
+                      border: Border.all(color: AppPalette.slate300),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -402,7 +379,7 @@ class _LocationsViewState extends State<LocationsView> {
                             Icon(
                               Icons.travel_explore_rounded,
                               size: 16,
-                              color: Color(0xFF1E3A8A),
+                              color: AppPalette.blue900,
                             ),
                             SizedBox(width: 6),
                             Text(
@@ -410,7 +387,7 @@ class _LocationsViewState extends State<LocationsView> {
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
-                                color: Color(0xFF1E3A8A),
+                                color: AppPalette.blue900,
                               ),
                             ),
                           ],
@@ -484,7 +461,7 @@ class _LocationsViewState extends State<LocationsView> {
                                   leading: const Icon(
                                     Icons.place_outlined,
                                     size: 18,
-                                    color: Color(0xFF2563EB),
+                                    color: AppPalette.blue600,
                                   ),
                                   title: Text(
                                     disp,
@@ -567,11 +544,11 @@ class _LocationsViewState extends State<LocationsView> {
                 icon: const Icon(
                   Icons.delete_outline,
                   size: 16,
-                  color: Color(0xFFDC2626),
+                  color: AppPalette.red600,
                 ),
                 label: const Text(
                   'Eliminar Datacenter',
-                  style: TextStyle(color: Color(0xFFDC2626)),
+                  style: TextStyle(color: AppPalette.red600),
                 ),
               ),
             TextButton(
@@ -599,13 +576,7 @@ class _LocationsViewState extends State<LocationsView> {
             'longitude': lon,
             'address': addrCtrl.text.trim(),
           });
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text(
-                'Datacenter "${nameCtrl.text.trim()}" actualizado correctamente.',
-              ),
-            ),
-          );
+          messenger.aviso('Datacenter "${nameCtrl.text.trim()}" actualizado correctamente.');
         } else {
           final created = await widget.api.createLocation(
             code: codeCtrl.text.trim(),
@@ -620,25 +591,14 @@ class _LocationsViewState extends State<LocationsView> {
               _selectedLocationId = newId;
             });
           }
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text(
-                'Datacenter "${created['name'] ?? nameCtrl.text.trim()}" (${created['code'] ?? codeCtrl.text.trim()}) creado correctamente.',
-              ),
-            ),
-          );
+          messenger.aviso('Datacenter "${created['name'] ?? nameCtrl.text.trim()}" (${created['code'] ?? codeCtrl.text.trim()}) creado correctamente.');
         }
         widget.onRefresh();
         if (_mapViewMode == 'api_map') {
           _mapController.move(LatLng(lat, lon), 14.0);
         }
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Error al guardar Datacenter: $e'),
-            backgroundColor: Colors.red.shade700,
-          ),
-        );
+        messenger.avisoError('Error al guardar Datacenter: $e');
       }
     }
   }
@@ -659,7 +619,7 @@ class _LocationsViewState extends State<LocationsView> {
     final lockScroll = _isDraggingCustomBox || _draggingOsmLocId != null;
 
     return Container(
-      color: const Color(0xFFF8FAFC),
+      color: AppPalette.slate50,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -669,7 +629,7 @@ class _LocationsViewState extends State<LocationsView> {
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
               decoration: const BoxDecoration(
                 color: Colors.white,
-                border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+                border: Border(bottom: BorderSide(color: AppPalette.slate200)),
               ),
               child: Row(
                 children: [
@@ -681,7 +641,7 @@ class _LocationsViewState extends State<LocationsView> {
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF0F172A),
+                          color: AppPalette.slate900,
                         ),
                       ),
                       const SizedBox(height: 2),
@@ -689,7 +649,7 @@ class _LocationsViewState extends State<LocationsView> {
                         'PBX  >  Locations${selected != null ? '  >  ${selected.code} (${selected.name})' : ''}',
                         style: const TextStyle(
                           fontSize: 12,
-                          color: Color(0xFF64748B),
+                          color: AppPalette.slate500,
                         ),
                       ),
                     ],
@@ -701,8 +661,8 @@ class _LocationsViewState extends State<LocationsView> {
                       icon: const Icon(Icons.tv_rounded, size: 17),
                       label: const Text('Modo Kiosco'),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFF0F172A),
-                        side: const BorderSide(color: Color(0xFF94A3B8)),
+                        foregroundColor: AppPalette.slate900,
+                        side: const BorderSide(color: AppPalette.slate400),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -728,7 +688,7 @@ class _LocationsViewState extends State<LocationsView> {
                     icon: const Icon(Icons.add, size: 18),
                     label: const Text('Add location'),
                     style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF1E3A8A),
+                      backgroundColor: AppPalette.blue900,
                       foregroundColor: Colors.white,
                     ),
                   ),
@@ -787,7 +747,7 @@ class _LocationsViewState extends State<LocationsView> {
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
-                                  color: Color(0xFF475569),
+                                  color: AppPalette.slate600,
                                 ),
                               ),
                               SegmentedButton<String>(
@@ -821,12 +781,12 @@ class _LocationsViewState extends State<LocationsView> {
                               ),
                               FilterChip(
                                 selected: _relocateByClickOnOsm,
-                                selectedColor: const Color(0xFFDBEAFE),
-                                checkmarkColor: const Color(0xFF1E3A8A),
+                                selectedColor: AppPalette.blue100,
+                                checkmarkColor: AppPalette.blue900,
                                 avatar: const Icon(
                                   Icons.pin_drop_outlined,
                                   size: 16,
-                                  color: Color(0xFF1E3A8A),
+                                  color: AppPalette.blue900,
                                 ),
                                 label: Text(
                                   selected != null
@@ -853,7 +813,7 @@ class _LocationsViewState extends State<LocationsView> {
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
-                                  color: Color(0xFF475569),
+                                  color: AppPalette.slate600,
                                 ),
                               ),
                               SizedBox(
@@ -888,9 +848,9 @@ class _LocationsViewState extends State<LocationsView> {
                   Container(
                     height: widget.isKioskMode ? 580 : 420,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFE2E8F0),
+                      color: AppPalette.slate200,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFFCBD5E1)),
+                      border: Border.all(color: AppPalette.slate300),
                       boxShadow: const [
                         BoxShadow(
                           color: Color(0x0A000000),
@@ -916,7 +876,7 @@ class _LocationsViewState extends State<LocationsView> {
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
-                      color: Color(0xFF0F172A),
+                      color: AppPalette.slate900,
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -947,8 +907,8 @@ class _LocationsViewState extends State<LocationsView> {
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
                               color: isSelected
-                                  ? const Color(0xFF2563EB)
-                                  : const Color(0xFFE2E8F0),
+                                  ? AppPalette.blue600
+                                  : AppPalette.slate200,
                               width: isSelected ? 2 : 1,
                             ),
                             boxShadow: const [
@@ -969,8 +929,8 @@ class _LocationsViewState extends State<LocationsView> {
                                     height: 36,
                                     decoration: BoxDecoration(
                                       color: isSelected
-                                          ? const Color(0xFF1E3A8A)
-                                          : const Color(0xFF0F172A),
+                                          ? AppPalette.blue900
+                                          : AppPalette.slate900,
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: const Icon(
@@ -990,7 +950,7 @@ class _LocationsViewState extends State<LocationsView> {
                                           style: const TextStyle(
                                             fontWeight: FontWeight.w700,
                                             fontSize: 14,
-                                            color: Color(0xFF0F172A),
+                                            color: AppPalette.slate900,
                                           ),
                                           overflow: TextOverflow.ellipsis,
                                         ),
@@ -1000,7 +960,7 @@ class _LocationsViewState extends State<LocationsView> {
                                           overflow: TextOverflow.ellipsis,
                                           style: const TextStyle(
                                             fontSize: 11,
-                                            color: Color(0xFF64748B),
+                                            color: AppPalette.slate500,
                                           ),
                                         ),
                                       ],
@@ -1013,7 +973,7 @@ class _LocationsViewState extends State<LocationsView> {
                                     icon: const Icon(
                                       Icons.edit_location_alt_outlined,
                                       size: 18,
-                                      color: Color(0xFF475569),
+                                      color: AppPalette.slate600,
                                     ),
                                     onPressed: () =>
                                         _showLocationFormDialog(existing: loc),
@@ -1024,7 +984,7 @@ class _LocationsViewState extends State<LocationsView> {
                                     icon: const Icon(
                                       Icons.delete_outline,
                                       size: 18,
-                                      color: Color(0xFFDC2626),
+                                      color: AppPalette.red600,
                                     ),
                                     onPressed: () =>
                                         _confirmDeleteLocation(loc),
@@ -1071,21 +1031,21 @@ class _LocationsViewState extends State<LocationsView> {
                                 ),
                                 decoration: BoxDecoration(
                                   color: loc.offlineCount > 0
-                                      ? const Color(0xFFFEF2F2)
+                                      ? AppPalette.red50
                                       : (loc.warningCount > 0
-                                          ? const Color(0xFFFFFBEB)
+                                          ? AppPalette.amber50
                                           : (loc.onlineCount > 0
-                                              ? const Color(0xFFF0FDF4)
-                                              : const Color(0xFFF8FAFC))),
+                                              ? AppPalette.green50
+                                              : AppPalette.slate50)),
                                   borderRadius: BorderRadius.circular(6),
                                   border: Border.all(
                                     color: loc.offlineCount > 0
-                                        ? const Color(0xFFFECACA)
+                                        ? AppPalette.red200
                                         : (loc.warningCount > 0
                                             ? const Color(0xFFFDE68A)
                                             : (loc.onlineCount > 0
                                                 ? const Color(0xFFBBF7D0)
-                                                : const Color(0xFFCBD5E1))),
+                                                : AppPalette.slate300)),
                                   ),
                                 ),
                                 child: Wrap(
@@ -1097,38 +1057,38 @@ class _LocationsViewState extends State<LocationsView> {
                                       Icons.monitor_heart_rounded,
                                       size: 14,
                                       color: loc.offlineCount > 0
-                                          ? const Color(0xFFDC2626)
+                                          ? AppPalette.red600
                                           : (loc.warningCount > 0
-                                              ? const Color(0xFFD97706)
+                                              ? AppPalette.amber600
                                               : (loc.onlineCount > 0
-                                                  ? const Color(0xFF16A34A)
-                                                  : const Color(0xFF64748B))),
+                                                  ? AppPalette.green600
+                                                  : AppPalette.slate500)),
                                     ),
                                     const Text(
                                       'Heartbeat:',
                                       style: TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w800,
-                                        color: Color(0xFF0F172A),
+                                        color: AppPalette.slate900,
                                       ),
                                     ),
                                     _StatusDotPill(
-                                      color: const Color(0xFF94A3B8),
+                                      color: AppPalette.slate400,
                                       count: loc.unmonitoredCount,
                                       label: 'Gris',
                                     ),
                                     _StatusDotPill(
-                                      color: const Color(0xFF16A34A),
+                                      color: AppPalette.green600,
                                       count: loc.onlineCount,
                                       label: 'Verde',
                                     ),
                                     _StatusDotPill(
-                                      color: const Color(0xFFD97706),
+                                      color: AppPalette.amber600,
                                       count: loc.warningCount,
                                       label: 'Naranja',
                                     ),
                                     _StatusDotPill(
-                                      color: const Color(0xFFDC2626),
+                                      color: AppPalette.red600,
                                       count: loc.offlineCount,
                                       label: 'Rojo',
                                     ),
@@ -1163,7 +1123,7 @@ class _LocationsViewState extends State<LocationsView> {
             const Icon(
               Icons.image_outlined,
               size: 48,
-              color: Color(0xFF64748B),
+              color: AppPalette.slate500,
             ),
             const SizedBox(height: 10),
             const Text(
@@ -1171,7 +1131,7 @@ class _LocationsViewState extends State<LocationsView> {
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF334155),
+                color: AppPalette.slate700,
               ),
             ),
             const SizedBox(height: 14),
@@ -1195,7 +1155,7 @@ class _LocationsViewState extends State<LocationsView> {
           children: [
             // Imagen de fondo escalable
             Container(
-              color: const Color(0xFFF1F5F9),
+              color: AppPalette.slate100,
               child: Center(
                 child: Transform.scale(
                   scale: _mapImageScale,
@@ -1267,7 +1227,7 @@ class _LocationsViewState extends State<LocationsView> {
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
                               color: isSel
-                                  ? const Color(0xFF38BDF8)
+                                  ? AppPalette.sky400
                                   : Colors.white70,
                               width: isSel ? 2.5 : 1.5,
                             ),
@@ -1293,7 +1253,7 @@ class _LocationsViewState extends State<LocationsView> {
                                       children: [
                                         const Icon(
                                           Icons.open_with_rounded,
-                                          color: Color(0xFF38BDF8),
+                                          color: AppPalette.sky400,
                                           size: 14,
                                         ),
                                         const SizedBox(width: 4),
@@ -1317,7 +1277,7 @@ class _LocationsViewState extends State<LocationsView> {
                                             child: Icon(
                                               Icons.delete_outline,
                                               size: 14,
-                                              color: Color(0xFFFCA5A5),
+                                              color: AppPalette.red300,
                                             ),
                                           ),
                                         ),
@@ -1335,7 +1295,7 @@ class _LocationsViewState extends State<LocationsView> {
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
-                                        color: Color(0xFFBAE6FD),
+                                        color: AppPalette.sky200,
                                         fontSize: 10,
                                       ),
                                     ),
@@ -1346,7 +1306,7 @@ class _LocationsViewState extends State<LocationsView> {
                                             widget.onOpenDatacenter(loc.id),
                                         style: FilledButton.styleFrom(
                                           backgroundColor:
-                                              const Color(0xFF2563EB),
+                                              AppPalette.blue600,
                                           padding: const EdgeInsets.symmetric(
                                             horizontal: 8,
                                           ),
@@ -1402,7 +1362,7 @@ class _LocationsViewState extends State<LocationsView> {
                                       width: 18,
                                       height: 18,
                                       decoration: const BoxDecoration(
-                                        color: Color(0xFF38BDF8),
+                                        color: AppPalette.sky400,
                                         borderRadius: BorderRadius.only(
                                           topLeft: Radius.circular(6),
                                           bottomRight: Radius.circular(6),
@@ -1411,7 +1371,7 @@ class _LocationsViewState extends State<LocationsView> {
                                       child: const Icon(
                                         Icons.open_in_full_rounded,
                                         size: 11,
-                                        color: Color(0xFF0F172A),
+                                        color: AppPalette.slate900,
                                       ),
                                     ),
                                   ),
@@ -1436,14 +1396,14 @@ class _LocationsViewState extends State<LocationsView> {
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.92),
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                  border: Border.all(color: AppPalette.slate300),
                 ),
                 child: const Text(
                   'Arrastra cada Datacenter para ubicarlo en el mapa • Estira su esquina azul (◢) para dimensionarlo • Pulsa "Entrar al Edificio" para ver sus Plantas y Racks.',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF0F172A),
+                    color: AppPalette.slate900,
                   ),
                 ),
               ),
@@ -1568,12 +1528,12 @@ class _LocationsViewState extends State<LocationsView> {
                             ),
                             decoration: BoxDecoration(
                               color: isSel
-                                  ? const Color(0xFF1E3A8A)
-                                  : const Color(0xFF0F172A),
+                                  ? AppPalette.blue900
+                                  : AppPalette.slate900,
                               borderRadius: BorderRadius.circular(6),
                               border: Border.all(
                                 color: isSel
-                                    ? const Color(0xFF38BDF8)
+                                    ? AppPalette.sky400
                                     : Colors.white70,
                                 width: isSel ? 2 : 1,
                               ),
@@ -1590,7 +1550,7 @@ class _LocationsViewState extends State<LocationsView> {
                                 const Icon(
                                   Icons.open_with_rounded,
                                   size: 12,
-                                  color: Color(0xFF38BDF8),
+                                  color: AppPalette.sky400,
                                 ),
                                 const SizedBox(width: 4),
                                 Flexible(
@@ -1621,10 +1581,10 @@ class _LocationsViewState extends State<LocationsView> {
                             height: 34,
                             decoration: BoxDecoration(
                               color: isDragging
-                                  ? const Color(0xFF0284C7)
+                                  ? AppPalette.sky600
                                   : (isSel
-                                      ? const Color(0xFF2563EB)
-                                      : const Color(0xFF0F172A)),
+                                      ? AppPalette.blue600
+                                      : AppPalette.slate900),
                               shape: BoxShape.circle,
                               border: Border.all(
                                 color: Colors.white,
@@ -1661,7 +1621,7 @@ class _LocationsViewState extends State<LocationsView> {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: const Color(0xFFCBD5E1)),
+              border: Border.all(color: AppPalette.slate300),
               boxShadow: const [
                 BoxShadow(color: Colors.black12, blurRadius: 4),
               ],
@@ -1705,14 +1665,14 @@ class _LocationsViewState extends State<LocationsView> {
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.92),
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: const Color(0xFFCBD5E1)),
+              border: Border.all(color: AppPalette.slate300),
             ),
             child: const Text(
               'Arrastra cualquier Datacenter (✥) con el ratón para colocarlo en su sitio final • Doble clic para abrir sus Plantas.',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF0F172A),
+                color: AppPalette.slate900,
               ),
             ),
           ),
@@ -1731,7 +1691,7 @@ class _LocationsViewState extends State<LocationsView> {
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.96),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                  border: Border.all(color: AppPalette.slate300),
                   boxShadow: const [
                     BoxShadow(color: Colors.black12, blurRadius: 6),
                   ],
@@ -1741,7 +1701,7 @@ class _LocationsViewState extends State<LocationsView> {
                     const Icon(
                       Icons.travel_explore_rounded,
                       size: 18,
-                      color: Color(0xFF1E3A8A),
+                      color: AppPalette.blue900,
                     ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -1785,7 +1745,7 @@ class _LocationsViewState extends State<LocationsView> {
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                    border: Border.all(color: AppPalette.slate300),
                     boxShadow: const [
                       BoxShadow(color: Colors.black26, blurRadius: 8),
                     ],
@@ -1845,7 +1805,7 @@ class _LocationsViewState extends State<LocationsView> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
               decoration: BoxDecoration(
-                color: const Color(0xFF1E3A8A),
+                color: AppPalette.blue900,
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
@@ -1871,7 +1831,7 @@ class _LocationsViewState extends State<LocationsView> {
             ),
             child: const Text(
               '© OpenStreetMap contributors',
-              style: TextStyle(fontSize: 10, color: Color(0xFF475569)),
+              style: TextStyle(fontSize: 10, color: AppPalette.slate600),
             ),
           ),
         ),
@@ -1895,7 +1855,7 @@ class _StatColumn extends StatelessWidget {
           label,
           style: const TextStyle(
             fontSize: 11,
-            color: Color(0xFF64748B),
+            color: AppPalette.slate500,
           ),
         ),
         const SizedBox(height: 2),
@@ -1904,7 +1864,7 @@ class _StatColumn extends StatelessWidget {
           style: const TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w700,
-            color: Color(0xFF0F172A),
+            color: AppPalette.slate900,
           ),
         ),
       ],
