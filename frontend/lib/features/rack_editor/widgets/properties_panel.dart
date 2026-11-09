@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/widgets/avisos.dart';
 import '../../../core/theme.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -432,15 +433,11 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
       });
       widget.onRefreshRack();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Ajustes del Rack guardados correctamente.')),
-        );
+        ScaffoldMessenger.of(context).aviso('Ajustes del Rack guardados correctamente.');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        ScaffoldMessenger.of(context).avisoError('$e');
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -860,9 +857,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        ScaffoldMessenger.of(context).avisoError('$e');
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -883,13 +878,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
 
   Future<void> _triggerDevicePing() async {
     if (!_canConnectRemote) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Tu rol actual (Solo Ver) no permite lanzar pruebas interactivas sobre los hosts.',
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(context).aviso('Tu rol actual (Solo Ver) no permite lanzar pruebas interactivas sobre los hosts.');
       return;
     }
     final d = widget.selectedDevice;
@@ -1001,15 +990,11 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
       });
       widget.onRefreshRack();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Propiedades del cable actualizadas.')),
-        );
+        ScaffoldMessenger.of(context).aviso('Propiedades del cable actualizadas.');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        ScaffoldMessenger.of(context).avisoError('$e');
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);

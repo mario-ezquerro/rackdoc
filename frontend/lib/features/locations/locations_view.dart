@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/widgets/avisos.dart';
 import '../../core/theme.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -176,9 +177,7 @@ class _LocationsViewState extends State<LocationsView> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error buscando en OpenStreetMap: $e')),
-      );
+      ScaffoldMessenger.of(context).aviso('Error buscando en OpenStreetMap: $e');
     } finally {
       if (mounted) setState(() => _searchingOsm = false);
     }
@@ -216,12 +215,7 @@ class _LocationsViewState extends State<LocationsView> {
         ),
       );
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Error guardando coordenadas: $e'),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      messenger.avisoError('Error guardando coordenadas: $e');
     }
   }
 
@@ -259,16 +253,9 @@ class _LocationsViewState extends State<LocationsView> {
           _selectedLocationId = null;
         }
         widget.onRefresh();
-        messenger.showSnackBar(
-          SnackBar(content: Text('Datacenter "${loc.code}" eliminado.')),
-        );
+        messenger.aviso('Datacenter "${loc.code}" eliminado.');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Error eliminando Datacenter: $e'),
-            backgroundColor: Colors.red.shade700,
-          ),
-        );
+        messenger.avisoError('Error eliminando Datacenter: $e');
       }
     }
   }
@@ -290,20 +277,9 @@ class _LocationsViewState extends State<LocationsView> {
       );
       setState(() => _mapViewMode = 'custom_plan');
       widget.onRefresh();
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            'Mapa general (${picked.name}) subido. Ahora puedes arrastrar y dimensionar tus Datacenters sobre él.',
-          ),
-        ),
-      );
+      messenger.aviso('Mapa general (${picked.name}) subido. Ahora puedes arrastrar y dimensionar tus Datacenters sobre él.');
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Error subiendo mapa: $e'),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      messenger.avisoError('Error subiendo mapa: $e');
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -600,13 +576,7 @@ class _LocationsViewState extends State<LocationsView> {
             'longitude': lon,
             'address': addrCtrl.text.trim(),
           });
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text(
-                'Datacenter "${nameCtrl.text.trim()}" actualizado correctamente.',
-              ),
-            ),
-          );
+          messenger.aviso('Datacenter "${nameCtrl.text.trim()}" actualizado correctamente.');
         } else {
           final created = await widget.api.createLocation(
             code: codeCtrl.text.trim(),
@@ -621,25 +591,14 @@ class _LocationsViewState extends State<LocationsView> {
               _selectedLocationId = newId;
             });
           }
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text(
-                'Datacenter "${created['name'] ?? nameCtrl.text.trim()}" (${created['code'] ?? codeCtrl.text.trim()}) creado correctamente.',
-              ),
-            ),
-          );
+          messenger.aviso('Datacenter "${created['name'] ?? nameCtrl.text.trim()}" (${created['code'] ?? codeCtrl.text.trim()}) creado correctamente.');
         }
         widget.onRefresh();
         if (_mapViewMode == 'api_map') {
           _mapController.move(LatLng(lat, lon), 14.0);
         }
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Error al guardar Datacenter: $e'),
-            backgroundColor: Colors.red.shade700,
-          ),
-        );
+        messenger.avisoError('Error al guardar Datacenter: $e');
       }
     }
   }

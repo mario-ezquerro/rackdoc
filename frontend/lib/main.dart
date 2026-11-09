@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'core/widgets/avisos.dart';
 import 'core/theme.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -402,13 +403,7 @@ class _RackDocShellState extends State<RackDocShell> {
                             });
                             await _loadInitialData();
                             if (ctx.mounted) Navigator.pop(ctx);
-                            messenger.showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Sesión iniciada como ${logged.username} (${logged.roleLabel}).',
-                                ),
-                              ),
-                            );
+                            messenger.aviso('Sesión iniciada como ${logged.username} (${logged.roleLabel}).');
                           } catch (e) {
                             setModal(
                               () => authError = e.toString().replaceFirst(
@@ -439,13 +434,7 @@ class _RackDocShellState extends State<RackDocShell> {
                           });
                           await _loadInitialData();
                           if (ctx.mounted) Navigator.pop(ctx);
-                          messenger.showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                'Sesión iniciada como ${logged.username} (${logged.roleLabel}).',
-                              ),
-                            ),
-                          );
+                          messenger.aviso('Sesión iniciada como ${logged.username} (${logged.roleLabel}).');
                         } catch (e) {
                           setModal(
                             () => authError = e.toString().replaceFirst(
@@ -748,14 +737,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                     importing = false;
                                     importResult = res;
                                   });
-                                  messenger.showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Importación de Excel completada correctamente.',
-                                      ),
-                                      backgroundColor: AppPalette.green700,
-                                    ),
-                                  );
+                                  messenger.avisoExito('Importación de Excel completada correctamente.');
                                 } catch (e) {
                                   setModal(() {
                                     importing = false;

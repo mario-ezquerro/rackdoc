@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/widgets/avisos.dart';
 import '../../core/theme.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -1030,9 +1031,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
             ? _fdConnSshHostCtrl.text.trim()
             : _devIpCtrl.text.trim();
         if (host.isEmpty) {
-          messenger.showSnackBar(
-            const SnackBar(content: Text('Indica el Host/IP para Conectar SSH.')),
-          );
+          messenger.aviso('Indica el Host/IP para Conectar SSH.');
           return;
         }
         final user = _fdConnSshUserCtrl.text.trim().isEmpty
@@ -1075,9 +1074,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       }
     } catch (e) {
       if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('No se pudo abrir la conexión: $e')),
-        );
+        messenger.aviso('No se pudo abrir la conexión: $e');
       }
     }
   }
@@ -1902,16 +1899,9 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
           }
         });
         widget.onRefresh();
-        messenger.showSnackBar(
-          SnackBar(content: Text('Dispositivo "${dev.code}" eliminado.')),
-        );
+        messenger.aviso('Dispositivo "${dev.code}" eliminado.');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Error al eliminar dispositivo: $e'),
-            backgroundColor: Colors.red.shade700,
-          ),
-        );
+        messenger.avisoError('Error al eliminar dispositivo: $e');
       }
     }
   }
@@ -1930,18 +1920,9 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         fileBytes: picked.bytes,
       );
       widget.onRefresh();
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Plano de planta "${floor.name}" subido correctamente.'),
-        ),
-      );
+      messenger.aviso('Plano de planta "${floor.name}" subido correctamente.');
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Error al subir plano de planta: $e'),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      messenger.avisoError('Error al subir plano de planta: $e');
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -2313,16 +2294,9 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
           _selectedFloorId = null;
         }
         widget.onRefresh();
-        messenger.showSnackBar(
-          SnackBar(content: Text('Planta "${fl.name}" eliminada.')),
-        );
+        messenger.aviso('Planta "${fl.name}" eliminada.');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Error eliminando planta: $e'),
-            backgroundColor: Colors.red.shade700,
-          ),
-        );
+        messenger.avisoError('Error eliminando planta: $e');
       }
     }
   }
@@ -2361,16 +2335,9 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         _rackSizes.remove(rk.id);
         _rackRotations.remove(rk.id);
         widget.onRefresh();
-        messenger.showSnackBar(
-          SnackBar(content: Text('Rack "${rk.code}" eliminado.')),
-        );
+        messenger.aviso('Rack "${rk.code}" eliminado.');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Error eliminando rack: $e'),
-            backgroundColor: Colors.red.shade700,
-          ),
-        );
+        messenger.avisoError('Error eliminando rack: $e');
       }
     }
   }

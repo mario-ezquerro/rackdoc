@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../../core/widgets/avisos.dart';
 import '../../core/theme.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -259,12 +260,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         ),
       );
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('No se pudo deshacer el movimiento: $e'),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      messenger.avisoError('No se pudo deshacer el movimiento: $e');
     }
   }
 
@@ -338,16 +334,9 @@ class _RackEditorViewState extends State<RackEditorView> {
       try {
         await widget.api.deleteRack(rack.id);
         widget.onBackToLocations();
-        messenger.showSnackBar(
-          SnackBar(content: Text('Rack "${rack.code}" eliminado.')),
-        );
+        messenger.aviso('Rack "${rack.code}" eliminado.');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Error eliminando rack: $e'),
-            backgroundColor: Colors.red.shade700,
-          ),
-        );
+        messenger.avisoError('Error eliminando rack: $e');
       }
     }
   }
@@ -771,16 +760,9 @@ class _RackEditorViewState extends State<RackEditorView> {
         clamped,
         excludeDeviceId: dev.id,
       );
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            blocker != null
+      messenger.avisoError(blocker != null
                 ? 'No se puede ampliar "${dev.code}" a ${clamped}U en U${dev.startU}-U${dev.startU + clamped - 1}: choca con "${blocker.code}" (U${blocker.startU}).'
-                : 'No cabe "${dev.code}" con ${clamped}U en U${dev.startU} (excede U${rack.totalUnits}).',
-          ),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+                : 'No cabe "${dev.code}" con ${clamped}U en U${dev.startU} (excede U${rack.totalUnits}).');
       return;
     }
 
@@ -798,9 +780,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         ),
       );
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-      );
+      messenger.avisoError('$e');
     }
   }
 
@@ -815,14 +795,7 @@ class _RackEditorViewState extends State<RackEditorView> {
     final messenger = ScaffoldMessenger.of(context);
 
     if (targetStartU < 1 || targetEndU > rack.totalUnits) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            'No se puede colocar "${dev.code}" ($uHeight U) en U$targetStartU: necesita hasta U$targetEndU y el rack tiene ${rack.totalUnits}U.',
-          ),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      messenger.avisoError('No se puede colocar "${dev.code}" ($uHeight U) en U$targetStartU: necesita hasta U$targetEndU y el rack tiene ${rack.totalUnits}U.');
       return;
     }
 
@@ -838,14 +811,7 @@ class _RackEditorViewState extends State<RackEditorView> {
       final blockerRange = blocker.uHeight > 1
           ? 'U${blocker.startU}-U${blocker.endU}'
           : 'U${blocker.startU}';
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            'No hay suficientes "U" libres en $rangeLabel para "${dev.code}" (${uHeight}U): ocupado por "${blocker.code}" ($blockerRange).',
-          ),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      messenger.avisoError('No hay suficientes "U" libres en $rangeLabel para "${dev.code}" (${uHeight}U): ocupado por "${blocker.code}" ($blockerRange).');
       return;
     }
 
@@ -880,12 +846,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         ),
       );
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('No se pudo mover a U$targetStartU: $e'),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      messenger.avisoError('No se pudo mover a U$targetStartU: $e');
     }
   }
 
@@ -980,9 +941,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         ),
       );
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-      );
+      messenger.avisoError('$e');
     }
   }
 
@@ -1174,13 +1133,7 @@ class _RackEditorViewState extends State<RackEditorView> {
     final miniTemplates =
         widget.templates.where((t) => t.isTrayMiniDevice).toList();
     if (miniTemplates.isEmpty) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text(
-            'No se encontraron plantillas en la librería "Bandeja - Equipos Mini".',
-          ),
-        ),
-      );
+      messenger.aviso('No se encontraron plantillas en la librería "Bandeja - Equipos Mini".');
       return;
     }
 
@@ -1659,17 +1612,9 @@ class _RackEditorViewState extends State<RackEditorView> {
         setState(() {
           _selectedDeviceId = trayDev.id;
         });
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Bandeja "${trayDev.code}" actualizada con ${items.length} equipo(s) alojado(s) y sus bocas RJ45/Fibra/PSU sincronizadas.',
-            ),
-          ),
-        );
+        messenger.aviso('Bandeja "${trayDev.code}" actualizada con ${items.length} equipo(s) alojado(s) y sus bocas RJ45/Fibra/PSU sincronizadas.');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        messenger.avisoError('$e');
       }
     }
   }
@@ -2201,14 +2146,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         orElse: () => tpl,
       );
       if (!_canFitAtU(rack, targetStartU, 1)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Para colocar "${tpl.modelName}" en U$targetStartU hace falta una Bandeja en esa U o que U$targetStartU esté libre.',
-            ),
-            backgroundColor: Colors.red.shade700,
-          ),
-        );
+        ScaffoldMessenger.of(context).avisoError('Para colocar "${tpl.modelName}" en U$targetStartU hace falta una Bandeja en esa U o que U$targetStartU esté libre.');
         return;
       }
       try {
@@ -2244,19 +2182,11 @@ class _RackEditorViewState extends State<RackEditorView> {
           _selectedTemplateForClick = null;
         });
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Bandeja BDJ$trayCount montada en U$targetStartU con "${tpl.manufacturer} ${tpl.modelName}" alojado encima. Pulsa "+ Equipos en Bandeja" para meter más.',
-              ),
-            ),
-          );
+          ScaffoldMessenger.of(context).aviso('Bandeja BDJ$trayCount montada en U$targetStartU con "${tpl.manufacturer} ${tpl.modelName}" alojado encima. Pulsa "+ Equipos en Bandeja" para meter más.');
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-          );
+          ScaffoldMessenger.of(context).avisoError('$e');
         }
       }
       return;
@@ -2271,14 +2201,7 @@ class _RackEditorViewState extends State<RackEditorView> {
           : (blocker != null
               ? 'choca con "${blocker.code}" en U${blocker.startU}'
               : 'las unidades U no están libres');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'No se puede montar "${tpl.modelName}" (${tpl.uHeight}U) en U$targetStartU${tpl.uHeight > 1 ? '-U$targetEndU' : ''}: necesita ${tpl.uHeight}U libres consecutivas ($reason).',
-          ),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      ScaffoldMessenger.of(context).avisoError('No se puede montar "${tpl.modelName}" (${tpl.uHeight}U) en U$targetStartU${tpl.uHeight > 1 ? '-U$targetEndU' : ''}: necesita ${tpl.uHeight}U libres consecutivas ($reason).');
       return;
     }
 
@@ -2774,9 +2697,7 @@ class _RackEditorViewState extends State<RackEditorView> {
       });
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        ScaffoldMessenger.of(context).avisoError('$e');
       }
     }
   }
@@ -2802,24 +2723,12 @@ class _RackEditorViewState extends State<RackEditorView> {
     }
 
     if (!_canEdit) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Modo lectura: tu rol actual no permite crear nuevos cables.',
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(context).aviso('Modo lectura: tu rol actual no permite crear nuevos cables.');
       return;
     }
 
     if (existingConn != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'La boca ${dev.code}:${port.portNumber} ya está ocupada por un cable. Selecciónala sin cable activo para editarla o desconectarla.',
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(context).aviso('La boca ${dev.code}:${port.portNumber} ya está ocupada por un cable. Selecciónala sin cable activo para editarla o desconectarla.');
       return;
     }
 
@@ -3147,9 +3056,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         });
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-          );
+          ScaffoldMessenger.of(context).avisoError('$e');
         }
       }
     }
@@ -3171,24 +3078,13 @@ class _RackEditorViewState extends State<RackEditorView> {
     try {
       otherRacks = await widget.api.getInterRackTargets(rack.id);
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Error obteniendo otros racks: $e'),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      messenger.avisoError('Error obteniendo otros racks: $e');
       return;
     }
 
     if (otherRacks.isEmpty) {
       if (!mounted) return;
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text(
-            'No hay otros Racks dados de alta en el Datacenter para conectar fibra/cable Inter-Rack.',
-          ),
-        ),
-      );
+      messenger.aviso('No hay otros Racks dados de alta en el Datacenter para conectar fibra/cable Inter-Rack.');
       return;
     }
 
@@ -3203,11 +3099,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         rack.devices.where((d) => !d.isExternalFeed && d.ports.isNotEmpty).toList();
     if (localDevices.isEmpty) {
       if (!mounted) return;
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Este rack no tiene equipos con puertos para conectar.'),
-        ),
-      );
+      messenger.aviso('Este rack no tiene equipos con puertos para conectar.');
       return;
     }
 
@@ -3639,17 +3531,9 @@ class _RackEditorViewState extends State<RackEditorView> {
           _selectedConnectionId = created.id;
           _selectedDeviceId = null;
         });
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Fibra / Cable Inter-Rack conectado hacia ${selectedTargetRack['code']} (${selectedTargetDev?['code']}:${selectedTargetPort!['port_number']}).',
-            ),
-          ),
-        );
+        messenger.aviso('Fibra / Cable Inter-Rack conectado hacia ${selectedTargetRack['code']} (${selectedTargetDev?['code']}:${selectedTargetPort!['port_number']}).');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        messenger.avisoError('$e');
       }
     }
   }
@@ -3983,9 +3867,7 @@ class _RackEditorViewState extends State<RackEditorView> {
           ),
         );
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        messenger.avisoError('$e');
       }
     }
   }
@@ -4017,9 +3899,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         ),
       );
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-      );
+      messenger.avisoError('$e');
     }
   }
 
@@ -4309,9 +4189,7 @@ class _RackEditorViewState extends State<RackEditorView> {
           ),
         );
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        messenger.avisoError('$e');
       }
     }
   }
@@ -4337,13 +4215,9 @@ class _RackEditorViewState extends State<RackEditorView> {
     try {
       await widget.api.deleteExternalOutlet(ext.id);
       await _loadRack();
-      messenger.showSnackBar(
-        SnackBar(content: Text('Toma exterior "${ext.code}" eliminada.')),
-      );
+      messenger.aviso('Toma exterior "${ext.code}" eliminada.');
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-      );
+      messenger.avisoError('$e');
     }
   }
 
@@ -4412,13 +4286,7 @@ class _RackEditorViewState extends State<RackEditorView> {
               onPressed: () async {
                 await Clipboard.setData(ClipboardData(text: prettyJson));
                 if (ctx.mounted) Navigator.pop(ctx);
-                messenger.showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'JSON de la librería copiado al portapapeles.',
-                    ),
-                  ),
-                );
+                messenger.aviso('JSON de la librería copiado al portapapeles.');
               },
               icon: const Icon(Icons.copy, size: 16),
               label: const Text('Copiar JSON'),
@@ -4427,9 +4295,7 @@ class _RackEditorViewState extends State<RackEditorView> {
         ),
       );
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('Error exportando librería: $e')),
-      );
+      messenger.aviso('Error exportando librería: $e');
     }
   }
 
@@ -4547,20 +4413,9 @@ class _RackEditorViewState extends State<RackEditorView> {
         );
         widget.onTemplatesChanged();
         setState(() => _selectedLibraryGroup = targetGroup);
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Librería "$targetGroup" importada: ${res['created']} creados, ${res['updated']} actualizados.',
-            ),
-          ),
-        );
+        messenger.aviso('Librería "$targetGroup" importada: ${res['created']} creados, ${res['updated']} actualizados.');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Error importando JSON: $e'),
-            backgroundColor: Colors.red.shade700,
-          ),
-        );
+        messenger.avisoError('Error importando JSON: $e');
       }
     }
   }
@@ -4792,17 +4647,9 @@ class _RackEditorViewState extends State<RackEditorView> {
           'custom_fields': updatedCustom,
         });
         await _loadRack();
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Bocas Front y Back de "${dev.code}" actualizadas correctamente.',
-            ),
-          ),
-        );
+        messenger.aviso('Bocas Front y Back de "${dev.code}" actualizadas correctamente.');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        messenger.avisoError('$e');
       }
     }
   }
@@ -5955,13 +5802,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                     await widget.api.pingAllRackDevices(rack.id);
                     await _loadRack();
                     if (mounted) {
-                      messenger.showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Chequeo de Ping completado en todos los equipos del rack.',
-                          ),
-                        ),
-                      );
+                      messenger.aviso('Chequeo de Ping completado en todos los equipos del rack.');
                     }
                   },
                   icon: const Icon(Icons.network_ping, size: 16),
@@ -7993,17 +7834,9 @@ class _RackEditorViewState extends State<RackEditorView> {
           'linked_rack_device_code': '',
         });
         await _loadRack();
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Equipo de planta "${codeCtrl.text.trim()}" añadido al recuadro de ${rack.code}. Haz clic en su icono para unirlo a un Switch o Patch Panel.',
-            ),
-          ),
-        );
+        messenger.aviso('Equipo de planta "${codeCtrl.text.trim()}" añadido al recuadro de ${rack.code}. Haz clic en su icono para unirlo a un Switch o Patch Panel.');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        messenger.avisoError('$e');
       }
     }
   }

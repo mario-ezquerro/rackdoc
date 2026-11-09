@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/widgets/avisos.dart';
 import '../../core/theme.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_client.dart';
@@ -70,12 +71,7 @@ class _AdminViewState extends State<AdminView> {
     final uname = _quickUsernameCtrl.text.trim();
     final pass = _quickPasswordCtrl.text.trim();
     if (uname.isEmpty) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: const Text('Escribe un nombre de usuario (username) para dar de alta.'),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
+      messenger.avisoError('Escribe un nombre de usuario (username) para dar de alta.');
       return;
     }
     setState(() => _creatingLocalUser = true);
@@ -97,17 +93,9 @@ class _AdminViewState extends State<AdminView> {
       _quickEmailCtrl.clear();
       _quickPasswordCtrl.clear();
       await _loadAdminData();
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            'Usuario local "$uname" dado de alta correctamente con rol $_quickRole.',
-          ),
-        ),
-      );
+      messenger.aviso('Usuario local "$uname" dado de alta correctamente con rol $_quickRole.');
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-      );
+      messenger.avisoError('$e');
     } finally {
       if (mounted) {
         setState(() => _creatingLocalUser = false);
@@ -165,20 +153,11 @@ class _AdminViewState extends State<AdminView> {
           _monitoringSettings = res;
           _hbMinutesCtrl.text = '$safeMins';
         });
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              '✓ Frecuencia de chequeo Heartbeat actualizada a cada $safeMins min.',
-            ),
-            backgroundColor: AppPalette.green700,
-          ),
-        );
+        messenger.avisoExito('✓ Frecuencia de chequeo Heartbeat actualizada a cada $safeMins min.');
       }
     } catch (e) {
       if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        messenger.avisoError('$e');
       }
     } finally {
       if (mounted) setState(() => _savingMonitoringSettings = false);
@@ -206,9 +185,7 @@ class _AdminViewState extends State<AdminView> {
       }
     } catch (e) {
       if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        messenger.avisoError('$e');
       }
     } finally {
       if (mounted) setState(() => _runningMonitoringNow = false);
@@ -371,13 +348,9 @@ class _AdminViewState extends State<AdminView> {
           }
         }
         await _loadAdminData();
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Usuario guardado correctamente.')),
-        );
+        messenger.aviso('Usuario guardado correctamente.');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        messenger.avisoError('$e');
       }
     }
   }
@@ -748,15 +721,9 @@ class _AdminViewState extends State<AdminView> {
           await widget.api.updateAdServer(existing.id, payload);
         }
         await _loadAdminData();
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text('Servidor Active Directory guardado correctamente.'),
-          ),
-        );
+        messenger.aviso('Servidor Active Directory guardado correctamente.');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        messenger.avisoError('$e');
       }
     }
   }
@@ -1099,17 +1066,9 @@ class _AdminViewState extends State<AdminView> {
             .toList();
         final res = await widget.api.importAdUsers(ad.id, toImport);
         await _loadAdminData();
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Usuarios AD procesados desde "${ad.name}": ${res['imported_count'] ?? toImport.length} dados de alta / actualizados.',
-            ),
-          ),
-        );
+        messenger.aviso('Usuarios AD procesados desde "${ad.name}": ${res['imported_count'] ?? toImport.length} dados de alta / actualizados.');
       } catch (e) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700),
-        );
+        messenger.avisoError('$e');
       }
     }
   }
@@ -2116,9 +2075,7 @@ class _AdminViewState extends State<AdminView> {
                                 await widget.api.deleteUser(u.id);
                                 await _loadAdminData();
                               } catch (e) {
-                                messenger.showSnackBar(
-                                  SnackBar(content: Text('$e')),
-                                );
+                                messenger.aviso('$e');
                               }
                             },
                             icon: const Icon(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/widgets/avisos.dart';
 import '../../core/theme.dart';
 import 'package:flutter/services.dart';
 import '../../core/api_client.dart';
@@ -444,13 +445,7 @@ class _CmdbViewState extends State<CmdbView> {
         !cidrAlreadyInCmdb;
 
     if (selectedRows.isEmpty && !shouldCreateSubnet) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Marca al menos un dispositivo detectado en red (en rojo) para añadirlo a la CMDB.',
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(context).aviso('Marca al menos un dispositivo detectado en red (en rojo) para añadirlo a la CMDB.');
       return;
     }
 
@@ -560,9 +555,7 @@ class _CmdbViewState extends State<CmdbView> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _importingDiscovered = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error importando en CMDB: $e')),
-      );
+      ScaffoldMessenger.of(context).aviso('Error importando en CMDB: $e');
     }
   }
 
@@ -586,9 +579,7 @@ class _CmdbViewState extends State<CmdbView> {
       await _loadOverview(silent: true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error en Heartbeat: $e')),
-      );
+      ScaffoldMessenger.of(context).aviso('Error en Heartbeat: $e');
     } finally {
       if (mounted) {
         setState(() => _runningHeartbeatAssetId = null);
@@ -1045,9 +1036,7 @@ class _CmdbViewState extends State<CmdbView> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error actualizando Heartbeat: $e')),
-      );
+      ScaffoldMessenger.of(context).aviso('Error actualizando Heartbeat: $e');
     }
   }
 
@@ -1518,11 +1507,7 @@ class _CmdbViewState extends State<CmdbView> {
                         } catch (e) {
                           if (!ctx.mounted) return;
                           setModalState(() => saving = false);
-                          ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(
-                              content: Text('Error resolviendo colisión: $e'),
-                            ),
-                          );
+                          ScaffoldMessenger.of(ctx).aviso('Error resolviendo colisión: $e');
                         }
                       },
                 icon: const Icon(Icons.check_circle_outline, size: 16),
@@ -3340,11 +3325,7 @@ class _CmdbViewState extends State<CmdbView> {
                           icon: const Icon(Icons.copy, size: 15),
                           onPressed: () {
                             Clipboard.setData(ClipboardData(text: addr));
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('IP $addr copiada al portapapeles'),
-                              ),
-                            );
+                            ScaffoldMessenger.of(context).aviso('IP $addr copiada al portapapeles');
                           },
                         ),
                         IconButton(
@@ -7106,9 +7087,7 @@ class _CmdbViewState extends State<CmdbView> {
                   await _loadOverview(silent: true);
                 } catch (e) {
                   if (!ctx.mounted) return;
-                  ScaffoldMessenger.of(ctx).showSnackBar(
-                    SnackBar(content: Text('Error guardando en CMDB: $e')),
-                  );
+                  ScaffoldMessenger.of(ctx).aviso('Error guardando en CMDB: $e');
                 }
               },
               icon: const Icon(Icons.save_rounded, size: 16),
@@ -7376,11 +7355,7 @@ class _CmdbViewState extends State<CmdbView> {
                           await _loadOverview(silent: true);
                         } catch (e) {
                           if (!ctx.mounted) return;
-                          ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(
-                              content: Text('Error guardando subred: $e'),
-                            ),
-                          );
+                          ScaffoldMessenger.of(ctx).aviso('Error guardando subred: $e');
                         }
                       },
                 icon: const Icon(Icons.save, size: 16),
