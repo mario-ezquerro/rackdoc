@@ -10,6 +10,10 @@ scrape_configs:
   - job_name: "rackdoc_backend_collector"
     scrape_interval: 15s
     metrics_path: "/api/v1/metrics"
+    # /api/v1/metrics exige la clave de automatización (X-API-Key o Bearer).
+    # La clave se guarda fuera de este fichero porque este sí se versiona.
+    authorization:
+      credentials_file: "/etc/prometheus/dynamic/automation_api_key"
     static_configs:
       - targets: ["rackdoc-backend:8000"]
         labels:

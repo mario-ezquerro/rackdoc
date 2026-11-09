@@ -2,6 +2,7 @@ from __future__ import annotations
 import os
 from datetime import datetime
 from sqlalchemy.orm import Session
+from .security import hash_password, verify_password
 from .models import (
     User,
     ADServer,
@@ -678,7 +679,10 @@ def sync_system_defaults(db: Session):
         existing_admin = db.query(User).filter(User.role == "admin").first()
     if existing_admin:
         existing_admin.username = admin_user
-        existing_admin.password_hash = admin_pass
+        # Solo se re-escribe el hash si la contraseña de .env ha cambiado, para no
+        # invalidar en cada arranque una contraseña ya rotada desde la interfaz.
+        if not verify_password(admin_pass, existing_admin.password_hash):
+            existing_admin.password_hash = hash_password(admin_pass)
         existing_admin.role = "admin"
         existing_admin.is_active = True
         if not existing_admin.full_name:
@@ -691,7 +695,7 @@ def sync_system_defaults(db: Session):
                 username=admin_user,
                 email=admin_email,
                 full_name="Administrador Principal (.env)",
-                password_hash=admin_pass,
+                password_hash=hash_password(admin_pass),
                 role="admin",
                 auth_source="local",
                 is_active=True,

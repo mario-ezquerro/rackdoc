@@ -2,8 +2,30 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/datacenter_models.dart';
 
+/// Error de autenticación/autorización devuelto por la API (401 / 403).
+/// La UI lo distingue de un error de red para poder volver a la pantalla de login.
+class RackDocAuthException implements Exception {
+  final int statusCode;
+  final String message;
+
+  const RackDocAuthException(this.statusCode, this.message);
+
+  /// 401: no hay sesión válida (hay que volver a identificarse).
+  bool get requiresLogin => statusCode == 401;
+
+  /// 403: la sesión es válida pero el rol no alcanza para esta operación.
+  bool get isForbidden => statusCode == 403;
+
+  @override
+  String toString() => message;
+}
+
 class RackDocApiClient {
   final String baseUrl;
+
+  /// JWT de la sesión en curso. Se rellena en [login] y se envía en cada
+  /// petición mediante la cabecera Authorization.
+  String? _accessToken;
 
   RackDocApiClient({String? baseUrl})
       : baseUrl = baseUrl ?? _resolveDefaultBaseUrl();
@@ -23,6 +45,12 @@ class RackDocApiClient {
 
   String get rootOrigin => baseUrl.replaceFirst(RegExp(r'/api(/v1)?$'), '');
 
+  /// true si hay un token de sesión guardado.
+  bool get hasSession => (_accessToken ?? '').isNotEmpty;
+
+  /// Olvida el token (cierre de sesión o respuesta 401 del backend).
+  void clearSession() => _accessToken = null;
+
   String getSwaggerDocsUrl() => '$rootOrigin/docs';
   String getRedocUrl() => '$rootOrigin/redoc';
   String getOpenApiSpecUrl() => '$rootOrigin/openapi.json';
@@ -30,6 +58,7 @@ class RackDocApiClient {
   Map<String, String> get _headers => {
         'Content-Type': 'application/json; charset=UTF-8',
         'Accept': 'application/json',
+        if (hasSession) 'Authorization': 'Bearer $_accessToken',
       };
 
   dynamic _decodeResponse(http.Response response) {
@@ -37,6 +66,19 @@ class RackDocApiClient {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       if (bodyStr.isEmpty) return {};
       return jsonDecode(bodyStr);
+    }
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      String detail = response.statusCode == 401
+          ? 'Sesión no válida o caducada. Vuelve a iniciar sesión.'
+          : 'No tienes permisos para esta operación.';
+      try {
+        final err = jsonDecode(bodyStr);
+        if (err is Map && err['detail'] is String) detail = err['detail'] as String;
+      } catch (_) {}
+      // Un 401 significa que el token ya no sirve: lo descartamos para no
+      // seguir reintentando con credenciales muertas.
+      if (response.statusCode == 401) clearSession();
+      throw RackDocAuthException(response.statusCode, detail);
     }
     try {
       final err = jsonDecode(bodyStr);
@@ -667,6 +709,11 @@ class RackDocApiClient {
       }),
     );
     final data = _decodeResponse(res) as Map;
+    final token = (data['token'] ?? '').toString();
+    if (token.isEmpty) {
+      throw Exception('El backend no devolvió un token de sesión.');
+    }
+    _accessToken = token;
     return UserModel.fromJson(Map<String, dynamic>.from(data['user'] as Map));
   }
 

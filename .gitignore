@@ -3,6 +3,10 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 data/*.json
+data/prometheus/tsdb/
+# Generado por el backend en cada arranque (File SD de Prometheus)
+data/prometheus/targets_dynamic.json
+data/prometheus/targets_*.json
 backend/data/*.db
 backend/data/*.db-shm
 backend/data/*.db-wal
@@ -12,6 +16,7 @@ backend/data/uploads/
 
 # Entornos y secretos
 .env
+data/prometheus/automation_api_key
 .venv/
 venv/
 __pycache__/

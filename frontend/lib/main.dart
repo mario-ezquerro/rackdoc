@@ -114,7 +114,8 @@ class _RackDocShellState extends State<RackDocShell> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleGlobalHardwareKey);
-    _loadInitialData();
+    // Sin sesión no se pide nada al backend: toda la API exige un JWT y las
+    // llamadas solo devolverían 401. Los datos se cargan tras el login.
     // El frontend consulta periódicamente al backend el estado de Heartbeat
     _backgroundStatusPollTimer = Timer.periodic(
       const Duration(seconds: 30),
@@ -169,10 +170,12 @@ class _RackDocShellState extends State<RackDocShell> {
       _error = null;
     });
     try {
+      // getUsers() solo está permitido a 'admin'; para el resto de roles
+      // devuelve 403, así que se pide aparte para no tumbar el resto de la carga.
       final results = await Future.wait([
         _api.getLocations(),
         _api.getTemplates(),
-        _api.getUsers(),
+        _api.getUsers().catchError((_) => <UserModel>[]),
         _api.fetchDashboardInventory(),
       ]);
       final locs = results[0] as List<LocationNode>;
@@ -240,6 +243,7 @@ class _RackDocShellState extends State<RackDocShell> {
   }
 
   Future<void> _refreshDataSilently() async {
+    if (!_isAuthenticated || !_api.hasSession) return;
     try {
       final results = await Future.wait([
         _api.getLocations(),
@@ -249,6 +253,14 @@ class _RackDocShellState extends State<RackDocShell> {
         setState(() {
           _locations = results[0] as List<LocationNode>;
           _dashboardInventory = results[1] as Map<String, dynamic>;
+        });
+      }
+    } on RackDocAuthException catch (e) {
+      // Token caducado o revocado: devolvemos al usuario a la pantalla de login.
+      if (e.requiresLogin && mounted) {
+        setState(() {
+          _isAuthenticated = false;
+          _gatePassCtrl.clear();
         });
       }
     } catch (_) {}
@@ -310,6 +322,7 @@ class _RackDocShellState extends State<RackDocShell> {
           _gateAuthenticating = false;
           _gatePassCtrl.clear();
         });
+        await _loadInitialData();
       }
     } catch (e) {
       if (mounted) {
@@ -386,6 +399,7 @@ class _RackDocShellState extends State<RackDocShell> {
                               _currentUser = logged;
                               _isAuthenticated = true;
                             });
+                            await _loadInitialData();
                             if (ctx.mounted) Navigator.pop(ctx);
                             messenger.showSnackBar(
                               SnackBar(
@@ -422,6 +436,7 @@ class _RackDocShellState extends State<RackDocShell> {
                             _currentUser = logged;
                             _isAuthenticated = true;
                           });
+                          await _loadInitialData();
                           if (ctx.mounted) Navigator.pop(ctx);
                           messenger.showSnackBar(
                             SnackBar(
@@ -539,10 +554,16 @@ class _RackDocShellState extends State<RackDocShell> {
             TextButton.icon(
               onPressed: () {
                 Navigator.pop(ctx);
+                // Se descarta el JWT y los datos ya cargados para que no quede
+                // información de la sesión anterior en pantalla.
+                _api.clearSession();
                 setState(() {
                   _isAuthenticated = false;
                   _gateUserCtrl.text = _currentUser.username;
                   _gatePassCtrl.clear();
+                  _locations = [];
+                  _users = [];
+                  _dashboardInventory = {};
                 });
               },
               icon: const Icon(

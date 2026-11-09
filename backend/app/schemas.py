@@ -110,7 +110,7 @@ class UserSchema(BaseModel):
 
 class UserCreate(BaseModel):
     username: str
-    password: str = "changeme"
+    password: str
     email: str = ""
     full_name: str = ""
     role: str = "viewer"  # admin | editor | operator | viewer
