@@ -56,7 +56,11 @@ from .monitor import check_host_connectivity
 PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://rackdoc-prometheus:9090").rstrip("/")
 PROMETHEUS_PUBLIC_URL = os.getenv("PROMETHEUS_PUBLIC_URL", "http://localhost:9090").rstrip("/")
 PROMETHEUS_DYNAMIC_DIR = Path(os.getenv("PROMETHEUS_DYNAMIC_DIR", "/app/data/prometheus"))
-AUTOMATION_API_KEY = os.getenv("AUTOMATION_API_KEY", "rackdoc-ansible-automation-token-2026")
+# Fichero de File Service Discovery que Prometheus relee cada 15s.
+PROMETHEUS_DYNAMIC_TARGETS_PATH = PROMETHEUS_DYNAMIC_DIR / "targets_dynamic.json"
+# Sin valor por defecto: si no está configurada, los endpoints de automatización
+# se deshabilitan en lugar de aceptar una clave pública conocida.
+AUTOMATION_API_KEY = (os.getenv("AUTOMATION_API_KEY", "") or "").strip()
 
 CONNECTOR_TYPE_LABELS: Dict[str, str] = {
     "snmp_switch": "Switch / Router / Firewall SNMP (IF-MIB + LLDP-MIB)",
@@ -117,6 +121,16 @@ def sync_prometheus_targets_file(db: Session) -> Dict[str, Any]:
     """
     try:
         PROMETHEUS_DYNAMIC_DIR.mkdir(parents=True, exist_ok=True)
+
+        # '/api/v1/metrics' está protegido con la clave de automatización, así que
+        # se la dejamos a Prometheus en un fichero aparte (nunca dentro del YAML,
+        # que sí se versiona) y la referenciamos con 'credentials_file'.
+        key_file = PROMETHEUS_DYNAMIC_DIR / "automation_api_key"
+        if AUTOMATION_API_KEY:
+            if not key_file.exists() or key_file.read_text(encoding="utf-8").strip() != AUTOMATION_API_KEY:
+                key_file.write_text(AUTOMATION_API_KEY, encoding="utf-8")
+                key_file.chmod(0o600)
+
         prom_yml = PROMETHEUS_DYNAMIC_DIR / "prometheus.yml"
         if not prom_yml.exists():
             prom_yml.write_text(
@@ -129,6 +143,8 @@ def sync_prometheus_targets_file(db: Session) -> Dict[str, Any]:
                 "  - job_name: 'rackdoc_backend_collector'\n"
                 "    scrape_interval: 15s\n"
                 "    metrics_path: '/api/v1/metrics'\n"
+                "    authorization:\n"
+                "      credentials_file: '/etc/prometheus/dynamic/automation_api_key'\n"
                 "    static_configs:\n"
                 "      - targets: ['rackdoc-backend:8000']\n"
                 "        labels:\n"
@@ -212,7 +228,7 @@ def sync_prometheus_targets_file(db: Session) -> Dict[str, Any]:
                     }
                 )
 
-        targets_file = PROMETHEUS_DYNAMIC_DIR / "targets_dynamic.json"
+        targets_file = PROMETHEUS_DYNAMIC_TARGETS_PATH
         targets_file.write_text(json.dumps(sd_entries, indent=2), encoding="utf-8")
         return {"targets_count": len(sd_entries), "file": str(targets_file)}
     except Exception as exc:
@@ -1727,7 +1743,7 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
             "active_maintenance_windows": len(active_windows),
             "total_tech_stacks": len(serialized_stacks),
             "prometheus_url": PROMETHEUS_PUBLIC_URL,
-            "automation_api_key_hint": AUTOMATION_API_KEY,
+            "automation_api_key_configured": bool(AUTOMATION_API_KEY),
         },
         "tech_stacks": serialized_stacks,
         "hosts": serialized_hosts,

@@ -16,6 +16,7 @@ backend/data/uploads/
 
 # Entornos y secretos
 .env
+data/prometheus/automation_api_key
 .venv/
 venv/
 __pycache__/
