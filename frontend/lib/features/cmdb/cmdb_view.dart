@@ -2637,6 +2637,64 @@ class _CmdbViewState extends State<CmdbView> {
                                   : AppPalette.slate400,
                             ),
                           ),
+                          Builder(
+                            builder: (_) {
+                              final rawCs = (asset['custom_fields'] is Map)
+                                  ? (asset['custom_fields']
+                                        as Map)['certscope_config']
+                                  : null;
+                              final csOn = rawCs is Map
+                                  ? rawCs['enabled'] == true
+                                  : ((asset['monitor_method'] ?? '')
+                                            .toString()
+                                            .toLowerCase() ==
+                                        'https');
+                              final csDays = rawCs is Map
+                                  ? rawCs['days_remaining']
+                                  : null;
+                              return IconButton(
+                                tooltip: csOn
+                                    ? '3. CertScope HTTPS Activo${csDays != null ? ' ($csDays días)' : ''} (Clic para desactivar)'
+                                    : '3. CertScope HTTPS Desactivado (Clic para activar y analizar certificado HTTPS)',
+                                visualDensity: VisualDensity.compact,
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                  minWidth: 26,
+                                  minHeight: 26,
+                                ),
+                                onPressed: () async {
+                                  final nextVal = !csOn;
+                                  try {
+                                    await widget.api.updateCmdbAsset(assetId, {
+                                      'certscope_enabled': nextVal,
+                                      'certscope_port': 443,
+                                    });
+                                    await _loadOverview(silent: true);
+                                    if (!mounted) return;
+                                    ScaffoldMessenger.of(context).aviso(
+                                      nextVal
+                                          ? 'CertScope HTTPS activado y analizado para ${asset['code']} (ver en 7. CertScope).'
+                                          : 'CertScope HTTPS desactivado para ${asset['code']}.',
+                                    );
+                                  } catch (e) {
+                                    if (!mounted) return;
+                                    ScaffoldMessenger.of(
+                                      context,
+                                    ).avisoError('$e');
+                                  }
+                                },
+                                icon: Icon(
+                                  csOn
+                                      ? Icons.verified_user_rounded
+                                      : Icons.shield_outlined,
+                                  size: 15,
+                                  color: csOn
+                                      ? AppPalette.violet600
+                                      : AppPalette.slate400,
+                                ),
+                              );
+                            },
+                          ),
                           IconButton(
                             tooltip: 'Añadir otra IP a este equipo',
                             visualDensity: VisualDensity.compact,
@@ -6411,9 +6469,24 @@ class _CmdbViewState extends State<CmdbView> {
     final monitorPortCtrl = TextEditingController(
       text: '${existing?['monitor_port'] ?? 22}',
     );
-    bool certscopeEnabled = false;
-    final certscopePortCtrl = TextEditingController(text: '443');
-    String certscopeRenewalType = 'manual';
+    final rawCsCfg = (existing?['custom_fields'] is Map)
+        ? (existing!['custom_fields'] as Map)['certscope_config']
+        : null;
+    final csCfg = rawCsCfg is Map
+        ? Map<String, dynamic>.from(rawCsCfg)
+        : <String, dynamic>{};
+    bool certscopeEnabled = csCfg.containsKey('enabled')
+        ? csCfg['enabled'] == true
+        : (monitorMethod == 'https');
+    final certscopePortCtrl = TextEditingController(
+      text: '${csCfg['port'] ?? 443}',
+    );
+    String certscopeRenewalType =
+        (csCfg['renewal_type'] ?? 'manual').toString() == 'auto_acme'
+            ? 'auto_acme'
+            : 'manual';
+    bool probingCertNow = false;
+    Map<String, dynamic> certProbeResult = Map<String, dynamic>.from(csCfg);
 
     List<Map<String, dynamic>> ipDrafts = [];
     if (isEdit && existing['ip_addresses'] is List) {
@@ -6996,7 +7069,7 @@ class _CmdbViewState extends State<CmdbView> {
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
-                      vertical: 6,
+                      vertical: 8,
                     ),
                     decoration: BoxDecoration(
                       color: certscopeEnabled
@@ -7009,66 +7082,197 @@ class _CmdbViewState extends State<CmdbView> {
                             : AppPalette.slate300,
                       ),
                     ),
-                    child: Row(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          child: SwitchListTile(
-                            value: certscopeEnabled,
-                            dense: true,
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text(
-                              '7. CertScope: Verificar y registrar caducidad de Certificado HTTPS/TLS al guardar',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w900,
-                                color: AppPalette.blue900,
-                              ),
-                            ),
-                            onChanged: (v) =>
-                                setModalState(() => certscopeEnabled = v),
-                          ),
-                        ),
-                        if (certscopeEnabled) ...[
-                          const SizedBox(width: 8),
-                          SizedBox(
-                            width: 110,
-                            child: TextField(
-                              controller: certscopePortCtrl,
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: 'Puerto HTTPS',
-                                border: OutlineInputBorder(),
-                                isDense: true,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          SizedBox(
-                            width: 190,
-                            child: DropdownButtonFormField<String>(
-                              initialValue: certscopeRenewalType,
-                              decoration: const InputDecoration(
-                                labelText: 'Renovación Certificado',
-                                border: OutlineInputBorder(),
-                                isDense: true,
-                              ),
-                              items: const [
-                                DropdownMenuItem(
-                                  value: 'manual',
-                                  child: Text('Manual (Avisar)'),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: SwitchListTile(
+                                value: certscopeEnabled,
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                title: const Text(
+                                  '3ª Gestión (7. CertScope): Verificar y controlar caducidad de Certificado HTTPS/TLS',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w900,
+                                    color: AppPalette.blue900,
+                                  ),
                                 ),
-                                DropdownMenuItem(
-                                  value: 'auto_acme',
-                                  child: Text('Automática ACME'),
+                                subtitle: const Text(
+                                  'Conecta este activo CMDB con 7. CertScope y analiza automáticamente su certificado X.509',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    color: AppPalette.slate600,
+                                  ),
+                                ),
+                                onChanged: (v) =>
+                                    setModalState(() => certscopeEnabled = v),
+                              ),
+                            ),
+                            if (certscopeEnabled) ...[
+                              const SizedBox(width: 8),
+                              SizedBox(
+                                width: 100,
+                                child: TextField(
+                                  controller: certscopePortCtrl,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Puerto TLS',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              SizedBox(
+                                width: 175,
+                                child: DropdownButtonFormField<String>(
+                                  initialValue: certscopeRenewalType,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Renovación Certificado',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  items: const [
+                                    DropdownMenuItem(
+                                      value: 'manual',
+                                      child: Text('Manual (Avisar)'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'auto_acme',
+                                      child: Text('Automática ACME'),
+                                    ),
+                                  ],
+                                  onChanged: (v) {
+                                    if (v != null) {
+                                      setModalState(
+                                        () => certscopeRenewalType = v,
+                                      );
+                                    }
+                                  },
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              FilledButton.tonalIcon(
+                                onPressed: probingCertNow
+                                    ? null
+                                    : () async {
+                                        final primaryIp = ipDrafts.isNotEmpty
+                                            ? (ipDrafts.first['ip_address'] ??
+                                                      '')
+                                                  .toString()
+                                                  .trim()
+                                            : '';
+                                        final target = primaryIp.isNotEmpty
+                                            ? primaryIp
+                                            : fqdnCtrl.text.trim();
+                                        if (target.isEmpty) return;
+                                        setModalState(
+                                          () => probingCertNow = true,
+                                        );
+                                        try {
+                                          final res = await widget.api
+                                              .probeCertificate({
+                                                'target_host': target,
+                                                'port':
+                                                    int.tryParse(
+                                                      certscopePortCtrl.text
+                                                          .trim(),
+                                                    ) ??
+                                                    443,
+                                                'sni_hostname': fqdnCtrl.text
+                                                    .trim(),
+                                              });
+                                          setModalState(() {
+                                            probingCertNow = false;
+                                            certProbeResult = {
+                                              ...certProbeResult,
+                                              'status':
+                                                  res['status'] ??
+                                                  (res['ok'] == true
+                                                      ? 'valid'
+                                                      : 'unreachable'),
+                                              'days_remaining':
+                                                  res['days_remaining'],
+                                              'common_name':
+                                                  res['common_name'] ?? '',
+                                              'issuer_cn':
+                                                  res['issuer_cn'] ?? '',
+                                              'valid_until':
+                                                  res['valid_until'] ?? '',
+                                              'last_error': res['error'] ?? '',
+                                            };
+                                          });
+                                        } catch (e) {
+                                          setModalState(() {
+                                            probingCertNow = false;
+                                            certProbeResult = {
+                                              'last_error': '$e',
+                                            };
+                                          });
+                                        }
+                                      },
+                                icon: probingCertNow
+                                    ? const SizedBox(
+                                        width: 13,
+                                        height: 13,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Icon(
+                                        Icons.sync_lock_rounded,
+                                        size: 15,
+                                      ),
+                                label: const Text('Analizar HTTPS'),
+                              ),
+                            ],
+                          ],
+                        ),
+                        if (certscopeEnabled &&
+                            ((certProbeResult['common_name'] ?? '')
+                                    .toString()
+                                    .isNotEmpty ||
+                                (certProbeResult['last_error'] ?? '')
+                                    .toString()
+                                    .isNotEmpty)) ...[
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: AppPalette.blue300),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  (certProbeResult['status'] == 'valid')
+                                      ? Icons.verified_user_rounded
+                                      : Icons.info_outline_rounded,
+                                  size: 15,
+                                  color: (certProbeResult['status'] == 'valid')
+                                      ? AppPalette.green700
+                                      : AppPalette.amber700,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    (certProbeResult['common_name'] ?? '')
+                                            .toString()
+                                            .isNotEmpty
+                                        ? 'Certificado X.509: CN=${certProbeResult['common_name']} · Emisor=${certProbeResult['issuer_cn']} · Vence=${(certProbeResult['valid_until'] ?? '').toString().split('T').first} (${certProbeResult['days_remaining'] ?? '?'} días)'
+                                        : 'Aviso TLS: ${certProbeResult['last_error']}',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppPalette.slate800,
+                                    ),
+                                  ),
                                 ),
                               ],
-                              onChanged: (v) {
-                                if (v != null) {
-                                  setModalState(
-                                    () => certscopeRenewalType = v,
-                                  );
-                                }
-                              },
                             ),
                           ),
                         ],

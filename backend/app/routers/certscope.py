@@ -321,8 +321,9 @@ def verify_single_certificate(
 def verify_all_certificates(
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
+    disc = certscope_service.auto_discover_https_devices_into_certscope(db, probe_all_active_ips=True)
     certs = db.query(models.TlsCertificate).all()
-    probed_count = 0
+    probed_count = disc.get("probed_candidates", 0)
     alerts_triggered = 0
 
     for cert in certs:

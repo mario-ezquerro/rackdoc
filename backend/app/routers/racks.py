@@ -11,7 +11,10 @@ from ..seed import create_ports_from_template, ensure_rack_external_outlets, get
 from ..routers._common import _check_u_collision, _delete_connections_for_port_ids, _effective_device_u_height, _serialize_connection, api_router
 from ..services.cmdb_service import resolve_cmdb_ip_collision, sync_physical_devices_to_cmdb
 from ..services.monitor import check_all_monitored_devices, check_single_device, run_device_remote_console
-from ..services.certscope_service import sync_or_probe_device_certificate
+from ..services.certscope_service import (
+    sync_or_probe_device_certificate,
+    sync_entity_certscope_from_custom_fields,
+)
 
 @api_router.post(
     "/racks",
@@ -401,23 +404,16 @@ def add_device_to_rack(rack_id: int, payload: RackDeviceCreate, db: Session = De
                 db.refresh(device)
             except Exception:
                 pass
-    if payload.certscope_enabled:
-        target_host = (device.ip_address or "").strip() or (device.fqdn or "").strip() or (device.hostname or "").strip()
-        if target_host:
-            my_asset = db.query(CmdbAsset).filter(CmdbAsset.rack_device_id == device.id).first()
-            sync_or_probe_device_certificate(
-                db,
-                name=f"Certificado TLS {device.name}",
-                target_host=target_host,
-                port=payload.certscope_port or 443,
-                sni_hostname=payload.certscope_sni or device.fqdn or "",
-                renewal_type=payload.certscope_renewal_type or "manual",
-                asset_id=my_asset.id if my_asset else None,
-                rack_device_id=device.id,
-                location_id=rack.room.floor.location_id if (rack.room and rack.room.floor) else None,
-            )
-            db.commit()
-            db.refresh(device)
+    sync_entity_certscope_from_custom_fields(
+        db,
+        rack_device=device,
+        explicit_enabled=payload.certscope_enabled,
+        explicit_port=payload.certscope_port,
+        explicit_renewal=payload.certscope_renewal_type,
+        explicit_sni=payload.certscope_sni,
+    )
+    db.commit()
+    db.refresh(device)
     return device
 
 
@@ -682,24 +678,16 @@ def update_rack_device(device_id: int, payload: RackDeviceUpdate, db: Session = 
             except Exception:
                 pass
 
-    if certscope_enabled:
-        target_host = (device.ip_address or "").strip() or (device.fqdn or "").strip() or (device.hostname or "").strip()
-        if target_host:
-            my_asset = db.query(CmdbAsset).filter(CmdbAsset.rack_device_id == device.id).first()
-            rk = device.rack
-            sync_or_probe_device_certificate(
-                db,
-                name=f"Certificado TLS {device.name}",
-                target_host=target_host,
-                port=certscope_port or 443,
-                sni_hostname=certscope_sni or device.fqdn or "",
-                renewal_type=certscope_renewal_type or "manual",
-                asset_id=my_asset.id if my_asset else None,
-                rack_device_id=device.id,
-                location_id=rk.room.floor.location_id if (rk and rk.room and rk.room.floor) else None,
-            )
-            db.commit()
-            db.refresh(device)
+    sync_entity_certscope_from_custom_fields(
+        db,
+        rack_device=device,
+        explicit_enabled=certscope_enabled,
+        explicit_port=certscope_port,
+        explicit_renewal=certscope_renewal_type,
+        explicit_sni=certscope_sni,
+    )
+    db.commit()
+    db.refresh(device)
 
     return device
 

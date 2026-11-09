@@ -692,6 +692,377 @@ def sync_or_probe_device_certificate(
     return existing
 
 
+def extract_https_config_from_custom_fields(
+    cf: Optional[Dict[str, Any]],
+    default_ip: str = "",
+    default_fqdn: str = "",
+    monitor_method: str = "",
+    monitor_port: int = 443,
+) -> Dict[str, Any]:
+    """
+    Evalúa la 3ª gestión ('certscope_config') o, si aún no fue definida explícitamente,
+    auto-detecta si el dispositivo tiene HTTPS activo en 'connect_config' o 'heartbeat_config'.
+    """
+    custom = dict(cf or {})
+    cs_cfg = custom.get("certscope_config")
+    conn_cfg = custom.get("connect_config") if isinstance(custom.get("connect_config"), dict) else {}
+    hb_cfg = custom.get("heartbeat_config") if isinstance(custom.get("heartbeat_config"), dict) else {}
+
+    # Determinar URL/Host HTTPS candidato desde Conectar o Heartbeat
+    conn_https_url = str(conn_cfg.get("https_url") or "").strip()
+    hb_http_url = str(hb_cfg.get("http_url") or "").strip()
+    candidate_url = ""
+    if isinstance(cs_cfg, dict) and str(cs_cfg.get("target_url") or cs_cfg.get("target_host") or "").strip():
+        candidate_url = str(cs_cfg.get("target_url") or cs_cfg.get("target_host") or "").strip()
+    elif conn_https_url:
+        candidate_url = conn_https_url
+    elif hb_http_url.lower().startswith("https://"):
+        candidate_url = hb_http_url
+    elif default_fqdn.strip():
+        candidate_url = default_fqdn.strip()
+    elif default_ip.strip():
+        candidate_url = default_ip.strip()
+
+    host_clean, port_clean, default_sni = clean_host_and_port(
+        candidate_url or default_ip or default_fqdn,
+        int((cs_cfg or {}).get("port") or (monitor_port if monitor_method == "https" else 443) or 443)
+        if isinstance(cs_cfg, dict)
+        else (monitor_port if monitor_method == "https" and monitor_port else 443),
+    )
+
+    if isinstance(cs_cfg, dict) and "enabled" in cs_cfg:
+        enabled = bool(cs_cfg.get("enabled"))
+        explicit = True
+    else:
+        explicit = False
+        conn_protos = [
+            str(x).lower()
+            for x in (conn_cfg.get("protocols") or conn_cfg.get("enabled_systems") or [])
+        ]
+        hb_protos = [
+            str(x).lower()
+            for x in (hb_cfg.get("protocols") or hb_cfg.get("enabled_systems") or [])
+        ]
+        has_conn_https = bool(conn_cfg.get("enabled")) and (
+            "https" in conn_protos or bool(conn_cfg.get("https_enabled"))
+        )
+        has_hb_https = bool(hb_cfg.get("enabled")) and (
+            "https" in hb_protos
+            or ("http" in hb_protos and hb_http_url.lower().startswith("https://"))
+        )
+        enabled = bool(
+            has_conn_https
+            or has_hb_https
+            or (str(monitor_method or "").lower() == "https")
+        )
+
+    return {
+        "enabled": enabled,
+        "explicit": explicit,
+        "target_host": host_clean,
+        "port": port_clean or 443,
+        "sni_hostname": str((cs_cfg or {}).get("sni_hostname") or default_fqdn or default_sni or "").strip()
+        if isinstance(cs_cfg, dict)
+        else (default_fqdn or default_sni or ""),
+        "renewal_type": str((cs_cfg or {}).get("renewal_type") or "manual").strip()
+        if isinstance(cs_cfg, dict)
+        else "manual",
+    }
+
+
+def sync_entity_certscope_from_custom_fields(
+    db: Session,
+    *,
+    rack_device: Optional[models.RackDevice] = None,
+    floor_device: Optional[models.FloorDevice] = None,
+    cmdb_asset: Optional[models.CmdbAsset] = None,
+    explicit_enabled: Optional[bool] = None,
+    explicit_port: Optional[int] = None,
+    explicit_renewal: Optional[str] = None,
+    explicit_sni: Optional[str] = None,
+) -> Optional[models.TlsCertificate]:
+    """
+    Sincroniza la 3ª gestión ('CertScope HTTPS') de cualquier elemento de Rack Editor, Datacenter Planta o CMDB
+    con la tabla `certscope_certificates` y actualiza `custom_fields['certscope_config']` con el resumen del certificado.
+    """
+    # Resolver entidades vinculadas si faltan
+    if rack_device and not cmdb_asset:
+        cmdb_asset = (
+            db.query(models.CmdbAsset)
+            .filter(
+                (models.CmdbAsset.rack_device_id == rack_device.id)
+                | (models.CmdbAsset.host_rack_device_id == rack_device.id)
+            )
+            .first()
+        )
+    if floor_device and not cmdb_asset:
+        if floor_device.cmdb_asset_id:
+            cmdb_asset = db.query(models.CmdbAsset).filter(models.CmdbAsset.id == floor_device.cmdb_asset_id).first()
+        if not cmdb_asset:
+            cmdb_asset = db.query(models.CmdbAsset).filter(models.CmdbAsset.floor_device_id == floor_device.id).first()
+    if cmdb_asset:
+        if not rack_device and (cmdb_asset.rack_device_id or cmdb_asset.host_rack_device_id):
+            r_id = cmdb_asset.rack_device_id or cmdb_asset.host_rack_device_id
+            rack_device = db.query(models.RackDevice).filter(models.RackDevice.id == r_id).first()
+        if not floor_device and cmdb_asset.floor_device_id:
+            floor_device = db.query(models.FloorDevice).filter(models.FloorDevice.id == cmdb_asset.floor_device_id).first()
+
+    primary_entity = rack_device or floor_device or cmdb_asset
+    if not primary_entity:
+        return None
+
+    cf = dict(getattr(primary_entity, "custom_fields", None) or {})
+    default_ip = ""
+    default_fqdn = getattr(primary_entity, "fqdn", "") or ""
+    if rack_device and rack_device.ip_address:
+        default_ip = rack_device.ip_address
+    elif floor_device and floor_device.ip_address:
+        default_ip = floor_device.ip_address
+    elif cmdb_asset and cmdb_asset.ip_addresses:
+        hb_ip = next(
+            (ip for ip in cmdb_asset.ip_addresses if ip.is_heartbeat_ip or ip.ip_role == "mgmt_heartbeat"),
+            cmdb_asset.ip_addresses[0],
+        )
+        default_ip = hb_ip.ip_address or ""
+
+    parsed = extract_https_config_from_custom_fields(
+        cf,
+        default_ip=default_ip,
+        default_fqdn=default_fqdn,
+        monitor_method=getattr(primary_entity, "monitor_method", "") or "",
+        monitor_port=getattr(primary_entity, "monitor_port", 443) or 443,
+    )
+
+    enabled = explicit_enabled if explicit_enabled is not None else parsed["enabled"]
+    target_host = parsed["target_host"] or default_ip or default_fqdn
+    port = explicit_port or parsed["port"] or 443
+    renewal_type = explicit_renewal or parsed["renewal_type"] or "manual"
+    sni_hostname = explicit_sni if explicit_sni is not None else parsed["sni_hostname"]
+
+    if not enabled:
+        # Si fue desactivado explícitamente, desactivar o eliminar certificado automático vinculado
+        if explicit_enabled is False or parsed["explicit"]:
+            q = db.query(models.TlsCertificate).filter(models.TlsCertificate.check_mode == "https_live")
+            conds = []
+            if cmdb_asset:
+                conds.append(models.TlsCertificate.asset_id == cmdb_asset.id)
+            if rack_device:
+                conds.append(models.TlsCertificate.rack_device_id == rack_device.id)
+            if floor_device:
+                conds.append(models.TlsCertificate.floor_device_id == floor_device.id)
+            if conds:
+                from sqlalchemy import or_
+                for c_del in q.filter(or_(*conds)).all():
+                    db.delete(c_del)
+            cs_Summary = {
+                "enabled": False,
+                "target_url": f"https://{target_host}:{port}" if target_host else "",
+                "port": port,
+                "renewal_type": renewal_type,
+                "sni_hostname": sni_hostname,
+            }
+            for ent in (rack_device, floor_device, cmdb_asset):
+                if ent is not None:
+                    ecf = dict(getattr(ent, "custom_fields", None) or {})
+                    ecf["certscope_config"] = cs_Summary
+                    ent.custom_fields = ecf
+            db.flush()
+        return None
+
+    if not target_host:
+        return None
+
+    loc_id = None
+    if rack_device and rack_device.rack and rack_device.rack.room and rack_device.rack.room.floor:
+        loc_id = rack_device.rack.room.floor.location_id
+    elif floor_device and floor_device.floor:
+        loc_id = floor_device.floor.location_id
+
+    dev_name = getattr(primary_entity, "name", "") or target_host
+    cert = sync_or_probe_device_certificate(
+        db,
+        name=f"Certificado TLS {dev_name}",
+        target_host=target_host,
+        port=port,
+        sni_hostname=sni_hostname,
+        renewal_type=renewal_type,
+        environment=getattr(cmdb_asset, "environment", "production") if cmdb_asset else "production",
+        responsible_person=getattr(primary_entity, "responsible_person", "Alex Geng") or "Alex Geng",
+        owner_team=getattr(cmdb_asset, "owner_team", "Seguridad & Sistemas") if cmdb_asset else "Seguridad & Sistemas",
+        asset_id=cmdb_asset.id if cmdb_asset else None,
+        rack_device_id=rack_device.id if rack_device else None,
+        floor_device_id=floor_device.id if floor_device else None,
+        location_id=loc_id,
+    )
+
+    if cert:
+        cs_summary = {
+            "enabled": True,
+            "cert_id": cert.id,
+            "cert_code": cert.code,
+            "target_url": f"https://{cert.target_host}:{cert.port}",
+            "target_host": cert.target_host,
+            "port": cert.port,
+            "sni_hostname": cert.sni_hostname or "",
+            "renewal_type": cert.renewal_type or "manual",
+            "status": cert.status,
+            "days_remaining": cert.days_remaining,
+            "common_name": cert.common_name or "",
+            "issuer_cn": cert.issuer_cn or "",
+            "valid_until": cert.valid_until.isoformat() if cert.valid_until else None,
+            "tls_version": cert.tls_version or "",
+            "is_self_signed": bool(cert.is_self_signed),
+            "last_error": cert.last_probe_error or "",
+            "last_checked_at": cert.last_checked_at.isoformat() if cert.last_checked_at else None,
+        }
+        for ent in (rack_device, floor_device, cmdb_asset):
+            if ent is not None:
+                ecf = dict(getattr(ent, "custom_fields", None) or {})
+                ecf["certscope_config"] = cs_summary
+                ent.custom_fields = ecf
+        db.flush()
+    return cert
+
+
+def auto_discover_https_devices_into_certscope(
+    db: Session,
+    probe_all_active_ips: bool = False,
+) -> Dict[str, int]:
+    """
+    Recorre los elementos creados en Rack Editor, Datacenter Planta y CMDB:
+    - Si tienen HTTPS activo (en 'certscope_config', 'connect_config', 'heartbeat_config' o 'MonitoredServiceCheck'),
+      los vincula y analiza automáticamente en CertScope.
+    - Si `probe_all_active_ips=True` (botón 'Auto-Analizar Equipos Existentes'), prueba además el puerto 443
+      en todos los equipos con IP de CMDB/Rack/Planta (salvo los que tengan CertScope desactivado explícitamente)
+      y registra aquellos que respondan por HTTPS/TLS o tengan verificación activa.
+    """
+    synced_count = 0
+    probed_candidates = 0
+
+    # 1. Equipos de Rack Editor
+    for rdev in db.query(models.RackDevice).all():
+        if rdev.mounted_face == "external":
+            continue
+        cf = dict(rdev.custom_fields or {})
+        cs_cfg = cf.get("certscope_config")
+        if isinstance(cs_cfg, dict) and cs_cfg.get("enabled") is False:
+            continue
+        parsed = extract_https_config_from_custom_fields(
+            cf,
+            default_ip=rdev.ip_address or "",
+            default_fqdn=rdev.fqdn or "",
+            monitor_method=rdev.monitor_method or "",
+            monitor_port=rdev.monitor_port or 443,
+        )
+        if parsed["enabled"]:
+            existing = (
+                db.query(models.TlsCertificate)
+                .filter(models.TlsCertificate.rack_device_id == rdev.id)
+                .first()
+            )
+            if not existing or probe_all_active_ips:
+                cert = sync_entity_certscope_from_custom_fields(db, rack_device=rdev, explicit_enabled=True)
+                if cert:
+                    synced_count += 1
+        elif probe_all_active_ips and (rdev.ip_address or rdev.fqdn):
+            probed_candidates += 1
+            host = (rdev.ip_address or rdev.fqdn or "").strip()
+            probe = probe_tls_certificate(host, 443, rdev.fqdn or "", timeout_sec=1.8)
+            if probe.get("ok"):
+                cert = sync_entity_certscope_from_custom_fields(db, rack_device=rdev, explicit_enabled=True)
+                if cert:
+                    synced_count += 1
+
+    # 2. Dispositivos de Datacenter Planta
+    for fdev in db.query(models.FloorDevice).all():
+        cf = dict(fdev.custom_fields or {})
+        cs_cfg = cf.get("certscope_config")
+        if isinstance(cs_cfg, dict) and cs_cfg.get("enabled") is False:
+            continue
+        parsed = extract_https_config_from_custom_fields(
+            cf,
+            default_ip=fdev.ip_address or "",
+            default_fqdn=fdev.fqdn or "",
+            monitor_method=fdev.monitor_method or "",
+            monitor_port=fdev.monitor_port or 443,
+        )
+        if parsed["enabled"]:
+            existing = (
+                db.query(models.TlsCertificate)
+                .filter(models.TlsCertificate.floor_device_id == fdev.id)
+                .first()
+            )
+            if not existing or probe_all_active_ips:
+                cert = sync_entity_certscope_from_custom_fields(db, floor_device=fdev, explicit_enabled=True)
+                if cert:
+                    synced_count += 1
+        elif probe_all_active_ips and (fdev.ip_address or fdev.fqdn):
+            probed_candidates += 1
+            host = (fdev.ip_address or fdev.fqdn or "").strip()
+            probe = probe_tls_certificate(host, 443, fdev.fqdn or "", timeout_sec=1.8)
+            if probe.get("ok"):
+                cert = sync_entity_certscope_from_custom_fields(db, floor_device=fdev, explicit_enabled=True)
+                if cert:
+                    synced_count += 1
+
+    # 3. Máquinas y Activos en CMDB y Red & Host (incluyendo chequeos HTTPS de Nagios)
+    https_checks_by_asset = {}
+    for chk in db.query(models.MonitoredServiceCheck).filter(models.MonitoredServiceCheck.enabled == True).all():
+        if chk.check_type == "https" or str(chk.target_ip_or_url or "").lower().startswith("https://"):
+            https_checks_by_asset[chk.asset_id] = chk
+
+    for asset in db.query(models.CmdbAsset).all():
+        cf = dict(asset.custom_fields or {})
+        cs_cfg = cf.get("certscope_config")
+        if isinstance(cs_cfg, dict) and cs_cfg.get("enabled") is False:
+            continue
+        hb_ip = next(
+            (ip.ip_address for ip in (asset.ip_addresses or []) if ip.is_heartbeat_ip or ip.ip_role == "mgmt_heartbeat"),
+            asset.ip_addresses[0].ip_address if asset.ip_addresses else "",
+        )
+        parsed = extract_https_config_from_custom_fields(
+            cf,
+            default_ip=hb_ip or "",
+            default_fqdn=asset.fqdn or "",
+            monitor_method=asset.monitor_method or "",
+            monitor_port=asset.monitor_port or 443,
+        )
+        has_https_chk = asset.id in https_checks_by_asset
+        if parsed["enabled"] or has_https_chk:
+            existing = (
+                db.query(models.TlsCertificate)
+                .filter(models.TlsCertificate.asset_id == asset.id)
+                .first()
+            )
+            if not existing or probe_all_active_ips:
+                chk_port = https_checks_by_asset[asset.id].port if has_https_chk else None
+                cert = sync_entity_certscope_from_custom_fields(
+                    db,
+                    cmdb_asset=asset,
+                    explicit_enabled=True,
+                    explicit_port=chk_port or parsed["port"] or 443,
+                )
+                if cert:
+                    synced_count += 1
+        elif probe_all_active_ips and (hb_ip or asset.fqdn):
+            existing = (
+                db.query(models.TlsCertificate)
+                .filter(models.TlsCertificate.asset_id == asset.id)
+                .first()
+            )
+            if not existing:
+                probed_candidates += 1
+                host = (hb_ip or asset.fqdn or "").strip()
+                probe = probe_tls_certificate(host, 443, asset.fqdn or "", timeout_sec=1.8)
+                if probe.get("ok"):
+                    cert = sync_entity_certscope_from_custom_fields(db, cmdb_asset=asset, explicit_enabled=True)
+                    if cert:
+                        synced_count += 1
+
+    db.commit()
+    return {"synced_count": synced_count, "probed_candidates": probed_candidates}
+
+
 def send_certificate_expiry_notification(
     db: Session,
     cert: models.TlsCertificate,
@@ -850,6 +1221,7 @@ def send_certificate_expiry_notification(
 
 
 def build_certscope_overview(db: Session) -> Dict[str, Any]:
+    auto_discover_https_devices_into_certscope(db, probe_all_active_ips=False)
     certs = db.query(models.TlsCertificate).order_by(models.TlsCertificate.id.asc()).all()
     contacts = db.query(models.AlertContact).order_by(models.AlertContact.full_name.asc()).all()
     groups = db.query(models.AlertContactGroup).order_by(models.AlertContactGroup.name.asc()).all()

@@ -11051,6 +11051,13 @@ class _DatacenterStyleHostConfigPanelState
   late final TextEditingController _connHttpUrlCtrl;
   late final TextEditingController _connHttpsUrlCtrl;
 
+  // Sección C (3ª Gestión): CertScope — Verificación Certificado HTTPS/TLS
+  late bool _csEnabled;
+  late final TextEditingController _csUrlCtrl;
+  late final TextEditingController _csPortCtrl;
+  late String _csRenewalType;
+  Map<String, dynamic> _csSummary = {};
+
   bool _saving = false;
 
   @override
@@ -11245,6 +11252,29 @@ class _DatacenterStyleHostConfigPanelState
     _connHttpsUrlCtrl = TextEditingController(
       text: (h['web_https_url'] as String?) ?? 'https://${_ipCtrl.text}/',
     );
+
+    final rawCs = h['certscope_config'];
+    final csCfg = rawCs is Map
+        ? Map<String, dynamic>.from(rawCs)
+        : <String, dynamic>{};
+    if (csCfg.containsKey('enabled')) {
+      _csEnabled = csCfg['enabled'] == true;
+    } else {
+      _csEnabled = (_connEnabled && _connHttps) ||
+          (_hbEnabled && _hbHttp && _hbHttpScheme == 'https');
+    }
+    _csUrlCtrl = TextEditingController(
+      text: (csCfg['url'] ?? csCfg['target_url'] ?? _connHttpsUrlCtrl.text)
+          .toString(),
+    );
+    _csPortCtrl = TextEditingController(
+      text: '${csCfg['port'] ?? 443}',
+    );
+    _csRenewalType =
+        (csCfg['renewal_type'] ?? 'manual').toString() == 'auto_acme'
+            ? 'auto_acme'
+            : 'manual';
+    _csSummary = csCfg;
   }
 
   Map<String, dynamic> _buildSavePayload() {
@@ -11421,6 +11451,13 @@ class _DatacenterStyleHostConfigPanelState
       'web_http_url': _connHttpUrlCtrl.text.trim(),
       'web_https_enabled': _connHttps,
       'web_https_url': _connHttpsUrlCtrl.text.trim(),
+      'certscope_enabled': _csEnabled,
+      'certscope_url': _csUrlCtrl.text.trim().isNotEmpty
+          ? _csUrlCtrl.text.trim()
+          : _connHttpsUrlCtrl.text.trim(),
+      'certscope_port': int.tryParse(_csPortCtrl.text.trim()) ?? 443,
+      'certscope_renewal_type': _csRenewalType,
+      'certscope_sni': _fqdnCtrl.text.trim(),
     };
   }
 
@@ -12537,6 +12574,165 @@ class _DatacenterStyleHostConfigPanelState
                             ),
                         ],
                       ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              // ===============================================================
+              // SECCIÓN C (3ª GESTIÓN): CERTSCOPE — VERIFICACIÓN HTTPS/TLS
+              // ===============================================================
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: _csEnabled
+                      ? AppTheme.accentPurple.withValues(alpha: 0.08)
+                      : AppTheme.bgSecondary,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: _csEnabled ? AppTheme.accentPurple : AppTheme.border,
+                    width: _csEnabled ? 1.4 : 1.0,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.verified_user_rounded,
+                          size: 16,
+                          color: _csEnabled
+                              ? AppTheme.accentPurple
+                              : AppTheme.textSecondary,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '3. CERTSCOPE — VERIFICACIÓN HTTPS / TLS',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w900,
+                                  color: _csEnabled
+                                      ? AppTheme.textPrimary
+                                      : AppTheme.textSecondary,
+                                ),
+                              ),
+                              const Text(
+                                'Comprueba caducidad de certificado SSL/TLS y sincroniza con 7. CertScope',
+                                style: TextStyle(
+                                  fontSize: 9.5,
+                                  color: AppTheme.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Switch.adaptive(
+                          value: _csEnabled,
+                          activeColor: AppTheme.accentPurple,
+                          onChanged: (v) => setState(() => _csEnabled = v),
+                        ),
+                      ],
+                    ),
+                    if (_csEnabled) ...[
+                      const SizedBox(height: 7),
+                      TextField(
+                        controller: _csUrlCtrl,
+                        style: const TextStyle(fontSize: 10.8),
+                        decoration: _compactDeco(
+                          'URL / Host HTTPS a verificar en CertScope',
+                          hint: 'https://10.20.20.160:443/',
+                        ),
+                      ),
+                      const SizedBox(height: 7),
+                      Row(
+                        children: [
+                          SizedBox(
+                            width: 90,
+                            child: TextField(
+                              controller: _csPortCtrl,
+                              style: const TextStyle(fontSize: 10.8),
+                              decoration: _compactDeco('Puerto TLS'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              initialValue: _csRenewalType,
+                              isExpanded: true,
+                              decoration: _compactDeco('Renovación'),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'manual',
+                                  child: Text(
+                                    '🔔 Manual (Avisar)',
+                                    style: TextStyle(fontSize: 10.8),
+                                  ),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'auto_acme',
+                                  child: Text(
+                                    '🤖 Automática ACME',
+                                    style: TextStyle(fontSize: 10.8),
+                                  ),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                if (v != null) {
+                                  setState(() => _csRenewalType = v);
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      if ((_csSummary['common_name'] ?? '')
+                              .toString()
+                              .isNotEmpty ||
+                          (_csSummary['last_error'] ?? '')
+                              .toString()
+                              .isNotEmpty) ...[
+                        const SizedBox(height: 7),
+                        Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: BoxDecoration(
+                            color: AppTheme.bgPrimary,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: AppTheme.border),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                (_csSummary['common_name'] ?? '')
+                                        .toString()
+                                        .isNotEmpty
+                                    ? 'CN: ${_csSummary['common_name']} (${_csSummary['days_remaining'] ?? '?'} días)'
+                                    : 'Estado TLS: ${_csSummary['status'] ?? 'Pendiente'}',
+                                style: const TextStyle(
+                                  fontSize: 10.2,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              if ((_csSummary['issuer_cn'] ?? '')
+                                  .toString()
+                                  .isNotEmpty)
+                                Text(
+                                  'CA: ${_csSummary['issuer_cn']} · Vence: ${(_csSummary['valid_until'] ?? '').toString().split('T').first}',
+                                  style: const TextStyle(
+                                    fontSize: 9.5,
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                   ],
                 ),

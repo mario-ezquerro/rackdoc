@@ -1369,6 +1369,8 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
                 "web_https_enabled": connect_enabled and web_https_enabled,
                 "web_https_url": web_https_url,
                 "connect_config": conn_cfg,
+                # Sección 3: CertScope — Verificación Certificado HTTPS/TLS
+                "certscope_config": dict(cf.get("certscope_config") or {}),
                 "mini_series": {
                     "cpu": [round(cpu_pct, 1) for _ in range(12)],
                     "ram": [round(ram_pct, 1) for _ in range(12)],
@@ -2018,6 +2020,17 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
     }
     if payload.get("heartbeat_config") is not None:
         cf["heartbeat_config"] = payload["heartbeat_config"]
+    if payload.get("certscope_enabled") is not None:
+        prev_cs = dict(cf.get("certscope_config") or {}) if isinstance(cf.get("certscope_config"), dict) else {}
+        prev_cs["enabled"] = bool(payload.get("certscope_enabled"))
+        if payload.get("certscope_url"):
+            prev_cs["url"] = str(payload.get("certscope_url")).strip()
+            prev_cs["target_url"] = prev_cs["url"]
+        if payload.get("certscope_port"):
+            prev_cs["port"] = int(payload.get("certscope_port") or 443)
+        if payload.get("certscope_renewal_type"):
+            prev_cs["renewal_type"] = str(payload.get("certscope_renewal_type")).strip()
+        cf["certscope_config"] = prev_cs
     asset.custom_fields = cf
 
     # Gestión del Alojamiento:
@@ -2264,35 +2277,52 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
             run_single_service_check(db=db, chk=chk, asset=asset)
 
     certscope_summary = None
-    if payload.get("certscope_enabled"):
-        from .certscope_service import sync_or_probe_device_certificate
-        cert = sync_or_probe_device_certificate(
-            db,
-            name=f"Certificado TLS {asset.name}",
-            target_host=primary_ip or asset.fqdn or asset.hostname,
-            port=int(payload.get("certscope_port") or 443),
-            sni_hostname=str(payload.get("certscope_sni") or asset.fqdn or "").strip(),
-            renewal_type=str(payload.get("certscope_renewal_type") or "manual").strip(),
-            environment=asset.environment or "production",
-            responsible_person=asset.responsible_person or "Alex Geng",
-            owner_team=asset.owner_team or "Seguridad & Sistemas",
-            asset_id=asset.id,
-            rack_device_id=asset.rack_device_id or asset.host_rack_device_id,
-            floor_device_id=asset.floor_device_id,
-            contact_group_ids=list(payload.get("certscope_contact_group_ids") or []),
-            contact_ids=list(payload.get("certscope_contact_ids") or []),
-            notify_emails=str(payload.get("certscope_notify_emails") or "").strip(),
-        )
-        db.commit()
-        if cert:
-            certscope_summary = {
-                "id": cert.id,
-                "code": cert.code,
-                "status": cert.status,
-                "days_remaining": cert.days_remaining,
-                "common_name": cert.common_name,
-                "valid_until": cert.valid_until.isoformat() if cert.valid_until else None,
-            }
+    from .certscope_service import sync_or_probe_device_certificate, sync_entity_certscope_from_custom_fields
+    if payload.get("certscope_enabled") is not None:
+        if payload.get("certscope_enabled"):
+            cert = sync_or_probe_device_certificate(
+                db,
+                name=f"Certificado TLS {asset.name}",
+                target_host=primary_ip or asset.fqdn or asset.hostname,
+                port=int(payload.get("certscope_port") or 443),
+                sni_hostname=str(payload.get("certscope_sni") or asset.fqdn or "").strip(),
+                renewal_type=str(payload.get("certscope_renewal_type") or "manual").strip(),
+                environment=asset.environment or "production",
+                responsible_person=asset.responsible_person or "Alex Geng",
+                owner_team=asset.owner_team or "Seguridad & Sistemas",
+                asset_id=asset.id,
+                rack_device_id=asset.rack_device_id or asset.host_rack_device_id,
+                floor_device_id=asset.floor_device_id,
+                contact_group_ids=list(payload.get("certscope_contact_group_ids") or []),
+                contact_ids=list(payload.get("certscope_contact_ids") or []),
+                notify_emails=str(payload.get("certscope_notify_emails") or "").strip(),
+            )
+            sync_entity_certscope_from_custom_fields(
+                db,
+                cmdb_asset=asset,
+                explicit_enabled=True,
+                explicit_port=int(payload.get("certscope_port") or 443),
+                explicit_renewal=str(payload.get("certscope_renewal_type") or "manual").strip(),
+                explicit_sni=str(payload.get("certscope_sni") or asset.fqdn or "").strip(),
+            )
+        else:
+            cert = sync_entity_certscope_from_custom_fields(
+                db,
+                cmdb_asset=asset,
+                explicit_enabled=False,
+            )
+    else:
+        cert = sync_entity_certscope_from_custom_fields(db, cmdb_asset=asset)
+    db.commit()
+    if cert:
+        certscope_summary = {
+            "id": cert.id,
+            "code": cert.code,
+            "status": cert.status,
+            "days_remaining": cert.days_remaining,
+            "common_name": cert.common_name,
+            "valid_until": cert.valid_until.isoformat() if cert.valid_until else None,
+        }
 
     prom_sync = sync_prometheus_targets_file(db)
     return {

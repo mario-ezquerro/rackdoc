@@ -144,6 +144,16 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   final TextEditingController _fdConnHttpUrlCtrl = TextEditingController();
   final TextEditingController _fdConnHttpsUrlCtrl = TextEditingController();
 
+  // 3) CERTSCOPE (Verificación Certificado HTTPS/TLS — sincronizado con 7. CertScope)
+  bool _fdCertScopeEnabled = false;
+  final TextEditingController _fdCertScopeUrlCtrl = TextEditingController();
+  final TextEditingController _fdCertScopePortCtrl = TextEditingController(
+    text: '443',
+  );
+  String _fdCertScopeRenewalType = 'manual';
+  bool _fdProbingCertScope = false;
+  Map<String, dynamic> _fdCertScopeSummary = {};
+
   // Tipos personalizados creados por el usuario ("+ Nuevo Tipo a Medida")
   List<_FloorDeviceCatalogItem> _customCatalogItems = [];
   final Set<String> _expandedLibraryGroups = {
@@ -888,6 +898,30 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     _fdConnHttpsUrlCtrl.text = (connCfg['https_url'] ??
             (baseHost.isNotEmpty ? 'https://$baseHost' : ''))
         .toString();
+
+    final csRaw = dev.customFields['certscope_config'];
+    final csCfg = csRaw is Map
+        ? Map<String, dynamic>.from(csRaw)
+        : <String, dynamic>{};
+    if (csCfg.containsKey('enabled')) {
+      _fdCertScopeEnabled = csCfg['enabled'] == true;
+    } else {
+      _fdCertScopeEnabled =
+          (_fdConnectEnabled && _fdEnabledConnectSystems.contains('https')) ||
+          (_fdEnabledMonitorSystems.contains('http') &&
+              _fdHttpHbUrlCtrl.text.trim().toLowerCase().startsWith('https://'));
+    }
+    _fdCertScopeUrlCtrl.text = (csCfg['url'] ??
+            csCfg['target_url'] ??
+            _fdConnHttpsUrlCtrl.text)
+        .toString();
+    _fdCertScopePortCtrl.text = (csCfg['port'] ?? 443).toString();
+    _fdCertScopeRenewalType =
+        (csCfg['renewal_type'] ?? 'manual').toString() == 'auto_acme'
+            ? 'auto_acme'
+            : 'manual';
+    _fdCertScopeSummary = csCfg;
+
     _fdLastPingResult = null;
   }
 
@@ -939,6 +973,23 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
           : _fdConnSshUserCtrl.text.trim(),
       'http_url': _fdConnHttpUrlCtrl.text.trim(),
       'https_url': _fdConnHttpsUrlCtrl.text.trim(),
+    };
+    final prevCs = existingCustom['certscope_config'] is Map
+        ? Map<String, dynamic>.from(existingCustom['certscope_config'] as Map)
+        : <String, dynamic>{};
+    final csUrl = _fdCertScopeUrlCtrl.text.trim().isNotEmpty
+        ? _fdCertScopeUrlCtrl.text.trim()
+        : (_fdConnHttpsUrlCtrl.text.trim().isNotEmpty
+            ? _fdConnHttpsUrlCtrl.text.trim()
+            : (baseHost.isNotEmpty ? 'https://$baseHost/' : ''));
+    existingCustom['certscope_config'] = {
+      ...prevCs,
+      ..._fdCertScopeSummary,
+      'enabled': _fdCertScopeEnabled,
+      'url': csUrl,
+      'target_url': csUrl,
+      'port': int.tryParse(_fdCertScopePortCtrl.text.trim()) ?? 443,
+      'renewal_type': _fdCertScopeRenewalType,
     };
 
     final primaryMethod = _fdEnabledMonitorSystems.isNotEmpty
@@ -1032,6 +1083,63 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       }
     } finally {
       if (mounted) setState(() => _fdPinging = false);
+    }
+  }
+
+  Future<void> _probeFloorDeviceCertScopeNow(FloorDeviceNode dev) async {
+    final baseHost = _devIpCtrl.text.trim();
+    final rawTarget = _fdCertScopeUrlCtrl.text.trim().isNotEmpty
+        ? _fdCertScopeUrlCtrl.text.trim()
+        : (_fdConnHttpsUrlCtrl.text.trim().isNotEmpty
+            ? _fdConnHttpsUrlCtrl.text.trim()
+            : baseHost);
+    if (rawTarget.isEmpty) {
+      _showInlineSettingsBanner(
+        'Indica primero la IP o URL HTTPS del dispositivo en planta.',
+        isError: true,
+      );
+      return;
+    }
+    final port = int.tryParse(_fdCertScopePortCtrl.text.trim()) ?? 443;
+    setState(() => _fdProbingCertScope = true);
+    try {
+      final res = await widget.api.probeCertificate({
+        'target_host': rawTarget,
+        'port': port,
+      });
+      if (!mounted) return;
+      setState(() {
+        _fdCertScopeSummary = {
+          ..._fdCertScopeSummary,
+          'enabled': _fdCertScopeEnabled,
+          'status': res['status'] ?? (res['ok'] == true ? 'valid' : 'unreachable'),
+          'days_remaining': res['days_remaining'],
+          'common_name': res['common_name'] ?? '',
+          'issuer_cn': res['issuer_cn'] ?? '',
+          'valid_until': res['valid_until'] ?? '',
+          'last_error': res['error'] ?? '',
+        };
+      });
+      await widget.api.updateFloorDevice(dev.id, _buildFloorDevicePayload(dev));
+      widget.onRefresh();
+      if (mounted) {
+        if (res['ok'] == true) {
+          _showInlineSettingsBanner(
+            '🔒 Certificado HTTPS verificado (${res['days_remaining']} días restantes) y sincronizado en 7. CertScope',
+          );
+        } else {
+          _showInlineSettingsBanner(
+            '🔒 Registrado en 7. CertScope (sin respuesta TLS en :$port): ${res['error'] ?? 'Revisa conectividad'}',
+            isError: true,
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        _showInlineSettingsBanner('Error analizando certificado HTTPS: $e', isError: true);
+      }
+    } finally {
+      if (mounted) setState(() => _fdProbingCertScope = false);
     }
   }
 
@@ -6574,6 +6682,225 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                                 backgroundColor: AppPalette.blue600,
                                 visualDensity: VisualDensity.compact,
                               ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // =============================================================
+                // SECCIÓN C (3ª GESTIÓN): CERTSCOPE — VERIFICACIÓN CERTIFICADO HTTPS/TLS
+                // =============================================================
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: _fdCertScopeEnabled
+                        ? const Color(0xFFF5F3FF)
+                        : AppPalette.slate100,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _fdCertScopeEnabled
+                          ? AppPalette.violet600
+                          : AppPalette.slate300,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.verified_user_rounded,
+                            size: 15,
+                            color: _fdCertScopeEnabled
+                                ? AppPalette.violet600
+                                : AppPalette.slate500,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '3. CERTSCOPE — VERIFICACIÓN HTTPS/TLS',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w900,
+                                    color: _fdCertScopeEnabled
+                                        ? AppPalette.slate900
+                                        : AppPalette.slate600,
+                                  ),
+                                ),
+                                Text(
+                                  _fdCertScopeEnabled
+                                      ? 'Analiza caducidad X.509 y vincula este equipo en 7. CertScope'
+                                      : 'Desactivado (no se verifica certificado HTTPS)',
+                                  style: const TextStyle(
+                                    fontSize: 9.5,
+                                    color: AppPalette.slate600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Switch.adaptive(
+                            value: _fdCertScopeEnabled,
+                            activeThumbColor: AppPalette.violet600,
+                            onChanged: (v) async {
+                              setState(() => _fdCertScopeEnabled = v);
+                              await _saveSelectedFloorDeviceSettings(
+                                customToast: v
+                                    ? '🔒 CertScope activado y sincronizado para "${dev.code}".'
+                                    : '⚪ CertScope desactivado para "${dev.code}".',
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                      if (_fdCertScopeEnabled) ...[
+                        const SizedBox(height: 6),
+                        _buildCompactField(
+                          label: 'URL / Host HTTPS a verificar en CertScope',
+                          controller: _fdCertScopeUrlCtrl,
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            SizedBox(
+                              width: 90,
+                              child: _buildCompactField(
+                                label: 'Puerto TLS',
+                                controller: _fdCertScopePortCtrl,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: DropdownButtonFormField<String>(
+                                initialValue: _fdCertScopeRenewalType,
+                                isExpanded: true,
+                                decoration: const InputDecoration(
+                                  labelText: 'Renovación Certificado',
+                                  isDense: true,
+                                  filled: true,
+                                  fillColor: Colors.white,
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 8,
+                                  ),
+                                  border: OutlineInputBorder(),
+                                ),
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppPalette.slate900,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: 'manual',
+                                    child: Text('🔔 Manual (Avisar)'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'auto_acme',
+                                    child: Text('🤖 Automática ACME'),
+                                  ),
+                                ],
+                                onChanged: (v) {
+                                  if (v != null) {
+                                    setState(() => _fdCertScopeRenewalType = v);
+                                  }
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            onPressed: _fdProbingCertScope
+                                ? null
+                                : () => _probeFloorDeviceCertScopeNow(dev),
+                            icon: _fdProbingCertScope
+                                ? const SizedBox(
+                                    width: 13,
+                                    height: 13,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(Icons.sync_lock_rounded, size: 14),
+                            label: Text(
+                              _fdProbingCertScope
+                                  ? 'Analizando Certificado HTTPS...'
+                                  : 'Analizar Certificado HTTPS Ahora (7. CertScope)',
+                              style: const TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: AppPalette.violet600,
+                              visualDensity: VisualDensity.compact,
+                            ),
+                          ),
+                        ),
+                        if ((_fdCertScopeSummary['common_name'] ?? '')
+                                .toString()
+                                .isNotEmpty ||
+                            (_fdCertScopeSummary['last_error'] ?? '')
+                                .toString()
+                                .isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.all(7),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: (_fdCertScopeSummary['status'] == 'valid')
+                                    ? AppPalette.green300
+                                    : AppPalette.amber300,
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  (_fdCertScopeSummary['common_name'] ?? '')
+                                          .toString()
+                                          .isNotEmpty
+                                      ? 'CN: ${_fdCertScopeSummary['common_name']} (${_fdCertScopeSummary['days_remaining'] ?? '?'} días)'
+                                      : 'Estado TLS: ${_fdCertScopeSummary['status'] ?? 'Pendiente'}',
+                                  style: const TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppPalette.slate900,
+                                  ),
+                                ),
+                                if ((_fdCertScopeSummary['issuer_cn'] ?? '')
+                                    .toString()
+                                    .isNotEmpty)
+                                  Text(
+                                    'CA: ${_fdCertScopeSummary['issuer_cn']} · Vence: ${(_fdCertScopeSummary['valid_until'] ?? '').toString().split('T').first}',
+                                    style: const TextStyle(
+                                      fontSize: 9.8,
+                                      color: AppPalette.slate600,
+                                    ),
+                                  ),
+                                if ((_fdCertScopeSummary['last_error'] ?? '')
+                                    .toString()
+                                    .isNotEmpty)
+                                  Text(
+                                    'Detalle: ${_fdCertScopeSummary['last_error']}',
+                                    style: const TextStyle(
+                                      fontSize: 9.5,
+                                      color: AppPalette.red700,
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                         ],

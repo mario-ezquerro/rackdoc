@@ -468,7 +468,9 @@ class _CertScopeViewState extends State<CertScopeView> {
                     )
                   : const Icon(Icons.sync_rounded, size: 16),
               label: Text(
-                _verifyingAll ? 'Verificando TLS...' : 'Verificar Todos HTTPS',
+                _verifyingAll
+                    ? 'Auto-Analizando Equipos HTTPS...'
+                    : 'Auto-Analizar Equipos HTTPS (CMDB / Rack / Planta)',
                 style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
               ),
             ),
@@ -482,7 +484,7 @@ class _CertScopeViewState extends State<CertScopeView> {
               onPressed: () => _showUpsertCertificateDialog(),
               icon: const Icon(Icons.add_moderator_rounded, size: 16),
               label: const Text(
-                '+ Añadir Certificado',
+                '+ Vincular Equipo / Añadir Certificado',
                 style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
               ),
             ),
@@ -1740,18 +1742,26 @@ class _CertScopeViewState extends State<CertScopeView> {
                                       selectedAssetId = val;
                                       if (val != null) {
                                         final ast = assetsList.firstWhere((a) => a['id'] == val);
-                                        if (hostCtrl.text.trim().isEmpty) {
-                                          hostCtrl.text = (ast['primary_ip'] ?? ast['fqdn'] ?? '').toString();
+                                        final ipOrFqdn = (ast['primary_ip'] ?? ast['fqdn'] ?? '').toString().trim();
+                                        if (ipOrFqdn.isNotEmpty) {
+                                          hostCtrl.text = ipOrFqdn;
                                         }
-                                        if (nameCtrl.text.trim().isEmpty) {
-                                          nameCtrl.text = 'Certificado TLS ${ast['name']}';
-                                        }
-                                        if (sniCtrl.text.trim().isEmpty &&
-                                            (ast['fqdn'] ?? '').toString().isNotEmpty) {
+                                        nameCtrl.text = 'Certificado TLS ${ast['name']}';
+                                        codeCtrl.text = 'CERT-${ast['code']}';
+                                        if ((ast['fqdn'] ?? '').toString().isNotEmpty) {
                                           sniCtrl.text = ast['fqdn'].toString();
+                                        }
+                                        if (ast['rack_device_id'] != null) {
+                                          selectedRackDeviceId = ast['rack_device_id'] as int?;
+                                        }
+                                        if (ast['floor_device_id'] != null) {
+                                          selectedFloorDeviceId = ast['floor_device_id'] as int?;
                                         }
                                       }
                                     });
+                                    if (val != null && checkMode == 'https_live' && hostCtrl.text.trim().isNotEmpty) {
+                                      runLiveProbe();
+                                    }
                                   },
                                 ),
                               ),
@@ -1787,14 +1797,17 @@ class _CertScopeViewState extends State<CertScopeView> {
                                       selectedRackDeviceId = val;
                                       if (val != null) {
                                         final r = rackDevsList.firstWhere((x) => x['id'] == val);
-                                        if (hostCtrl.text.trim().isEmpty) {
-                                          hostCtrl.text = (r['ip_address'] ?? r['fqdn'] ?? '').toString();
+                                        final ipOrFqdn = (r['ip_address'] ?? r['fqdn'] ?? '').toString().trim();
+                                        if (ipOrFqdn.isNotEmpty) {
+                                          hostCtrl.text = ipOrFqdn;
                                         }
-                                        if (nameCtrl.text.trim().isEmpty) {
-                                          nameCtrl.text = 'Certificado TLS ${r['name']}';
-                                        }
+                                        nameCtrl.text = 'Certificado TLS ${r['name']}';
+                                        codeCtrl.text = 'CERT-${r['code']}';
                                       }
                                     });
+                                    if (val != null && checkMode == 'https_live' && hostCtrl.text.trim().isNotEmpty) {
+                                      runLiveProbe();
+                                    }
                                   },
                                 ),
                               ),
@@ -1834,14 +1847,17 @@ class _CertScopeViewState extends State<CertScopeView> {
                                       selectedFloorDeviceId = val;
                                       if (val != null) {
                                         final f = floorDevsList.firstWhere((x) => x['id'] == val);
-                                        if (hostCtrl.text.trim().isEmpty) {
-                                          hostCtrl.text = (f['ip_address'] ?? f['fqdn'] ?? '').toString();
+                                        final ipOrFqdn = (f['ip_address'] ?? f['fqdn'] ?? '').toString().trim();
+                                        if (ipOrFqdn.isNotEmpty) {
+                                          hostCtrl.text = ipOrFqdn;
                                         }
-                                        if (nameCtrl.text.trim().isEmpty) {
-                                          nameCtrl.text = 'Certificado TLS ${f['name']}';
-                                        }
+                                        nameCtrl.text = 'Certificado TLS ${f['name']}';
+                                        codeCtrl.text = 'CERT-${f['code']}';
                                       }
                                     });
+                                    if (val != null && checkMode == 'https_live' && hostCtrl.text.trim().isNotEmpty) {
+                                      runLiveProbe();
+                                    }
                                   },
                                 ),
                               ),
