@@ -373,6 +373,15 @@ class CmdbAsset(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
+    # Equipo de rack que hospeda este CI (por ejemplo, el host físico de una VM).
+    # CmdbAsset tiene DOS claves ajenas hacia rack_devices (rack_device_id y
+    # host_rack_device_id), así que 'foreign_keys' es obligatorio para que
+    # SQLAlchemy sepa cuál de las dos usar.
+    host_rack_device = relationship(
+        "RackDevice",
+        foreign_keys=[host_rack_device_id],
+    )
+
     ip_addresses = relationship(
         "CmdbIpAddress",
         back_populates="asset",
