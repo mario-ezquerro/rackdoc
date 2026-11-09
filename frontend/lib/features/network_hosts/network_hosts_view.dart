@@ -12634,7 +12634,7 @@ class _DatacenterStyleHostConfigPanelState
                         ),
                         Switch.adaptive(
                           value: _csEnabled,
-                          activeColor: AppTheme.accentPurple,
+                          activeThumbColor: AppTheme.accentPurple,
                           onChanged: (v) => setState(() => _csEnabled = v),
                         ),
                       ],

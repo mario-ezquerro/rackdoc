@@ -187,26 +187,22 @@ class _CertScopeViewState extends State<CertScopeView> {
         ],
       ),
     );
-    if (confirm != true) return;
+    // Venimos de un await (el diálogo), así que el widget puede haberse
+    // desmontado ya; y el messenger se toma AHORA, antes de los siguientes
+    // await, porque después 'context' puede no ser utilizable.
+    if (confirm != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
     try {
       final res = await widget.api.notifyCertificateContacts(id, {
         'custom_message': noteCtrl.text.trim(),
         'force_send': true,
       });
-      if (!mounted) return;
       await _loadOverview(silent: true);
-      mostrarAviso(
-        context,
+      messenger.avisoExito(
         'Aviso enviado y registrado para: ${res['recipients_summary'] ?? 'Destinatarios asignados'}.',
-        tono: TonoAviso.exito,
       );
     } catch (e) {
-      if (!mounted) return;
-      mostrarAviso(
-        context,
-        'No se pudo enviar el aviso: $e',
-        tono: TonoAviso.error,
-      );
+      messenger.avisoError('No se pudo enviar el aviso: $e');
     }
   }
 
@@ -884,7 +880,7 @@ class _CertScopeViewState extends State<CertScopeView> {
           Expanded(
             child: ListView.separated(
               itemCount: certs.length,
-              separatorBuilder: (_, __) => const Divider(height: 1, color: AppPalette.slate200),
+              separatorBuilder: (_, _) => const Divider(height: 1, color: AppPalette.slate200),
               itemBuilder: (ctx, idx) => _buildCertRow(certs[idx]),
             ),
           ),
@@ -2384,6 +2380,8 @@ class _CertScopeViewState extends State<CertScopeView> {
                     );
                     return;
                   }
+                  // El messenger se toma antes de los await de guardado.
+                  final messenger = ScaffoldMessenger.of(context);
                   final payload = <String, dynamic>{
                     'code': codeCtrl.text.trim().isEmpty ? null : codeCtrl.text.trim(),
                     'name': nameCtrl.text.trim().isNotEmpty
@@ -2436,23 +2434,17 @@ class _CertScopeViewState extends State<CertScopeView> {
                     } else {
                       updated = await widget.api.createCertificate(payload);
                     }
-                    if (!ctx.mounted) return;
-                    Navigator.pop(ctx);
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    // setState necesita que siga montado el State, no el diálogo.
+                    if (!mounted) return;
                     setState(() => _overview = updated);
-                    mostrarAviso(
-                      context,
+                    messenger.avisoExito(
                       isEdit
                           ? 'Certificado actualizado en CertScope.'
                           : 'Certificado registrado en CertScope.',
-                      tono: TonoAviso.exito,
                     );
                   } catch (e) {
-                    if (!ctx.mounted) return;
-                    mostrarAviso(
-                      context,
-                      'Error guardando certificado: $e',
-                      tono: TonoAviso.error,
-                    );
+                    messenger.avisoError('Error guardando certificado: $e');
                   }
                 },
                 icon: const Icon(Icons.save_rounded, size: 16),
