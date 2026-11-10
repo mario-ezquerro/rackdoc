@@ -544,6 +544,7 @@ class CmdbAssetCreate(BaseModel):
     ram_gb: float = 0.0
     storage_gb: float = 0.0
     hypervisor_or_platform: str = ""
+    model_name: str = ""
     serial_or_uuid: str = ""
     owner_team: str = "Sistemas & Infraestructura"
     responsible_person: str = "Alex Geng"
@@ -580,6 +581,7 @@ class CmdbAssetUpdate(BaseModel):
     ram_gb: Optional[float] = None
     storage_gb: Optional[float] = None
     hypervisor_or_platform: Optional[str] = None
+    model_name: Optional[str] = None
     serial_or_uuid: Optional[str] = None
     owner_team: Optional[str] = None
     responsible_person: Optional[str] = None

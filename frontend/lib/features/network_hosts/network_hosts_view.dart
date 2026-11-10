@@ -10994,6 +10994,8 @@ class _DatacenterStyleHostConfigPanelState
   late final TextEditingController _ipCtrl;
   late final TextEditingController _fqdnCtrl;
   late final TextEditingController _osCtrl;
+  late final TextEditingController _modelCtrl;
+  late final TextEditingController _serialCtrl;
 
   late String _hostingMode;
   late String _clusterPreset;
@@ -11099,6 +11101,12 @@ class _DatacenterStyleHostConfigPanelState
     );
     _osCtrl = TextEditingController(
       text: (h['os_or_firmware'] as String?) ?? 'Ubuntu Server 24.04 LTS',
+    );
+    _modelCtrl = TextEditingController(
+      text: (h['model_name'] as String?) ?? '',
+    );
+    _serialCtrl = TextEditingController(
+      text: (h['serial_or_uuid'] as String?) ?? '',
     );
 
     _hostingMode = (h['hosting_mode'] as String?) ?? 'cluster_pool';
@@ -11421,6 +11429,8 @@ class _DatacenterStyleHostConfigPanelState
       'environment': 'production',
       'criticality': 'high',
       'os_or_firmware': _osCtrl.text.trim(),
+      'model_name': _modelCtrl.text.trim(),
+      'serial_or_uuid': _serialCtrl.text.trim(),
       'hosting_mode': _hostingMode,
       'cluster_or_pool_name': effCluster,
       'hypervisor_or_platform': effCluster,
@@ -11648,6 +11658,35 @@ class _DatacenterStyleHostConfigPanelState
         controller: _osCtrl,
         style: const TextStyle(fontSize: 11.5),
         decoration: _compactDeco('OS / Hypervisor / Firmware'),
+      ),
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _modelCtrl,
+              style: const TextStyle(fontSize: 11.5),
+              decoration: _compactDeco(
+                'Marca / Modelo del Equipo',
+                hint: 'Ej: Dell PowerEdge R750',
+              ),
+            ),
+          ),
+          const SizedBox(width: 7),
+          Expanded(
+            child: TextField(
+              controller: _serialCtrl,
+              style: const TextStyle(
+                fontSize: 11.5,
+                fontFamily: 'monospace',
+              ),
+              decoration: _compactDeco(
+                'Número de Serie / S/N',
+                hint: 'Service Tag / UUID',
+              ),
+            ),
+          ),
+        ],
       ),
       const SizedBox(height: 10),
     ];

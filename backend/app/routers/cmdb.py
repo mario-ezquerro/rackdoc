@@ -88,6 +88,13 @@ def _align_cmdb_asset_with_floor_device(
             fdev.monitoring_enabled = asset.monitoring_enabled
             fdev.monitor_method = asset.monitor_method or "icmp"
             fdev.monitor_port = asset.monitor_port or 22
+            fcf = dict(fdev.custom_fields or {})
+            acf = dict(asset.custom_fields or {})
+            if asset.serial_or_uuid:
+                fcf["serial_number"] = asset.serial_or_uuid
+            if acf.get("model_name"):
+                fcf["model_name"] = str(acf["model_name"]).strip()
+            fdev.custom_fields = fcf
             if hb_ip_rec:
                 fdev.ip_address = hb_ip_rec.ip_address
                 if hb_ip_rec.mac_address:
@@ -134,6 +141,10 @@ def _align_cmdb_asset_with_floor_device(
             last_checked_at=asset.last_checked_at,
             linked_rack_id=linked_rack_id if (linked_rack_id and linked_rack_id > 0) else None,
             responsible_person=asset.responsible_person or "Alex Geng",
+            custom_fields={
+                **(dict(asset.custom_fields or {})),
+                **({"serial_number": asset.serial_or_uuid} if asset.serial_or_uuid else {}),
+            },
             notes=asset.notes or "",
         )
         db.add(fdev)
@@ -176,6 +187,12 @@ def create_cmdb_asset_endpoint(payload: CmdbAssetCreate, db: Session = Depends(g
     if exists:
         raise HTTPException(status_code=409, detail=f"Ya existe un activo en la CMDB con el código '{code_clean}'.")
 
+    initial_cf = dict(payload.custom_fields or {})
+    if payload.model_name and payload.model_name.strip():
+        initial_cf["model_name"] = payload.model_name.strip()
+    if payload.serial_or_uuid and payload.serial_or_uuid.strip():
+        initial_cf["serial_number"] = payload.serial_or_uuid.strip()
+
     asset = CmdbAsset(
         code=code_clean,
         name=payload.name.strip() or code_clean,
@@ -201,7 +218,7 @@ def create_cmdb_asset_endpoint(payload: CmdbAssetCreate, db: Session = Depends(g
         monitor_port=payload.monitor_port,
         status="online" if payload.monitoring_enabled else "unmonitored",
         management_links=payload.management_links,
-        custom_fields=payload.custom_fields,
+        custom_fields=initial_cf,
         notes=payload.notes,
     )
     db.add(asset)
@@ -281,12 +298,20 @@ def update_cmdb_asset_endpoint(
     certscope_port = data.pop("certscope_port", None)
     certscope_renewal_type = data.pop("certscope_renewal_type", None)
     certscope_sni = data.pop("certscope_sni", None)
+    model_name = data.pop("model_name", None)
 
     for k, v in data.items():
         if k == "code" and isinstance(v, str) and v.strip():
             setattr(asset, k, v.strip().upper())
         else:
             setattr(asset, k, v)
+    if model_name is not None or "serial_or_uuid" in data:
+        acf = dict(asset.custom_fields or {})
+        if model_name is not None:
+            acf["model_name"] = str(model_name).strip()
+        if "serial_or_uuid" in data:
+            acf["serial_number"] = str(data.get("serial_or_uuid") or "").strip()
+        asset.custom_fields = acf
     asset.updated_at = utcnow()
 
     subnets = db.query(CmdbSubnet).all()
@@ -335,6 +360,13 @@ def update_cmdb_asset_endpoint(
             rdev.monitoring_enabled = asset.monitoring_enabled
             rdev.monitor_method = asset.monitor_method
             rdev.monitor_port = asset.monitor_port
+            if asset.serial_or_uuid is not None:
+                rdev.serial_number = asset.serial_or_uuid
+            acf = dict(asset.custom_fields or {})
+            if "model_name" in acf:
+                rcf = dict(rdev.custom_fields or {})
+                rcf["model_name"] = acf["model_name"]
+                rdev.custom_fields = rcf
             if hb_ip_rec:
                 rdev.ip_address = hb_ip_rec.ip_address
                 rdev.subnet_mask = hb_ip_rec.subnet_mask or rdev.subnet_mask

@@ -292,6 +292,8 @@ class _CmdbViewState extends State<CmdbView> {
         final owner = (a['owner_team'] ?? '').toString().toLowerCase();
         final resp = (a['responsible_person'] ?? '').toString().toLowerCase();
         final notes = (a['notes'] ?? '').toString().toLowerCase();
+        final modelName = (a['model_name'] ?? '').toString().toLowerCase();
+        final serialNum = (a['serial_or_uuid'] ?? '').toString().toLowerCase();
         final resources =
             '${a['cpu_cores'] ?? ''}vcpu ${a['ram_gb'] ?? ''}gb ${a['storage_gb'] ?? ''}gb'
                 .toLowerCase();
@@ -301,7 +303,7 @@ class _CmdbViewState extends State<CmdbView> {
                     .toLowerCase())
             .join(' ');
         final haystack =
-            '$code $name $host $fqdn $os $plat $loc $siteLoc $stackLbl $primaryMask $env $cls $status $owner $resp $notes $resources $ips';
+            '$code $name $host $fqdn $os $plat $modelName $serialNum $loc $siteLoc $stackLbl $primaryMask $env $cls $status $owner $resp $notes $resources $ips';
         if (!haystack.contains(q)) {
           return false;
         }
@@ -1599,7 +1601,7 @@ class _CmdbViewState extends State<CmdbView> {
                         style: const TextStyle(fontSize: 12.5),
                         decoration: InputDecoration(
                           hintText:
-                              'Buscar por cualquier dato (Código, Nombre, IP, Máscara 255.255..., Sede/Location, Rack, Stack, MAC, VLAN, SO, Notas)...',
+                              'Buscar por cualquier dato (Código, Nombre, IP, Modelo, Nº Serie, Máscara 255.255..., Sede, Rack, Stack, MAC, VLAN, SO)...',
                           prefixIcon: const Icon(Icons.search, size: 18),
                           suffixIcon: _searchCtrl.text.isNotEmpty
                               ? IconButton(
@@ -3026,6 +3028,25 @@ class _CmdbViewState extends State<CmdbView> {
                                 color: AppPalette.slate600,
                               ),
                             ),
+                          if ((asset['model_name'] ?? '').toString().trim().isNotEmpty)
+                            Text(
+                              'Modelo: ${asset['model_name']}',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                color: AppPalette.blue900,
+                              ),
+                            ),
+                          if ((asset['serial_or_uuid'] ?? '').toString().trim().isNotEmpty)
+                            Text(
+                              'S/N: ${asset['serial_or_uuid']}',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                fontFamily: 'monospace',
+                                color: AppPalette.teal700,
+                              ),
+                            ),
                           if (cores > 0 || ramGb > 0)
                             Text(
                               'Recursos: ${cores}vCPU • ${ramGb.toStringAsFixed(0)}GB RAM${storageGb > 0 ? ' • ${storageGb.toStringAsFixed(0)}GB Disco' : ''}',
@@ -3410,6 +3431,45 @@ class _CmdbViewState extends State<CmdbView> {
                 ),
                 onPressed: () =>
                     widget.onNavigateToStackNode!(stackDiagramId, stackNodeId),
+              ),
+            if ((asset['model_name'] ?? '').toString().trim().isNotEmpty)
+              Chip(
+                visualDensity: VisualDensity.compact,
+                backgroundColor: AppPalette.blue50,
+                side: const BorderSide(color: AppPalette.blue300),
+                avatar: const Icon(
+                  Icons.memory_rounded,
+                  size: 14,
+                  color: AppPalette.blue900,
+                ),
+                label: Text(
+                  'Modelo: ${asset['model_name']}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: AppPalette.blue900,
+                  ),
+                ),
+              ),
+            if ((asset['serial_or_uuid'] ?? '').toString().trim().isNotEmpty)
+              Chip(
+                visualDensity: VisualDensity.compact,
+                backgroundColor: const Color(0xFFF0FDFA),
+                side: const BorderSide(color: AppPalette.teal600),
+                avatar: const Icon(
+                  Icons.qr_code_2_rounded,
+                  size: 14,
+                  color: AppPalette.teal700,
+                ),
+                label: Text(
+                  'Nº Serie / S/N: ${asset['serial_or_uuid']}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    fontFamily: 'monospace',
+                    color: AppPalette.teal700,
+                  ),
+                ),
               ),
             Text(
               'Propietario: ${asset['owner_team'] ?? '-'} • Resp: ${asset['responsible_person'] ?? '-'}',
@@ -6442,6 +6502,15 @@ class _CmdbViewState extends State<CmdbView> {
     final platCtrl = TextEditingController(
       text: (existing?['hypervisor_or_platform'] ?? 'VMware vSphere 8.0').toString(),
     );
+    final existingCfInit = (existing?['custom_fields'] is Map)
+        ? Map<String, dynamic>.from(existing!['custom_fields'] as Map)
+        : <String, dynamic>{};
+    final modelCtrl = TextEditingController(
+      text: (existing?['model_name'] ?? existingCfInit['model_name'] ?? '').toString(),
+    );
+    final serialCtrl = TextEditingController(
+      text: (existing?['serial_or_uuid'] ?? existingCfInit['serial_number'] ?? '').toString(),
+    );
     final teamCtrl = TextEditingController(
       text: (existing?['owner_team'] ?? 'Sistemas & Virtualización').toString(),
     );
@@ -6983,6 +7052,37 @@ class _CmdbViewState extends State<CmdbView> {
                           controller: respCtrl,
                           decoration: const InputDecoration(
                             labelText: 'Persona Responsable',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: TextField(
+                          controller: modelCtrl,
+                          decoration: const InputDecoration(
+                            labelText:
+                                'Marca / Modelo del Equipo Físico o Servidor (ej. Dell PowerEdge R760, HPE DL380, Cisco C9300)',
+                            prefixIcon: Icon(Icons.memory_rounded, size: 17),
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: serialCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Número de Serie (S/N) / Service Tag / UUID',
+                            prefixIcon: Icon(Icons.qr_code_2_rounded, size: 17),
                             border: OutlineInputBorder(),
                             isDense: true,
                           ),
@@ -7552,6 +7652,16 @@ class _CmdbViewState extends State<CmdbView> {
                 } else {
                   existingCf.remove('location_id');
                 }
+                if (modelCtrl.text.trim().isNotEmpty) {
+                  existingCf['model_name'] = modelCtrl.text.trim();
+                } else {
+                  existingCf.remove('model_name');
+                }
+                if (serialCtrl.text.trim().isNotEmpty) {
+                  existingCf['serial_number'] = serialCtrl.text.trim();
+                } else {
+                  existingCf.remove('serial_number');
+                }
 
                 final validIps = ipDrafts
                     .where(
@@ -7684,6 +7794,8 @@ class _CmdbViewState extends State<CmdbView> {
                   'ram_gb': double.tryParse(ramCtrl.text.trim()) ?? 0.0,
                   'storage_gb': double.tryParse(diskCtrl.text.trim()) ?? 0.0,
                   'hypervisor_or_platform': platCtrl.text.trim(),
+                  'model_name': modelCtrl.text.trim(),
+                  'serial_or_uuid': serialCtrl.text.trim(),
                   'owner_team': teamCtrl.text.trim(),
                   'responsible_person': respCtrl.text.trim(),
                   'host_rack_device_id': hostRackDeviceId,

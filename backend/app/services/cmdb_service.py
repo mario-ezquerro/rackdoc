@@ -138,6 +138,9 @@ def sync_physical_devices_to_cmdb(db: Session) -> None:
             if db.query(CmdbAsset).filter(CmdbAsset.code == desired_code).first():
                 desired_code = f"{desired_code}-R{rdev.id}"
             cf = dict(rdev.custom_fields or {})
+            tpl_model = f"{rdev.template.manufacturer} {rdev.template.model_name}".strip() if rdev.template else ""
+            if tpl_model and not cf.get("model_name"):
+                cf["model_name"] = tpl_model
             asset = CmdbAsset(
                 code=desired_code,
                 name=rdev.name,
@@ -197,6 +200,18 @@ def sync_physical_devices_to_cmdb(db: Session) -> None:
                 asset.serial_or_uuid = rdev.serial_number
             elif asset.serial_or_uuid:
                 rdev.serial_number = asset.serial_or_uuid
+            rcf = dict(rdev.custom_fields or {})
+            acf = dict(asset.custom_fields or {})
+            tpl_model = f"{rdev.template.manufacturer} {rdev.template.model_name}".strip() if rdev.template else ""
+            if rcf.get("model_name"):
+                acf["model_name"] = str(rcf["model_name"]).strip()
+                asset.custom_fields = acf
+            elif acf.get("model_name"):
+                rcf["model_name"] = str(acf["model_name"]).strip()
+                rdev.custom_fields = rcf
+            elif tpl_model and not acf.get("model_name"):
+                acf["model_name"] = tpl_model
+                asset.custom_fields = acf
 
         # Sincronizar la IP primaria (Heartbeat / Gestión) del RackDevice
         primary_ip = (rdev.ip_address or "").strip()
@@ -297,6 +312,7 @@ def sync_physical_devices_to_cmdb(db: Session) -> None:
         if not asset:
             if db.query(CmdbAsset).filter(CmdbAsset.code == desired_code).first():
                 desired_code = f"{desired_code}-F{fdev.id}"
+            fcf = dict(fdev.custom_fields or {})
             asset = CmdbAsset(
                 code=desired_code,
                 name=fdev.name,
@@ -308,6 +324,7 @@ def sync_physical_devices_to_cmdb(db: Session) -> None:
                 lifecycle_status="active",
                 os_or_firmware=f"Endpoint ({fdev.device_type})",
                 hypervisor_or_platform=f"Planta: {fl_name} ({fdev.room_code})",
+                serial_or_uuid=str(fcf.get("serial_number") or "").strip(),
                 owner_team=fdev.contact_department or "Infraestructura Planta",
                 responsible_person=fdev.responsible_person or "Alex Geng",
                 sync_source="floor_device",
@@ -319,7 +336,7 @@ def sync_physical_devices_to_cmdb(db: Session) -> None:
                 status=fdev.status or "unmonitored",
                 last_ping_ms=fdev.last_ping_ms,
                 last_checked_at=fdev.last_checked_at,
-                custom_fields=dict(fdev.custom_fields or {}),
+                custom_fields=fcf,
                 notes=fdev.notes or "",
             )
             db.add(asset)
@@ -339,6 +356,19 @@ def sync_physical_devices_to_cmdb(db: Session) -> None:
             asset.asset_class = "floor_endpoint"
             asset.os_or_firmware = f"Endpoint ({fdev.device_type})"
             asset.hypervisor_or_platform = f"Planta: {fl_name} ({fdev.room_code})"
+            fcf = dict(fdev.custom_fields or {})
+            acf = dict(asset.custom_fields or {})
+            if fcf.get("serial_number"):
+                asset.serial_or_uuid = str(fcf["serial_number"]).strip()
+            elif asset.serial_or_uuid:
+                fcf["serial_number"] = asset.serial_or_uuid
+                fdev.custom_fields = fcf
+            if fcf.get("model_name"):
+                acf["model_name"] = str(fcf["model_name"]).strip()
+                asset.custom_fields = acf
+            elif acf.get("model_name"):
+                fcf["model_name"] = str(acf["model_name"]).strip()
+                fdev.custom_fields = fcf
             if fdev.responsible_person:
                 asset.responsible_person = fdev.responsible_person
             if fdev.notes:
@@ -1368,6 +1398,30 @@ def serialize_cmdb_asset(
 
     parent_ast = assets_by_id.get(asset.parent_asset_id) if asset.parent_asset_id else None
 
+    rdev_for_meta = rack_devs_by_id.get(asset.rack_device_id) if asset.rack_device_id else None
+    fdev_for_meta = (floor_devs_by_id or {}).get(asset.floor_device_id) if asset.floor_device_id else None
+    rdev_cf = dict(rdev_for_meta.custom_fields or {}) if rdev_for_meta else {}
+    fdev_cf = dict(fdev_for_meta.custom_fields or {}) if fdev_for_meta else {}
+    rdev_tpl_model = (
+        f"{rdev_for_meta.template.manufacturer} {rdev_for_meta.template.model_name}".strip()
+        if (rdev_for_meta and rdev_for_meta.template)
+        else ""
+    )
+    resolved_model_name = str(
+        cf_dict.get("model_name")
+        or rdev_cf.get("model_name")
+        or fdev_cf.get("model_name")
+        or rdev_tpl_model
+        or ""
+    ).strip()
+    resolved_serial = str(
+        asset.serial_or_uuid
+        or (rdev_for_meta.serial_number if rdev_for_meta else "")
+        or cf_dict.get("serial_number")
+        or fdev_cf.get("serial_number")
+        or ""
+    ).strip()
+
     return {
         "id": asset.id,
         "code": asset.code,
@@ -1384,7 +1438,8 @@ def serialize_cmdb_asset(
         "ram_gb": asset.ram_gb,
         "storage_gb": asset.storage_gb,
         "hypervisor_or_platform": asset.hypervisor_or_platform,
-        "serial_or_uuid": asset.serial_or_uuid,
+        "model_name": resolved_model_name,
+        "serial_or_uuid": resolved_serial,
         "owner_team": asset.owner_team,
         "responsible_person": asset.responsible_person,
         "sync_source": asset.sync_source,

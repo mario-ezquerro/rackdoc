@@ -1312,6 +1312,20 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
         else:
             loc_badge = ast.hypervisor_or_platform or "Independiente / Barebone / Cloud"
 
+        rdev_cf_host = dict(effective_rdev.custom_fields or {}) if (effective_rdev and ast.rack_device_id) else {}
+        rdev_tpl_lbl = (
+            f"{effective_rdev.template.manufacturer} {effective_rdev.template.model_name}".strip()
+            if (effective_rdev and ast.rack_device_id and effective_rdev.template)
+            else ""
+        )
+        host_model_name = str(cf.get("model_name") or rdev_cf_host.get("model_name") or rdev_tpl_lbl or "").strip()
+        host_serial = str(
+            ast.serial_or_uuid
+            or (effective_rdev.serial_number if (effective_rdev and ast.rack_device_id) else "")
+            or cf.get("serial_number")
+            or ""
+        ).strip()
+
         serialized_hosts.append(
             {
                 "id": ast.id,
@@ -1328,6 +1342,8 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
                 "environment": ast.environment,
                 "criticality": ast.criticality,
                 "os_or_firmware": ast.os_or_firmware,
+                "model_name": host_model_name,
+                "serial_or_uuid": host_serial,
                 "hosting_mode": hosting_mode,
                 "cluster_or_pool_name": cluster_or_pool_name,
                 "hypervisor_or_platform": ast.hypervisor_or_platform,
@@ -1988,8 +2004,8 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
     asset.ram_gb = float(payload.get("ram_gb") or 16.0)
     asset.storage_gb = float(payload.get("storage_gb") or 100.0)
     asset.hypervisor_or_platform = hypervisor_platform
-    if payload.get("serial_or_uuid"):
-        asset.serial_or_uuid = str(payload.get("serial_or_uuid")).strip()
+    if payload.get("serial_or_uuid") is not None or payload.get("serial_number") is not None:
+        asset.serial_or_uuid = str(payload.get("serial_or_uuid") if payload.get("serial_or_uuid") is not None else payload.get("serial_number") or "").strip()
     asset.owner_team = str(payload.get("owner_team") or "Sistemas & DevOps").strip()
     asset.responsible_person = str(payload.get("responsible_person") or "Alex Geng").strip()
     asset.monitoring_enabled = monitoring_enabled
@@ -2001,6 +2017,10 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
 
     # Actualizar custom_fields con las 2 configuraciones (Healthchecks/Heartbeat y Conectar SSH/HTTP/HTTPS) + Modo de Alojamiento
     cf = dict(asset.custom_fields or {})
+    if payload.get("model_name") is not None:
+        cf["model_name"] = str(payload.get("model_name") or "").strip()
+    if asset.serial_or_uuid:
+        cf["serial_number"] = asset.serial_or_uuid
     cf["hosting_mode"] = hosting_mode
     cf["cluster_or_pool_name"] = cluster_or_pool_name or hypervisor_platform
     cf["custom_asset_class_label"] = custom_class_lbl
@@ -2082,10 +2102,14 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
         if rdev_self:
             rdev_self.monitoring_enabled = monitoring_enabled
             rdev_self.status = "online" if monitoring_enabled else "unmonitored"
+            if asset.serial_or_uuid:
+                rdev_self.serial_number = asset.serial_or_uuid
             rcf = dict(rdev_self.custom_fields or {})
             rcf["connect_config"] = cf["connect_config"]
             if "heartbeat_config" in cf:
                 rcf["heartbeat_config"] = cf["heartbeat_config"]
+            if "model_name" in cf:
+                rcf["model_name"] = cf["model_name"]
             rdev_self.custom_fields = rcf
 
     # Sincronizar cualquier nodo en los Stacks Tecnológicos que apunte a este host

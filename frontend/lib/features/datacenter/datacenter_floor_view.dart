@@ -87,6 +87,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   final TextEditingController _devContactPhoneCtrl = TextEditingController();
   final TextEditingController _devContactJobCtrl = TextEditingController();
   final TextEditingController _devContactDeptCtrl = TextEditingController();
+  final TextEditingController _devModelCtrl = TextEditingController();
+  final TextEditingController _devSerialCtrl = TextEditingController();
   final TextEditingController _devNotesCtrl = TextEditingController();
   int? _devLinkedRackId;
   int? _devLinkedOutletId;
@@ -585,6 +587,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     _devContactPhoneCtrl.dispose();
     _devContactJobCtrl.dispose();
     _devContactDeptCtrl.dispose();
+    _devModelCtrl.dispose();
+    _devSerialCtrl.dispose();
     _devNotesCtrl.dispose();
     _fdPingTargetCtrl.dispose();
     _fdPingTimeoutCtrl.dispose();
@@ -825,6 +829,9 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     _devContactPhoneCtrl.text = dev.contactPhone;
     _devContactJobCtrl.text = dev.contactJobTitle;
     _devContactDeptCtrl.text = dev.contactDepartment;
+    _devModelCtrl.text = (dev.customFields['model_name'] ?? '').toString();
+    _devSerialCtrl.text =
+        (dev.customFields['serial_number'] ?? dev.customFields['serial_or_uuid'] ?? '').toString();
     _devNotesCtrl.text = dev.notes;
     _devLinkedRackId = dev.linkedRackId;
     _devLinkedOutletId = dev.linkedOutletId;
@@ -929,6 +936,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
     final existingCustom = currentDev != null
         ? Map<String, dynamic>.from(currentDev.customFields)
         : <String, dynamic>{};
+    existingCustom['model_name'] = _devModelCtrl.text.trim();
+    existingCustom['serial_number'] = _devSerialCtrl.text.trim();
     final baseHost = _devIpCtrl.text.trim();
     existingCustom['heartbeat_config'] = {
       'enabled_systems': _fdEnabledMonitorSystems.toList(),
@@ -1808,6 +1817,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
           : '',
     );
     final respCtrl = TextEditingController(text: 'Alex Geng');
+    final modelCtrl = TextEditingController();
+    final serialCtrl = TextEditingController();
 
     void applyCmdbAssetSelection(Map<String, dynamic>? ast) {
       if (ast == null) {
@@ -1819,6 +1830,10 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         return;
       }
       selectedCmdbAssetId = (ast['id'] as num?)?.toInt();
+      final astModel = (ast['model_name'] ?? '').toString().trim();
+      if (astModel.isNotEmpty) modelCtrl.text = astModel;
+      final astSerial = (ast['serial_or_uuid'] ?? '').toString().trim();
+      if (astSerial.isNotEmpty) serialCtrl.text = astSerial;
       final fType = (ast['floor_device_type'] ?? '').toString().trim();
       if (fType.isNotEmpty &&
           _allCatalogItems.any((c) => c.category == fType)) {
@@ -2324,6 +2339,32 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       children: [
                         Expanded(
                           child: TextField(
+                            controller: modelCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Marca / Modelo del Equipo',
+                              hintText: 'Ej: HP LaserJet M428, Hikvision IP...',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: serialCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Número de Serie (S/N) / Service Tag',
+                              hintText: 'S/N o UUID del fabricante',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
                             controller: notesCtrl,
                             decoration: InputDecoration(
                               labelText: isSensor
@@ -2478,6 +2519,12 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         'notes': notesCtrl.text.trim(),
         'certscope_enabled': certscopeEnabled,
         'certscope_port': int.tryParse(certscopePortCtrl.text.trim()) ?? 443,
+        'custom_fields': {
+          if (modelCtrl.text.trim().isNotEmpty)
+            'model_name': modelCtrl.text.trim(),
+          if (serialCtrl.text.trim().isNotEmpty)
+            'serial_number': serialCtrl.text.trim(),
+        },
       });
       final newId = (res['id'] as num?)?.toInt();
       if (newId != null) {
@@ -6060,6 +6107,24 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                 _buildCompactField(
                   label: 'IP Address / Host',
                   controller: _devIpCtrl,
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildCompactField(
+                        label: 'Marca / Modelo',
+                        controller: _devModelCtrl,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _buildCompactField(
+                        label: 'Número de Serie (S/N)',
+                        controller: _devSerialCtrl,
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 8),
                 Container(

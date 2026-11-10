@@ -2222,6 +2222,10 @@ class _RackEditorViewState extends State<RackEditorView> {
         TextEditingController(text: '10.28.1.${20 + rack.devices.length}');
     final maskCtrl = TextEditingController(text: '255.255.255.0');
     final gwCtrl = TextEditingController(text: '10.28.1.1');
+    final modelCtrl = TextEditingController(
+      text: '${tpl.manufacturer} ${tpl.modelName}'.trim(),
+    );
+    final serialCtrl = TextEditingController();
 
     final initialCounts = _extractPortCountsFromSpec(
       tpl.layoutSpec,
@@ -2340,6 +2344,28 @@ class _RackEditorViewState extends State<RackEditorView> {
                   TextField(
                     controller: fqdnCtrl,
                     decoration: const InputDecoration(labelText: 'FQDN'),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: modelCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Marca / Modelo del Equipo',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: serialCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Número de Serie (S/N) / Service Tag',
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 10),
                   Row(
@@ -2719,9 +2745,12 @@ class _RackEditorViewState extends State<RackEditorView> {
         'subnet_mask': maskCtrl.text.trim(),
         'gateway': gwCtrl.text.trim(),
         'monitoring_enabled': targetIp.isNotEmpty,
+        'serial_number': serialCtrl.text.trim(),
         'certscope_enabled': certscopeEnabled,
         'certscope_port': int.tryParse(certscopePortCtrl.text.trim()) ?? 443,
         'custom_fields': {
+          if (modelCtrl.text.trim().isNotEmpty)
+            'model_name': modelCtrl.text.trim(),
           if (chosenUHeight != tpl.uHeight) 'u_height_override': chosenUHeight,
           if (collisionAction != null && collisionTargetAssetId != null) ...{
             'on_ip_collision_action': collisionAction,

@@ -66,6 +66,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
   late TextEditingController _devGwCtrl;
   late TextEditingController _devMacCtrl;
   late TextEditingController _devVlanCtrl;
+  late TextEditingController _devModelCtrl;
   late TextEditingController _devSerialCtrl;
   late TextEditingController _devNotesCtrl;
   late TextEditingController _devStartUCtrl;
@@ -185,6 +186,13 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
     _devGwCtrl = TextEditingController(text: d?.gateway ?? '');
     _devMacCtrl = TextEditingController(text: d?.macAddress ?? '');
     _devVlanCtrl = TextEditingController(text: d?.vlanMgmt?.toString() ?? '');
+    _devModelCtrl = TextEditingController(
+      text: (d?.customFields['model_name'] ??
+              (d != null
+                  ? '${d.template.manufacturer} ${d.template.modelName}'.trim()
+                  : ''))
+          .toString(),
+    );
     _devSerialCtrl = TextEditingController(text: d?.serialNumber ?? '');
     _devNotesCtrl = TextEditingController(text: d?.notes ?? '');
     _devStartUCtrl = TextEditingController(text: '${d?.startU ?? 1}');
@@ -965,6 +973,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
       _devCustomFields['connect_config'] = _buildConnectConfigMap();
       _devCustomFields['certscope_config'] = _buildCertScopeConfigMap();
       _devCustomFields['u_height_override'] = _devUHeight;
+      _devCustomFields['model_name'] = _devModelCtrl.text.trim();
       final customPayload = Map<String, dynamic>.from(_devCustomFields);
       if (collisionAction != null && collisionTargetAssetId != null) {
         customPayload['on_ip_collision_action'] = collisionAction;
@@ -2607,11 +2616,15 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
             ),
           ],
         ),
+        _CompactInput(
+          label: 'Marca / Modelo del Equipo',
+          controller: _devModelCtrl,
+        ),
         Row(
           children: [
             Expanded(
               child: _CompactInput(
-                label: 'Número de Serie',
+                label: 'Número de Serie (S/N)',
                 controller: _devSerialCtrl,
               ),
             ),
