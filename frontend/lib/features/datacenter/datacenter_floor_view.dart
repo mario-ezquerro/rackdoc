@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_client.dart';
 import '../../core/image_file_picker.dart';
 import '../../models/datacenter_models.dart';
+import '../../shared/widgets/cmdb_asset_explorer_dialog.dart';
 
 class DatacenterFloorView extends StatefulWidget {
   final RackDocApiClient api;
@@ -1595,128 +1596,42 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
   Future<void> _showLinkExistingFloorDeviceWithCmdbDialog(
     FloorDeviceNode dev,
   ) async {
-    List<Map<String, dynamic>> cmdbAssets = [];
-    try {
-      final overview = await widget.api.fetchCmdbOverview();
-      cmdbAssets = ((overview['assets'] as List?) ?? [])
-          .whereType<Map>()
-          .map((e) => Map<String, dynamic>.from(e))
-          .where((a) => a['rack_device_id'] == null)
-          .toList();
-      cmdbAssets.sort((a, b) {
-        final aUnplaced = a['floor_device_id'] == null ? 0 : 1;
-        final bUnplaced = b['floor_device_id'] == null ? 0 : 1;
-        if (aUnplaced != bUnplaced) return aUnplaced.compareTo(bUnplaced);
-        return (a['code'] ?? '')
-            .toString()
-            .compareTo((b['code'] ?? '').toString());
-      });
-    } catch (_) {}
-
-    if (!mounted) return;
-    int? chosenAssetId = dev.cmdbAssetId ??
-        (cmdbAssets.isNotEmpty ? (cmdbAssets.first['id'] as num?)?.toInt() : null);
-
-    final selectedAst = await showDialog<Map<String, dynamic>?>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModal) => AlertDialog(
-          title: Row(
-            children: [
-              const Icon(Icons.fact_check_outlined, color: AppPalette.blue600),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Vincular y Cumplimentar "${dev.code}" desde CMDB',
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          content: SizedBox(
-            width: 520,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Text(
-                  'Selecciona un dispositivo detectado en la CMDB para unificarlo con este elemento de planta y rellenar automáticamente su IP, Nombre, Hostname, VLAN y estado:',
-                  style: TextStyle(fontSize: 12, color: AppPalette.slate600),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<int?>(
-                  initialValue: chosenAssetId,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Dispositivo en CMDB',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  items: cmdbAssets.map((a) {
-                    final id = (a['id'] as num).toInt();
-                    final code = (a['code'] ?? '').toString();
-                    final name = (a['name'] ?? '').toString();
-                    final ip = (a['heartbeat_ip'] ?? '').toString();
-                    final host = (a['hostname'] ?? '').toString();
-                    final unplaced = a['floor_device_id'] == null;
-                    final badge = unplaced
-                        ? '🟢 [Detectado / Sin ubicar]'
-                        : '📍 [Planta: ${a['floor_name'] ?? ''}]';
-                    return DropdownMenuItem<int?>(
-                      value: id,
-                      child: Text(
-                        '$badge $code • ${ip.isNotEmpty ? ip : "Sin IP"} • $name ${host.isNotEmpty ? "($host)" : ""}',
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 11.5),
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (v) => setModal(() => chosenAssetId = v),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, null),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton.icon(
-              onPressed: chosenAssetId == null
-                  ? null
-                  : () {
-                      final ast = cmdbAssets
-                          .where(
-                            (a) => (a['id'] as num?)?.toInt() == chosenAssetId,
-                          )
-                          .firstOrNull;
-                      Navigator.pop(ctx, ast);
-                    },
-              icon: const Icon(Icons.sync_alt_rounded, size: 16),
-              label: const Text('Vincular y Autocompletar Datos'),
-            ),
-          ],
-        ),
-      ),
+    final selectedAst = await CmdbAssetExplorerDialog.show(
+      context,
+      api: widget.api,
+      contextMode: 'floor',
+      preselectedAssetId: dev.cmdbAssetId,
+      title: 'Vincular y Cumplimentar "${dev.code}" desde CMDB (Por Redes)',
+      subtitle:
+          'Selecciona una Subred / Máscara en la columna izquierda y elige el equipo detectado en CMDB para unificarlo con este elemento de planta.',
     );
 
     if (selectedAst != null) {
       final astId = (selectedAst['id'] as num).toInt();
-      final hbIp = (selectedAst['heartbeat_ip'] ?? '').toString().trim();
+      final hbIp =
+          (selectedAst['_resolved_ip'] ?? selectedAst['heartbeat_ip'] ?? '')
+              .toString()
+              .trim();
       final rawName = (selectedAst['name'] ?? '').toString().trim();
       final rawHost = (selectedAst['hostname'] ?? '').toString().trim();
-      final fqdn = (selectedAst['fqdn'] ?? '').toString().trim();
+      final fqdn =
+          (selectedAst['_resolved_fqdn'] ?? selectedAst['fqdn'] ?? '')
+              .toString()
+              .trim();
       final fType = (selectedAst['floor_device_type'] ?? '').toString().trim();
-      String mac = '';
-      int? vlan;
+      final modelName = (selectedAst['model_name'] ?? '').toString().trim();
+      final serialNum = (selectedAst['serial_or_uuid'] ?? '').toString().trim();
+      String mac = (selectedAst['_resolved_mac'] ?? '').toString().trim();
+      int? vlan = int.tryParse(
+        (selectedAst['_resolved_vlan'] ?? '').toString().trim(),
+      );
       final ips = (selectedAst['ip_addresses'] as List?) ?? [];
       if (ips.isNotEmpty && ips.first is Map) {
         final firstIp = Map<String, dynamic>.from(ips.first as Map);
-        mac = (firstIp['mac_address'] ?? '').toString().trim();
-        vlan = (firstIp['vlan_id'] as num?)?.toInt();
+        if (mac.isEmpty) {
+          mac = (firstIp['mac_address'] ?? '').toString().trim();
+        }
+        vlan ??= (firstIp['vlan_id'] as num?)?.toInt();
       }
       setState(() {
         if (fType.isNotEmpty &&
@@ -1725,6 +1640,8 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         }
         if (hbIp.isNotEmpty) _devIpCtrl.text = hbIp;
         if (vlan != null) _devVlanCtrl.text = vlan.toString();
+        if (modelName.isNotEmpty) _devModelCtrl.text = modelName;
+        if (serialNum.isNotEmpty) _devSerialCtrl.text = serialNum;
         final catLabel = _catalogItemFor(_devCategory).label;
         if (rawName.isNotEmpty && !rawName.startsWith('Equipo Detectado')) {
           _devNameCtrl.text = rawName;
@@ -1743,6 +1660,13 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
           _devStatus = 'online';
         }
       });
+      final updatedCustom = Map<String, dynamic>.from(dev.customFields);
+      if (_devModelCtrl.text.trim().isNotEmpty) {
+        updatedCustom['model_name'] = _devModelCtrl.text.trim();
+      }
+      if (_devSerialCtrl.text.trim().isNotEmpty) {
+        updatedCustom['serial_number'] = _devSerialCtrl.text.trim();
+      }
       await widget.api.updateFloorDevice(dev.id, {
         'device_type': _devCategory,
         'code': _devCodeCtrl.text.trim(),
@@ -1756,6 +1680,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
         'responsible_person': _devRespCtrl.text.trim(),
         'notes': _devNotesCtrl.text.trim(),
         'cmdb_asset_id': astId,
+        'custom_fields': updatedCustom,
       });
       widget.onRefresh();
     }
@@ -2029,70 +1954,108 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           ),
                           const SizedBox(height: 6),
                           const Text(
-                            'Al elegir un dispositivo detectado en la CMDB, se autorrellenan su IP, Hostname, MAC y estado, y queda unido como el mismo elemento en CMDB y Datacenter.',
+                            'Al elegir un dispositivo detectado en la CMDB (agrupado por su Red / Máscara CIDR), se autorrellenan su IP, Hostname, MAC, Modelo, S/N y estado, y queda unido como el mismo elemento en CMDB y Datacenter.',
                             style: TextStyle(
                               fontSize: 10.5,
                               color: AppPalette.slate600,
                             ),
                           ),
                           const SizedBox(height: 8),
-                          DropdownButtonFormField<int?>(
-                            initialValue: selectedCmdbAssetId,
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText:
-                                  'Equipo de la CMDB (Detectados por escaneo IP / Inventario CMDB)',
-                              filled: true,
-                              fillColor: Colors.white,
-                              isDense: true,
-                            ),
-                            items: [
-                              const DropdownMenuItem<int?>(
-                                value: null,
-                                child: Text(
-                                  '— Crear dispositivo nuevo (sin seleccionar de CMDB) —',
+                          if (selectedCmdbAssetId != null)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 7,
+                              ),
+                              margin: const EdgeInsets.only(bottom: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(7),
+                                border: Border.all(
+                                  color: const Color(0xFF22C55E),
                                 ),
                               ),
-                              ...cmdbAssets.map((a) {
-                                final id = (a['id'] as num).toInt();
-                                final code = (a['code'] ?? '').toString();
-                                final name = (a['name'] ?? '').toString();
-                                final ip = (a['heartbeat_ip'] ?? '').toString();
-                                final host = (a['hostname'] ?? '').toString();
-                                final unplaced = a['floor_device_id'] == null;
-                                final badge = unplaced
-                                    ? '🟢 [Detectado / Sin ubicar]'
-                                    : '📍 [Ya en Planta: ${a['floor_name'] ?? ''}]';
-                                return DropdownMenuItem<int?>(
-                                  value: id,
-                                  child: Text(
-                                    '$badge $code • ${ip.isNotEmpty ? ip : "Sin IP"} • $name ${host.isNotEmpty ? "($host)" : ""}',
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      fontWeight: unplaced
-                                          ? FontWeight.w800
-                                          : FontWeight.normal,
-                                      color: unplaced
-                                          ? AppPalette.slate900
-                                          : AppPalette.slate600,
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.check_circle,
+                                    size: 16,
+                                    color: Color(0xFF16A34A),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'Seleccionado de CMDB: [${codeCtrl.text}] ${nameCtrl.text} • IP: ${ipCtrl.text}',
+                                      style: const TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w800,
+                                        color: Color(0xFF14532D),
+                                      ),
                                     ),
                                   ),
-                                );
-                              }),
-                            ],
-                            onChanged: (val) {
-                              setModal(() {
-                                if (val == null) {
-                                  applyCmdbAssetSelection(null);
-                                } else {
-                                  final found = cmdbAssets
-                                      .where((a) => (a['id'] as num?)?.toInt() == val)
-                                      .firstOrNull;
-                                  applyCmdbAssetSelection(found);
+                                  TextButton.icon(
+                                    style: TextButton.styleFrom(
+                                      visualDensity: VisualDensity.compact,
+                                      foregroundColor: AppPalette.red600,
+                                    ),
+                                    onPressed: () => setModal(
+                                      () => applyCmdbAssetSelection(null),
+                                    ),
+                                    icon: const Icon(Icons.link_off, size: 14),
+                                    label: const Text(
+                                      'Desvincular',
+                                      style: TextStyle(fontSize: 11),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                backgroundColor: Colors.white,
+                                side: const BorderSide(
+                                  color: AppPalette.blue600,
+                                ),
+                              ),
+                              onPressed: () async {
+                                final picked =
+                                    await CmdbAssetExplorerDialog.show(
+                                      ctx,
+                                      api: widget.api,
+                                      initialAssets: cmdbAssets.isNotEmpty
+                                          ? cmdbAssets
+                                          : null,
+                                      contextMode: 'floor',
+                                      preselectedAssetId: selectedCmdbAssetId,
+                                      title:
+                                          'Seleccionar Equipo de la CMDB para Colocar en ${floor.name}',
+                                      subtitle:
+                                          'Navega por las Redes / Subredes (Máscara CIDR) en la columna izquierda y elige el equipo detectado.',
+                                    );
+                                if (picked != null) {
+                                  setModal(() {
+                                    applyCmdbAssetSelection(picked);
+                                  });
                                 }
-                              });
-                            },
+                              },
+                              icon: const Icon(
+                                Icons.manage_search_rounded,
+                                size: 17,
+                                color: AppPalette.blue700,
+                              ),
+                              label: Text(
+                                selectedCmdbAssetId != null
+                                    ? 'Cambiar Equipo de la CMDB (Explorador por Redes / Máscara)'
+                                    : 'Abrir Explorador CMDB por Redes / Máscara de Red...',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppPalette.blue900,
+                                ),
+                              ),
+                            ),
                           ),
                           if (selectedCmdbAssetId != null &&
                               (detectedFqdn.isNotEmpty ||

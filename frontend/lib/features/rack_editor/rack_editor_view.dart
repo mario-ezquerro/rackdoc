@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_client.dart';
 import '../../models/datacenter_models.dart';
+import '../../shared/widgets/cmdb_asset_explorer_dialog.dart';
 import 'widgets/cable_painter.dart';
 import 'widgets/device_catalog_panel.dart';
 import 'widgets/properties_panel.dart';
@@ -2247,6 +2248,9 @@ class _RackEditorViewState extends State<RackEditorView> {
     int chosenUHeight = tpl.uHeight;
     bool certscopeEnabled = false;
     final certscopePortCtrl = TextEditingController(text: '443');
+    int? selectedCmdbAssetId;
+    Map<String, dynamic>? selectedCmdbAsset;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -2255,12 +2259,217 @@ class _RackEditorViewState extends State<RackEditorView> {
             'Montar ${tpl.modelName} en U$targetStartU (Configura Front y Back)',
           ),
           content: SizedBox(
-            width: 520,
+            width: 560,
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // 0. VINCULAR CON ACTIVO DE LA CMDB AGRUPADO POR RED / MÁSCARA
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(
+                      color: selectedCmdbAsset != null
+                          ? const Color(0xFFF0FDF4)
+                          : const Color(0xFFEFF6FF),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: selectedCmdbAsset != null
+                            ? const Color(0xFF22C55E)
+                            : AppPalette.blue300,
+                        width: 1.3,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.account_tree_rounded,
+                              size: 16,
+                              color: selectedCmdbAsset != null
+                                  ? const Color(0xFF15803D)
+                                  : AppPalette.blue900,
+                            ),
+                            const SizedBox(width: 6),
+                            const Expanded(
+                              child: Text(
+                                '0. ¿Es un equipo ya detectado / registrado en la CMDB?',
+                                style: TextStyle(
+                                  fontSize: 11.8,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppPalette.slate900,
+                                ),
+                              ),
+                            ),
+                            if (selectedCmdbAsset != null)
+                              TextButton.icon(
+                                style: TextButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  foregroundColor: AppPalette.red600,
+                                ),
+                                onPressed: () {
+                                  setModal(() {
+                                    selectedCmdbAssetId = null;
+                                    selectedCmdbAsset = null;
+                                  });
+                                },
+                                icon: const Icon(Icons.link_off, size: 14),
+                                label: const Text(
+                                  'Desvincular',
+                                  style: TextStyle(fontSize: 11),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        if (selectedCmdbAsset != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 6,
+                            ),
+                            margin: const EdgeInsets.only(bottom: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: const Color(0xFF86EFAC),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.check_circle,
+                                  size: 15,
+                                  color: Color(0xFF16A34A),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    'Vinculado: [${selectedCmdbAsset!['code']}] ${selectedCmdbAsset!['name']} '
+                                    '• IP: ${selectedCmdbAsset!['_resolved_ip'] ?? selectedCmdbAsset!['heartbeat_ip'] ?? "Sin IP"}',
+                                    style: const TextStyle(
+                                      fontSize: 11.2,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFF14532D),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              side: const BorderSide(color: AppPalette.blue600),
+                            ),
+                            onPressed: () async {
+                              final picked = await CmdbAssetExplorerDialog.show(
+                                ctx,
+                                api: widget.api,
+                                contextMode: 'rack',
+                                preselectedAssetId: selectedCmdbAssetId,
+                                title:
+                                    'Seleccionar Equipo de la CMDB para Montar en U$targetStartU',
+                                subtitle:
+                                    'Navega por las Redes / Subredes (Máscara CIDR) en la columna izquierda y elige el activo para autocompletar todos sus datos.',
+                              );
+                              if (picked != null) {
+                                setModal(() {
+                                  selectedCmdbAsset = picked;
+                                  selectedCmdbAssetId =
+                                      (picked['id'] as num?)?.toInt();
+                                  final rawCode =
+                                      (picked['code'] ?? '').toString().trim();
+                                  if (rawCode.isNotEmpty &&
+                                      !rawCode.startsWith('DISC-') &&
+                                      !rawCode.startsWith('FLR-')) {
+                                    codeCtrl.text = rawCode;
+                                  }
+                                  final rawName =
+                                      (picked['name'] ?? '').toString().trim();
+                                  if (rawName.isNotEmpty &&
+                                      !rawName.startsWith('Equipo Detectado')) {
+                                    nameCtrl.text = rawName;
+                                  }
+                                  final rawHost = (picked['hostname'] ?? '')
+                                      .toString()
+                                      .trim();
+                                  if (rawHost.isNotEmpty) {
+                                    hostnameCtrl.text = rawHost;
+                                  }
+                                  final resFqdn = (picked['_resolved_fqdn'] ??
+                                          picked['fqdn'] ??
+                                          '')
+                                      .toString()
+                                      .trim();
+                                  if (resFqdn.isNotEmpty) {
+                                    fqdnCtrl.text = resFqdn;
+                                  }
+                                  final resIp = (picked['_resolved_ip'] ??
+                                          picked['heartbeat_ip'] ??
+                                          '')
+                                      .toString()
+                                      .trim();
+                                  if (resIp.isNotEmpty) {
+                                    ipCtrl.text = resIp;
+                                  }
+                                  final resMask =
+                                      (picked['_resolved_subnet_mask'] ?? '')
+                                          .toString()
+                                          .trim();
+                                  if (resMask.isNotEmpty) {
+                                    maskCtrl.text = resMask;
+                                  }
+                                  final resGw =
+                                      (picked['_resolved_gateway'] ?? '')
+                                          .toString()
+                                          .trim();
+                                  if (resGw.isNotEmpty) {
+                                    gwCtrl.text = resGw;
+                                  }
+                                  final resModel =
+                                      (picked['model_name'] ?? '')
+                                          .toString()
+                                          .trim();
+                                  if (resModel.isNotEmpty) {
+                                    modelCtrl.text = resModel;
+                                  }
+                                  final resSerial =
+                                      (picked['serial_or_uuid'] ?? '')
+                                          .toString()
+                                          .trim();
+                                  if (resSerial.isNotEmpty) {
+                                    serialCtrl.text = resSerial;
+                                  }
+                                });
+                              }
+                            },
+                            icon: const Icon(
+                              Icons.manage_search_rounded,
+                              size: 17,
+                              color: AppPalette.blue700,
+                            ),
+                            label: Text(
+                              selectedCmdbAsset != null
+                                  ? 'Cambiar Equipo de la CMDB (Explorador por Redes / Máscara)'
+                                  : 'Abrir Explorador CMDB por Redes / Máscara de Red...',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w800,
+                                color: AppPalette.blue900,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                   Container(
                     padding: const EdgeInsets.all(8),
                     margin: const EdgeInsets.only(bottom: 10),
@@ -2593,6 +2802,9 @@ class _RackEditorViewState extends State<RackEditorView> {
         if (check['has_collision'] == true) {
           final owners = ((check['owners'] as List?) ?? [])
               .map((e) => Map<String, dynamic>.from(e as Map))
+              .where((o) =>
+                  selectedCmdbAssetId == null ||
+                  (o['id'] as num?)?.toInt() != selectedCmdbAssetId)
               .toList();
           if (owners.isNotEmpty && mounted) {
             final owner = owners.first;
@@ -2749,6 +2961,8 @@ class _RackEditorViewState extends State<RackEditorView> {
         'certscope_enabled': certscopeEnabled,
         'certscope_port': int.tryParse(certscopePortCtrl.text.trim()) ?? 443,
         'custom_fields': {
+          if (selectedCmdbAssetId != null)
+            'linked_cmdb_asset_id': selectedCmdbAssetId,
           if (modelCtrl.text.trim().isNotEmpty)
             'model_name': modelCtrl.text.trim(),
           if (chosenUHeight != tpl.uHeight) 'u_height_override': chosenUHeight,

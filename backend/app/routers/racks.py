@@ -386,6 +386,40 @@ def add_device_to_rack(rack_id: int, payload: RackDeviceCreate, db: Session = De
         check_single_device(db, device)
         db.refresh(device)
 
+    # Si el operario seleccionó un activo existente de la CMDB al montar el equipo en el Rack, vincularlo antes de sincronizar
+    cf_init = dict(device.custom_fields or {})
+    linked_cmdb_id = cf_init.pop("linked_cmdb_asset_id", None)
+    if linked_cmdb_id is not None:
+        device.custom_fields = cf_init
+        try:
+            linked_ast = (
+                db.query(CmdbAsset)
+                .options(joinedload(CmdbAsset.ip_addresses))
+                .filter(CmdbAsset.id == int(linked_cmdb_id))
+                .first()
+            )
+            if linked_ast and linked_ast.rack_device_id is None:
+                linked_ast.rack_device_id = device.id
+                linked_ast.sync_source = "rack_device"
+                if not (device.mac_address or "").strip() and linked_ast.ip_addresses:
+                    hb_rec = next(
+                        (ip for ip in linked_ast.ip_addresses if ip.is_heartbeat_ip or ip.ip_role == "mgmt_heartbeat"),
+                        linked_ast.ip_addresses[0],
+                    )
+                    if hb_rec and hb_rec.mac_address:
+                        device.mac_address = hb_rec.mac_address
+                    if device.vlan_mgmt is None and hb_rec and hb_rec.vlan_id is not None:
+                        device.vlan_mgmt = hb_rec.vlan_id
+                if linked_ast.status == "online" and device.status == "unmonitored":
+                    device.status = "online"
+                    device.monitoring_enabled = True
+                    device.last_ping_ms = linked_ast.last_ping_ms
+                    device.last_checked_at = linked_ast.last_checked_at
+                db.commit()
+                db.refresh(device)
+        except Exception:
+            db.rollback()
+
     # Sincronizar inmediatamente con la CMDB y aplicar resolución de colisión si el operario la indicó desde el Rack Editor
     sync_physical_devices_to_cmdb(db)
     cf_clean = dict(device.custom_fields or {})
@@ -666,6 +700,40 @@ def update_rack_device(device_id: int, payload: RackDeviceUpdate, db: Session = 
     ):
         check_single_device(db, device)
         db.refresh(device)
+
+    # Si el operario seleccionó un activo existente de la CMDB al montar el equipo en el Rack, vincularlo antes de sincronizar
+    cf_init = dict(device.custom_fields or {})
+    linked_cmdb_id = cf_init.pop("linked_cmdb_asset_id", None)
+    if linked_cmdb_id is not None:
+        device.custom_fields = cf_init
+        try:
+            linked_ast = (
+                db.query(CmdbAsset)
+                .options(joinedload(CmdbAsset.ip_addresses))
+                .filter(CmdbAsset.id == int(linked_cmdb_id))
+                .first()
+            )
+            if linked_ast and linked_ast.rack_device_id is None:
+                linked_ast.rack_device_id = device.id
+                linked_ast.sync_source = "rack_device"
+                if not (device.mac_address or "").strip() and linked_ast.ip_addresses:
+                    hb_rec = next(
+                        (ip for ip in linked_ast.ip_addresses if ip.is_heartbeat_ip or ip.ip_role == "mgmt_heartbeat"),
+                        linked_ast.ip_addresses[0],
+                    )
+                    if hb_rec and hb_rec.mac_address:
+                        device.mac_address = hb_rec.mac_address
+                    if device.vlan_mgmt is None and hb_rec and hb_rec.vlan_id is not None:
+                        device.vlan_mgmt = hb_rec.vlan_id
+                if linked_ast.status == "online" and device.status == "unmonitored":
+                    device.status = "online"
+                    device.monitoring_enabled = True
+                    device.last_ping_ms = linked_ast.last_ping_ms
+                    device.last_checked_at = linked_ast.last_checked_at
+                db.commit()
+                db.refresh(device)
+        except Exception:
+            db.rollback()
 
     # Sincronizar inmediatamente con la CMDB y aplicar resolución de colisión si el operario la indicó desde el Rack Editor
     sync_physical_devices_to_cmdb(db)

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api_client.dart';
+import '../../shared/widgets/cmdb_asset_explorer_dialog.dart';
 
 class NetworkHostsView extends StatefulWidget {
   final RackDocApiClient api;
@@ -1632,17 +1633,76 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
               ),
             ),
           const Divider(height: 18),
-          // 3. Hosts ya registrados en CMDB / Red & Host para arrastrar al Stack
-          Text(
-            'HOSTS EN CMDB (${_hosts.length})',
-            style: const TextStyle(
-              fontSize: 9.8,
-              fontWeight: FontWeight.w800,
-              color: AppTheme.accentTeal,
-            ),
+          // 3. Hosts ya registrados en CMDB / Red & Host para arrastrar o añadir al Stack
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'HOSTS EN CMDB (${_hosts.length})',
+                  style: const TextStyle(
+                    fontSize: 9.8,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.accentTeal,
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 6),
-          for (final h in _hosts)
+          if (widget.canEdit)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 7,
+                    ),
+                    backgroundColor: AppTheme.accentTeal.withValues(
+                      alpha: 0.08,
+                    ),
+                    side: const BorderSide(color: AppTheme.accentTeal),
+                  ),
+                  onPressed: () async {
+                    final picked = await CmdbAssetExplorerDialog.show(
+                      context,
+                      api: widget.api,
+                      contextMode: 'stack',
+                      alreadyInStackAssetIds: inStackAssetIds
+                          .whereType<int>()
+                          .toSet(),
+                      title:
+                          'Añadir Equipo desde CMDB al Stack (Agrupado por Redes / Máscara)',
+                      subtitle:
+                          'Selecciona una Subred / Máscara CIDR en la columna izquierda y elige el equipo a incorporar en este Stack.',
+                    );
+                    if (picked != null && picked['id'] != null) {
+                      await _handleStackCanvasDrop(
+                        'host:${picked['id']}',
+                        const Offset(0.32, 0.32),
+                        stackId,
+                      );
+                    }
+                  },
+                  icon: const Icon(
+                    Icons.account_tree_rounded,
+                    size: 14,
+                    color: AppTheme.accentTeal,
+                  ),
+                  label: const Text(
+                    'Explorar por Redes / Subredes',
+                    style: TextStyle(
+                      fontSize: 10.2,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.accentTeal,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          for (final h in _hosts.take(25))
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Draggable<String>(
@@ -9256,6 +9316,7 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
           width: 470,
           height: 760,
           child: _DatacenterStyleHostConfigPanel(
+            api: widget.api,
             host: existingHost ??
                 <String, dynamic>{
                   'code': 'ELEM-${DateTime.now().millisecondsSinceEpoch % 1000}',
@@ -10945,6 +11006,7 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
 // =============================================================================
 
 class _DatacenterStyleHostConfigPanel extends StatefulWidget {
+  final RackDocApiClient? api;
   final Map<String, dynamic> host;
   final Map<String, dynamic>? stackNode;
   final List<Map<String, dynamic>> allStackNodes;
@@ -10963,6 +11025,7 @@ class _DatacenterStyleHostConfigPanel extends StatefulWidget {
 
   const _DatacenterStyleHostConfigPanel({
     super.key,
+    this.api,
     required this.host,
     this.stackNode,
     required this.allStackNodes,
@@ -10996,6 +11059,8 @@ class _DatacenterStyleHostConfigPanelState
   late final TextEditingController _osCtrl;
   late final TextEditingController _modelCtrl;
   late final TextEditingController _serialCtrl;
+  int? _selectedExistingCmdbAssetId;
+  Map<String, dynamic>? _selectedExistingCmdbAsset;
 
   late String _hostingMode;
   late String _clusterPreset;
@@ -11414,7 +11479,9 @@ class _DatacenterStyleHostConfigPanelState
               : 'Alojado en Servidor Físico del Rack');
 
     return {
-      if (!widget.isNewElement && widget.host['id'] != null)
+      if (_selectedExistingCmdbAssetId != null)
+        'asset_id': _selectedExistingCmdbAssetId
+      else if (!widget.isNewElement && widget.host['id'] != null)
         'asset_id': widget.host['id'],
       'code': _codeCtrl.text.trim(),
       'name': _nameCtrl.text.trim(),
@@ -11521,6 +11588,164 @@ class _DatacenterStyleHostConfigPanelState
   // 1. Tipo de elemento, identificadores, IP, FQDN y sistema operativo.
   List<Widget> _buildIdentidadDelElemento() {
     return [
+      if (widget.isNewElement && widget.api != null) ...[
+        Container(
+          padding: const EdgeInsets.all(9),
+          margin: const EdgeInsets.only(bottom: 10),
+          decoration: BoxDecoration(
+            color: _selectedExistingCmdbAsset != null
+                ? const Color(0xFFF0FDF4)
+                : const Color(0xFFEFF6FF),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: _selectedExistingCmdbAsset != null
+                  ? const Color(0xFF22C55E)
+                  : AppPalette.blue300,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.account_tree_rounded,
+                    size: 15,
+                    color: _selectedExistingCmdbAsset != null
+                        ? const Color(0xFF15803D)
+                        : AppPalette.blue900,
+                  ),
+                  const SizedBox(width: 6),
+                  const Expanded(
+                    child: Text(
+                      '0. ¿Seleccionar activo ya registrado en la CMDB?',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                        color: AppPalette.slate900,
+                      ),
+                    ),
+                  ),
+                  if (_selectedExistingCmdbAsset != null)
+                    InkWell(
+                      onTap: () {
+                        setState(() {
+                          _selectedExistingCmdbAssetId = null;
+                          _selectedExistingCmdbAsset = null;
+                        });
+                      },
+                      child: const Text(
+                        'Desvincular',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                          color: AppPalette.red600,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              if (_selectedExistingCmdbAsset != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    'Vinculado: [${_selectedExistingCmdbAsset!['code']}] ${_selectedExistingCmdbAsset!['name']} (${_ipCtrl.text})',
+                    style: const TextStyle(
+                      fontSize: 10.8,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF166534),
+                    ),
+                  ),
+                ),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    backgroundColor: Colors.white,
+                    side: const BorderSide(color: AppPalette.blue600),
+                  ),
+                  onPressed: () async {
+                    final inStackIds = widget.allStackNodes
+                        .map((n) => (n['host'] as Map?)?['id'])
+                        .whereType<int>()
+                        .toSet();
+                    final picked = await CmdbAssetExplorerDialog.show(
+                      context,
+                      api: widget.api!,
+                      contextMode: 'stack',
+                      alreadyInStackAssetIds: inStackIds,
+                      preselectedAssetId: _selectedExistingCmdbAssetId,
+                      title:
+                          'Seleccionar Activo de la CMDB por Redes / Máscara',
+                      subtitle:
+                          'Elige una Subred / Máscara CIDR en la columna izquierda y selecciona el equipo para autocompletar todos sus campos.',
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        _selectedExistingCmdbAsset = picked;
+                        _selectedExistingCmdbAssetId =
+                            (picked['id'] as num?)?.toInt();
+                        final rawCode =
+                            (picked['code'] ?? '').toString().trim();
+                        if (rawCode.isNotEmpty) _codeCtrl.text = rawCode;
+                        final rawName =
+                            (picked['name'] ?? '').toString().trim();
+                        if (rawName.isNotEmpty) _nameCtrl.text = rawName;
+                        final resIp = (picked['_resolved_ip'] ??
+                                picked['heartbeat_ip'] ??
+                                '')
+                            .toString()
+                            .trim();
+                        if (resIp.isNotEmpty) {
+                          _ipCtrl.text = resIp;
+                          _connSshHostCtrl.text = resIp;
+                          _hbHttpUrlCtrl.text = '$_hbHttpScheme://$resIp/health';
+                          _connHttpUrlCtrl.text = 'http://$resIp/';
+                          _connHttpsUrlCtrl.text = 'https://$resIp/';
+                          _csUrlCtrl.text = 'https://$resIp/';
+                        }
+                        final resFqdn = (picked['_resolved_fqdn'] ??
+                                picked['fqdn'] ??
+                                '')
+                            .toString()
+                            .trim();
+                        if (resFqdn.isNotEmpty) _fqdnCtrl.text = resFqdn;
+                        final resOs = (picked['os_or_firmware'] ?? '')
+                            .toString()
+                            .trim();
+                        if (resOs.isNotEmpty) _osCtrl.text = resOs;
+                        final resModel =
+                            (picked['model_name'] ?? '').toString().trim();
+                        if (resModel.isNotEmpty) _modelCtrl.text = resModel;
+                        final resSerial =
+                            (picked['serial_or_uuid'] ?? '').toString().trim();
+                        if (resSerial.isNotEmpty) _serialCtrl.text = resSerial;
+                      });
+                    }
+                  },
+                  icon: const Icon(
+                    Icons.manage_search_rounded,
+                    size: 15,
+                    color: AppPalette.blue700,
+                  ),
+                  label: Text(
+                    _selectedExistingCmdbAsset != null
+                        ? 'Cambiar Activo CMDB (Por Redes / Máscara)'
+                        : 'Explorar CMDB por Redes / Máscara de Red...',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: AppPalette.blue900,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
       // 1. Tipo + ID + Name + IP + FQDN
       DropdownButtonFormField<String>(
         initialValue: _assetClass,
