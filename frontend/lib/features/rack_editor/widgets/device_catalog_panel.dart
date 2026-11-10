@@ -7,6 +7,7 @@ class DeviceCatalogPanel extends StatefulWidget {
   final DeviceTemplateModel? selectedTemplateForClickMount;
   final ValueChanged<DeviceTemplateModel?> onSelectTemplate;
   final VoidCallback onCreateCustomTemplate;
+  final VoidCallback? onMountFromCmdb;
   final String selectedLibraryGroup;
   final ValueChanged<String> onSelectLibraryGroup;
   final VoidCallback onExportLibrary;
@@ -20,6 +21,7 @@ class DeviceCatalogPanel extends StatefulWidget {
     required this.selectedTemplateForClickMount,
     required this.onSelectTemplate,
     required this.onCreateCustomTemplate,
+    this.onMountFromCmdb,
     required this.selectedLibraryGroup,
     required this.onSelectLibraryGroup,
     required this.onExportLibrary,
@@ -183,6 +185,29 @@ class _DeviceCatalogPanelState extends State<DeviceCatalogPanel> {
                       ),
                   ],
                 ),
+                if (widget.canEdit && widget.onMountFromCmdb != null) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        foregroundColor: AppPalette.teal700,
+                        backgroundColor: const Color(0xFFF0FDFA),
+                        side: const BorderSide(color: AppPalette.teal600),
+                      ),
+                      onPressed: widget.onMountFromCmdb,
+                      icon: const Icon(Icons.fact_check_outlined, size: 15),
+                      label: const Text(
+                        '+ Seleccionar Equipo CMDB',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 6),
                 // Selector de Librería / Grupo ("Network", "Power", "Host - HP", etc.)
                 Container(

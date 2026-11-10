@@ -1129,6 +1129,7 @@ class _RackEditorViewState extends State<RackEditorView> {
   Future<void> _showManageTrayItemsDialog(
     RackDeviceModel trayDev, {
     DeviceTemplateModel? initialAddTemplate,
+    Map<String, dynamic>? initialCmdbAsset,
   }) async {
     if (!_canEdit) return;
     final messenger = ScaffoldMessenger.of(context);
@@ -1139,11 +1140,33 @@ class _RackEditorViewState extends State<RackEditorView> {
       return;
     }
 
+    List<Map<String, dynamic>> cmdbAssets = [];
+    try {
+      final overview = await widget.api.fetchCmdbOverview();
+      cmdbAssets = ((overview['assets'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      cmdbAssets.sort((a, b) {
+        final aUnplaced =
+            (a['rack_device_id'] == null && a['rack_id'] == null) ? 0 : 1;
+        final bUnplaced =
+            (b['rack_device_id'] == null && b['rack_id'] == null) ? 0 : 1;
+        if (aUnplaced != bUnplaced) return aUnplaced.compareTo(bUnplaced);
+        return (a['code'] ?? '')
+            .toString()
+            .compareTo((b['code'] ?? '').toString());
+      });
+    } catch (_) {}
+    if (!mounted) return;
+
     final items = trayDev.trayItems
         .map((e) => Map<String, dynamic>.from(e))
         .toList();
 
     DeviceTemplateModel selectedTpl = initialAddTemplate ?? miniTemplates.first;
+    int? selectedCmdbAssetId;
+    Map<String, dynamic>? selectedCmdbAsset;
 
     String suggestCodeFor(DeviceTemplateModel t, int index) {
       final m = t.modelName.toUpperCase();
@@ -1183,6 +1206,40 @@ class _RackEditorViewState extends State<RackEditorView> {
     final ipCtrl = TextEditingController(
       text: '10.28.1.${60 + trayDev.startU * 2 + items.length}',
     );
+
+    void applyTrayCmdbAsset(Map<String, dynamic>? ast) {
+      selectedCmdbAsset = ast;
+      selectedCmdbAssetId = (ast?['id'] as num?)?.toInt();
+      if (ast == null) return;
+      final rawCode = (ast['code'] ?? '').toString().trim();
+      if (rawCode.isNotEmpty &&
+          !rawCode.startsWith('DISC-') &&
+          !rawCode.startsWith('FLR-')) {
+        codeCtrl.text = rawCode;
+      }
+      final rawName = (ast['name'] ?? '').toString().trim();
+      if (rawName.isNotEmpty && !rawName.startsWith('Equipo Detectado')) {
+        nameCtrl.text = rawName;
+      }
+      final resIp =
+          (ast['_resolved_ip'] ?? ast['heartbeat_ip'] ?? '').toString().trim();
+      if (resIp.isNotEmpty) {
+        ipCtrl.text = resIp;
+      }
+      final modelHint =
+          '${ast['model_name'] ?? ''} ${ast['name'] ?? ''}'.toLowerCase();
+      for (final mt in miniTemplates) {
+        if (modelHint.contains(mt.manufacturer.toLowerCase()) ||
+            modelHint.contains(mt.modelName.toLowerCase())) {
+          selectedTpl = mt;
+          break;
+        }
+      }
+    }
+
+    if (initialCmdbAsset != null) {
+      applyTrayCmdbAsset(initialCmdbAsset);
+    }
 
     Map<String, dynamic> buildTrayItemSpec() {
       return {
@@ -1370,6 +1427,170 @@ class _RackEditorViewState extends State<RackEditorView> {
                     ),
                   ),
                   const SizedBox(height: 8),
+                  // Selector CMDB para equipo de bandeja
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(
+                      color: selectedCmdbAsset != null
+                          ? const Color(0xFFF0FDF4)
+                          : const Color(0xFFEFF6FF),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: selectedCmdbAsset != null
+                            ? const Color(0xFF22C55E)
+                            : AppPalette.blue300,
+                        width: 1.3,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.fact_check_outlined,
+                              size: 16,
+                              color: selectedCmdbAsset != null
+                                  ? const Color(0xFF15803D)
+                                  : AppPalette.blue900,
+                            ),
+                            const SizedBox(width: 6),
+                            const Expanded(
+                              child: Text(
+                                '0. ¿Seleccionar equipo ya detectado / registrado en la CMDB?',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppPalette.slate900,
+                                ),
+                              ),
+                            ),
+                            if (selectedCmdbAsset != null)
+                              TextButton.icon(
+                                style: TextButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  foregroundColor: AppPalette.red600,
+                                ),
+                                onPressed: () => setModal(() {
+                                  applyTrayCmdbAsset(null);
+                                }),
+                                icon: const Icon(Icons.link_off, size: 14),
+                                label: const Text(
+                                  'Desvincular',
+                                  style: TextStyle(fontSize: 11),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        if (cmdbAssets.isNotEmpty) ...[
+                          DropdownButtonFormField<int?>(
+                            key: ValueKey('tray_cmdb_$selectedCmdbAssetId'),
+                            initialValue: cmdbAssets.any(
+                              (a) =>
+                                  (a['id'] as num?)?.toInt() ==
+                                  selectedCmdbAssetId,
+                            )
+                                ? selectedCmdbAssetId
+                                : null,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                              labelText:
+                                  'Elegir directamente de la lista CMDB (o usa el Explorador por Redes abajo)',
+                              prefixIcon: Icon(
+                                Icons.inventory_2_outlined,
+                                size: 17,
+                              ),
+                              isDense: true,
+                              filled: true,
+                              fillColor: Colors.white,
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                            ),
+                            items: [
+                              const DropdownMenuItem<int?>(
+                                value: null,
+                                child: Text(
+                                  '— Nuevo equipo (Sin vincular a CMDB) —',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                              ),
+                              for (final ast in cmdbAssets)
+                                DropdownMenuItem<int?>(
+                                  value: (ast['id'] as num?)?.toInt(),
+                                  child: Text(
+                                    '[${ast['code']}] ${ast['name']} • ${(ast['heartbeat_ip'] ?? '').toString().isNotEmpty ? ast['heartbeat_ip'] : 'Sin IP'}${(ast['rack_device_id'] == null && ast['rack_id'] == null) ? ' (SIN RACK)' : ''}',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                            onChanged: (astId) {
+                              setModal(() {
+                                if (astId == null) {
+                                  applyTrayCmdbAsset(null);
+                                } else {
+                                  final found = cmdbAssets.firstWhere(
+                                    (a) => (a['id'] as num?)?.toInt() == astId,
+                                  );
+                                  applyTrayCmdbAsset(found);
+                                }
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 6),
+                        ],
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              side: const BorderSide(color: AppPalette.blue600),
+                            ),
+                            onPressed: () async {
+                              final picked = await CmdbAssetExplorerDialog.show(
+                                ctx,
+                                api: widget.api,
+                                initialAssets:
+                                    cmdbAssets.isNotEmpty ? cmdbAssets : null,
+                                contextMode: 'rack',
+                                preselectedAssetId: selectedCmdbAssetId,
+                                title:
+                                    'Seleccionar Equipo de la CMDB para Bandeja ${trayDev.code}',
+                                subtitle:
+                                    'Navega por las Redes / Subredes (Máscara CIDR) y elige el activo para autocompletar sus datos.',
+                              );
+                              if (picked != null) {
+                                setModal(() => applyTrayCmdbAsset(picked));
+                              }
+                            },
+                            icon: const Icon(
+                              Icons.manage_search_rounded,
+                              size: 16,
+                              color: AppPalette.blue700,
+                            ),
+                            label: Text(
+                              selectedCmdbAsset != null
+                                  ? 'Cambiar Equipo de la CMDB (Explorador por Redes / Máscara)'
+                                  : 'Abrir Explorador CMDB por Redes / Máscara de Red...',
+                              style: const TextStyle(
+                                fontSize: 11.2,
+                                fontWeight: FontWeight.w800,
+                                color: AppPalette.blue900,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                   DropdownButtonFormField<DeviceTemplateModel>(
                     initialValue: selectedTpl,
                     isExpanded: true,
@@ -1549,6 +1770,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                                   'manufacturer': selectedTpl.manufacturer,
                                   'model_name': selectedTpl.modelName,
                                   'ip_address': ipCtrl.text.trim(),
+                                  if (selectedCmdbAssetId != null)
+                                    'cmdb_asset_id': selectedCmdbAssetId,
                                   'layout_spec': buildTrayItemSpec(),
                                 });
                                 codeCtrl.text = suggestCodeFor(
@@ -1576,7 +1799,7 @@ class _RackEditorViewState extends State<RackEditorView> {
             ),
             FilledButton.icon(
               onPressed: () {
-                if (initialAddTemplate != null &&
+                if ((initialAddTemplate != null || initialCmdbAsset != null) &&
                     items.length == trayDev.trayItems.length &&
                     items.length < 4) {
                   items.add({
@@ -1590,6 +1813,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                     'manufacturer': selectedTpl.manufacturer,
                     'model_name': selectedTpl.modelName,
                     'ip_address': ipCtrl.text.trim(),
+                    if (selectedCmdbAssetId != null)
+                      'cmdb_asset_id': selectedCmdbAssetId,
                     'layout_spec': buildTrayItemSpec(),
                   });
                 }
@@ -1642,10 +1867,34 @@ class _RackEditorViewState extends State<RackEditorView> {
     'miscellaneous': 'Accesorios / Ventiladores / Panel Ciego',
   };
 
-  Future<void> _showQuickInstallAtUDialog(int targetU, String face) async {
+  Future<void> _openInstallFromCmdbAtFirstFreeU() async {
+    final rack = _rack;
+    if (rack == null || !_canEdit) return;
+    int firstFreeU = rack.totalUnits;
+    for (int u = rack.totalUnits; u >= 1; u--) {
+      if (_canFitAtU(rack, u, 1)) {
+        firstFreeU = u;
+        break;
+      }
+    }
+    await _showQuickInstallAtUDialog(
+      firstFreeU,
+      _activeFace == 'back' ? 'back' : 'front',
+      focusCmdbSelector: true,
+    );
+  }
+
+  Future<void> _showQuickInstallAtUDialog(
+    int initialTargetU,
+    String initialFace, {
+    bool focusCmdbSelector = false,
+  }) async {
     if (!_canEdit) return;
     final rack = _rack;
     if (rack == null) return;
+
+    int targetU = initialTargetU;
+    String face = initialFace;
 
     final availableTemplates = widget.templates
         .where(
@@ -1656,6 +1905,26 @@ class _RackEditorViewState extends State<RackEditorView> {
         )
         .toList();
     if (availableTemplates.isEmpty) return;
+
+    List<Map<String, dynamic>> cmdbAssets = [];
+    try {
+      final overview = await widget.api.fetchCmdbOverview();
+      cmdbAssets = ((overview['assets'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      cmdbAssets.sort((a, b) {
+        final aUnplaced =
+            (a['rack_device_id'] == null && a['rack_id'] == null) ? 0 : 1;
+        final bUnplaced =
+            (b['rack_device_id'] == null && b['rack_id'] == null) ? 0 : 1;
+        if (aUnplaced != bUnplaced) return aUnplaced.compareTo(bUnplaced);
+        return (a['code'] ?? '')
+            .toString()
+            .compareTo((b['code'] ?? '').toString());
+      });
+    } catch (_) {}
+    if (!mounted) return;
 
     // 1. Construir lista ordenada de Grupos / Librerías
     const preferredOrder = [
@@ -1684,7 +1953,7 @@ class _RackEditorViewState extends State<RackEditorView> {
     final groups = groupSet.toList();
 
     String selectedGroup =
-        ( _selectedLibraryGroup != 'all' &&
+        (_selectedLibraryGroup != 'all' &&
                 groups.contains(_selectedLibraryGroup))
             ? _selectedLibraryGroup
             : (groups.isNotEmpty ? groups.first : 'Network');
@@ -1716,8 +1985,71 @@ class _RackEditorViewState extends State<RackEditorView> {
     var filteredList = templatesForSelection(selectedGroup, selectedCategory);
     DeviceTemplateModel? selectedTemplate =
         filteredList.isNotEmpty ? filteredList.first : availableTemplates.first;
+    int? selectedCmdbAssetId;
+    Map<String, dynamic>? selectedCmdbAsset;
 
-    final chosenTemplate = await showDialog<DeviceTemplateModel>(
+    void autoMatchTemplateFromCmdb(Map<String, dynamic> asset) {
+      final assetClass = (asset['asset_class'] ?? '').toString().toLowerCase();
+      final modelStr =
+          '${asset['manufacturer'] ?? ''} ${asset['model_name'] ?? ''} ${asset['name'] ?? ''}'
+              .toLowerCase();
+
+      // 1. Buscar coincidencia directa por nombre de modelo/fabricante en el catálogo
+      for (final t in availableTemplates) {
+        final mName = t.modelName.toLowerCase();
+        if (mName.length >= 4 && modelStr.contains(mName)) {
+          selectedGroup = t.libraryGroup;
+          selectedCategory = t.category;
+          selectedTemplate = t;
+          return;
+        }
+      }
+
+      // 2. Mapear clase CMDB a grupo y categoría del catálogo de Rack
+      if (assetClass.contains('switch')) {
+        selectedGroup = 'Network';
+        selectedCategory = 'switch';
+      } else if (assetClass.contains('router') || assetClass.contains('gateway')) {
+        selectedGroup = 'Network';
+        selectedCategory = 'router';
+      } else if (assetClass.contains('firewall')) {
+        selectedGroup = 'Network';
+        selectedCategory = 'firewall';
+      } else if (assetClass.contains('storage') || assetClass.contains('nas')) {
+        selectedGroup = groups.contains('Storage - NAS') ? 'Storage - NAS' : 'Network';
+        selectedCategory = 'all';
+      } else if (assetClass.contains('san')) {
+        selectedGroup = groups.contains('Storage - SAN') ? 'Storage - SAN' : 'Network';
+        selectedCategory = 'all';
+      } else if (assetClass.contains('ups') || assetClass.contains('pdu')) {
+        selectedGroup = 'Power';
+        selectedCategory = 'all';
+      } else if (assetClass.contains('server') ||
+          assetClass.contains('hypervisor') ||
+          assetClass.contains('host')) {
+        if (modelStr.contains('dell') && groups.contains('Host - Dell')) {
+          selectedGroup = 'Host - Dell';
+        } else if (modelStr.contains('supermicro') &&
+            groups.contains('Host - Supermicro')) {
+          selectedGroup = 'Host - Supermicro';
+        } else if (groups.contains('Host - HP')) {
+          selectedGroup = 'Host - HP';
+        }
+        selectedCategory = 'all';
+      }
+      final nextList = templatesForSelection(selectedGroup, selectedCategory);
+      if (nextList.isNotEmpty) {
+        selectedTemplate = nextList.first;
+      }
+    }
+
+    final chosenResult = await showDialog<
+        ({
+          DeviceTemplateModel template,
+          Map<String, dynamic>? cmdbAsset,
+          int targetU,
+          String face,
+        })>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModal) {
@@ -1773,7 +2105,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                         ),
                       ),
                       const Text(
-                        'Selecciona primero el Grupo, luego la Categoría y finalmente el Dispositivo concreto',
+                        'Puedes elegir un equipo ya existente en la CMDB o seleccionar su plantilla física del catálogo',
                         style: TextStyle(
                           fontSize: 11,
                           color: AppPalette.slate500,
@@ -1786,15 +2118,334 @@ class _RackEditorViewState extends State<RackEditorView> {
               ],
             ),
             content: SizedBox(
-              width: 540,
+              width: 560,
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // PASO 0: SELECCIONAR EQUIPO YA EXISTENTE EN LA CMDB (IGUAL QUE EN DATACENTERS Y RED & HOST)
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: selectedCmdbAsset != null
+                            ? const Color(0xFFF0FDF4)
+                            : const Color(0xFFEFF6FF),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: selectedCmdbAsset != null
+                              ? const Color(0xFF22C55E)
+                              : AppPalette.blue300,
+                          width: focusCmdbSelector ? 1.8 : 1.3,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.account_tree_rounded,
+                                size: 16,
+                                color: selectedCmdbAsset != null
+                                    ? const Color(0xFF15803D)
+                                    : AppPalette.blue900,
+                              ),
+                              const SizedBox(width: 6),
+                              const Expanded(
+                                child: Text(
+                                  '0. ¿Seleccionar equipo ya detectado / registrado en la CMDB?',
+                                  style: TextStyle(
+                                    fontSize: 11.8,
+                                    fontWeight: FontWeight.w900,
+                                    color: AppPalette.slate900,
+                                  ),
+                                ),
+                              ),
+                              if (selectedCmdbAsset != null)
+                                TextButton.icon(
+                                  style: TextButton.styleFrom(
+                                    visualDensity: VisualDensity.compact,
+                                    foregroundColor: AppPalette.red600,
+                                  ),
+                                  onPressed: () {
+                                    setModal(() {
+                                      selectedCmdbAssetId = null;
+                                      selectedCmdbAsset = null;
+                                    });
+                                  },
+                                  icon: const Icon(Icons.link_off, size: 14),
+                                  label: const Text(
+                                    'Desvincular',
+                                    style: TextStyle(fontSize: 11),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          if (cmdbAssets.isNotEmpty) ...[
+                            DropdownButtonFormField<int?>(
+                              key: ValueKey('quick_cmdb_$selectedCmdbAssetId'),
+                              initialValue: cmdbAssets.any(
+                                      (a) => a['id'] == selectedCmdbAssetId)
+                                  ? selectedCmdbAssetId
+                                  : null,
+                              isExpanded: true,
+                              decoration: const InputDecoration(
+                                labelText:
+                                    'Seleccionar directamente activo de 6. CMDB (Autocompleta Nombre, IP, Hostname y Modelo)',
+                                prefixIcon: Icon(
+                                  Icons.inventory_2_outlined,
+                                  size: 17,
+                                  color: AppPalette.blue700,
+                                ),
+                                isDense: true,
+                                filled: true,
+                                fillColor: Colors.white,
+                                border: OutlineInputBorder(),
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 9,
+                                ),
+                              ),
+                              items: [
+                                const DropdownMenuItem<int?>(
+                                  value: null,
+                                  child: Text(
+                                    '— Crear nuevo equipo desde cero (o selecciona uno de la CMDB) —',
+                                    style: TextStyle(
+                                      fontSize: 11.8,
+                                      color: AppPalette.slate500,
+                                    ),
+                                  ),
+                                ),
+                                ...cmdbAssets.map((a) {
+                                  final id = (a['id'] as num?)?.toInt();
+                                  final code = (a['code'] ?? '').toString();
+                                  final name = (a['name'] ?? '').toString();
+                                  final ip = (a['_resolved_ip'] ??
+                                          a['heartbeat_ip'] ??
+                                          a['ip_address'] ??
+                                          '')
+                                      .toString();
+                                  return DropdownMenuItem<int?>(
+                                    value: id,
+                                    child: Text(
+                                      '[$code] $name ${ip.isNotEmpty ? "• IP: $ip" : ""}',
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  );
+                                }),
+                              ],
+                              onChanged: (val) {
+                                setModal(() {
+                                  selectedCmdbAssetId = val;
+                                  if (val == null) {
+                                    selectedCmdbAsset = null;
+                                  } else {
+                                    final picked = cmdbAssets.firstWhere(
+                                      (a) => a['id'] == val,
+                                    );
+                                    selectedCmdbAsset = picked;
+                                    autoMatchTemplateFromCmdb(picked);
+                                  }
+                                });
+                              },
+                            ),
+                            const SizedBox(height: 6),
+                          ],
+                          if (selectedCmdbAsset != null)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 9,
+                                vertical: 6,
+                              ),
+                              margin: const EdgeInsets.only(bottom: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: const Color(0xFF86EFAC),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.check_circle,
+                                    size: 15,
+                                    color: Color(0xFF16A34A),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      'Activo CMDB seleccionado: [${selectedCmdbAsset!['code']}] ${selectedCmdbAsset!['name']} '
+                                      '• IP: ${selectedCmdbAsset!['_resolved_ip'] ?? selectedCmdbAsset!['heartbeat_ip'] ?? "Sin IP"}',
+                                      style: const TextStyle(
+                                        fontSize: 11.2,
+                                        fontWeight: FontWeight.w800,
+                                        color: Color(0xFF14532D),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                backgroundColor: Colors.white,
+                                side:
+                                    const BorderSide(color: AppPalette.blue600),
+                              ),
+                              onPressed: () async {
+                                final picked =
+                                    await CmdbAssetExplorerDialog.show(
+                                  ctx,
+                                  api: widget.api,
+                                  contextMode: 'rack',
+                                  preselectedAssetId: selectedCmdbAssetId,
+                                  title:
+                                      'Seleccionar Equipo de la CMDB para Montar en U$targetU',
+                                  subtitle:
+                                      'Navega por las Redes / Subredes (Máscara CIDR) en la columna izquierda y elige el activo para autocompletar todos sus datos.',
+                                );
+                                if (picked != null) {
+                                  setModal(() {
+                                    selectedCmdbAsset = picked;
+                                    selectedCmdbAssetId =
+                                        (picked['id'] as num?)?.toInt();
+                                    if (!cmdbAssets.any(
+                                      (a) => a['id'] == selectedCmdbAssetId,
+                                    )) {
+                                      cmdbAssets = [picked, ...cmdbAssets];
+                                    }
+                                    autoMatchTemplateFromCmdb(picked);
+                                  });
+                                }
+                              },
+                              icon: const Icon(
+                                Icons.manage_search_rounded,
+                                size: 17,
+                                color: AppPalette.blue700,
+                              ),
+                              label: Text(
+                                selectedCmdbAsset != null
+                                    ? 'Cambiar Equipo de la CMDB (Explorador por Redes / Máscara)'
+                                    : 'Abrir Explorador CMDB por Redes / Máscara de Red...',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppPalette.blue900,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // POSICIÓN U Y CARA DE MONTAJE (ÚTIL CUANDO SE ABRE DESDE "+ DESDE CMDB")
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<int>(
+                            key: ValueKey('pos_u_$targetU'),
+                            initialValue: targetU,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Posición en Rack (Unidad U)',
+                              prefixIcon: Icon(
+                                Icons.vertical_align_center_rounded,
+                                size: 17,
+                              ),
+                              isDense: true,
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 9,
+                              ),
+                            ),
+                            items: [
+                              for (int u = rack.totalUnits; u >= 1; u--)
+                                DropdownMenuItem<int>(
+                                  value: u,
+                                  child: Text(
+                                    'U$u ${_canFitAtU(rack, u, 1) ? "(Libre)" : "(Ocupada)"}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: _canFitAtU(rack, u, 1)
+                                          ? AppPalette.slate900
+                                          : AppPalette.slate400,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                            onChanged: (val) {
+                              if (val != null) {
+                                setModal(() => targetU = val);
+                              }
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            key: ValueKey('pos_face_$face'),
+                            initialValue: face,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Cara del Bastidor',
+                              prefixIcon: Icon(Icons.flip_rounded, size: 17),
+                              isDense: true,
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 9,
+                              ),
+                            ),
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'front',
+                                child: Text(
+                                  'Cara Frontal (FRONT)',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              DropdownMenuItem(
+                                value: 'back',
+                                child: Text(
+                                  'Cara Trasera (BACK)',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                            onChanged: (val) {
+                              if (val != null) {
+                                setModal(() => face = val);
+                              }
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
                     // PASO 1: DESPLEGABLE DE GRUPO / LIBRERÍA
                     const Text(
-                      '1. GRUPO / FAMILIA DE EQUIPOS:',
+                      '1. GRUPO / FAMILIA DE EQUIPOS (PLANTILLA CHASIS):',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
@@ -1916,8 +2567,8 @@ class _RackEditorViewState extends State<RackEditorView> {
                     const SizedBox(height: 14),
                     Text(
                       groupCategories.length > 1
-                          ? '3. DISPOSITIVO CONCRETO A INSTALAR (${filteredList.length} disponibles):'
-                          : '2. DISPOSITIVO CONCRETO A INSTALAR (${filteredList.length} disponibles):',
+                          ? '3. MODELO / PLANTILLA FÍSICA A INSTALAR (${filteredList.length} disponibles):'
+                          : '2. MODELO / PLANTILLA FÍSICA A INSTALAR (${filteredList.length} disponibles):',
                       style: const TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
@@ -2103,9 +2754,18 @@ class _RackEditorViewState extends State<RackEditorView> {
                   FilledButton.icon(
                     onPressed: selectedTemplate == null
                         ? null
-                        : () => Navigator.pop(ctx, selectedTemplate),
+                        : () => Navigator.pop(ctx, (
+                              template: selectedTemplate!,
+                              cmdbAsset: selectedCmdbAsset,
+                              targetU: targetU,
+                              face: face,
+                            )),
                     icon: const Icon(Icons.arrow_forward, size: 16),
-                    label: Text('Seleccionar para U$targetU'),
+                    label: Text(
+                      selectedCmdbAsset != null
+                          ? 'Continuar con Activo CMDB en U$targetU'
+                          : 'Seleccionar para U$targetU',
+                    ),
                   ),
                 ],
               ),
@@ -2115,11 +2775,12 @@ class _RackEditorViewState extends State<RackEditorView> {
       ),
     );
 
-    if (chosenTemplate != null && mounted) {
+    if (chosenResult != null && mounted) {
       await _handleDropOrMountTemplate(
-        chosenTemplate,
-        targetU,
-        targetFace: face,
+        chosenResult.template,
+        chosenResult.targetU,
+        targetFace: chosenResult.face,
+        initialCmdbAsset: chosenResult.cmdbAsset,
       );
     }
   }
@@ -2128,18 +2789,23 @@ class _RackEditorViewState extends State<RackEditorView> {
     DeviceTemplateModel tpl,
     int targetStartU, {
     String? targetFace,
+    Map<String, dynamic>? initialCmdbAsset,
   }) async {
     if (!_canEdit) return;
     final rack = _rack;
     if (rack == null) return;
 
     // Si es un equipo de "Bandeja - Equipos Mini" (Router sobremesa, Mini-Switch, ONT, Mini-PC)
-    // y se suelta en una U donde ya hay una Bandeja, lo metemos en esa bandeja.
-    // Si se suelta en una U libre, montamos automáticamente una Bandeja 1U con este mini-equipo dentro.
+    // y se suelta en una U donde ya hay una Bandeja, abrimos el gestor de esa bandeja (con soporte CMDB).
+    // Si se suelta en una U libre, creamos la Bandeja 1U y abrimos el gestor de bandeja para configurar/vincular CMDB.
     if (tpl.isTrayMiniDevice) {
       for (final d in rack.devices) {
         if (d.isRackTray && targetStartU >= d.startU && targetStartU <= d.endU) {
-          await _showManageTrayItemsDialog(d, initialAddTemplate: tpl);
+          await _showManageTrayItemsDialog(
+            d,
+            initialAddTemplate: tpl,
+            initialCmdbAsset: initialCmdbAsset,
+          );
           return;
         }
       }
@@ -2166,25 +2832,25 @@ class _RackEditorViewState extends State<RackEditorView> {
           'gateway': '10.28.1.1',
           'monitoring_enabled': true,
           'custom_fields': {
-            'tray_items': [
-              {
-                'template_id': tpl.id,
-                'code': 'EQ1',
-                'name': '${tpl.manufacturer} ${tpl.modelName}',
-                'manufacturer': tpl.manufacturer,
-                'model_name': tpl.modelName,
-                'ip_address': '10.28.1.${60 + targetStartU}',
-              },
-            ],
+            'tray_items': <Map<String, dynamic>>[],
           },
         });
         await _loadRack();
+        final freshTray = _rack?.devices.firstWhere(
+              (d) => d.id == createdTray.id,
+              orElse: () => createdTray,
+            ) ??
+            createdTray;
         setState(() {
-          _selectedDeviceId = createdTray.id;
+          _selectedDeviceId = freshTray.id;
           _selectedTemplateForClick = null;
         });
         if (mounted) {
-          ScaffoldMessenger.of(context).aviso('Bandeja BDJ$trayCount montada en U$targetStartU con "${tpl.manufacturer} ${tpl.modelName}" alojado encima. Pulsa "+ Equipos en Bandeja" para meter más.');
+          await _showManageTrayItemsDialog(
+            freshTray,
+            initialAddTemplate: tpl,
+            initialCmdbAsset: initialCmdbAsset,
+          );
         }
       } catch (e) {
         if (mounted) {
@@ -2206,6 +2872,26 @@ class _RackEditorViewState extends State<RackEditorView> {
       ScaffoldMessenger.of(context).avisoError('No se puede montar "${tpl.modelName}" (${tpl.uHeight}U) en U$targetStartU${tpl.uHeight > 1 ? '-U$targetEndU' : ''}: necesita ${tpl.uHeight}U libres consecutivas ($reason).');
       return;
     }
+
+    List<Map<String, dynamic>> cmdbAssets = [];
+    try {
+      final overview = await widget.api.fetchCmdbOverview();
+      cmdbAssets = ((overview['assets'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      cmdbAssets.sort((a, b) {
+        final aUnplaced =
+            (a['rack_device_id'] == null && a['rack_id'] == null) ? 0 : 1;
+        final bUnplaced =
+            (b['rack_device_id'] == null && b['rack_id'] == null) ? 0 : 1;
+        if (aUnplaced != bUnplaced) return aUnplaced.compareTo(bUnplaced);
+        return (a['code'] ?? '')
+            .toString()
+            .compareTo((b['code'] ?? '').toString());
+      });
+    } catch (_) {}
+    if (!mounted) return;
 
     final prefix = tpl.category
         .substring(0, tpl.category.length.clamp(1, 3))
@@ -2252,6 +2938,63 @@ class _RackEditorViewState extends State<RackEditorView> {
     int? selectedCmdbAssetId;
     Map<String, dynamic>? selectedCmdbAsset;
 
+    void applyCmdbAssetToControllers(Map<String, dynamic> picked) {
+      selectedCmdbAsset = picked;
+      selectedCmdbAssetId = (picked['id'] as num?)?.toInt();
+      final rawCode = (picked['code'] ?? '').toString().trim();
+      if (rawCode.isNotEmpty &&
+          !rawCode.startsWith('DISC-') &&
+          !rawCode.startsWith('FLR-')) {
+        codeCtrl.text = rawCode;
+      }
+      final rawName = (picked['name'] ?? '').toString().trim();
+      if (rawName.isNotEmpty && !rawName.startsWith('Equipo Detectado')) {
+        nameCtrl.text = rawName;
+      }
+      final rawHost = (picked['hostname'] ?? '').toString().trim();
+      if (rawHost.isNotEmpty) {
+        hostnameCtrl.text = rawHost;
+      }
+      final resFqdn =
+          (picked['_resolved_fqdn'] ?? picked['fqdn'] ?? '').toString().trim();
+      if (resFqdn.isNotEmpty) {
+        fqdnCtrl.text = resFqdn;
+      }
+      final resIp = (picked['_resolved_ip'] ??
+              picked['heartbeat_ip'] ??
+              picked['ip_address'] ??
+              '')
+          .toString()
+          .trim();
+      if (resIp.isNotEmpty) {
+        ipCtrl.text = resIp;
+      }
+      final resMask = (picked['_resolved_subnet_mask'] ?? '').toString().trim();
+      if (resMask.isNotEmpty) {
+        maskCtrl.text = resMask;
+      }
+      final resGw = (picked['_resolved_gateway'] ?? '').toString().trim();
+      if (resGw.isNotEmpty) {
+        gwCtrl.text = resGw;
+      }
+      final resModel = (picked['model_name'] ?? '').toString().trim();
+      if (resModel.isNotEmpty) {
+        modelCtrl.text = resModel;
+      }
+      final resSerial = (picked['serial_or_uuid'] ?? '').toString().trim();
+      if (resSerial.isNotEmpty) {
+        serialCtrl.text = resSerial;
+      }
+    }
+
+    if (initialCmdbAsset != null) {
+      applyCmdbAssetToControllers(initialCmdbAsset);
+      if (selectedCmdbAssetId != null &&
+          !cmdbAssets.any((a) => a['id'] == selectedCmdbAssetId)) {
+        cmdbAssets = [initialCmdbAsset, ...cmdbAssets];
+      }
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -2266,7 +3009,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // 0. VINCULAR CON ACTIVO DE LA CMDB AGRUPADO POR RED / MÁSCARA
+                  // 0. VINCULAR CON ACTIVO DE LA CMDB (DESPLEGABLE DIRECTO + EXPLORADOR POR RED / MÁSCARA)
                   Container(
                     padding: const EdgeInsets.all(10),
                     margin: const EdgeInsets.only(bottom: 10),
@@ -2326,6 +3069,80 @@ class _RackEditorViewState extends State<RackEditorView> {
                           ],
                         ),
                         const SizedBox(height: 6),
+                        if (cmdbAssets.isNotEmpty) ...[
+                          DropdownButtonFormField<int?>(
+                            key: ValueKey('mount_cmdb_$selectedCmdbAssetId'),
+                            initialValue: cmdbAssets
+                                    .any((a) => a['id'] == selectedCmdbAssetId)
+                                ? selectedCmdbAssetId
+                                : null,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                              labelText:
+                                  'Seleccionar directamente activo de 6. CMDB (Autocompleta Nombre, IP, Hostname y Serie)',
+                              prefixIcon: Icon(
+                                Icons.inventory_2_outlined,
+                                size: 17,
+                                color: AppPalette.blue700,
+                              ),
+                              isDense: true,
+                              filled: true,
+                              fillColor: Colors.white,
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 9,
+                              ),
+                            ),
+                            items: [
+                              const DropdownMenuItem<int?>(
+                                value: null,
+                                child: Text(
+                                  '— Crear nuevo equipo desde cero (sin vincular a activo previo) —',
+                                  style: TextStyle(
+                                    fontSize: 11.8,
+                                    color: AppPalette.slate500,
+                                  ),
+                                ),
+                              ),
+                              ...cmdbAssets.map((a) {
+                                final id = (a['id'] as num?)?.toInt();
+                                final code = (a['code'] ?? '').toString();
+                                final name = (a['name'] ?? '').toString();
+                                final ip = (a['_resolved_ip'] ??
+                                        a['heartbeat_ip'] ??
+                                        a['ip_address'] ??
+                                        '')
+                                    .toString();
+                                return DropdownMenuItem<int?>(
+                                  value: id,
+                                  child: Text(
+                                    '[$code] $name ${ip.isNotEmpty ? "• IP: $ip" : ""}',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                );
+                              }),
+                            ],
+                            onChanged: (val) {
+                              setModal(() {
+                                if (val == null) {
+                                  selectedCmdbAssetId = null;
+                                  selectedCmdbAsset = null;
+                                } else {
+                                  final picked = cmdbAssets.firstWhere(
+                                    (a) => a['id'] == val,
+                                  );
+                                  applyCmdbAssetToControllers(picked);
+                                }
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 6),
+                        ],
                         if (selectedCmdbAsset != null)
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -2382,71 +3199,12 @@ class _RackEditorViewState extends State<RackEditorView> {
                               );
                               if (picked != null) {
                                 setModal(() {
-                                  selectedCmdbAsset = picked;
-                                  selectedCmdbAssetId =
-                                      (picked['id'] as num?)?.toInt();
-                                  final rawCode =
-                                      (picked['code'] ?? '').toString().trim();
-                                  if (rawCode.isNotEmpty &&
-                                      !rawCode.startsWith('DISC-') &&
-                                      !rawCode.startsWith('FLR-')) {
-                                    codeCtrl.text = rawCode;
-                                  }
-                                  final rawName =
-                                      (picked['name'] ?? '').toString().trim();
-                                  if (rawName.isNotEmpty &&
-                                      !rawName.startsWith('Equipo Detectado')) {
-                                    nameCtrl.text = rawName;
-                                  }
-                                  final rawHost = (picked['hostname'] ?? '')
-                                      .toString()
-                                      .trim();
-                                  if (rawHost.isNotEmpty) {
-                                    hostnameCtrl.text = rawHost;
-                                  }
-                                  final resFqdn = (picked['_resolved_fqdn'] ??
-                                          picked['fqdn'] ??
-                                          '')
-                                      .toString()
-                                      .trim();
-                                  if (resFqdn.isNotEmpty) {
-                                    fqdnCtrl.text = resFqdn;
-                                  }
-                                  final resIp = (picked['_resolved_ip'] ??
-                                          picked['heartbeat_ip'] ??
-                                          '')
-                                      .toString()
-                                      .trim();
-                                  if (resIp.isNotEmpty) {
-                                    ipCtrl.text = resIp;
-                                  }
-                                  final resMask =
-                                      (picked['_resolved_subnet_mask'] ?? '')
-                                          .toString()
-                                          .trim();
-                                  if (resMask.isNotEmpty) {
-                                    maskCtrl.text = resMask;
-                                  }
-                                  final resGw =
-                                      (picked['_resolved_gateway'] ?? '')
-                                          .toString()
-                                          .trim();
-                                  if (resGw.isNotEmpty) {
-                                    gwCtrl.text = resGw;
-                                  }
-                                  final resModel =
-                                      (picked['model_name'] ?? '')
-                                          .toString()
-                                          .trim();
-                                  if (resModel.isNotEmpty) {
-                                    modelCtrl.text = resModel;
-                                  }
-                                  final resSerial =
-                                      (picked['serial_or_uuid'] ?? '')
-                                          .toString()
-                                          .trim();
-                                  if (resSerial.isNotEmpty) {
-                                    serialCtrl.text = resSerial;
+                                  applyCmdbAssetToControllers(picked);
+                                  if (selectedCmdbAssetId != null &&
+                                      !cmdbAssets.any(
+                                        (a) => a['id'] == selectedCmdbAssetId,
+                                      )) {
+                                    cmdbAssets = [picked, ...cmdbAssets];
                                   }
                                 });
                               }
@@ -5467,6 +6225,7 @@ class _RackEditorViewState extends State<RackEditorView> {
                   onSelectTemplate: (tpl) {
                     setState(() => _selectedTemplateForClick = tpl);
                   },
+                  onMountFromCmdb: _openInstallFromCmdbAtFirstFreeU,
                   onCreateCustomTemplate: _showCreateCustomTemplateDialog,
                   onConfigureTemplatePhoto: (tpl) =>
                       _showHardwarePhotoSearchDialog(template: tpl),
@@ -7352,6 +8111,32 @@ class _RackEditorViewState extends State<RackEditorView> {
               ),
             ),
 
+            // Botón directo en Barra Superior para montar un equipo desde la CMDB (igual que en 2. Datacenters)
+            if (_canEdit)
+              Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF1E3A8A),
+                    foregroundColor: Colors.white,
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
+                    ),
+                  ),
+                  onPressed: _openInstallFromCmdbAtFirstFreeU,
+                  icon: const Icon(Icons.account_tree_rounded, size: 15),
+                  label: const Text(
+                    '+ Desde CMDB',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+
             // Conmutador directo en barra superior: [Front | Back | Front & Back]
             Container(
               margin: const EdgeInsets.only(right: 10),
@@ -8092,6 +8877,26 @@ class _RackEditorViewState extends State<RackEditorView> {
     if (floorId == null) return;
 
     final messenger = ScaffoldMessenger.of(context);
+    List<Map<String, dynamic>> cmdbAssets = [];
+    try {
+      final overview = await widget.api.fetchCmdbOverview();
+      cmdbAssets = ((overview['assets'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      cmdbAssets.sort((a, b) {
+        final aUnplaced =
+            (a['rack_device_id'] == null && a['rack_id'] == null) ? 0 : 1;
+        final bUnplaced =
+            (b['rack_device_id'] == null && b['rack_id'] == null) ? 0 : 1;
+        if (aUnplaced != bUnplaced) return aUnplaced.compareTo(bUnplaced);
+        return (a['code'] ?? '')
+            .toString()
+            .compareTo((b['code'] ?? '').toString());
+      });
+    } catch (_) {}
+    if (!mounted) return;
+
     String selectedType = 'printer';
     final codeCtrl = TextEditingController(text: 'PR02');
     final nameCtrl = TextEditingController(text: 'Impresora Multifunción Sala');
@@ -8099,6 +8904,8 @@ class _RackEditorViewState extends State<RackEditorView> {
     final roomCtrl = TextEditingController(
       text: (rack.breadcrumb['room_name'] ?? 'CPD').toString(),
     );
+    int? selectedCmdbAssetId;
+    Map<String, dynamic>? selectedCmdbAsset;
 
     const presets = <({String key, String prefix, String label, String defName})>[
       (
@@ -8163,6 +8970,28 @@ class _RackEditorViewState extends State<RackEditorView> {
       ),
     ];
 
+    void applyCmdbToFloor(Map<String, dynamic> picked) {
+      selectedCmdbAsset = picked;
+      selectedCmdbAssetId = (picked['id'] as num?)?.toInt();
+      final rawCode = (picked['code'] ?? '').toString().trim();
+      if (rawCode.isNotEmpty && !rawCode.startsWith('DISC-')) {
+        codeCtrl.text = rawCode;
+      }
+      final rawName = (picked['name'] ?? '').toString().trim();
+      if (rawName.isNotEmpty && !rawName.startsWith('Equipo Detectado')) {
+        nameCtrl.text = rawName;
+      }
+      final resIp = (picked['_resolved_ip'] ??
+              picked['heartbeat_ip'] ??
+              picked['ip_address'] ??
+              '')
+          .toString()
+          .trim();
+      if (resIp.isNotEmpty) {
+        ipCtrl.text = resIp;
+      }
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -8183,97 +9012,284 @@ class _RackEditorViewState extends State<RackEditorView> {
             ],
           ),
           content: SizedBox(
-            width: 460,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(9),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF0FDFA),
-                    borderRadius: BorderRadius.circular(7),
-                    border: Border.all(color: const Color(0xFF99F6E4)),
-                  ),
-                  child: Text(
-                    'Se añadirá al plano de Planta (2. Datacenters) vinculado a "${rack.code}" y aparecerá en este recuadro para que puedas tirar su cable al Switch o Patch Panel.',
-                    style: const TextStyle(
-                      fontSize: 11.2,
-                      color: Color(0xFF115E59),
+            width: 500,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(9),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF0FDFA),
+                      borderRadius: BorderRadius.circular(7),
+                      border: Border.all(color: const Color(0xFF99F6E4)),
+                    ),
+                    child: Text(
+                      'Se añadirá al plano de Planta (2. Datacenters) vinculado a "${rack.code}" y aparecerá en este recuadro para que puedas tirar su cable al Switch o Patch Panel.',
+                      style: const TextStyle(
+                        fontSize: 11.2,
+                        color: Color(0xFF115E59),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: selectedType,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Tipo de Equipo o Sensor de Planta',
-                    isDense: true,
-                  ),
-                  items: presets
-                      .map(
-                        (p) => DropdownMenuItem(
-                          value: p.key,
-                          child: Text(
-                            p.label,
-                            style: const TextStyle(fontSize: 12.5),
+                  const SizedBox(height: 10),
+                  // 0. SELECCIONAR EQUIPO YA EXISTENTE EN LA CMDB
+                  Container(
+                    padding: const EdgeInsets.all(9),
+                    decoration: BoxDecoration(
+                      color: selectedCmdbAsset != null
+                          ? const Color(0xFFF0FDF4)
+                          : const Color(0xFFEFF6FF),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: selectedCmdbAsset != null
+                            ? const Color(0xFF22C55E)
+                            : AppPalette.blue300,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.account_tree_rounded,
+                              size: 15,
+                              color: selectedCmdbAsset != null
+                                  ? const Color(0xFF15803D)
+                                  : AppPalette.blue900,
+                            ),
+                            const SizedBox(width: 6),
+                            const Expanded(
+                              child: Text(
+                                '0. ¿Seleccionar equipo ya detectado / registrado en la CMDB?',
+                                style: TextStyle(
+                                  fontSize: 11.3,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppPalette.slate900,
+                                ),
+                              ),
+                            ),
+                            if (selectedCmdbAsset != null)
+                              TextButton.icon(
+                                style: TextButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  foregroundColor: AppPalette.red600,
+                                ),
+                                onPressed: () {
+                                  setModal(() {
+                                    selectedCmdbAssetId = null;
+                                    selectedCmdbAsset = null;
+                                  });
+                                },
+                                icon: const Icon(Icons.link_off, size: 13),
+                                label: const Text(
+                                  'Desvincular',
+                                  style: TextStyle(fontSize: 10.5),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        if (cmdbAssets.isNotEmpty) ...[
+                          DropdownButtonFormField<int?>(
+                            key: ValueKey('flr_cmdb_$selectedCmdbAssetId'),
+                            initialValue: cmdbAssets
+                                    .any((a) => a['id'] == selectedCmdbAssetId)
+                                ? selectedCmdbAssetId
+                                : null,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                              labelText:
+                                  'Seleccionar directamente activo de 6. CMDB',
+                              prefixIcon: Icon(
+                                Icons.inventory_2_outlined,
+                                size: 16,
+                                color: AppPalette.blue700,
+                              ),
+                              isDense: true,
+                              filled: true,
+                              fillColor: Colors.white,
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                            ),
+                            items: [
+                              const DropdownMenuItem<int?>(
+                                value: null,
+                                child: Text(
+                                  '— Crear nuevo equipo desde cero —',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: AppPalette.slate500,
+                                  ),
+                                ),
+                              ),
+                              ...cmdbAssets.map((a) {
+                                final id = (a['id'] as num?)?.toInt();
+                                final code = (a['code'] ?? '').toString();
+                                final name = (a['name'] ?? '').toString();
+                                final ip = (a['_resolved_ip'] ??
+                                        a['heartbeat_ip'] ??
+                                        a['ip_address'] ??
+                                        '')
+                                    .toString();
+                                return DropdownMenuItem<int?>(
+                                  value: id,
+                                  child: Text(
+                                    '[$code] $name ${ip.isNotEmpty ? "• IP: $ip" : ""}',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 11.8,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                );
+                              }),
+                            ],
+                            onChanged: (val) {
+                              setModal(() {
+                                if (val == null) {
+                                  selectedCmdbAssetId = null;
+                                  selectedCmdbAsset = null;
+                                } else {
+                                  final picked = cmdbAssets.firstWhere(
+                                    (a) => a['id'] == val,
+                                  );
+                                  applyCmdbToFloor(picked);
+                                }
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 6),
+                        ],
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              side: const BorderSide(color: AppPalette.blue600),
+                            ),
+                            onPressed: () async {
+                              final picked = await CmdbAssetExplorerDialog.show(
+                                ctx,
+                                api: widget.api,
+                                contextMode: 'floor',
+                                preselectedAssetId: selectedCmdbAssetId,
+                                title:
+                                    'Seleccionar Equipo de la CMDB para Planta (${rack.code})',
+                                subtitle:
+                                    'Navega por las Redes / Subredes (Máscara CIDR) y elige el activo para autocompletar sus datos.',
+                              );
+                              if (picked != null) {
+                                setModal(() {
+                                  applyCmdbToFloor(picked);
+                                  if (selectedCmdbAssetId != null &&
+                                      !cmdbAssets.any(
+                                        (a) => a['id'] == selectedCmdbAssetId,
+                                      )) {
+                                    cmdbAssets = [picked, ...cmdbAssets];
+                                  }
+                                });
+                              }
+                            },
+                            icon: const Icon(
+                              Icons.manage_search_rounded,
+                              size: 16,
+                              color: AppPalette.blue700,
+                            ),
+                            label: Text(
+                              selectedCmdbAsset != null
+                                  ? 'Cambiar Equipo CMDB ([${selectedCmdbAsset!['code']}])'
+                                  : 'Abrir Explorador CMDB por Redes / Máscara...',
+                              style: const TextStyle(
+                                fontSize: 11.3,
+                                fontWeight: FontWeight.w800,
+                                color: AppPalette.blue900,
+                              ),
+                            ),
                           ),
                         ),
-                      )
-                      .toList(),
-                  onChanged: (val) {
-                    if (val == null) return;
-                    final pr = presets.firstWhere((e) => e.key == val);
-                    setModal(() {
-                      selectedType = val;
-                      codeCtrl.text =
-                          '${pr.prefix}0${DateTime.now().second % 9 + 1}';
-                      nameCtrl.text = pr.defName;
-                    });
-                  },
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: codeCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Código (ej. PR02, AP03, CAM04)',
-                          isDense: true,
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedType,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Tipo de Equipo o Sensor de Planta',
+                      isDense: true,
+                    ),
+                    items: presets
+                        .map(
+                          (p) => DropdownMenuItem(
+                            value: p.key,
+                            child: Text(
+                              p.label,
+                              style: const TextStyle(fontSize: 12.5),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (val) {
+                      if (val == null) return;
+                      final pr = presets.firstWhere((e) => e.key == val);
+                      setModal(() {
+                        selectedType = val;
+                        if (selectedCmdbAsset == null) {
+                          codeCtrl.text =
+                              '${pr.prefix}0${DateTime.now().second % 9 + 1}';
+                          nameCtrl.text = pr.defName;
+                        }
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: codeCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Código (ej. PR02, AP03, CAM04)',
+                            isDense: true,
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: TextField(
-                        controller: roomCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Zona / Sala en Planta',
-                          isDense: true,
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: roomCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Zona / Sala en Planta',
+                            isDense: true,
+                          ),
                         ),
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Nombre Descriptivo',
+                      isDense: true,
                     ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Nombre Descriptivo',
-                    isDense: true,
                   ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: ipCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Dirección IP (opcional)',
-                    isDense: true,
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: ipCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Dirección IP (opcional)',
+                      isDense: true,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           actions: [
@@ -8310,6 +9326,8 @@ class _RackEditorViewState extends State<RackEditorView> {
           'monitoring_enabled': false,
           'linked_rack_id': rack.id,
           'linked_rack_device_code': '',
+          if (selectedCmdbAssetId != null)
+            'cmdb_asset_id': selectedCmdbAssetId,
         });
         await _loadRack();
         messenger.aviso('Equipo de planta "${codeCtrl.text.trim()}" añadido al recuadro de ${rack.code}. Haz clic en su icono para unirlo a un Switch o Patch Panel.');

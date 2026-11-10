@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/api_client.dart';
 import '../../../models/datacenter_models.dart';
+import '../../../shared/widgets/cmdb_asset_explorer_dialog.dart';
 
 class PropertiesPanel extends StatefulWidget {
   final RackDocApiClient api;
@@ -932,6 +933,91 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
         ),
       ),
     );
+  }
+
+  Future<void> _showLinkExistingRackDeviceWithCmdbDialog(
+    RackDeviceModel dev,
+  ) async {
+    final currentLinkedId =
+        (_devCustomFields['linked_cmdb_asset_id'] as num?)?.toInt();
+    final selectedAst = await CmdbAssetExplorerDialog.show(
+      context,
+      api: widget.api,
+      contextMode: 'rack',
+      preselectedAssetId: currentLinkedId,
+      title: 'Vincular y Cumplimentar "${dev.code}" desde CMDB (Por Redes)',
+      subtitle:
+          'Selecciona una Subred / Máscara en la columna izquierda y elige el equipo detectado en CMDB para unificarlo con este equipo del Rack.',
+    );
+
+    if (selectedAst != null && mounted) {
+      final astId = (selectedAst['id'] as num?)?.toInt();
+      final rawCode = (selectedAst['code'] ?? '').toString().trim();
+      final rawName = (selectedAst['name'] ?? '').toString().trim();
+      final rawHost = (selectedAst['hostname'] ?? '').toString().trim();
+      final fqdn =
+          (selectedAst['_resolved_fqdn'] ?? selectedAst['fqdn'] ?? '')
+              .toString()
+              .trim();
+      final hbIp =
+          (selectedAst['_resolved_ip'] ?? selectedAst['heartbeat_ip'] ?? '')
+              .toString()
+              .trim();
+      final mask =
+          (selectedAst['_resolved_subnet_mask'] ?? '').toString().trim();
+      final gw = (selectedAst['_resolved_gateway'] ?? '').toString().trim();
+      final modelName = (selectedAst['model_name'] ?? '').toString().trim();
+      final serialNum = (selectedAst['serial_or_uuid'] ?? '').toString().trim();
+      String mac = (selectedAst['_resolved_mac'] ?? '').toString().trim();
+      int? vlan = int.tryParse(
+        (selectedAst['_resolved_vlan'] ?? '').toString().trim(),
+      );
+      final ips = (selectedAst['ip_addresses'] as List?) ?? [];
+      if (ips.isNotEmpty && ips.first is Map) {
+        final firstIp = Map<String, dynamic>.from(ips.first as Map);
+        if (mac.isEmpty) {
+          mac = (firstIp['mac_address'] ?? '').toString().trim();
+        }
+        vlan ??= (firstIp['vlan_id'] as num?)?.toInt();
+      }
+      setState(() {
+        if (astId != null) {
+          _devCustomFields['linked_cmdb_asset_id'] = astId;
+        }
+        if (rawCode.isNotEmpty &&
+            !rawCode.startsWith('DISC-') &&
+            !rawCode.startsWith('FLR-')) {
+          _devCodeCtrl.text = rawCode;
+        }
+        if (rawName.isNotEmpty && !rawName.startsWith('Equipo Detectado')) {
+          _devNameCtrl.text = rawName;
+        }
+        if (rawHost.isNotEmpty) _devHostnameCtrl.text = rawHost;
+        if (fqdn.isNotEmpty) _devFqdnCtrl.text = fqdn;
+        if (hbIp.isNotEmpty) {
+          _devIpCtrl.text = hbIp;
+          _connSshHostCtrl.text = hbIp;
+          _connHttpUrlCtrl.text = 'http://$hbIp/';
+          _connHttpsUrlCtrl.text = 'https://$hbIp/';
+          _certScopeUrlCtrl.text = 'https://$hbIp/';
+        }
+        if (mask.isNotEmpty) _devMaskCtrl.text = mask;
+        if (gw.isNotEmpty) _devGwCtrl.text = gw;
+        if (mac.isNotEmpty) _devMacCtrl.text = mac;
+        if (vlan != null) _devVlanCtrl.text = '$vlan';
+        if (modelName.isNotEmpty) _devModelCtrl.text = modelName;
+        if (serialNum.isNotEmpty) _devSerialCtrl.text = serialNum;
+        final notes = (selectedAst['notes'] ?? '').toString().trim();
+        if (notes.isNotEmpty && _devNotesCtrl.text.trim().isEmpty) {
+          _devNotesCtrl.text = notes;
+        }
+        if (selectedAst['status'] == 'online' ||
+            selectedAst['monitoring_enabled'] == true) {
+          _devMonitorEnabled = true;
+        }
+      });
+      await _saveDeviceSettings();
+    }
   }
 
   Future<void> _saveDeviceSettings() async {
@@ -2519,7 +2605,76 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
             color: AppPalette.slate900,
           ),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 8),
+        if (_canEdit) ...[
+          Container(
+            padding: const EdgeInsets.all(9),
+            margin: const EdgeInsets.only(bottom: 10),
+            decoration: BoxDecoration(
+              color: _devCustomFields['linked_cmdb_asset_id'] != null
+                  ? const Color(0xFFF0FDF4)
+                  : const Color(0xFFEFF6FF),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: _devCustomFields['linked_cmdb_asset_id'] != null
+                    ? const Color(0xFF86EFAC)
+                    : AppPalette.blue300,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.fact_check_outlined,
+                      size: 14,
+                      color: _devCustomFields['linked_cmdb_asset_id'] != null
+                          ? const Color(0xFF15803D)
+                          : AppPalette.blue700,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        _devCustomFields['linked_cmdb_asset_id'] != null
+                            ? 'Alineado con CMDB (ID #${_devCustomFields['linked_cmdb_asset_id']})'
+                            : 'Alineación CMDB & Control IPs',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w900,
+                          color:
+                              _devCustomFields['linked_cmdb_asset_id'] != null
+                                  ? const Color(0xFF166534)
+                                  : AppPalette.blue900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    backgroundColor: Colors.white,
+                    foregroundColor: AppPalette.blue900,
+                    side: const BorderSide(color: AppPalette.blue300),
+                  ),
+                  onPressed: () => _showLinkExistingRackDeviceWithCmdbDialog(d),
+                  icon: const Icon(Icons.sync_alt_rounded, size: 14),
+                  label: Text(
+                    _devCustomFields['linked_cmdb_asset_id'] != null
+                        ? 'Cambiar / Autocompletar desde CMDB'
+                        : 'Seleccionar equipo detectado en CMDB',
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         Row(
           children: [
             Expanded(
