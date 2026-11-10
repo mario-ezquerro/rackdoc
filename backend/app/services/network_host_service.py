@@ -66,8 +66,15 @@ PROMETHEUS_DYNAMIC_TARGETS_PATH = PROMETHEUS_DYNAMIC_DIR / "targets_dynamic.json
 # se deshabilitan en lugar de aceptar una clave pública conocida.
 AUTOMATION_API_KEY = (os.getenv("AUTOMATION_API_KEY", "") or "").strip()
 
+# Únicos tipos de conector cuyo endpoint se escribe en los ficheros de
+# descubrimiento dinámico de Prometheus (ver sync_prometheus_targets_file). Para
+# ellos "sincronizar" sí deja algo hecho, aunque sea Prometheus quien los raspe.
+# El resto de tipos (Proxmox, VMware, Docker, Apache, Nginx, BBDD...) no se
+# contactan desde ningún punto del código.
+TIPOS_PUBLICADOS_A_PROMETHEUS = ("node_exporter", "windows_exporter", "haproxy_stats")
+
 CONNECTOR_TYPE_LABELS: Dict[str, str] = {
-    "snmp_switch": "Switch / Router / Firewall SNMP (IF-MIB + LLDP-MIB)",
+    "snmp_switch": "Switch / Router / Firewall SNMP (comprobación de respuesta)",
     "proxmox_ve": "Hipervisor Proxmox VE (API :8006 + QEMU/LXC)",
     "vmware_vsphere": "Hipervisor VMware ESXi / vCenter (API :443)",
     "hyperv": "Hipervisor Microsoft Hyper-V (WinRM / Exporter)",
@@ -214,7 +221,7 @@ def sync_prometheus_targets_file(db: Session) -> Dict[str, Any]:
             )
 
         for conn in connectors:
-            if conn.connector_type in ("node_exporter", "windows_exporter", "haproxy_stats"):
+            if conn.connector_type in TIPOS_PUBLICADOS_A_PROMETHEUS:
                 target_str = f"{conn.endpoint_host.strip()}:{conn.endpoint_port}"
                 if target_str in seen_targets:
                     continue
@@ -410,7 +417,9 @@ def _dispatch_alert_notification(
     if smtp_cfg and smtp_cfg.global_webhook_url:
         webhooks_set.add(smtp_cfg.global_webhook_url)
 
-    delivery_status = "simulated_ready"
+    # Nada enviado todavía. "not_configured" es el estado honesto mientras no se
+    # haya intentado ningún envío: el aviso queda registrado y nadie lo recibe.
+    delivery_status = "not_configured"
     # Intentar envío real si hay un servidor SMTP o Webhook alcanzable configurado
     if smtp_cfg and smtp_cfg.enabled and smtp_cfg.smtp_host and smtp_cfg.smtp_host != "smtp.empresa.local" and emails_set:
         try:
@@ -435,7 +444,25 @@ def _dispatch_alert_notification(
                 server.send_message(msg)
             delivery_status = "sent"
         except Exception:
-            delivery_status = "simulated_ready"
+            # El aviso no ha salido. Antes se registraba como "simulated_ready",
+            # que se lee como un casi-éxito; es un fallo de entrega y se dice.
+            delivery_status = "error"
+            logger.error(
+                "No se pudo enviar por SMTP el aviso %s de %s (%s) a %s.",
+                event_state, asset.code, service_name, ", ".join(sorted(emails_set)),
+                exc_info=True,
+            )
+
+    # 'webhooks_set' se construye más arriba con los webhooks personales, los de
+    # grupo y el global, pero este módulo NO los usa: aquí solo se envía por SMTP.
+    # El que sí publica webhooks es CertScope (services/certscope_service.py). Por
+    # eso el canal registrado es "smtp" y no "smtp+webhook", que era falso.
+    if webhooks_set and delivery_status == "not_configured":
+        logger.warning(
+            "Aviso %s de %s registrado sin enviar: hay %d webhook(s) configurados, "
+            "pero el envío por webhook no está implementado en Red & Host.",
+            event_state, asset.code, len(webhooks_set),
+        )
 
     db.add(
         AlertNotificationLog(
@@ -444,7 +471,7 @@ def _dispatch_alert_notification(
             event_state=event_state,
             matched_rule_name=", ".join(r.name for r in matched_rules) or "Regla Global",
             recipients_summary=", ".join(sorted(names_set)) or "Administrador General",
-            delivery_channel="smtp+webhook",
+            delivery_channel="smtp",
             delivery_status=delivery_status,
             detail=detail,
         )
@@ -555,9 +582,16 @@ def run_single_service_check(
     host_groups_by_id: Optional[Dict[int, HostGroup]] = None,
 ) -> Dict[str, Any]:
     """
-    Ejecuta un chequeo individual de Heartbeat / Servicio REAL en red (ICMP, HTTP, HTTPS+SSL, TCP, SSH, SNMP,
-    Apache, Nginx, Docker, Proxmox, VMware, PostgreSQL, Node/Windows Exporter) aplicando la
-    máquina de estados de Nagios Core (SOFT 1..N -> HARD) sin ninguna simulación.
+    Ejecuta un chequeo individual de Heartbeat / Servicio contra la red, aplicando la
+    máquina de estados de Nagios Core (SOFT 1..N -> HARD). Ningún resultado se simula.
+
+    Transportes implementados a nivel de protocolo: icmp, tcp, udp, ssh, http/https
+    (código de estado, palabra clave y días restantes del certificado) y snmp.
+
+    Los tipos por servicio (apache, nginx, haproxy, docker, proxmox, vmware, postgres,
+    mysql, redis, node_exporter, windows_exporter) son una comprobación TCP del puerto,
+    más el raspado real de métricas cuando el agente las expone. No hablan el protocolo
+    nativo del servicio ni autentican contra él. Un check_type desconocido cae a icmp.
     """
     now = utcnow()
     if active_windows is None:
@@ -736,9 +770,20 @@ def run_snmp_switch_discovery(
     sync_ports_to_rack_device: bool = True,
 ) -> Dict[str, Any]:
     """
-    Motor de Autodescubrimiento SNMP real:
-    Interroga el Switch / Router / Firewall por SNMP en el puerto 161/UDP.
-    No inventa bocas ficticias si el equipo no responde por SNMP.
+    Comprueba por SNMP que un Switch / Router / Firewall responde y lo registra en la CMDB.
+
+    Lo que hace de verdad: un GetRequest SNMP (v1/v2c/v3) al puerto 161/UDP sobre un
+    OID (sysDescr por defecto). Si el equipo contesta, se da de alta o se actualiza
+    como activo de la CMDB con su IP de gestión.
+
+    LO QUE NO HACE, pese al nombre: no recorre IF-MIB ni LLDP-MIB. No existe en todo
+    el backend ninguna sentencia que cree una fila de SwitchSnmpPort, así que
+    'existing_ports' siempre sale vacía, 'discovered_ports_count' y
+    'lldp_neighbors_count' valen 0, y el bloque de sincronización con los puertos del
+    Rack Editor no tiene nada que copiar. Para implementarlo falta el
+    GetNextRequest/GetBulkRequest iterativo sobre 1.3.6.1.2.1.2.2.1 (IF-MIB) y
+    1.0.8802.1.1.2.1.4.1.1 (LLDP-MIB); el transporte SNMP ya está hecho en
+    services/monitor.py y es reutilizable.
     """
     ensure_network_hosts_seeded(db)
     ip_clean = target_ip.strip()

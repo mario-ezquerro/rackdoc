@@ -552,7 +552,10 @@ class InfraConnector(Base):
     linked_rack_device_id = Column(Integer, ForeignKey("rack_devices.id", ondelete="SET NULL"), nullable=True)
     extra_settings = Column(JSON, default=dict)
     enabled = Column(Boolean, default=True)
-    last_sync_status = Column(String(32), default="ok")  # ok | warning | error | never
+    # "never" = no se ha contactado con el sistema remoto. Es el estado de partida:
+    # dar de alta un conector no comprueba nada. Default de Python, sin
+    # server_default, así que cambiarlo no necesita migración.
+    last_sync_status = Column(String(32), default="never")  # ok | warning | error | never
     last_sync_at = Column(DateTime, nullable=True)
     last_sync_summary = Column(Text, default="")
     discovered_items_count = Column(Integer, default=0)
@@ -644,7 +647,12 @@ class AlertNotificationLog(Base):
     matched_rule_name = Column(String(160), default="")
     recipients_summary = Column(Text, default="")
     delivery_channel = Column(String(48), default="smtp+webhook")
-    delivery_status = Column(String(32), default="sent")  # sent | simulated_ready | suppressed_maintenance | suppressed_unreachable | error
+    # sent / sent_smtp / sent_webhook : entregado de verdad por ese transporte
+    # not_configured                  : no se intentó enviar (sin SMTP ni destinatarios)
+    # error                           : se intentó y falló; el detalle lleva el motivo
+    # suppressed_maintenance          : silenciado por ventana de mantenimiento
+    # suppressed_unreachable          : silenciado porque el padre estaba caído
+    delivery_status = Column(String(32), default="sent")
     detail = Column(Text, default="")
 
 

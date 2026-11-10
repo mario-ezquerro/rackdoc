@@ -7,6 +7,7 @@ import '../../core/api_client.dart';
 import '../../core/image_file_picker.dart';
 import '../../models/datacenter_models.dart';
 import '../../shared/widgets/cmdb_asset_explorer_dialog.dart';
+import '../../shared/widgets/diagram_exporter.dart';
 
 class DatacenterFloorView extends StatefulWidget {
   final RackDocApiClient api;
@@ -5361,6 +5362,166 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       );
   }
 
+  DiagramExportDocument _buildFloorExportDocument(
+    FloorNode floor,
+    List<RackSummary> floorRacks,
+  ) {
+    final loc = _location;
+    final locTitle = loc != null ? '${loc.name} (${loc.code})' : 'Datacenter';
+    const double canvasW = 1440.0;
+    const double canvasH = 920.0;
+
+    final zones = <DiagramExportZone>[];
+    for (int i = 0; i < floor.rooms.length; i++) {
+      final rm = floor.rooms[i];
+      zones.add(
+        DiagramExportZone(
+          id: 'room_${rm.id}',
+          title: 'Sala ${rm.name}',
+          subtitle: '${rm.racks.length} Racks',
+          x: 24.0 + (i * 20.0),
+          y: 24.0 + (i * 20.0),
+          width: canvasW - 48.0 - (i * 40.0),
+          height: canvasH - 48.0 - (i * 40.0),
+          colorHex: '#64748B',
+        ),
+      );
+    }
+
+    final nodes = <DiagramExportNode>[];
+    for (int i = 0; i < floorRacks.length; i++) {
+      final rk = floorRacks[i];
+      final normPos =
+          _rackPositions[rk.id] ??
+          Offset(0.18 + (i % 4) * 0.20, 0.22 + (i ~/ 4) * 0.26);
+      final sz = _rackSizes[rk.id] ?? const Size(175.0, 96.0);
+      final status = rk.offlineCount > 0
+          ? 'offline'
+          : (rk.warningCount > 0
+                ? 'warning'
+                : (rk.onlineCount > 0 ? 'online' : 'unmonitored'));
+      nodes.add(
+        DiagramExportNode(
+          id: 'rack_${rk.id}',
+          code: rk.code,
+          name: '${rk.name} (${rk.totalUnits}U • ${rk.deviceCount} eq.)',
+          subtitle: 'RACK',
+          ip: 'ETH:${rk.ethCablesCount} FIB:${rk.fiberCablesCount} PWR:${rk.powerCablesCount}',
+          modelName: rk.responsiblePerson.isNotEmpty
+              ? 'Resp: ${rk.responsiblePerson}'
+              : 'Armario ${rk.totalUnits}U',
+          serialNumber: '',
+          status: status,
+          x: (normPos.dx * (canvasW - 210)).clamp(30.0, canvasW - 200),
+          y: (normPos.dy * (canvasH - 130)).clamp(30.0, canvasH - 120),
+          width: sz.width.clamp(165.0, 230.0),
+          height: sz.height.clamp(82.0, 130.0),
+          colorHex: status == 'offline'
+              ? '#DC2626'
+              : (status == 'warning' ? '#D97706' : '#1E3A8A'),
+        ),
+      );
+    }
+
+    for (final dev in floor.floorDevices) {
+      final normPos =
+          _floorDevicePositions[dev.id] ?? Offset(dev.posX, dev.posY);
+      final modelName = (dev.customFields['model_name'] ?? '').toString().trim();
+      final serialNum =
+          (dev.customFields['serial_number'] ?? '').toString().trim();
+      nodes.add(
+        DiagramExportNode(
+          id: 'fdev_${dev.id}',
+          code: dev.code,
+          name: dev.name,
+          subtitle: dev.deviceType.toUpperCase(),
+          ip: dev.ipAddress,
+          modelName: modelName,
+          serialNumber: serialNum,
+          status: dev.status,
+          x: (normPos.dx * (canvasW - 190)).clamp(30.0, canvasW - 185),
+          y: (normPos.dy * (canvasH - 110)).clamp(30.0, canvasH - 105),
+          width: 170.0,
+          height: 76.0,
+          colorHex: dev.status == 'offline'
+              ? '#DC2626'
+              : (dev.deviceType == 'telecom_outlet' ? '#D97706' : '#0284C7'),
+        ),
+      );
+    }
+
+    final edges = <DiagramExportEdge>[];
+    // 1. Enlaces Inter-Rack
+    for (int i = 0; i < floor.interRackLinks.length; i++) {
+      final lnk = floor.interRackLinks[i];
+      final srcRackId = lnk['source_rack_id'];
+      final dstRackId = lnk['target_rack_id'];
+      if (srcRackId == null || dstRackId == null) continue;
+      final mg = (lnk['media_group'] ?? 'fiber').toString();
+      final srcEnd =
+          '${lnk['source_device_code'] ?? ''}:${lnk['source_port_number'] ?? ''}';
+      final dstEnd =
+          '${lnk['target_device_code'] ?? ''}:${lnk['target_port_number'] ?? ''}';
+      edges.add(
+        DiagramExportEdge(
+          id: 'ir_${lnk['id'] ?? i}',
+          sourceId: 'rack_$srcRackId',
+          targetId: 'rack_$dstRackId',
+          label: '$srcEnd ⟷ $dstEnd',
+          detail: mg.toUpperCase(),
+          colorHex: mg == 'fiber'
+              ? '#06B6D4'
+              : (mg == 'power' ? '#EA580C' : '#2563EB'),
+        ),
+      );
+    }
+
+    // 2. Enlaces de Dispositivos de Planta -> Roseta o Rack
+    for (final dev in floor.floorDevices) {
+      if (dev.linkedOutletId != null) {
+        edges.add(
+          DiagramExportEdge(
+            id: 'fdev_out_${dev.id}',
+            sourceId: 'fdev_${dev.id}',
+            targetId: 'fdev_${dev.linkedOutletId}',
+            label: '${dev.code} ➔ Roseta',
+            detail: 'UTP RJ45',
+            colorHex: '#2563EB',
+            dashed: true,
+          ),
+        );
+      } else if (dev.linkedRackId != null) {
+        final portInfo = dev.linkedRackDeviceCode.isNotEmpty
+            ? ' (${dev.linkedRackDeviceCode})'
+            : '';
+        edges.add(
+          DiagramExportEdge(
+            id: 'fdev_rk_${dev.id}',
+            sourceId: 'fdev_${dev.id}',
+            targetId: 'rack_${dev.linkedRackId}',
+            label: '${dev.code}$portInfo',
+            detail: dev.vlan != null ? 'VLAN ${dev.vlan}' : 'STRUCTURED',
+            colorHex: '#D97706',
+            dashed: true,
+          ),
+        );
+      }
+    }
+
+    return DiagramExportDocument(
+      moduleName: '2. Datacenters (Planta 2D)',
+      title: '$locTitle — ${floor.name}',
+      subtitle:
+          'Planta 2D • ${floorRacks.length} Racks • ${floor.floorDevices.length} Equipos/Sensores • ${edges.length} Enlaces',
+      fileBaseName: 'esquema_planta_${floor.name.toLowerCase()}',
+      canvasWidth: canvasW,
+      canvasHeight: canvasH,
+      zones: zones,
+      nodes: nodes,
+      edges: edges,
+    );
+  }
+
   /// Barra de controles de la vista de planta (capas, zoom y modos).
   Widget _buildBarraControlesPlanta(FloorNode floor, List<RackSummary> floorRacks) {
     return Container(
@@ -5430,6 +5591,12 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                       : AppPalette.slate600,
                 ),
               ),
+            ),
+            const SizedBox(width: 8),
+            DiagramExportMenuButton(
+              documentBuilder: () =>
+                  _buildFloorExportDocument(floor, floorRacks),
+              compact: true,
             ),
             const SizedBox(width: 8),
             // Botón Deshacer (Ctrl+Z en Windows/Linux o Cmd+Z en Mac)

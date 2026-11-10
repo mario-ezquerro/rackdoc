@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_client.dart';
 import '../../models/datacenter_models.dart';
 import '../../shared/widgets/cmdb_asset_explorer_dialog.dart';
+import '../../shared/widgets/diagram_exporter.dart';
 import 'widgets/cable_painter.dart';
 import 'widgets/device_catalog_panel.dart';
 import 'widgets/properties_panel.dart';
@@ -7742,6 +7743,10 @@ class _RackEditorViewState extends State<RackEditorView> {
                     const Text('Ping Rack', style: TextStyle(fontSize: 12)),
               ),
             const SizedBox(width: 8),
+            DiagramExportMenuButton(
+              documentBuilder: () => _buildRackExportDocument(rack),
+            ),
+            const SizedBox(width: 8),
             OutlinedButton.icon(
               onPressed: () {
                 final url = Uri.parse(
@@ -7771,6 +7776,169 @@ class _RackEditorViewState extends State<RackEditorView> {
           ],
         ),
       );
+  }
+
+  DiagramExportDocument _buildRackExportDocument(RackDetailModel rack) {
+    final double unitH = 26.0;
+    final double rackTop = 60.0;
+    final double rackFrameH = rack.totalUnits * unitH + 28.0;
+    final double canvasW = 1480.0;
+    final double canvasH = (rackTop + rackFrameH + 140.0).clamp(900.0, 2200.0);
+
+    final zones = <DiagramExportZone>[
+      DiagramExportZone(
+        id: 'zone_front_${rack.id}',
+        title: '${rack.code} — FRONT (Delante)',
+        subtitle: '${rack.name} • ${rack.totalUnits}U',
+        x: 60,
+        y: rackTop,
+        width: 420,
+        height: rackFrameH,
+        colorHex: '#1E293B',
+      ),
+      DiagramExportZone(
+        id: 'zone_back_${rack.id}',
+        title: '${rack.code} — BACK (Detrás)',
+        subtitle: '${rack.name} • ${rack.totalUnits}U',
+        x: 560,
+        y: rackTop,
+        width: 420,
+        height: rackFrameH,
+        colorHex: '#1E3A8A',
+      ),
+      DiagramExportZone(
+        id: 'zone_ext_${rack.id}',
+        title: 'Acometidas / Planta / Inter-Rack',
+        subtitle: 'Equipos externos y enlaces salientes',
+        x: 1050,
+        y: rackTop,
+        width: 370,
+        height: rackFrameH,
+        colorHex: '#0D9488',
+      ),
+    ];
+
+    final nodes = <DiagramExportNode>[];
+    final addedNodeIds = <String>{};
+    int extIndex = 0;
+
+    for (final dev in rack.devices) {
+      final nodeId = 'dev_${dev.id}';
+      addedNodeIds.add(nodeId);
+      final isExt = dev.isExternalFeed;
+      final isBack = dev.mountedFace == 'back';
+      final double x = isExt ? 1075.0 : (isBack ? 585.0 : 85.0);
+      final double y = isExt
+          ? (rackTop + 44.0 + (extIndex++ * 92.0))
+          : (rackTop + 22.0 + (rack.totalUnits - dev.endU) * unitH);
+      final double h = isExt
+          ? 74.0
+          : (dev.uHeight * unitH - 2.0).clamp(24.0, 260.0);
+      final modelStr =
+          (dev.customFields['model_name'] ??
+                  '${dev.template.manufacturer} ${dev.template.modelName}')
+              .toString()
+              .trim();
+      final uTag = isExt
+          ? 'EXT'
+          : (dev.uHeight > 1
+                ? 'U${dev.startU}-U${dev.endU}'
+                : 'U${dev.startU}');
+
+      nodes.add(
+        DiagramExportNode(
+          id: nodeId,
+          code: '${dev.code} [$uTag]',
+          name: dev.name,
+          subtitle: isExt
+              ? dev.feedType.toUpperCase()
+              : '${dev.template.category.toUpperCase()} (${dev.mountedFace.toUpperCase()})',
+          ip: dev.ipAddress,
+          modelName: modelStr,
+          serialNumber: dev.serialNumber,
+          status: dev.monitoringEnabled ? dev.status : 'unmonitored',
+          x: x,
+          y: y,
+          width: isExt ? 320.0 : 370.0,
+          height: h,
+          colorHex: isExt
+              ? dev.feedColorHex
+              : (dev.status == 'offline'
+                    ? '#DC2626'
+                    : (isBack ? '#1D4ED8' : '#0284C7')),
+        ),
+      );
+    }
+
+    final edges = <DiagramExportEdge>[];
+    for (final c in rack.connections) {
+      final srcId = 'dev_${c.sourceInfo.deviceId}';
+      final dstId = 'dev_${c.targetInfo.deviceId}';
+
+      if (!addedNodeIds.contains(srcId)) {
+        addedNodeIds.add(srcId);
+        nodes.add(
+          DiagramExportNode(
+            id: srcId,
+            code: '${c.sourceInfo.rackCode}:${c.sourceInfo.deviceCode}',
+            name: c.sourceInfo.deviceName,
+            subtitle: 'INTER-RACK',
+            x: 1075.0,
+            y: rackTop + 44.0 + (extIndex++ * 92.0),
+            width: 320.0,
+            height: 70.0,
+            colorHex: '#7C3AED',
+          ),
+        );
+      }
+      if (!addedNodeIds.contains(dstId)) {
+        addedNodeIds.add(dstId);
+        nodes.add(
+          DiagramExportNode(
+            id: dstId,
+            code: '${c.targetInfo.rackCode}:${c.targetInfo.deviceCode}',
+            name: c.targetInfo.deviceName,
+            subtitle: 'INTER-RACK',
+            x: 1075.0,
+            y: rackTop + 44.0 + (extIndex++ * 92.0),
+            width: 320.0,
+            height: 70.0,
+            colorHex: '#7C3AED',
+          ),
+        );
+      }
+
+      final vlanSuffix = c.vlan != null ? ' [VLAN ${c.vlan}]' : '';
+      edges.add(
+        DiagramExportEdge(
+          id: 'conn_${c.id}',
+          sourceId: srcId,
+          targetId: dstId,
+          label:
+              '${c.sourceInfo.portNumber} ➔ ${c.targetInfo.portNumber}$vlanSuffix',
+          detail: c.cableType,
+          colorHex: c.colorHex,
+          dashed: c.isOutbound,
+        ),
+      );
+    }
+
+    final locCode = (rack.breadcrumb['location_code'] ?? '').toString();
+    final floorName = (rack.breadcrumb['floor_name'] ?? '').toString();
+    final roomName = (rack.breadcrumb['room_name'] ?? '').toString();
+
+    return DiagramExportDocument(
+      moduleName: '3. Rack Editor',
+      title: 'Rack ${rack.code} — ${rack.name}',
+      subtitle:
+          '$locCode > $floorName > $roomName • ${rack.totalUnits}U • ${rack.devices.length} Equipos • ${rack.connections.length} Cables',
+      fileBaseName: 'esquema_rack_${rack.code.toLowerCase()}',
+      canvasWidth: canvasW,
+      canvasHeight: canvasH,
+      zones: zones,
+      nodes: nodes,
+      edges: edges,
+    );
   }
 
   Widget _buildPerforated19InchRail(int totalUnits, {bool isLeft = true}) {

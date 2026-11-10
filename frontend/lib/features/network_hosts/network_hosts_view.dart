@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api_client.dart';
 import '../../shared/widgets/cmdb_asset_explorer_dialog.dart';
+import '../../shared/widgets/diagram_exporter.dart';
 
 class NetworkHostsView extends StatefulWidget {
   final RackDocApiClient api;
@@ -33,6 +34,29 @@ class NetworkHostsView extends StatefulWidget {
 class _NetworkHostsViewState extends State<NetworkHostsView>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
+
+  /// Traduce el `delivery_status` del registro de avisos. Importa distinguir
+  /// «no se intentó enviar» de «se intentó y falló»: antes los dos llegaban como
+  /// `simulated_ready`, que se leía como un casi-éxito.
+  static String _rotuloEntrega(Object? estado) {
+    switch ('${estado ?? ''}'.toLowerCase()) {
+      case 'sent':
+      case 'sent_smtp':
+        return 'enviado por correo';
+      case 'sent_webhook':
+        return 'enviado por webhook';
+      case 'not_configured':
+        return 'registrado, NO enviado (sin SMTP configurado)';
+      case 'error':
+        return 'FALLO DE ENVÍO';
+      case 'suppressed_maintenance':
+        return 'silenciado (ventana de mantenimiento)';
+      case 'suppressed_unreachable':
+        return 'silenciado (equipo padre caído)';
+      default:
+        return '${estado ?? 'desconocido'}';
+    }
+  }
 
   bool _loading = true;
   bool _runningAction = false;
@@ -527,7 +551,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                       ),
                       SizedBox(height: 2),
                       Text(
-                        'Coordinado en vivo con 3. Rack Editor y 6. CMDB • Autodescubrimiento SNMP + LLDP • Estados Nagios (SOFT/HARD + UNREACHABLE) • Series Temporales Prometheus • Webhooks Ansible',
+                        'Coordinado en vivo con 3. Rack Editor y 6. CMDB • Comprobación SNMP de switches • Estados Nagios (SOFT/HARD + UNREACHABLE) • Series Temporales Prometheus • Webhooks Ansible',
                         style: TextStyle(
                           fontSize: 11,
                           color: AppTheme.textSecondary,
@@ -559,9 +583,13 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                     onPressed: _showSnmpDiscoveryDialog,
                     icon: const Icon(Icons.radar_rounded, size: 15),
                     label: const Text(
-                      'Autodescubrir Switch (SNMP)',
+                      'Comprobar Switch (SNMP)',
                       style: TextStyle(fontSize: 11.5),
                     ),
+                  ),
+                  DiagramExportMenuButton(
+                    documentBuilder: _buildCurrentStackExportDocument,
+                    darkStyle: true,
                   ),
                   if (widget.canEdit) ...[
                     ElevatedButton.icon(
@@ -747,7 +775,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
           ),
           Tab(
             icon: Icon(Icons.settings_ethernet_rounded, size: 16),
-            text: '4. Switches SNMP (LLDP) & Conectores (Proxmox/VMware/Docker/Web)',
+            text: '4. Switches SNMP & Conectores (Proxmox/VMware/Docker/Web)',
           ),
           Tab(
             icon: Icon(Icons.multiline_chart_rounded, size: 16),
@@ -800,6 +828,112 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     } catch (e) {
       _showSnack('Error al guardar lienzo del Stack: $e', isError: true);
     }
+  }
+
+  DiagramExportDocument _buildCurrentStackExportDocument() {
+    final activeStack = _activeStack;
+    final stackName = (activeStack['name'] ?? 'Topología Red & Hosts').toString();
+    final stackCode = (activeStack['code'] ?? 'STACK').toString();
+    final rawNodes = ((activeStack['nodes'] as List?) ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final rawEdges = ((activeStack['edges'] as List?) ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+
+    const double canvasW = 1400.0;
+    const double canvasH = 860.0;
+
+    final zones = <DiagramExportZone>[
+      for (final box in _stackBoxes)
+        DiagramExportZone(
+          id: (box['id'] ?? 'zone').toString(),
+          title: (box['title'] ?? 'Zona').toString(),
+          subtitle: (box['subtitle'] ?? '').toString(),
+          x: ((box['x'] as num?)?.toDouble() ?? 0.08) * canvasW,
+          y: ((box['y'] as num?)?.toDouble() ?? 0.10) * canvasH,
+          width: (((box['w'] as num?)?.toDouble() ?? 0.35) * canvasW)
+              .clamp(160.0, canvasW),
+          height: (((box['h'] as num?)?.toDouble() ?? 0.35) * canvasH)
+              .clamp(120.0, canvasH),
+          colorHex: (box['color_hex'] ?? '#0EA5E9').toString(),
+        ),
+    ];
+
+    final exportNodes = <DiagramExportNode>[];
+    for (int i = 0; i < rawNodes.length; i++) {
+      final n = rawNodes[i];
+      final nid = 'node_${n['id']}';
+      final pos = _stackNodePositions[n['id'] as int? ?? -1];
+      final normX = pos?.dx ?? (n['pos_x'] as num?)?.toDouble() ?? (0.12 + (i % 5) * 0.17);
+      final normY = pos?.dy ?? (n['pos_y'] as num?)?.toDouble() ?? (0.16 + (i ~/ 5) * 0.22);
+      final hostInfo = n['host'] is Map
+          ? Map<String, dynamic>.from(n['host'] as Map)
+          : <String, dynamic>{};
+      final code = (n['code'] ?? hostInfo['code'] ?? 'N-${n['id']}').toString();
+      final name = (n['label'] ?? n['name'] ?? hostInfo['name'] ?? code).toString();
+      final ip = (n['ip_address'] ?? hostInfo['ip_address'] ?? '').toString();
+      final modelName = (n['model_name'] ?? hostInfo['model_name'] ?? '').toString();
+      final serialNumber =
+          (n['serial_or_uuid'] ?? hostInfo['serial_or_uuid'] ?? '').toString();
+      final status = (n['status'] ?? hostInfo['status'] ?? 'online').toString();
+      final category =
+          (n['node_type'] ?? hostInfo['host_type'] ?? 'host').toString();
+
+      exportNodes.add(
+        DiagramExportNode(
+          id: nid,
+          code: code,
+          name: name,
+          subtitle: category.toUpperCase(),
+          ip: ip,
+          modelName: modelName,
+          serialNumber: serialNumber,
+          status: status,
+          x: (normX * (canvasW - 210)).clamp(20.0, canvasW - 200),
+          y: (normY * (canvasH - 120)).clamp(20.0, canvasH - 100),
+          width: 195,
+          height: 82,
+          colorHex: status == 'offline'
+              ? '#DC2626'
+              : (status == 'warning' ? '#D97706' : '#0284C7'),
+        ),
+      );
+    }
+
+    final exportEdges = <DiagramExportEdge>[];
+    for (int i = 0; i < rawEdges.length; i++) {
+      final e = rawEdges[i];
+      final srcId = 'node_${e['source_node_id']}';
+      final dstId = 'node_${e['target_node_id']}';
+      final protocol = (e['protocol'] ?? e['edge_type'] ?? '').toString();
+      final port = e['port'] != null ? ':${e['port']}' : '';
+      final lbl = (e['label'] ?? '$protocol$port').toString().trim();
+      exportEdges.add(
+        DiagramExportEdge(
+          id: 'edge_${e['id'] ?? i}',
+          sourceId: srcId,
+          targetId: dstId,
+          label: lbl.isEmpty ? 'LINK' : lbl,
+          detail: protocol.isEmpty ? 'TCP/IP' : protocol.toUpperCase(),
+          colorHex: (e['color_hex'] ?? '#0284C7').toString(),
+          dashed: (e['edge_type'] ?? '').toString().contains('logical'),
+        ),
+      );
+    }
+
+    return DiagramExportDocument(
+      moduleName: '4. Red & Host',
+      title: 'Red & Host — $stackName',
+      subtitle:
+          'Stack: $stackCode • ${exportNodes.length} Nodos • ${exportEdges.length} Enlaces Lógicos/Físicos',
+      fileBaseName: 'esquema_red_host_${stackCode.toLowerCase()}',
+      canvasWidth: canvasW,
+      canvasHeight: canvasH,
+      zones: zones,
+      nodes: exportNodes,
+      edges: exportEdges,
+    );
   }
 
   Widget _buildTechStacksCanvasTab() {
@@ -935,6 +1069,10 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                         fontWeight: FontWeight.w700,
                       ),
                     ),
+                  ),
+                  DiagramExportMenuButton(
+                    documentBuilder: _buildCurrentStackExportDocument,
+                    darkStyle: true,
                   ),
                   if (widget.canEdit && activeStack.isNotEmpty) ...[
                     // Modo Enlazar interactivo (clic origen -> clic destino en cualquier dirección)
@@ -5854,7 +5992,10 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
   }
 
   // ===========================================================================
-  // TAB 3: SWITCHES SNMP (IF-MIB + LLDP) Y CONECTORES DE INFRAESTRUCTURA
+  // TAB 3: SWITCHES SNMP Y CONECTORES DE INFRAESTRUCTURA
+  // Ojo: el inventario de bocas IF-MIB / LLDP-MIB no está implementado en el
+  // backend (la tabla switch_snmp_ports nunca se rellena), así que la rejilla de
+  // bocas sale siempre vacía. Ver "Estado de implementación" en el README.
   // ===========================================================================
 
   Widget _buildSnmpSwitchesAndConnectorsTab() {
@@ -5903,7 +6044,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                       ),
                       SizedBox(width: 8),
                       Text(
-                        'AUTODESCUBRIMIENTO DE SWITCHES POR SNMP (IF-MIB + LLDP-MIB) SIN ALTA MANUAL PUERTO A PUERTO',
+                        'COMPROBACIÓN SNMP DE SWITCHES Y ALTA EN LA CMDB',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w800,
@@ -5938,7 +6079,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                         onPressed: _showSnmpDiscoveryDialog,
                         icon: const Icon(Icons.radar_rounded, size: 15),
                         label: const Text(
-                          'Lanzar SNMP Walk a Switch',
+                          'Comprobar Switch por SNMP',
                           style: TextStyle(fontSize: 11.5),
                         ),
                       ),
@@ -5949,7 +6090,9 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
               const SizedBox(height: 12),
               if (swPorts.isEmpty)
                 const Text(
-                  'Pulsa "Lanzar SNMP Walk a Switch" para interrogar todas las bocas IF-MIB y vecinos LLDP.',
+                  'El inventario de bocas (IF-MIB) y de vecinos (LLDP-MIB) no está implementado: esta rejilla '
+                  'siempre sale vacía. "Comprobar Switch por SNMP" sí interroga de verdad al equipo con un '
+                  'GetRequest y lo da de alta en la CMDB si responde.',
                   style: TextStyle(color: AppTheme.textSecondary),
                 )
               else ...[
@@ -6053,7 +6196,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
             const Icon(Icons.power_rounded, color: AppTheme.accentTeal, size: 20),
             const SizedBox(width: 8),
             Text(
-              'CONECTORES ACTIVOS DE VIRTUALIZACIÓN, CONTENEDORES, SERVIDORES WEB Y BBDD (${_connectors.length})',
+              'CONECTORES REGISTRADOS DE VIRTUALIZACIÓN, CONTENEDORES, SERVIDORES WEB Y BBDD (${_connectors.length})',
               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
             ),
             const Spacer(),
@@ -6067,6 +6210,36 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                 ),
               ),
           ],
+        ),
+        const SizedBox(height: 8),
+        // El semáforo de un conector no significa lo mismo según su tipo, así que
+        // se explica aquí en lugar de dejar que el verde se lea como "comprobado".
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            color: AppTheme.bgElevated,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: AppTheme.warning.withValues(alpha: 0.45)),
+          ),
+          child: const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.info_outline_rounded,
+                  color: AppTheme.warning, size: 16),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Qué comprueba realmente «Sincronizar»: los conectores SNMP interrogan al equipo; los '
+                  'exporters (node_exporter, windows_exporter, haproxy_stats) quedan publicados para que '
+                  'Prometheus los raspe cada 15 s. Para el resto de tipos (Proxmox, VMware, Docker, Apache, '
+                  'Nginx, bases de datos) la sincronización no está implementada: no se contacta con el '
+                  'sistema remoto y el conector es solo un registro de inventario.',
+                  style: TextStyle(fontSize: 11.5, height: 1.45),
+                ),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 12),
         Wrap(
@@ -6086,23 +6259,42 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                 children: [
                   Row(
                     children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 7,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppTheme.success.withValues(alpha: 0.16),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          '${c['last_sync_status']}'.toUpperCase(),
-                          style: const TextStyle(
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.success,
-                          ),
-                        ),
+                      // El color sale del estado, no es verde fijo: 'never' significa
+                      // que no se ha contactado con el sistema remoto y no puede
+                      // pintarse igual que una sincronización correcta.
+                      Builder(
+                        builder: (_) {
+                          final estado = '${c['last_sync_status']}'.toLowerCase();
+                          final color = switch (estado) {
+                            'ok' => AppTheme.success,
+                            'warning' => AppTheme.warning,
+                            'error' => AppTheme.error,
+                            _ => AppTheme.textMuted,
+                          };
+                          final rotulo = switch (estado) {
+                            'never' => 'SIN COMPROBAR',
+                            '' => 'SIN COMPROBAR',
+                            _ => estado.toUpperCase(),
+                          };
+                          return Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: color.withValues(alpha: 0.16),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              rotulo,
+                              style: TextStyle(
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w800,
+                                color: color,
+                              ),
+                            ),
+                          );
+                        },
                       ),
                       const SizedBox(width: 8),
                       Expanded(
@@ -6153,7 +6345,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                             c['id'] as int,
                           );
                           setState(() => _overview = res);
-                          _showSnack('Conector sincronizado: ${c['name']}');
+                          _showSnack('Conector actualizado: ${c['name']}');
                         },
                         icon: const Icon(Icons.sync_rounded, size: 14),
                         label: const Text(
@@ -6917,8 +7109,10 @@ Invoke-WebRequest -Uri "http://localhost:9182/metrics" -UseBasicParsing
 
 ---
 
-## 4. Switches, Routers y Firewalls (Cisco, Aruba, FortiGate, MikroTik) — `SNMPv2c/v3 + LLDP (:161/UDP)`
-Permite a RackDoc descubrir todas las bocas (`IF-MIB`) y vecinos (`LLDP-MIB`) de una sola vez sin alta manual.
+## 4. Switches, Routers y Firewalls (Cisco, Aruba, FortiGate, MikroTik) — `SNMPv2c/v3 (:161/UDP)`
+Permite a RackDoc comprobar que el equipo responde por SNMP y darlo de alta en la CMDB con su IP de gestión.
+
+> **Nota**: el inventario de bocas (`IF-MIB`) y de vecinos (`LLDP-MIB`) **no está implementado**. Dejar `lldp run` configurado no hace daño y servirá cuando lo esté, pero hoy RackDoc no lee esas tablas.
 
 ```text
 ! Configuración en Switch Cisco IOS / Catalyst / Aruba ($ip):
@@ -9064,7 +9258,7 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                           (lg) => Padding(
                             padding: const EdgeInsets.only(bottom: 3),
                             child: Text(
-                              '• [${lg['event_state']}] ${lg['asset_code']} ➔ ${lg['recipients_summary']} (${lg['delivery_status']})',
+                              '• [${lg['event_state']}] ${lg['asset_code']} ➔ ${lg['recipients_summary']} (${_rotuloEntrega(lg['delivery_status'])})',
                               style: const TextStyle(fontSize: 9.8),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -9681,7 +9875,7 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Autodescubrir Switch por SNMP (IF-MIB + LLDP-MIB)'),
+        title: const Text('Comprobar Switch por SNMP'),
         content: SizedBox(
           width: 440,
           child: Column(
@@ -9734,7 +9928,7 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
               );
             },
             icon: const Icon(Icons.radar_rounded, size: 16),
-            label: const Text('Ejecutar SNMP Walk'),
+            label: const Text('Comprobar por SNMP'),
           ),
         ],
       ),
@@ -10121,7 +10315,7 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                     ),
                     DropdownMenuItem(
                       value: 'snmp_switch',
-                      child: Text('Switch SNMPv2c/v3 (IF-MIB + LLDP)'),
+                      child: Text('Switch SNMPv2c/v3 (comprobación de respuesta)'),
                     ),
                   ],
                   onChanged: (v) => setModal(() => connType = v ?? connType),
@@ -10181,7 +10375,7 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                   'linked_asset_id': _selectedHostId,
                 });
                 setState(() => _overview = res);
-                _showSnack('Conector creado y sincronizado con Prometheus.');
+                _showSnack('Conector registrado. No se ha comprobado la conexión con él.');
               },
               child: const Text('Registrar Conector'),
             ),

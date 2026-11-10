@@ -1,4 +1,12 @@
-"""Autenticación, usuarios, roles RBAC y servidores Active Directory."""
+"""Autenticación local, usuarios y roles RBAC.
+
+Las rutas /ad-servers de este módulo guardan y devuelven configuración de
+servidores de dominio, pero RackDoc no habla LDAP: no hay cliente de
+directorio en el backend (ni en requirements.txt). La búsqueda de usuarios
+devuelve un catálogo de ejemplo y las cuentas marcadas como de dominio se
+validan contra su propio hash local, que al importarlas es aleatorio.
+Ver "Estado de implementación" en el README.
+"""
 
 import uuid
 
@@ -11,11 +19,24 @@ from ..schemas import ADServerCreate, ADServerSchema, ADServerUpdate, ADUserImpo
 from ..security import create_access_token, hash_password, verify_password
 from ..routers._common import VALID_ROLES, api_router, public_router
 
+# Texto reutilizado en las descripciones OpenAPI de las rutas /ad-servers, para
+# que quien lea /docs no dé por operativa la integración con el directorio.
+AVISO = (
+    "**Active Directory no está implementado**: no hay cliente LDAP en el backend. "
+)
+
 @public_router.post(
     "/auth/login",
     tags=["Authentication, RBAC & Active Directory"],
-    summary="Iniciar sesión (Local o Active Directory / LDAP)",
-    description="Autentica un usuario local o de dominio Active Directory (`DOMAIN\\user` o `user@domain`) y devuelve su token de sesión y rol RBAC.",
+    summary="Iniciar sesión (usuario local)",
+    description=(
+        "Autentica contra la contraseña bcrypt guardada en RackDoc y devuelve el token de sesión y el rol RBAC. "
+        "Acepta las formas `DOMAIN\\user` y `user@domain`, de las que se queda con el nombre de cuenta.\n\n"
+        "**No hay autenticación contra Active Directory**: un usuario con `auth_source = 'ad'` se valida también "
+        "contra su hash local. Como las cuentas importadas desde AD se crean con un hash aleatorio, no pueden "
+        "iniciar sesión; para dar acceso a una persona hay que crearla como usuario local. "
+        "Ver 'Estado de implementación' en el README."
+    ),
 )
 def login_endpoint(payload: LoginRequest, db: Session = Depends(get_db)):
     uname = payload.username.strip()
@@ -73,7 +94,7 @@ def login_endpoint(payload: LoginRequest, db: Session = Depends(get_db)):
     response_model=list[UserSchema],
     tags=["Authentication, RBAC & Active Directory"],
     summary="Listar usuarios registrados y sus roles RBAC",
-    description="Devuelve todos los usuarios dados de alta en RackDoc (locales y de Active Directory) con su nivel de permisos (`admin`, `editor`, `operator`, `viewer`).",
+    description="Devuelve todos los usuarios dados de alta en RackDoc con su nivel de permisos (`admin`, `editor`, `operator`, `viewer`). El campo `auth_source` es una etiqueta guardada en la base de datos, no el resultado de consultar un directorio.",
 )
 def list_users(db: Session = Depends(get_db)):
     return db.query(User).order_by(User.id).all()
@@ -84,7 +105,7 @@ def list_users(db: Session = Depends(get_db)):
     response_model=UserSchema,
     tags=["Authentication, RBAC & Active Directory"],
     summary="Crear nuevo usuario",
-    description="Registra una nueva cuenta de usuario local o vinculada a Active Directory asignándole un rol RBAC.",
+    description="Registra una nueva cuenta de usuario con contraseña bcrypt y rol RBAC. Marcarla como `auth_source = 'ad'` solo cambia la etiqueta: la contraseña se sigue comprobando contra el hash local.",
 )
 def create_user(payload: UserCreate, db: Session = Depends(get_db)):
     uname = payload.username.strip()
@@ -171,8 +192,12 @@ def delete_user(user_id: int, db: Session = Depends(get_db)):
     "/ad-servers",
     response_model=list[ADServerSchema],
     tags=["Authentication, RBAC & Active Directory"],
-    summary="Listar servidores Active Directory / LDAP",
-    description="Devuelve los controladores de dominio Active Directory / LDAP configurados y su mapeo de grupos a roles RBAC.",
+    summary="Listar fichas de servidor Active Directory / LDAP (configuración almacenada)",
+    description=(
+        "Devuelve las fichas de servidor de dominio configuradas y su mapeo de grupos a roles RBAC.\n\n"
+        + AVISO +
+        "Estas fichas son configuración guardada que no se usa para conectar con nada."
+    ),
 )
 def list_ad_servers(db: Session = Depends(get_db)):
     return db.query(ADServer).order_by(ADServer.id).all()
@@ -182,8 +207,12 @@ def list_ad_servers(db: Session = Depends(get_db)):
     "/ad-servers",
     response_model=ADServerSchema,
     tags=["Authentication, RBAC & Active Directory"],
-    summary="Añadir servidor Active Directory / LDAP",
-    description="Registra un nuevo controlador de dominio Active Directory / LDAP con soporte de mapeo de grupos a roles.",
+    summary="Añadir una ficha de servidor Active Directory / LDAP (no comprueba la conexión)",
+    description=(
+        "Guarda los datos de un controlador de dominio y su mapeo de grupos a roles.\n\n"
+        + AVISO +
+        "Guardar la ficha no valida que el servidor exista ni que el bind funcione."
+    ),
 )
 def create_ad_server(payload: ADServerCreate, db: Session = Depends(get_db)):
     srv = ADServer(**payload.model_dump())
@@ -197,8 +226,11 @@ def create_ad_server(payload: ADServerCreate, db: Session = Depends(get_db)):
     "/ad-servers/{ad_id}",
     response_model=ADServerSchema,
     tags=["Authentication, RBAC & Active Directory"],
-    summary="Actualizar servidor Active Directory / LDAP",
-    description="Actualiza parámetros de conexión LDAP/LDAPS, Base DN o mapeo de grupos de un servidor Active Directory.",
+    summary="Actualizar una ficha de servidor Active Directory / LDAP",
+    description=(
+        "Actualiza los parámetros LDAP/LDAPS, el Base DN o el mapeo de grupos de una ficha de servidor.\n\n"
+        + AVISO
+    ),
 )
 def update_ad_server(ad_id: int, payload: ADServerUpdate, db: Session = Depends(get_db)):
     srv = db.query(ADServer).filter(ADServer.id == ad_id).first()
@@ -214,8 +246,8 @@ def update_ad_server(ad_id: int, payload: ADServerUpdate, db: Session = Depends(
 @api_router.delete(
     "/ad-servers/{ad_id}",
     tags=["Authentication, RBAC & Active Directory"],
-    summary="Eliminar servidor Active Directory / LDAP",
-    description="Elimina la configuración de un servidor Active Directory / LDAP.",
+    summary="Eliminar una ficha de servidor Active Directory / LDAP",
+    description="Elimina la configuración guardada de un servidor de dominio. No afecta a ningún directorio.",
 )
 def delete_ad_server(ad_id: int, db: Session = Depends(get_db)):
     srv = db.query(ADServer).filter(ADServer.id == ad_id).first()
@@ -229,8 +261,14 @@ def delete_ad_server(ad_id: int, db: Session = Depends(get_db)):
 @api_router.post(
     "/ad-servers/{ad_id}/search-users",
     tags=["Authentication, RBAC & Active Directory"],
-    summary="Buscar cuentas y grupos en un directorio Active Directory",
-    description="Consulta cuentas de usuario en el servidor Active Directory especificado y sugiere el rol RBAC según su grupo AD.",
+    summary="Explorar cuentas de ejemplo (NO consulta el directorio Active Directory)",
+    description=(
+        "**Devuelve un catálogo de ejemplo, no cuentas reales.** " + AVISO + "\n\n"
+        "La respuesta es una lista fija de cuatro cuentas inventadas (`jgarcia`, `mfernandez`, `rnavarro`, "
+        "`elopez`) a las que solo se adapta el dominio y el Base DN que tengas configurados, y el rol "
+        "sugerido según tu mapeo de grupos. Sirve para probar el flujo de importación y el mapeo de roles, "
+        "no para descubrir usuarios. Ver 'Estado de implementación' en el README."
+    ),
 )
 def search_ad_directory_users(
     ad_id: int,
@@ -256,7 +294,10 @@ def search_ad_directory_users(
         if gdn:
             group_map[gdn] = r
 
-    # Catálogo de cuentas del directorio AD para explorar/filtrar e importar con rol asignado por grupo o usuario
+    # CATÁLOGO DE EJEMPLO, NO EL DIRECTORIO. Estas cuatro cuentas son inventadas: no
+    # hay cliente LDAP en el backend, así que no se consulta ningún servidor. Solo se
+    # adaptan el dominio y el Base DN configurados, y el rol sugerido según group_map.
+    # Sirve para probar el flujo de importación y el mapeo de grupos a roles.
     directory_entries = [
         {
             "username": "jgarcia",
@@ -350,8 +391,15 @@ def search_ad_directory_users(
 @api_router.post(
     "/ad-servers/{ad_id}/import-users",
     tags=["Authentication, RBAC & Active Directory"],
-    summary="Importar usuarios desde Active Directory con asignación de rol RBAC",
-    description="Importa o actualiza un lote de usuarios del directorio Active Directory vinculándolos al servidor AD y rol RBAC seleccionados.",
+    summary="Crear cuentas marcadas como de dominio (quedan SIN poder iniciar sesión)",
+    description=(
+        "Crea o actualiza un lote de cuentas con `auth_source = 'ad'`, vinculadas a la ficha de servidor y al "
+        "rol RBAC indicados.\n\n"
+        "**Las cuentas nuevas quedan inaccesibles**: se crean con un hash bcrypt de un valor aleatorio, y el "
+        "login de un usuario de dominio se valida contra ese mismo hash local. " + AVISO + "\n\n"
+        "Para dar acceso real a una persona, créala como usuario local con contraseña. "
+        "Ver 'Estado de implementación' en el README."
+    ),
 )
 def import_ad_users(
     ad_id: int,

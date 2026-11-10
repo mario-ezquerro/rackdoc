@@ -53,7 +53,14 @@ OPENAPI_TAGS_METADATA = [
     },
     {
         "name": "Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)",
-        "description": "Módulo 4 'Red & Host': Topología Lógica Interactiva con Monitorización Integrada, Máquina de Estados Nagios Core (SOFT/HARD + UNREACHABLE), Autodescubrimiento de Switches por SNMP (IF-MIB + LLDP-MIB), Conectores (Proxmox, VMware, Docker, Apache, Nginx, BBDD), Series Temporales Prometheus y Matriz de Avisos de Alarmas.",
+        "description": (
+            "Módulo 4 'Red & Host': Topología Lógica Interactiva con Monitorización Integrada, "
+            "Máquina de Estados Nagios Core (SOFT/HARD + UNREACHABLE), comprobación SNMP de Switches, "
+            "registro de Conectores de Infraestructura, Series Temporales Prometheus y Matriz de Avisos. "
+            "NO IMPLEMENTADO: el recorrido de bocas IF-MIB / LLDP-MIB (la tabla switch_snmp_ports nunca se "
+            "rellena) y la sincronización de los conectores que no son snmp_switch ni exporters de Prometheus, "
+            "que no contactan con el sistema remoto. Ver 'Estado de implementación' en el README."
+        ),
     },
     {
         "name": "Automation Webhooks (Ansible, CI/CD & AI Agents)",
@@ -89,7 +96,14 @@ OPENAPI_TAGS_METADATA = [
     },
     {
         "name": "Auth, Users & Active Directory (RBAC)",
-        "description": "Autenticación local y Multi-Active Directory (LDAP/LDAPS) con control de acceso basado en 4 roles (admin, editor, operator, viewer).",
+        "description": (
+            "Autenticación local con bcrypt + JWT y control de acceso basado en 4 roles "
+            "(admin, editor, operator, viewer) aplicado a todas las rutas de /api/v1. "
+            "NO IMPLEMENTADO: la autenticación contra Active Directory. No hay cliente LDAP en el backend; "
+            "las rutas /ad-servers almacenan configuración, la búsqueda de usuarios devuelve un catálogo de "
+            "ejemplo y las cuentas importadas como AD no pueden iniciar sesión. "
+            "Ver 'Estado de implementación' en el README."
+        ),
     },
 ]
 
@@ -168,7 +182,8 @@ app = FastAPI(
     description=(
         "Especificación **OpenAPI 3.1.0** de **RackDoc DCIM**.\n\n"
         "- **Prefijo canónico versionado**: `/api/v1` (con soporte retrocompatible en `/api`).\n"
-        "- **Módulo 4 Red & Host**: Topología Lógica en 5 Capas, estados Nagios (`UP/DOWN/UNREACHABLE/MAINTENANCE`, `SOFT/HARD`), SNMP Switch Port Discovery (`IF-MIB` + `LLDP-MIB`), Conectores (`Proxmox`, `VMware`, `Docker`, `Apache`, `Nginx`, `BBDD`), Matriz de Avisos de Alarmas y Series Temporales en **Prometheus**.\n"
+        "- **Módulo 4 Red & Host**: Topología Lógica en 5 Capas, estados Nagios (`UP/DOWN/UNREACHABLE/MAINTENANCE`, `SOFT/HARD`), comprobación SNMP de switches, Conectores de Infraestructura, Matriz de Avisos y Series Temporales en **Prometheus**.\n"
+        "- **⚠️ Funciones no implementadas**: el recorrido de bocas `IF-MIB`/`LLDP-MIB`, la sincronización de los conectores que no son `snmp_switch` ni exporters, y la autenticación contra Active Directory. Cada endpoint afectado lo indica en su descripción.\n"
         "- **Webhooks de Automatización Ansible & Agentes IA**: `/api/v1/automation/webhook/*` y `/api/v1/automation/ai-context`.\n"
         "- **Documentación interactiva**: Swagger UI (`/docs` y `/api/v1/docs`) y ReDoc (`/redoc`)."
     ),

@@ -13,7 +13,10 @@ import json
 from sqlalchemy.orm import Session
 
 from .. import models
+from ..logging_setup import get_logger
 from ..time_utils import utcnow
+
+logger = get_logger(__name__)
 
 
 def clean_host_and_port(raw_host: str, default_port: int = 443) -> Tuple[str, int, str]:
@@ -1463,7 +1466,11 @@ def send_certificate_expiry_notification(
     body_text = "\n".join(body_lines)
 
     smtp_cfg = db.query(models.SmtpAlertConfig).first()
-    delivery_status = "logged_simulated"
+    # Sin intento de envío todavía: el aviso queda registrado y nadie lo recibe.
+    # Si algún transporte se intenta y falla, el estado pasa a "error", no se queda
+    # en un valor que se lea como éxito parcial.
+    delivery_status = "not_configured"
+    intento_de_envio = False
     error_detail = ""
 
     # Envío Webhook si hay configurado
@@ -1471,6 +1478,7 @@ def send_certificate_expiry_notification(
         webhooks_set.add(smtp_cfg.global_webhook_url)
 
     for wh_url in webhooks_set:
+        intento_de_envio = True
         try:
             payload_bytes = json.dumps({"text": f"*{subject}*\n```{body_text}```"}).encode("utf-8")
             req = urllib.request.Request(wh_url, data=payload_bytes, headers={"Content-Type": "application/json"})
@@ -1478,9 +1486,11 @@ def send_certificate_expiry_notification(
                 delivery_status = "sent_webhook"
         except Exception as exc:
             error_detail = str(exc)
+            logger.warning("Falló el webhook de CertScope para %s.", cert.code, exc_info=True)
 
     # Envío SMTP real si está habilitado y no es host dummy
     if smtp_cfg and smtp_cfg.enabled and emails_set and smtp_cfg.smtp_host not in ("", "smtp.empresa.local"):
+        intento_de_envio = True
         try:
             msg = MIMEText(body_text, "plain", "utf-8")
             msg["Subject"] = subject
@@ -1495,6 +1505,15 @@ def send_certificate_expiry_notification(
             delivery_status = "sent_smtp"
         except Exception as exc:
             error_detail = f"SMTP: {exc}"
+            logger.error(
+                "No se pudo enviar por SMTP el aviso de CertScope para %s a %s.",
+                cert.code, ", ".join(sorted(emails_set)), exc_info=True,
+            )
+
+    # Se intentó enviar por algún transporte y ninguno lo consiguió: es un fallo de
+    # entrega, no un aviso "registrado y listo".
+    if intento_de_envio and delivery_status == "not_configured":
+        delivery_status = "error"
 
     recipients_summary = ", ".join(recipient_labels) if recipient_labels else "Equipo de Seguridad & Sistemas"
 

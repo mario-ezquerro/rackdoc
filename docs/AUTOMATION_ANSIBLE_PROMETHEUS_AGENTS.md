@@ -9,7 +9,8 @@
 ## 1. Visión General de la Arquitectura (`3. Rack Editor` ⇄ `4. Red & Host` ⇄ `6. CMDB` ⇄ `Prometheus`)
 
 El módulo **`4. Red & Host`** une en una sola plataforma cuatro mundos tradicionalmente separados:
-1. **Topología de Red y Autodescubrimiento SNMP + LLDP** (*inspirado en NetBox y Observium*): interroga Switches y Routers por SNMP (`IF-MIB`, `LLDP-MIB`) descubriendo todas sus bocas, velocidades, VLANs, caudal Rx/Tx y vecinos LLDP sin tener que dar de alta puerto a puerto, sincronizando además las bocas físicas con el equipo en **`3. Rack Editor (42U)`**.
+1. **Topología de Red y comprobación SNMP** (*inspirado en NetBox y Observium*): interroga Switches y Routers por SNMP (`GetRequest` real al puerto 161/UDP) y los da de alta en la CMDB con su IP de gestión.
+   > ⚠️ **El autodescubrimiento de bocas no está implementado.** RackDoc no recorre `IF-MIB` ni `LLDP-MIB`: la tabla `switch_snmp_ports` nunca se rellena, así que no hay bocas, velocidades, VLANs, caudal Rx/Tx ni vecinos que sincronizar con **`3. Rack Editor (42U)`**. Ver *Estado de implementación* en el README.
 2. **Grafo Lógico en 5 Capas y Virtualización / Contenedores** (*inspirado en Combodo iTop*): relaciona el servidor físico del Rack (`SRV-ESXI-01`, `SRV-PVE-01` o un servidor Barebone externo) con sus Máquinas Virtuales (`VMware`, `Proxmox`, `Hyper-V`, `KVM`), Contenedores (`Docker`, `LXC`, `Kubernetes`), IPs Virtuales (`VIP Keepalived`) y Servicios (`Apache`, `Nginx`, `HAProxy`, `PostgreSQL`, `MySQL`, `Active Directory`). Todo activo e IP termina sincronizado en **`6. CMDB & Control IPs`**.
 3. **Máquina de Estados Operativos y Avisos** (*inspirado en Nagios Core*):
    - Estados de Host: `UP`, `DOWN`, `UNREACHABLE` (cuando cae el Switch o Hipervisor padre, suprimiendo cascadas de falsas alarmas en las VMs hijas) y `MAINTENANCE` (durante despliegues de Ansible o ventanas programadas).
@@ -42,7 +43,10 @@ Invoke-WebRequest -Uri "https://github.com/prometheus-community/windows_exporter
 msiexec /i C:\windows_exporter.msi ENABLED_COLLECTORS="cpu,cs,logical_disk,net,os,service,system,memory" LISTEN_PORT=9182 /qn
 ```
 
-### 2.3. Switches, Routers y Firewalls — `SNMPv2c/v3 (:161/UDP) + LLDP`
+### 2.3. Switches, Routers y Firewalls — `SNMPv2c/v3 (:161/UDP)`
+
+RackDoc comprueba que el equipo responde por SNMP y lo registra en la CMDB. No lee las tablas de bocas ni de vecinos: dejar `lldp run` configurado no estorba y servirá cuando el recorrido de MIBs esté implementado, pero hoy no se usa.
+
 ```text
 ! Cisco IOS / Catalyst / Nexus / Aruba
 snmp-server community public RO

@@ -404,7 +404,7 @@ class _AdminViewState extends State<AdminView> {
         builder: (ctx, setModal) => AlertDialog(
           title: Text(
             existing == null
-                ? 'Conectar Nuevo Servidor Active Directory (LDAP / LDAPS)'
+                ? 'Guardar Ficha de Servidor Active Directory (LDAP / LDAPS)'
                 : 'Editar Servidor Active Directory (${existing.name})',
           ),
           content: SizedBox(
@@ -721,7 +721,10 @@ class _AdminViewState extends State<AdminView> {
           await widget.api.updateAdServer(existing.id, payload);
         }
         await _loadAdminData();
-        messenger.aviso('Servidor Active Directory guardado correctamente.');
+        messenger.aviso(
+          'Ficha de servidor AD guardada. No se ha comprobado la conexión: la '
+          'autenticación contra Active Directory no está implementada.',
+        );
       } catch (e) {
         messenger.avisoError('$e');
       }
@@ -774,7 +777,7 @@ class _AdminViewState extends State<AdminView> {
             }
             return AlertDialog(
               title: Text(
-                'Dar de Alta Usuarios desde "${ad.name}" (${ad.domain})',
+                'Dar de Alta Usuarios desde "${ad.name}" (${ad.domain}) — catálogo de ejemplo',
               ),
               content: SizedBox(
                 width: 640,
@@ -790,7 +793,7 @@ class _AdminViewState extends State<AdminView> {
                             onSubmitted: (_) => runSearch(setModal),
                             decoration: const InputDecoration(
                               hintText:
-                                  'Buscar en Active Directory por sAMAccountName, nombre, departamento...',
+                                  'Filtrar el catálogo de ejemplo por nombre de cuenta, nombre o departamento...',
                               prefixIcon: Icon(Icons.search, size: 18),
                               isDense: true,
                             ),
@@ -1095,7 +1098,7 @@ class _AdminViewState extends State<AdminView> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Administración de Usuarios, 4 Roles RBAC y Multi-Active Directory',
+                      'Administración de Usuarios Locales y 4 Roles RBAC',
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w800,
@@ -1646,7 +1649,11 @@ class _AdminViewState extends State<AdminView> {
 
           const SizedBox(height: 24),
 
-          // SECCIÓN 1: SERVIDORES ACTIVE DIRECTORY CONECTADOS (MULTI-AD)
+          // SECCIÓN 1: FICHAS DE SERVIDOR ACTIVE DIRECTORY
+          // No son servidores "conectados": RackDoc no habla LDAP (no hay cliente de
+          // directorio en el backend). Esto es configuración guardada, y el aviso de
+          // abajo lo dice para que nadie espere un inicio de sesión de dominio.
+          // Ver "Estado de implementación" en el README.
           Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
@@ -1666,7 +1673,7 @@ class _AdminViewState extends State<AdminView> {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      'Servidores Active Directory / LDAP Conectados (${_adServers.length})',
+                      'Fichas de Servidor Active Directory / LDAP (${_adServers.length})',
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w800,
@@ -1680,6 +1687,45 @@ class _AdminViewState extends State<AdminView> {
                       label: const Text('Añadir otro AD'),
                     ),
                   ],
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppPalette.amber50,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: AppPalette.amber300),
+                  ),
+                  child: const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        size: 18,
+                        color: AppPalette.amber800,
+                      ),
+                      SizedBox(width: 9),
+                      Expanded(
+                        child: Text(
+                          'La autenticación contra Active Directory no está implementada. RackDoc no abre '
+                          'ninguna conexión LDAP: estas fichas son configuración guardada, el explorador de '
+                          'usuarios devuelve un catálogo de ejemplo, y las cuentas que des de alta desde aquí '
+                          'quedan marcadas como de dominio pero NO pueden iniciar sesión. Para dar acceso a '
+                          'una persona, créala abajo como usuario local con contraseña.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.45,
+                            color: AppPalette.amber800,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Wrap(

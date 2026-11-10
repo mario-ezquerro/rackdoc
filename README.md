@@ -2,7 +2,9 @@
 
 **RackDoc8** es una plataforma integral de gestión visual de centros de datos (**DCIM**), **CMDB Multi-IP con control anti-colisiones**, **Topología Lógica / Stack Tecnológico 2D** y **Telemetría Real (Heartbeat + Nagios + SNMP + Prometheus + OpenTelemetry)** desarrollada con **Flutter Web** (Canvas 2D interactivo estilo CAD), **FastAPI (Python 3.12)**, **SQLite**, **Prometheus TSDB** y **Docker Compose**.
 
-Diseñada para operar sobre **infraestructura real (modo POC / Producción limpio, sin datos simulados ni falsos positivos)**, coordina en tiempo real la ubicación física de los equipos (Sedes $\rightarrow$ Plantas 2D $\rightarrow$ Racks 42U Front/Back) con la **CMDB de direcciones IP, VLANs y Subredes**, los **Stacks Tecnológicos de negocio** y el sistema de **monitorización y alertas con Active Directory**.
+Diseñada para operar sobre **infraestructura real**: las sondas de red, los chequeos de servicio, la exposición Prometheus y el inventario parten siempre de una medida o de un dato introducido, nunca de valores inventados. Coordina en tiempo real la ubicación física de los equipos (Sedes $\rightarrow$ Plantas 2D $\rightarrow$ Racks 42U Front/Back) con la **CMDB de direcciones IP, VLANs y Subredes**, los **Stacks Tecnológicos de negocio** y el sistema de **monitorización y avisos**.
+
+> **Antes de nada, lee [⚠️ Estado de implementación](#️-estado-de-implementación).** Tres funciones que aparecen en la interfaz y en la especificación OpenAPI están **a medias o sin implementar**: el *walk* SNMP de bocas, la sincronización de los conectores que no son SNMP, y la autenticación contra Active Directory. Se documentan ahí una por una para que nadie las dé por operativas.
 
 ---
 
@@ -48,7 +50,7 @@ La barra lateral izquierda estructura el flujo completo de extremo a extremo en 
 
 ---
 
-### 4. 🕸️ `4. Red & Host` — Stack Tecnológico 2D, Topología Lógica, Nagios, SNMP, Prometheus y Alertas AD
+### 4. 🕸️ `4. Red & Host` — Stack Tecnológico 2D, Topología Lógica, Nagios, SNMP, Prometheus y Avisos
 Organizado en **7 pestañas operativas**:
 1. **`1. Stack Tecnológico (Lógica de Negocio)`**:
    - Lienzo 2D estilo CAD para diseñar múltiples esquemas de servicio (ej. *Portal Ecommerce, ERP, Clúster K8s*).
@@ -56,15 +58,19 @@ Organizado en **7 pestañas operativas**:
 2. **`2. Topología Lógica & Capas`**:
    - Mapa automático por capas (`Core/Firewall`, `Switches`, `Hipervisores`, `VMs/Contenedores`, `BBDD/Middleware`) y gestión de enlaces lógicos (`LLDP Trunk`, `Hypervisor -> VM`, `Reverse Proxy -> App -> DB`).
 3. **`3. Hosts, Servicios & Estados (Nagios)`**:
-   - Chequeos reales de servicios por activo (`ICMP`, `TCP`, `HTTP/HTTPS`, `SSH`, `DNS`, `SNMP`, `PostgreSQL`, `MySQL`, `Redis`, `Docker`, `Proxmox`) con máquina de estados estilo **Nagios Core (`OK`, `WARNING`, `CRITICAL`, `UNKNOWN` en modo `SOFT`/`HARD`)** y control de días restantes de **certificados SSL/TLS**.
-4. **`4. Switches & Bocas SNMP / LLDP`**:
-   - Inspección boca a boca (`ifIndex`, `ifName`, estado `UP/DOWN`, VLAN, velocidad, caudal `In/Out Mbps`, vecinos `LLDP/CDP`) y sincronización con los puertos físicos del Rack Editor.
+   - Chequeos reales de servicios por activo con máquina de estados estilo **Nagios Core (`OK`, `WARNING`, `CRITICAL`, `UNKNOWN` en modo `SOFT`/`HARD`)** y control de días restantes de **certificados SSL/TLS**.
+   - Seis transportes implementados a nivel de protocolo: `ICMP` (ping del sistema), `TCP` (apertura de socket), `UDP` (datagrama), `SSH` (banner), `HTTP/HTTPS` (código de estado, palabra clave y caducidad del certificado) y `SNMP` (`GetRequest` ASN.1/BER v1/v2c/v3).
+   - Los tipos por servicio (`apache`, `nginx`, `haproxy`, `docker`, `proxmox`, `vmware`, `postgres`, `mysql`, `redis`, `node_exporter`, `windows_exporter`) son una **comprobación TCP del puerto**, más el raspado real de métricas cuando el agente las expone (`node_exporter :9100/metrics`, `windows_exporter :9182/metrics`, `nginx_status`, `apache server-status?auto`). **No hablan el protocolo nativo del servicio** ni autentican contra él. Un tipo no reconocido cae a `ICMP`.
+4. **`4. Switches SNMP & Conectores`**:
+   - **Comprobación SNMP del switch (implementada)**: `GetRequest` real al puerto 161/UDP sobre un OID (`sysDescr` por defecto); si el equipo responde, queda dado de alta o actualizado como activo de la CMDB con su IP de gestión.
+   - **Inventario de bocas (sin implementar)**: la pantalla muestra las columnas `ifIndex`, `ifName`, `UP/DOWN`, VLAN, velocidad, caudal `In/Out Mbps` y vecinos `LLDP/CDP`, y la tabla `switch_snmp_ports` existe en el esquema, pero **nada la rellena**: no hay recorrido de `IF-MIB` ni de `LLDP-MIB`. La lista sale siempre vacía y la sincronización con los puertos del Rack Editor no tiene nada que copiar. Ver [⚠️ Estado de implementación](#️-estado-de-implementación).
 5. **`5. Telemetría Prometheus & Agentes (OpenTelemetry / Exporters)`**:
    - Integración directa con el contenedor **`rackdoc-prometheus` (`:9090`)** que recolecta `/api/v1/metrics` cada 15 segundos y añade dinámicamente targets de agentes externos (`node_exporter :9100`, `windows_exporter :9182`, `cadvisor :8080`, `snmp_exporter :9116`).
    - Receptor HTTP nativo **OpenTelemetry (`POST /api/v1/otel/v1/metrics`)** para ingesta push de métricas reales de CPU, RAM y Disco.
    - Asistente guiado con fragmentos `docker-compose.yml` y comandos listos para copiar e instalar agentes en servidores Linux/Windows.
-6. **`6. Avisos, Alarmas & Matriz Active Directory`**:
-   - Matriz visual de **4 columnas con Drag & Drop**: *1. Grupos de Hosts* $\rightarrow$ *2. Reglas de Enrutamiento* $\rightarrow$ *3. Grupos de Usuarios (Active Directory / Locales)* $\rightarrow$ *4. Contactos*, además de ventanas de mantenimiento programadas y configuración SMTP/Webhook.
+6. **`6. Avisos, Alarmas & Matriz de Enrutamiento`**:
+   - Matriz visual de **4 columnas con Drag & Drop**: *1. Grupos de Hosts* $\rightarrow$ *2. Reglas de Enrutamiento* $\rightarrow$ *3. Grupos de Usuarios* $\rightarrow$ *4. Contactos*, además de ventanas de mantenimiento programadas y configuración SMTP/Webhook.
+   - Los contactos se generan a partir de los usuarios dados de alta en RackDoc (locales y los marcados como de dominio). El origen `AD` de un usuario es una etiqueta guardada en la base de datos, no una consulta al directorio.
 7. **`7. Manifiesto IA & Contexto Operativo (JSON)`**:
    - Exportación estructurada en JSON de toda la topología física, lógica y de red para auditoría o integración con agentes LLM.
 
@@ -124,11 +130,89 @@ Ubicado justo debajo de `6. CMDB & Control IPs`, proporciona un inventario centr
 
 ---
 
-### 8. ⚙️ `8. Administración & Avisos (Usuarios / AD)` — Login, 4 Roles RBAC y Multi-Active Directory
+### 8. ⚙️ `8. Administración & Avisos (Usuarios / AD)` — Login y 4 Roles RBAC
 - Acceso protegido por pantalla de Login y verificación de contraseña al cambiar de usuario activo.
-- Gestión de usuarios locales, **4 roles RBAC** (`admin`, `editor`, `operator`, `viewer`), múltiples servidores **Active Directory (LDAP/LDAPS)** con mapeo de permisos para usuarios y grupos (`ADRoleMapping`), y ajuste en caliente del intervalo del motor Heartbeat.
+- Gestión de **usuarios locales** con contraseña bcrypt, **4 roles RBAC** (`admin`, `editor`, `operator`, `viewer`) aplicados a toda la API, y ajuste en caliente del intervalo del motor Heartbeat.
+- **Active Directory / LDAP: sin implementar.** Las fichas de servidor AD, el filtro LDAP, el mapeo de grupos a roles (`ADRoleMapping`) y el explorador de usuarios existen en la interfaz, pero RackDoc **no abre ninguna conexión LDAP**: no hay cliente LDAP en el backend. Ver [⚠️ Estado de implementación](#️-estado-de-implementación).
 
-![4. Administración - 4 Roles RBAC y Multi-AD](docs/screenshots/04_admin_rbac_ad.png)
+![4. Administración - 4 Roles RBAC y fichas de servidor AD](docs/screenshots/04_admin_rbac_ad.png)
+
+---
+
+## ⚠️ Estado de implementación
+
+RackDoc no inventa medidas: las sondas, los chequeos de servicio y las métricas que publica salen siempre de una
+comprobación real o de un dato introducido a mano. Pero hay tres funciones que **la interfaz y la especificación
+OpenAPI presentan como operativas y no lo están**. Se listan aquí sin rodeos para que nadie construya un
+procedimiento encima de ellas.
+
+### 1. Inventario de bocas por SNMP (`IF-MIB` / `LLDP-MIB`) — sin implementar
+
+| | |
+| :--- | :--- |
+| **Qué sí hace** | `POST /api/v1/network-hosts/snmp-discover` envía un `GetRequest` SNMP real (ASN.1/BER construido a mano, v1/v2c/v3) al puerto 161/UDP sobre un OID configurable (`1.3.6.1.2.1.1.1.0` por defecto). Si el equipo contesta, se da de alta o se actualiza como activo de la CMDB con su IP de gestión, y se devuelve la cadena `sysDescr` recibida. |
+| **Qué no hace** | No recorre `IF-MIB` ni `LLDP-MIB`. La tabla `switch_snmp_ports` está declarada en el esquema y se lee en varios sitios, pero **no se escribe en ningún punto del código**: no existe ninguna sentencia que cree una fila. |
+| **Qué se ve** | La pestaña *«4. Switches SNMP & Conectores»* sale siempre vacía. El resumen del conector dice *«SNMP Walk completado: 0 bocas IF-MIB y 0 vecinos LLDP sincronizados»*, que es literalmente cierto y completamente engañoso. |
+| **Para implementarlo** | Falta el `GetNextRequest`/`GetBulkRequest` iterativo sobre `1.3.6.1.2.1.2.2.1` (`IF-MIB`) y `1.0.8802.1.1.2.1.4.1.1` (`LLDP-MIB`), y el volcado de cada boca a `switch_snmp_ports`. El transporte SNMP ya está hecho y es reutilizable (`services/monitor.py`). |
+
+### 2. Sincronización de Conectores de Infraestructura — parcial
+
+`POST /api/v1/network-hosts/connectors/{id}/sync` se comporta de tres maneras distintas según el tipo:
+
+| Tipo de conector | Comportamiento real |
+| :--- | :--- |
+| `snmp_switch` | Lanza la comprobación SNMP descrita arriba. **Contacta de verdad** con el equipo. |
+| `node_exporter`, `windows_exporter`, `haproxy_stats` | El endpoint se escribe en los ficheros `targets_*.json` de descubrimiento dinámico de Prometheus, que **sí los raspa de verdad** cada 15 s. La integración es real, pero la hace Prometheus, no el botón «Sincronizar». |
+| `proxmox_ve`, `vmware_vsphere`, `hyperv`, `kvm_libvirt`, `xcpng`, `docker_engine`, `portainer`, `kubernetes`, `apache_status`, `nginx_status`, `postgresql`, `mysql_mariadb`, `redis` | **No se contacta con nada.** El conector queda en `last_sync_status = "never"`, sin fecha de sincronización, y la interfaz lo muestra como **SIN COMPROBAR** en gris. El resumen lo dice por escrito. |
+
+Para esos últimos tipos, el conector es hoy **un registro de inventario**: documenta dónde está el sistema y con
+qué credenciales se llegaría a él, nada más. No descubre VMs, ni contenedores, ni *virtual hosts*, ni bases de datos.
+
+Valores de `last_sync_status`: `ok` (contactado y responde), `error` (contactado y falla), `never` (no se ha
+contactado). Un conector recién dado de alta nace en `never`: registrarlo no comprueba que exista.
+
+### 2 bis. Envío de avisos por webhook en Red & Host — sin implementar
+
+La matriz de alarmas permite configurar un webhook personal por contacto, uno de canal por grupo y uno global.
+**En «4. Red & Host» esos webhooks se leen y se descartan**: el único transporte implementado es el correo SMTP.
+CertScope sí publica en los webhooks configurados, de modo que la función existe en el proyecto, pero no en esta ruta.
+Un aviso que no llega a enviarse se registra como `not_configured` (no se intentó) o `error` (se intentó y falló), y
+el registro de avisos de la interfaz lo dice con esas palabras en lugar de mostrar un estado que parezca un éxito.
+
+### 3. Autenticación contra Active Directory / LDAP — sin implementar
+
+No hay cliente LDAP en el backend: `requirements.txt` no incluye `ldap3` ni equivalente, y no se importa ninguna
+biblioteca de directorio en `backend/app/`. En consecuencia:
+
+- **Las fichas de servidor AD son configuración almacenada.** `GET/POST/PUT/DELETE /api/v1/ad-servers` guarda y
+  devuelve `ldap_url`, `base_dn`, `bind_dn`, el filtro de usuarios y el mapeo de grupos a roles. Nunca se usan para
+  conectar. Guardar un servidor AD no valida que exista.
+- **El explorador de usuarios devuelve un catálogo de ejemplo.**
+  `POST /api/v1/ad-servers/{id}/search-users` responde con una lista fija de cuatro cuentas inventadas
+  (`jgarcia`, `mfernandez`, `rnavarro`, `elopez`), adaptando únicamente el dominio y el `base_dn` que tengas
+  configurados y el rol sugerido según tu mapeo de grupos. No consulta ningún directorio.
+- **Las cuentas importadas como AD no pueden iniciar sesión.** `POST /api/v1/ad-servers/{id}/import-users` crea el
+  usuario con `password_hash = bcrypt(uuid4())`, un valor aleatorio que nadie conoce; y el login de un usuario con
+  `auth_source = "ad"` valida la contraseña contra ese mismo hash local. El resultado es una cuenta inaccesible por
+  diseño. **Para dar acceso a una persona hay que crearla como usuario local.**
+
+El resto de lo que cuelga de «Multi-AD» sí funciona, porque no depende del directorio: los **4 roles RBAC**
+(`admin`, `editor`, `operator`, `viewer`) se aplican a todas las rutas de `/api/v1` mediante una dependencia global
+del router, y la autenticación local con bcrypt + JWT es real.
+
+### Lo que sí está medido de verdad
+
+Por contraste, y para que la lista anterior no se lea como una advertencia general:
+
+- **Sondas de red**: `ICMP` (vía `ping` del sistema), `TCP`, `UDP`, `SSH`, `HTTP/HTTPS` y `SNMP` son comprobaciones
+  reales contra el equipo, con latencia medida.
+- **Certificados TLS**: CertScope negocia TLS de verdad contra el puerto (incluido `STARTTLS` en SMTP, LDAP, IMAP,
+  PostgreSQL y MySQL) y lee la fecha de caducidad del certificado presentado.
+- **Máquina de estados Nagios**: los ciclos `SOFT`/`HARD`, el contador de intentos y las ventanas de mantenimiento
+  se aplican sobre los resultados de esas sondas.
+- **Prometheus**: `GET /api/v1/metrics` publica solo métricas medidas; si un exporter no ha reportado CPU o RAM, la
+  serie no se emite en lugar de rellenarse con un valor plausible.
+- **Barrido de red y verificación de IPs**: el *Deep IP Probe* de la CMDB sondea las direcciones una por una.
 
 ---
 
@@ -187,9 +271,9 @@ Todos los endpoints del backend cumplen con **OpenAPI 3.1.0** bajo el prefijo ve
 | **Cabling & Connections** | `POST/PUT/DELETE /api/v1/connections`, `GET /api/v1/racks/{id}/inter-rack-targets` | Trazabilidad punto a punto de cables UTP, fibra óptica OM4/OS2 y alimentación eléctrica. |
 | **Device Templates & Library** | `GET/POST/PUT/DELETE /api/v1/templates`, `GET /api/v1/templates/export`, `POST /api/v1/templates/import` | Catálogo hardware personalizable e importación/exportación JSON. |
 | **CMDB, Multi-IP & IP Verification** | `GET /api/v1/cmdb/overview`, `POST/PUT/DELETE /api/v1/cmdb/assets`, `POST /api/v1/cmdb/verify-ip`, `POST /api/v1/cmdb/scan-range`, `POST /api/v1/cmdb/import-discovered`, `GET /api/v1/cmdb/check-ip-owner`, `POST /api/v1/cmdb/resolve-ip-collision`, `POST/DELETE /api/v1/cmdb/subnets` | Inventario CMDB estilo Excel, múltiples IPs por máquina, coordinación con Locations, Deep IP Probe y resolución de colisiones de IP con el Rack Editor. |
-| **Red & Host (Topología, Nagios, SNMP, Prometheus & OTel)** | `GET /api/v1/network-hosts/overview`, `GET /api/v1/metrics`, `POST /api/v1/otel/v1/metrics`, `POST/PUT/DELETE /api/v1/network-hosts/tech-stacks`, `POST /api/v1/network-hosts/service-checks/{id}/run` | Stacks Tecnológicos 2D, estados Nagios, bocas SNMP/LLDP, exposición Prometheus, ingesta OpenTelemetry y matriz de alertas Active Directory. |
+| **Red & Host (Topología, Nagios, SNMP, Prometheus & OTel)** | `GET /api/v1/network-hosts/overview`, `GET /api/v1/metrics`, `POST /api/v1/otel/v1/metrics`, `POST/PUT/DELETE /api/v1/network-hosts/tech-stacks`, `POST /api/v1/network-hosts/service-checks/{id}/run` | Stacks Tecnológicos 2D, estados Nagios, comprobación SNMP de switches, exposición Prometheus, ingesta OpenTelemetry y matriz de enrutamiento de avisos. El inventario de bocas `IF-MIB`/`LLDP-MIB` no está implementado. |
 | **Dashboard, KPIs & Excel Reports** | `GET /api/v1/reports/dashboard-inventory`, `GET /api/v1/reports/excel`, `GET /api/v1/reports/excel/template`, `POST /api/v1/reports/excel/import` | Auditoría de hierro línea a línea, patch panels boca a boca e importación/exportación Excel (`.xlsx`). |
-| **Authentication, RBAC & Active Directory** | `POST /api/v1/auth/login`, `GET/POST/PUT/DELETE /api/v1/users`, `GET/POST/PUT/DELETE /api/v1/ad-servers`, `POST /api/v1/ad-role-mappings` | Control de acceso con 4 roles RBAC y autenticación híbrida Local + Multi-Active Directory. |
+| **Authentication, RBAC & Active Directory** | `POST /api/v1/auth/login`, `GET/POST/PUT/DELETE /api/v1/users`, `GET/POST/PUT/DELETE /api/v1/ad-servers`, `POST /api/v1/ad-role-mappings` | Control de acceso con 4 roles RBAC sobre toda la API y autenticación local con bcrypt. Los endpoints `/ad-servers` y `/ad-role-mappings` almacenan configuración, pero la autenticación contra Active Directory no está implementada. |
 
 ---
 
@@ -204,7 +288,7 @@ rackdoc/
 │   └── app/
 │       ├── main.py                     # Endpoints REST versionados (/api/v1) y worker Heartbeat en background
 │       ├── database.py                 # Persistencia SQLite, migraciones automáticas en caliente y volumen /app/data
-│       ├── models.py                   # Modelos SQLAlchemy (Locations, Racks, CMDB Multi-IP, TechStacks, Nagios, SNMP, AD)
+│       ├── models.py                   # Modelos SQLAlchemy (Locations, Racks, CMDB Multi-IP, TechStacks, Nagios, SNMP, Usuarios)
 │       ├── schemas.py                  # Esquemas de validación Pydantic v2
 │       ├── seed.py                     # Inicialización limpia de catálogos hardware y usuario administrador (.env)
 │       └── services/
@@ -223,7 +307,7 @@ rackdoc/
             ├── locations/              # 1. Mapa OpenStreetMap arrastrable y planos personalizados
             ├── datacenter/             # 2. Editor 2D de Plantas, Pasillos, Racks y Equipos de Planta
             ├── rack_editor/            # 3. Rack Editor 42U Front/Back, Bandejas y prevención de colisiones IP
-            ├── network_hosts/          # 4. Red & Host (Stacks 2D, Topología, Nagios, SNMP, Prometheus/OTel, Alertas AD)
+            ├── network_hosts/          # 4. Red & Host (Stacks 2D, Topología, Nagios, SNMP, Prometheus/OTel, Avisos)
             ├── cmdb/                   # 6. CMDB & Control IPs (Tabla Excel, Multi-IP, Locations, Escáner y Colisiones IP)
-            └── admin/                  # 7. Configuración (Usuarios, 4 Roles RBAC y Multi-Active Directory)
+            └── admin/                  # 7. Configuración (Usuarios locales, 4 Roles RBAC y fichas de servidor AD)
 ```

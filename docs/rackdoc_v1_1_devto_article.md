@@ -1,12 +1,21 @@
 ---
 title: "RackDoc DCIM v1.1: Background Multi-Protocol Heartbeat, 48-Port CAD Geometry, NOC Kiosk Mode & Decoupled Remote Connect"
 published: true
-description: "A deep dive into everything new in RackDoc DCIM v1.1: a 4-state background Heartbeat engine (Grey/Green/Orange/Red), independent Frontend SSH/HTTP/HTTPS launcher, 48-port switch CAD geometry, NOC Kiosk Mode, Rack Trays, and Active Directory RBAC."
+description: "A deep dive into everything new in RackDoc DCIM v1.1: a 4-state background Heartbeat engine (Grey/Green/Orange/Red), independent Frontend SSH/HTTP/HTTPS launcher, 48-port switch CAD geometry, NOC Kiosk Mode, Rack Trays, and 4-tier RBAC. (Kept as a record of the release; see the correction note about Active Directory.)"
 tags: [dcim, flutter, fastapi, docker]
 cover_image: https://raw.githubusercontent.com/mario-ezquerro/rackdoc/main/docs/rackdoc_v1_1_screenshot.png
 ---
 
 ![RackDoc DCIM v1.1 — 42U Front & Back Rack Editor, Structured Cabling, Heartbeat & Remote Connect](/Users/mario/.gemini/antigravity/brain/864b1863-7f73-45e7-905d-c6bebb564392/rackdoc_v1_1_screenshot.png)
+
+> **Correction (November 2026).** This article was published when v1.1 shipped and is kept here as a
+> record of that release. One claim in section 6 was wrong: **RackDoc has never authenticated against
+> Active Directory.** There is no LDAP client in the backend, the AD server entries are stored
+> configuration, the directory browser returns a sample catalogue, and accounts imported as AD users
+> cannot sign in at all. The 4-tier RBAC and the local bcrypt + JWT authentication described alongside it
+> are real and work as written. See **Implementation status** in the
+> [README](https://github.com/mario-ezquerro/rackdoc#%EF%B8%8F-estado-de-implementación) for the full
+> picture, including the SNMP port inventory and the infrastructure connectors.
 
 > *For DEV.to Markdown copy-paste, the screenshot above is also hosted at:*
 > `https://raw.githubusercontent.com/mario-ezquerro/rackdoc/main/docs/rackdoc_v1_1_screenshot.png`
@@ -96,12 +105,19 @@ Need to display your global datacenter map, 2D floor plan, 42U rack elevation, o
 
 ## 6. 🔐 4-Tier RBAC + Multi-Active Directory & 100× Faster Startup
 
+*(The Multi-Active Directory part of this section did not ship working — see the note below.)*
+
 - **4 Role-Based Access Control Tiers**:
   - `admin`: Full control over users, Active Directory servers, settings, and hardware.
   - `editor`: Create/edit locations, floors, racks, cables, and sensors + launch remote connections.
   - `operator`: Read-only on physical rack geometry, **with permission to test Heartbeats and launch SSH/HTTP/HTTPS connections**.
   - `viewer`: Strict read-only auditing mode.
-- **Multi-Active Directory (LDAP / LDAPS) + Local Users**: Connect multiple AD domains with automatic `Group DN → Role` mapping alongside local database accounts.
+- ~~**Multi-Active Directory (LDAP / LDAPS) + Local Users**: Connect multiple AD domains with automatic `Group DN → Role` mapping alongside local database accounts.~~
+  **Not implemented** (see the correction at the top). What exists is the configuration UI and its
+  storage: AD server entries, the `Group DN → Role` mapping and a sample directory browser. No LDAP
+  connection is ever opened, and accounts created through the AD import cannot sign in. **Local
+  accounts with bcrypt passwords are the only working authentication**, and the 4 RBAC tiers above
+  apply to them in full.
 - **Versioned `/api/v1` REST API & Full OpenAPI 3.1.0 / Swagger UI Documentation**:
   - All **46 API paths (64 HTTP operations)** are cleanly versioned under **`/api/v1/...`** (with `/api/...` preserved as a transparent backward-compatible alias).
   - 100% of endpoints are documented with Pydantic v2 schemas, summaries, descriptions, and organized into **10 OpenAPI 3.1.0 tags** (`Monitoring & Heartbeat`, `Locations & Topology`, `Datacenter Rooms & Aisles`, `Floor Devices & Environmental Sensors`, `Racks & Rack Devices`, `Cabling & Connections`, `Device Templates & Library`, `Dashboard, KPIs & Excel Reports`, `Authentication, RBAC & Active Directory`, and `Static Assets & Uploads`).

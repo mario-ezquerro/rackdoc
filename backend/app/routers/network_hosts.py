@@ -8,13 +8,18 @@ from ..database import get_db
 from ..models import AlertContact, AlertContactGroup, CmdbAsset, HostGroup, InfraConnector, LogicalTopologyLink, MaintenanceWindow, MonitoredServiceCheck, NotificationRoutingRule, SmtpAlertConfig, TechStackDiagram, TechStackEdge, TechStackNode
 from ..schemas import AlertContactGroupInput, AlertContactInput, AnsibleHostUpsertWebhook, HostGroupInput, HostSshCommandInput, InfraConnectorInput, LogicalLinkInput, MaintenanceWindowInput, NotificationRoutingRuleInput, ServiceCheckInput, SmtpAlertConfigInput, SnmpWalkDiscoveryRequest, TechStackDiagramInput, TechStackDiagramUpdateInput, TechStackEdgeInput, TechStackEdgeUpdateInput, TechStackNodeInput, TechStackNodeMoveInput
 from ..routers._common import api_router
-from ..services.network_host_service import _dispatch_alert_notification, build_network_hosts_overview, ensure_network_hosts_seeded, evaluate_all_network_service_checks, execute_host_ssh_diagnostic, get_asset_telemetry_timeseries, handle_ansible_host_upsert_webhook, run_single_service_check, run_snmp_switch_discovery, sync_prometheus_targets_file
+from ..services.network_host_service import TIPOS_PUBLICADOS_A_PROMETHEUS, _dispatch_alert_notification, build_network_hosts_overview, ensure_network_hosts_seeded, evaluate_all_network_service_checks, execute_host_ssh_diagnostic, get_asset_telemetry_timeseries, handle_ansible_host_upsert_webhook, run_single_service_check, run_snmp_switch_discovery, sync_prometheus_targets_file
 from ..time_utils import utcnow
 
 @api_router.get(
     "/network-hosts/overview",
     tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
     summary="Estado consolidado de '4. Red & Host' (Topología Lógica en 5 Capas + Nagios + SNMP + Conectores + Avisos)",
+    description=(
+        "Aviso: aunque sea un GET, este endpoint **escribe en la base de datos** (siembra inicial del módulo "
+        "y sincronización de contactos de aviso con la lista de usuarios), así que no es idempotente ni "
+        "cacheable."
+    ),
 )
 def get_network_hosts_overview_endpoint(db: Session = Depends(get_db)):
     return build_network_hosts_overview(db)
@@ -64,7 +69,16 @@ def create_network_host_with_services_endpoint(
 @api_router.post(
     "/network-hosts/service-checks",
     tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
-    summary="Añadir un nuevo Heartbeat o Chequeo de Servicio (HTTP, HTTPS+SSL, ICMP, TCP, SSH, SNMP, Apache, Nginx, Docker, BBDD)",
+    summary="Añadir un nuevo Heartbeat o Chequeo de Servicio (HTTP, HTTPS+SSL, ICMP, TCP, UDP, SSH, SNMP, Apache, Nginx, Docker, BBDD)",
+    description=(
+        "Seis transportes están implementados a nivel de protocolo: `icmp`, `tcp`, `udp`, `ssh`, "
+        "`http`/`https` (código de estado, palabra clave y días restantes del certificado) y `snmp`.\n\n"
+        "Los tipos por servicio (`apache`, `nginx`, `haproxy`, `docker`, `proxmox`, `vmware`, `postgres`, "
+        "`mysql`, `redis`, `node_exporter`, `windows_exporter`) son una **comprobación TCP del puerto**, más el "
+        "raspado real de métricas cuando el agente las expone (node_exporter :9100/metrics, "
+        "windows_exporter :9182/metrics, nginx_status, apache server-status?auto). No hablan el protocolo "
+        "nativo del servicio ni autentican contra él. Un `check_type` no reconocido se comprueba por `icmp`."
+    ),
 )
 def create_service_check_endpoint(payload: ServiceCheckInput, db: Session = Depends(get_db)):
     asset = db.query(CmdbAsset).filter(CmdbAsset.id == payload.asset_id).first()
@@ -140,10 +154,15 @@ def run_all_service_checks_endpoint(db: Session = Depends(get_db)):
 @api_router.post(
     "/network-hosts/snmp-discover",
     tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
-    summary="Autodescubrimiento de Switch por SNMP (IF-MIB + LLDP-MIB) sin dar de alta puerto a puerto",
+    summary="Comprobar un Switch por SNMP y darlo de alta en la CMDB (el inventario de bocas NO está implementado)",
     description=(
-        "Interroga un Switch o Router por SNMPv2c/v3, descubre todas sus bocas físicas, velocidades, alias, VLANs, "
-        "tráfico In/Out y vecinos LLDP, y sincroniza las bocas con el dispositivo físico del Rack Editor."
+        "Envía un GetRequest SNMP real (v1/v2c/v3) al puerto 161/UDP sobre un OID configurable "
+        "(1.3.6.1.2.1.1.1.0 / sysDescr por defecto). Si el equipo responde, lo da de alta o lo actualiza "
+        "como activo de la CMDB con su IP de gestión y devuelve la cadena sysDescr recibida.\n\n"
+        "**NO IMPLEMENTADO**: el recorrido de bocas (IF-MIB) y de vecinos (LLDP-MIB). La tabla "
+        "`switch_snmp_ports` existe en el esquema pero no se escribe en ningún punto del código, así que "
+        "`discovered_ports_count` y `lldp_neighbors_count` valen siempre 0 y no hay bocas que sincronizar "
+        "con el Rack Editor. Ver 'Estado de implementación' en el README."
     ),
 )
 def snmp_switch_discover_endpoint(payload: SnmpWalkDiscoveryRequest, db: Session = Depends(get_db)):
@@ -204,6 +223,12 @@ def delete_logical_link_endpoint(link_id: int, db: Session = Depends(get_db)):
     "/network-hosts/connectors",
     tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
     summary="Registrar un nuevo Conector de Infraestructura (Proxmox, VMware, Docker, Apache, Nginx, PostgreSQL, MySQL, SNMP, Exporters)",
+    description=(
+        "Da de alta el endpoint, sus credenciales y el activo de la CMDB al que pertenece. Registrar un "
+        "conector **no comprueba que exista**: no se abre ninguna conexión contra él.\n\n"
+        "Los conectores de tipo `node_exporter`, `windows_exporter` y `haproxy_stats` quedan escritos en los "
+        "ficheros de descubrimiento dinámico de Prometheus, que sí los raspa de verdad cada 15 s."
+    ),
 )
 def create_infra_connector_endpoint(payload: InfraConnectorInput, db: Session = Depends(get_db)):
     conn = InfraConnector(
@@ -217,10 +242,13 @@ def create_infra_connector_endpoint(payload: InfraConnectorInput, db: Session = 
         linked_rack_device_id=payload.linked_rack_device_id,
         extra_settings=payload.extra_settings or {},
         enabled=payload.enabled,
-        last_sync_status="ok",
-        last_sync_at=utcnow(),
-        last_sync_summary=f"Conector {payload.connector_type} registrado y sincronizado con Prometheus.",
-        discovered_items_count=1,
+        # "never" es el valor del vocabulario de la columna para "no se ha
+        # contactado con el sistema remoto". Dar de alta un conector no comprueba
+        # nada, así que no puede nacer en "ok" ni contando un elemento descubierto.
+        last_sync_status="never",
+        last_sync_at=None,
+        last_sync_summary=f"Conector {payload.connector_type} registrado (sin comprobar la conexión).",
+        discovered_items_count=0,
     )
     db.add(conn)
     db.commit()
@@ -231,7 +259,20 @@ def create_infra_connector_endpoint(payload: InfraConnectorInput, db: Session = 
 @api_router.post(
     "/network-hosts/connectors/{connector_id}/sync",
     tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
-    summary="Sincronizar al instante un Conector de Infraestructura (Proxmox, VMware, Docker, Apache, Nginx, SNMP...)",
+    summary="Sincronizar un Conector de Infraestructura (solo contacta de verdad con los de tipo snmp_switch)",
+    description=(
+        "Comportamiento según el tipo de conector:\n\n"
+        "- `snmp_switch`: lanza la comprobación SNMP real contra el equipo.\n"
+        "- `node_exporter`, `windows_exporter`, `haproxy_stats`: el endpoint ya está publicado para "
+        "Prometheus, que lo raspa por su cuenta cada 15 s.\n"
+        "- **Resto de tipos** (`proxmox_ve`, `vmware_vsphere`, `hyperv`, `kvm_libvirt`, `xcpng`, "
+        "`docker_engine`, `portainer`, `kubernetes`, `apache_status`, `nginx_status`, `postgresql`, "
+        "`mysql_mariadb`, `redis`): **no se contacta con el sistema remoto** y el conector queda en "
+        "estado `never`. No se descubren VMs, contenedores, virtual hosts ni bases de datos. "
+        "Ver 'Estado de implementación' en el README.\n\n"
+        "Valores de `last_sync_status`: `ok` (contactado y responde), `error` (contactado y falla), "
+        "`never` (no se ha contactado)."
+    ),
 )
 def sync_infra_connector_endpoint(connector_id: int, db: Session = Depends(get_db)):
     conn = db.query(InfraConnector).filter(InfraConnector.id == connector_id).first()
@@ -246,16 +287,46 @@ def sync_infra_connector_endpoint(connector_id: int, db: Session = Depends(get_d
             asset_id=conn.linked_asset_id,
             rack_device_id=conn.linked_rack_device_id,
         )
-        conn.last_sync_status = "ok"
+        # El sondeo puede devolver "offline": un switch que no contesta por SNMP no
+        # es una sincronización correcta, así que el estado lo decide la respuesta.
+        respondio = disc["snmp_status"] == "online"
+        conn.last_sync_status = "ok" if respondio else "error"
         conn.last_sync_at = utcnow()
         conn.discovered_items_count = disc["discovered_ports_count"]
+        # El recorrido de bocas IF-MIB / LLDP-MIB no está implementado, así que estos
+        # contadores valen siempre 0. El texto lo dice en lugar de hablar de un
+        # "SNMP Walk completado" que nunca ha ocurrido.
         conn.last_sync_summary = (
-            f"SNMP Walk completado ({conn.endpoint_host}): {disc['discovered_ports_count']} bocas IF-MIB "
-            f"y {disc['lldp_neighbors_count']} vecinos LLDP sincronizados."
+            (
+                f"Respuesta SNMP correcta de {conn.endpoint_host}. "
+                f"El inventario de bocas IF-MIB y de vecinos LLDP no está implementado "
+                f"({disc['discovered_ports_count']} bocas, {disc['lldp_neighbors_count']} vecinos)."
+            )
+            if respondio
+            else f"Sin respuesta SNMP de {conn.endpoint_host}: {disc['detail']}"
         )
-    else:
+    elif conn.connector_type in TIPOS_PUBLICADOS_A_PROMETHEUS:
+        # Aquí RackDoc tampoco habla con el agente, pero sí hace algo comprobable:
+        # escribe el endpoint en los ficheros de descubrimiento de Prometheus
+        # (sync_prometheus_targets_file, al final de la función), y es Prometheus
+        # quien lo raspa de verdad cada 15 s.
         conn.last_sync_status = "ok"
         conn.last_sync_at = utcnow()
+        conn.last_sync_summary = (
+            f"Endpoint {conn.endpoint_host}:{conn.endpoint_port} publicado para Prometheus, "
+            f"que lo raspa cada 15 s. RackDoc no lo consulta directamente."
+        )
+    else:
+        # Para el resto de tipos no se contacta con el sistema remoto. El estado se
+        # queda en "never" para que el semáforo no se lea como "he hablado con
+        # Proxmox y está bien", y last_sync_at sigue sin fecha porque no ha habido
+        # sincronización ninguna que fechar.
+        conn.last_sync_status = "never"
+        conn.last_sync_summary = (
+            f"Sin comprobar: la sincronización de conectores de tipo "
+            f"'{conn.connector_type}' no está implementada. No se ha contactado con "
+            f"{conn.endpoint_host}:{conn.endpoint_port}."
+        )
     db.commit()
     sync_prometheus_targets_file(db)
     return build_network_hosts_overview(db)
