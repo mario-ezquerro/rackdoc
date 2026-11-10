@@ -14,6 +14,7 @@ import 'features/locations/locations_view.dart';
 import 'features/network_hosts/network_hosts_view.dart';
 import 'features/rack_editor/rack_editor_view.dart';
 import 'models/datacenter_models.dart';
+import 'shared/widgets/diagram_exporter.dart';
 
 void main() {
   runApp(const RackDocApp());
@@ -1819,16 +1820,14 @@ class _RackDocShellState extends State<RackDocShell> {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      OutlinedButton.icon(
-                        onPressed: () {
+                      DiagramExportMenuButton(
+                        buttonLabel: 'Exportar Todo (.xlsx/.dia/.pdf/.png)',
+                        compact: true,
+                        onExportExcel: () {
                           final url = Uri.parse(_api.getExcelExportUrl());
                           launchUrl(url, mode: LaunchMode.externalApplication);
                         },
-                        icon: const Icon(Icons.table_view_outlined, size: 16),
-                        label: const Text(
-                          'Exportar Todo a Excel',
-                          style: TextStyle(fontSize: 11),
-                        ),
+                        documentBuilder: _buildGlobalExportDocument,
                       ),
                       const SizedBox(height: 6),
                       InkWell(
@@ -2254,6 +2253,102 @@ class _RackDocShellState extends State<RackDocShell> {
     );
   }
 
+  DiagramExportDocument _buildGlobalExportDocument() {
+    final rawRackLines =
+        (_dashboardInventory?['rack_lines'] as List?) ?? const [];
+    final allRackLines = rawRackLines
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .where(
+          (ln) =>
+              _dashSelectedRackId == null ||
+              ln['rack_id'] == _dashSelectedRackId,
+        )
+        .toList();
+
+    final zones = <DiagramExportZone>[];
+    for (int i = 0; i < _locations.length; i++) {
+      final loc = _locations[i];
+      zones.add(
+        DiagramExportZone(
+          id: 'loc_${loc.id}',
+          title: '${loc.name} (${loc.code})',
+          subtitle:
+              '${loc.floorsCount} Plantas • ${loc.racksCount} Racks • ${loc.monitoredCount} Monitorizados',
+          x: 24.0 + (i % 2) * 680.0,
+          y: 24.0 + (i ~/ 2) * 320.0,
+          width: 650.0,
+          height: 295.0,
+          colorHex: '#1E3A8A',
+        ),
+      );
+    }
+
+    final nodes = <DiagramExportNode>[];
+    final edges = <DiagramExportEdge>[];
+    for (int i = 0; i < allRackLines.length; i++) {
+      final ln = allRackLines[i];
+      final id = 'dev_${ln['device_id'] ?? i}';
+      final col = i % 5;
+      final row = i ~/ 5;
+      nodes.add(
+        DiagramExportNode(
+          id: id,
+          code: '${ln['code'] ?? ''}',
+          name: '${ln['name'] ?? ''}',
+          subtitle: '${ln['rack_code'] ?? ''} • ${ln['u_range'] ?? ''}',
+          ip: '${ln['ip_address'] ?? ''}',
+          modelName: '${ln['manufacturer'] ?? ''} ${ln['model_name'] ?? ''}'
+              .trim(),
+          serialNumber: '${ln['serial_number'] ?? ''}',
+          status: '${ln['status'] ?? 'online'}',
+          x: 40.0 + col * 265.0,
+          y: 55.0 + row * 110.0,
+          width: 240.0,
+          height: 86.0,
+          colorHex: ln['kind_group'] == 'hierro' ? '#1E3A8A' : '#475569',
+        ),
+      );
+    }
+
+    final rawPatchPanels =
+        (_dashboardInventory?['patch_panels'] as List?) ?? const [];
+    int edgeIdx = 1;
+    for (final rawPp in rawPatchPanels) {
+      final pp = Map<String, dynamic>.from(rawPp as Map);
+      final ppDevId = 'dev_${pp['device_id']}';
+      final bocas = (pp['bocas'] as List?) ?? const [];
+      for (final rawB in bocas) {
+        final b = Map<String, dynamic>.from(rawB as Map);
+        if (b['occupied'] == true && b['peer_device_id'] != null) {
+          edges.add(
+            DiagramExportEdge(
+              id: 'pp_edge_${edgeIdx++}',
+              sourceId: ppDevId,
+              targetId: 'dev_${b['peer_device_id']}',
+              label: 'Boca ${b['port_number']} -> ${b['peer_port_number'] ?? ''}',
+              detail: '${b['peer_ip'] ?? b['cable_type'] ?? 'RJ45'}',
+              colorHex: '#0284C7',
+            ),
+          );
+        }
+      }
+    }
+
+    return DiagramExportDocument(
+      moduleName: '5. Dashboard Global & Inventario DCIM',
+      title: 'Inventario Global RackDoc — Hierro, Patch Panels y Enlaces (${nodes.length} equipos)',
+      subtitle:
+          '${_locations.length} Sedes • ${nodes.length} Equipos en Racks • ${edges.length} Bocas Conectadas',
+      fileBaseName: 'rackdoc_inventario_global',
+      canvasWidth: 1420,
+      canvasHeight:
+          (120.0 + ((nodes.length ~/ 5) + 1) * 115.0).clamp(900.0, 2800.0),
+      zones: zones,
+      nodes: nodes,
+      edges: edges,
+    );
+  }
+
   Widget _buildDashboardOverview() {
     int totalFloors = 0;
     int totalRooms = 0;
@@ -2515,22 +2610,17 @@ class _RackDocShellState extends State<RackDocShell> {
                   ),
                 ),
                 const SizedBox(width: 10),
-                FilledButton.icon(
-                  onPressed: () {
+                DiagramExportMenuButton(
+                  buttonLabel: _dashSelectedRackId != null
+                      ? 'Exportar Rack (.xlsx / .dia / .png / .pdf / .csv)'
+                      : 'Exportar Todo (.xlsx / .dia / .png / .pdf / .csv)',
+                  onExportExcel: () {
                     final url = Uri.parse(
                       _api.getExcelExportUrl(rackId: _dashSelectedRackId),
                     );
                     launchUrl(url, mode: LaunchMode.externalApplication);
                   },
-                  icon: const Icon(Icons.download_rounded, size: 18),
-                  label: Text(
-                    _dashSelectedRackId != null
-                        ? 'Exportar Rack a Excel (.xlsx)'
-                        : 'Exportar Todo a Excel (.xlsx)',
-                  ),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppPalette.green700,
-                  ),
+                  documentBuilder: _buildGlobalExportDocument,
                 ),
               ],
             ],

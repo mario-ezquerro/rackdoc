@@ -24,7 +24,12 @@ from .rack_sync import _resync_rack_boxes
 from .security import JWT_SECRET_IS_EPHEMERAL, hash_password, is_password_hashed
 from .seed import seed_initial_data, sync_system_defaults
 from .uploads_store import _sanitize_missing_upload_urls
-from .routers._common import api_router, automation_router, public_router
+from .routers._common import (
+    agent_or_session_router,
+    api_router,
+    automation_router,
+    public_router,
+)
 from .services.cmdb_service import ensure_cmdb_seed_data
 from .services.network_host_service import ensure_network_hosts_seeded
 
@@ -239,6 +244,7 @@ app.add_middleware(
 for _prefijo, _en_esquema in (("/api/v1", True), ("/api", False)):
     app.include_router(public_router, prefix=_prefijo, include_in_schema=_en_esquema)
     app.include_router(automation_router, prefix=_prefijo, include_in_schema=_en_esquema)
+    app.include_router(agent_or_session_router, prefix=_prefijo, include_in_schema=_en_esquema)
     app.include_router(api_router, prefix=_prefijo, include_in_schema=_en_esquema)
 
 

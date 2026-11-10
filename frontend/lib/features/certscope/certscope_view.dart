@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../core/api_client.dart';
 import '../../core/theme.dart';
 import '../../core/widgets/avisos.dart';
+import '../../shared/widgets/diagram_exporter.dart';
 import '../cmdb/api_onboarding_dialog.dart';
 
 class CertScopeView extends StatefulWidget {
@@ -442,6 +443,11 @@ class _CertScopeViewState extends State<CertScopeView> {
             ),
           ),
           const SizedBox(width: 8),
+          DiagramExportMenuButton(
+            buttonLabel: 'Exportar CertScope (.csv / .json / .pdf / .dia / .png)',
+            documentBuilder: _buildCertScopeExportDocument,
+          ),
+          const SizedBox(width: 8),
           OutlinedButton.icon(
             style: OutlinedButton.styleFrom(
               foregroundColor: AppPalette.blue900,
@@ -494,6 +500,49 @@ class _CertScopeViewState extends State<CertScopeView> {
             ),
         ],
       ),
+    );
+  }
+
+  DiagramExportDocument _buildCertScopeExportDocument() {
+    final certs = _filteredAndSortedCertificates();
+    final nodes = <DiagramExportNode>[];
+    for (int i = 0; i < certs.length; i++) {
+      final c = certs[i];
+      final col = i % 4;
+      final row = i ~/ 4;
+      final st = (c['status'] ?? 'valid').toString();
+      final mappedStatus = (st == 'expired' || st == 'critical')
+          ? 'offline'
+          : (st == 'expiring_soon' ? 'warning' : 'online');
+      nodes.add(
+        DiagramExportNode(
+          id: 'cert_${c['id'] ?? i}',
+          code: '${c['code'] ?? ''}',
+          name: '${c['name'] ?? ''}',
+          subtitle: 'Restan ${c['days_remaining'] ?? '?'}d (${st.toUpperCase()})',
+          ip: '${c['target_host'] ?? ''}:${c['port'] ?? 443}',
+          modelName: 'CN: ${c['common_name'] ?? '-'} | Emisor: ${c['issuer_cn'] ?? '-'}',
+          serialNumber: 'Vence: ${c['not_after_display'] ?? c['not_after'] ?? '-'}',
+          status: mappedStatus,
+          x: 40.0 + col * 330.0,
+          y: 55.0 + row * 115.0,
+          width: 300.0,
+          height: 92.0,
+          colorHex: mappedStatus == 'offline'
+              ? '#DC2626'
+              : (mappedStatus == 'warning' ? '#D97706' : '#0D9488'),
+        ),
+      );
+    }
+    return DiagramExportDocument(
+      moduleName: '7. CertScope — Auditoría SSL/TLS',
+      title: 'Inventario y Estado de Certificados X.509 SSL/TLS (${certs.length})',
+      subtitle: 'Auditoría HTTPS en vivo, fechas de vencimiento y emisores',
+      fileBaseName: 'auditoria_certscope_tls',
+      canvasWidth: 1400,
+      canvasHeight: (120.0 + ((certs.length ~/ 4) + 1) * 120.0).clamp(900.0, 2200.0),
+      nodes: nodes,
+      edges: const [],
     );
   }
 

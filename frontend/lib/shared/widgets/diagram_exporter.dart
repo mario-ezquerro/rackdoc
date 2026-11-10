@@ -109,16 +109,20 @@ class DiagramExportDocument {
   });
 }
 
-/// Botón desplegable unificado "Exportar Esquema ▾" que permite al usuario elegir
-/// en el momento cualquiera de los formatos (.dia, .drawio, .png, .svg, .pdf).
+/// Botón desplegable unificado "Exportar (.dia / .png / .pdf / .xlsx / .csv) ▾"
+/// que permite elegir cualquiera de los formatos de esquema o datos.
 class DiagramExportMenuButton extends StatefulWidget {
   final DiagramExportDocument Function() documentBuilder;
+  final VoidCallback? onExportExcel;
+  final String? buttonLabel;
   final bool compact;
   final bool darkStyle;
 
   const DiagramExportMenuButton({
     super.key,
     required this.documentBuilder,
+    this.onExportExcel,
+    this.buttonLabel,
     this.compact = false,
     this.darkStyle = false,
   });
@@ -133,6 +137,10 @@ class _DiagramExportMenuButtonState extends State<DiagramExportMenuButton> {
 
   Future<void> _handleFormatSelection(String format) async {
     if (_exporting) return;
+    if (format == 'xlsx' && widget.onExportExcel != null) {
+      widget.onExportExcel!();
+      return;
+    }
     setState(() => _exporting = true);
     try {
       final doc = widget.documentBuilder();
@@ -173,6 +181,21 @@ class _DiagramExportMenuButtonState extends State<DiagramExportMenuButton> {
           mime = 'image/png';
           label = 'Imagen Alta Resolución (.png)';
           break;
+        case 'csv':
+          final csv = DiagramExporter.buildCsv(doc);
+          // UTF-8 BOM para apertura directa con tildes en Microsoft Excel / LibreOffice
+          bytes = Uint8List.fromList([0xEF, 0xBB, 0xBF, ...utf8.encode(csv)]);
+          ext = 'csv';
+          mime = 'text/csv;charset=utf-8';
+          label = 'Tabla de Datos y Enlaces (.csv)';
+          break;
+        case 'json':
+          final jsonStr = DiagramExporter.buildJson(doc);
+          bytes = Uint8List.fromList(utf8.encode(jsonStr));
+          ext = 'json';
+          mime = 'application/json';
+          label = 'Inventario y Topología (.json)';
+          break;
         case 'pdf':
         default:
           bytes = DiagramExporter.buildPdfBytes(doc);
@@ -194,7 +217,7 @@ class _DiagramExportMenuButtonState extends State<DiagramExportMenuButton> {
           SnackBar(
             backgroundColor: AppPalette.slate900,
             content: Text(
-              '✓ Esquema exportado en formato $label: $filename (${doc.nodes.length} equipos, ${doc.edges.length} enlaces)',
+              '✓ Exportado en formato $label: $filename (${doc.nodes.length} equipos, ${doc.edges.length} enlaces)',
               style: const TextStyle(fontWeight: FontWeight.w800),
             ),
           ),
@@ -205,7 +228,7 @@ class _DiagramExportMenuButtonState extends State<DiagramExportMenuButton> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: AppPalette.red600,
-            content: Text('Error al exportar esquema: $e'),
+            content: Text('Error al exportar: $e'),
           ),
         );
       }
@@ -216,15 +239,19 @@ class _DiagramExportMenuButtonState extends State<DiagramExportMenuButton> {
 
   @override
   Widget build(BuildContext context) {
+    final defaultLabel = widget.compact
+        ? 'Exportar (.dia / .png / .pdf / .csv)'
+        : 'Exportar (.dia / .png / .pdf / .xlsx / .csv)';
     return PopupMenuButton<String>(
-      tooltip: 'Exportar esquema de equipos y enlaces (.dia, .png, .pdf, .drawio, .svg)',
+      tooltip:
+          'Elegir formato de exportación: .DIA, .PNG, .PDF, .DRAWIO, .SVG, .XLSX, .CSV, .JSON',
       onSelected: _handleFormatSelection,
       itemBuilder: (ctx) => [
         const PopupMenuItem<String>(
           enabled: false,
           height: 30,
           child: Text(
-            'ELIGE FORMATO DE EXPORTACIÓN DEL ESQUEMA',
+            '1. ESQUEMAS Y DIAGRAMAS DE ENLACES',
             style: TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w900,
@@ -233,7 +260,6 @@ class _DiagramExportMenuButtonState extends State<DiagramExportMenuButton> {
             ),
           ),
         ),
-        const PopupMenuDivider(height: 6),
         PopupMenuItem<String>(
           value: 'dia',
           child: _buildMenuRow(
@@ -261,7 +287,6 @@ class _DiagramExportMenuButtonState extends State<DiagramExportMenuButton> {
             subtitle: 'Plano A4 apaisado con cajetín, diagrama y matriz de enlaces',
           ),
         ),
-        const PopupMenuDivider(height: 6),
         PopupMenuItem<String>(
           value: 'drawio',
           child: _buildMenuRow(
@@ -278,6 +303,48 @@ class _DiagramExportMenuButtonState extends State<DiagramExportMenuButton> {
             color: const Color(0xFF7C3AED),
             title: 'Vectorial .SVG (Zoom Infinito Web/CAD)',
             subtitle: 'Gráfico vectorial escalable sin pérdida de calidad',
+          ),
+        ),
+        const PopupMenuDivider(height: 8),
+        const PopupMenuItem<String>(
+          enabled: false,
+          height: 28,
+          child: Text(
+            '2. EXPORTACIÓN DE DATOS E INVENTARIO',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              color: AppPalette.slate500,
+              letterSpacing: 0.4,
+            ),
+          ),
+        ),
+        if (widget.onExportExcel != null)
+          PopupMenuItem<String>(
+            value: 'xlsx',
+            child: _buildMenuRow(
+              icon: Icons.table_view_rounded,
+              color: const Color(0xFF15803D),
+              title: 'Libro Excel .XLSX (Inventario Completo)',
+              subtitle: 'Hojas detalladas de Racks, Equipos, Bocas y CMDB',
+            ),
+          ),
+        PopupMenuItem<String>(
+          value: 'csv',
+          child: _buildMenuRow(
+            icon: Icons.grid_on_rounded,
+            color: const Color(0xFF0D9488),
+            title: 'Tabla .CSV (Excel / LibreOffice Calc)',
+            subtitle: 'Tabla UTF-8 de equipos, IPs, modelos y enlaces',
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'json',
+          child: _buildMenuRow(
+            icon: Icons.data_object_rounded,
+            color: const Color(0xFF4F46E5),
+            title: 'Estructura .JSON (API / Automatización)',
+            subtitle: 'Volcado estructurado de nodos, zonas y conexiones',
           ),
         ),
       ],
@@ -313,12 +380,15 @@ class _DiagramExportMenuButtonState extends State<DiagramExportMenuButton> {
                 color: widget.darkStyle ? Colors.white : AppPalette.blue700,
               ),
             const SizedBox(width: 6),
-            Text(
-              'Exportar Esquema',
-              style: TextStyle(
-                fontSize: widget.compact ? 11 : 11.5,
-                fontWeight: FontWeight.w800,
-                color: widget.darkStyle ? Colors.white : AppPalette.blue900,
+            Flexible(
+              child: Text(
+                widget.buttonLabel ?? defaultLabel,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: widget.compact ? 11 : 11.5,
+                  fontWeight: FontWeight.w800,
+                  color: widget.darkStyle ? Colors.white : AppPalette.blue900,
+                ),
               ),
             ),
             const SizedBox(width: 3),
@@ -1059,6 +1129,133 @@ class DiagramExporter {
     }
 
     return _assemblePdfDocument([p1.toString(), p2.toString()], pageW, pageH);
+  }
+
+  // ===========================================================================
+  // 6. GENERADOR DE TABLA CSV (.CSV — EQUIPOS, IPs, MODELOS Y ENLACES)
+  // ===========================================================================
+  static String buildCsv(DiagramExportDocument doc) {
+    String escCsv(String v) {
+      final clean = v.replaceAll('\r', ' ').replaceAll('\n', ' ').trim();
+      if (clean.contains(';') || clean.contains('"')) {
+        return '"${clean.replaceAll('"', '""')}"';
+      }
+      return clean;
+    }
+
+    final sb = StringBuffer();
+    sb.writeln('# MODULO;${escCsv(doc.moduleName)}');
+    sb.writeln('# TITULO;${escCsv(doc.title)}');
+    sb.writeln('# DETALLE;${escCsv(doc.subtitle)}');
+    sb.writeln('');
+    sb.writeln(
+      'SECCION;ID;CODIGO;NOMBRE;CATEGORIA_U;IP_DIRECCION;MODELO_FABRICANTE;NUMERO_SERIE;ESTADO',
+    );
+    for (final n in doc.nodes) {
+      sb.writeln(
+        [
+          'EQUIPO_NODO',
+          escCsv(n.id),
+          escCsv(n.code),
+          escCsv(n.name),
+          escCsv(n.subtitle),
+          escCsv(n.ip),
+          escCsv(n.modelName),
+          escCsv(n.serialNumber),
+          escCsv(n.status.toUpperCase()),
+        ].join(';'),
+      );
+    }
+
+    if (doc.edges.isNotEmpty) {
+      final nodeMap = {for (final n in doc.nodes) n.id: n};
+      sb.writeln('');
+      sb.writeln(
+        'SECCION;ID_ENLACE;ORIGEN_CODIGO;ORIGEN_NOMBRE;DESTINO_CODIGO;DESTINO_NOMBRE;ETIQUETA_CABLE;DETALLE_PROTOCOLO',
+      );
+      for (final e in doc.edges) {
+        final src = nodeMap[e.sourceId];
+        final dst = nodeMap[e.targetId];
+        sb.writeln(
+          [
+            'ENLACE_CONEXION',
+            escCsv(e.id),
+            escCsv(src?.code ?? e.sourceId),
+            escCsv(src?.name ?? ''),
+            escCsv(dst?.code ?? e.targetId),
+            escCsv(dst?.name ?? ''),
+            escCsv(e.label),
+            escCsv(e.detail),
+          ].join(';'),
+        );
+      }
+    }
+    return sb.toString();
+  }
+
+  // ===========================================================================
+  // 7. GENERADOR DE ESTRUCTURA JSON (.JSON — INVENTARIO + ZONAS + CONEXIONES)
+  // ===========================================================================
+  static String buildJson(DiagramExportDocument doc) {
+    final nodeMap = {for (final n in doc.nodes) n.id: n};
+    final payload = {
+      'exported_at': DateTime.now().toIso8601String(),
+      'module': doc.moduleName,
+      'title': doc.title,
+      'subtitle': doc.subtitle,
+      'summary': {
+        'zones_count': doc.zones.length,
+        'nodes_count': doc.nodes.length,
+        'edges_count': doc.edges.length,
+      },
+      'zones': doc.zones
+          .map(
+            (z) => {
+              'id': z.id,
+              'title': z.title,
+              'subtitle': z.subtitle,
+              'x': z.x,
+              'y': z.y,
+              'width': z.width,
+              'height': z.height,
+              'color_hex': z.colorHex,
+            },
+          )
+          .toList(),
+      'nodes': doc.nodes
+          .map(
+            (n) => {
+              'id': n.id,
+              'code': n.code,
+              'name': n.name,
+              'category_or_u': n.subtitle,
+              'ip_address': n.ip,
+              'model_name': n.modelName,
+              'serial_number': n.serialNumber,
+              'status': n.status,
+              'x': n.x,
+              'y': n.y,
+              'width': n.width,
+              'height': n.height,
+            },
+          )
+          .toList(),
+      'edges': doc.edges
+          .map(
+            (e) => {
+              'id': e.id,
+              'source_id': e.sourceId,
+              'source_code': nodeMap[e.sourceId]?.code ?? e.sourceId,
+              'target_id': e.targetId,
+              'target_code': nodeMap[e.targetId]?.code ?? e.targetId,
+              'label': e.label,
+              'detail': e.detail,
+              'dashed': e.dashed,
+            },
+          )
+          .toList(),
+    };
+    return const JsonEncoder.withIndent('  ').convert(payload);
   }
 
   static String _pdfStr(String input) {

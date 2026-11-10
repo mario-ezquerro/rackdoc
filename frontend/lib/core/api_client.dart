@@ -92,7 +92,7 @@ class RackDocApiClient {
       default:
         throw ArgumentError('Método HTTP no soportado: $metodo');
     }
-    return _decodeResponse(respuesta);
+    return _decodeResponse(respuesta, uri.path);
   }
 
   Future<dynamic> _get(String ruta, [Map<String, dynamic>? query]) =>
@@ -107,7 +107,15 @@ class RackDocApiClient {
   Future<dynamic> _delete(String ruta, [Object? cuerpo]) =>
       _enviar('DELETE', _url(ruta), cuerpo);
 
-  dynamic _decodeResponse(http.Response response) {
+  /// Rutas que NO se autentican con el JWT de sesión, sino con la clave de
+  /// automatización (X-API-Key). Un 401 de estas no significa que la sesión del
+  /// usuario haya muerto, así que no se puede borrar el token por su culpa: eso
+  /// es lo que dejaba la aplicación entera en "se requiere un token de sesión
+  /// válido" tras pasar por una pantalla que consultaba uno de estos endpoints.
+  static bool _esRutaDeMaquina(String ruta) =>
+      ruta.contains('/automation/webhook/') || ruta.endsWith('/metrics');
+
+  dynamic _decodeResponse(http.Response response, [String ruta = '']) {
     final bodyStr = utf8.decode(response.bodyBytes);
     if (response.statusCode >= 200 && response.statusCode < 300) {
       if (bodyStr.isEmpty) return {};
@@ -121,9 +129,10 @@ class RackDocApiClient {
         final err = jsonDecode(bodyStr);
         if (err is Map && err['detail'] is String) detail = err['detail'] as String;
       } catch (_) {}
-      // Un 401 significa que el token ya no sirve: lo descartamos para no
-      // seguir reintentando con credenciales muertas.
-      if (response.statusCode == 401) clearSession();
+      // Un 401 de una ruta de sesión significa que el token ya no sirve: lo
+      // descartamos para no seguir reintentando con credenciales muertas. El de
+      // una ruta de máquina no dice nada de la sesión y se deja intacta.
+      if (response.statusCode == 401 && !_esRutaDeMaquina(ruta)) clearSession();
       throw RackDocAuthException(response.statusCode, detail);
     }
     try {

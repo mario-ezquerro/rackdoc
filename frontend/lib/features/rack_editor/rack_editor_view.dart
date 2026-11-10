@@ -7744,19 +7744,14 @@ class _RackEditorViewState extends State<RackEditorView> {
               ),
             const SizedBox(width: 8),
             DiagramExportMenuButton(
+              buttonLabel: 'Exportar Rack (.dia / .png / .pdf / .xlsx / .csv)',
               documentBuilder: () => _buildRackExportDocument(rack),
-            ),
-            const SizedBox(width: 8),
-            OutlinedButton.icon(
-              onPressed: () {
+              onExportExcel: () {
                 final url = Uri.parse(
                   widget.api.getExcelExportUrl(rackId: rack.id),
                 );
                 launchUrl(url, mode: LaunchMode.externalApplication);
               },
-              icon: const Icon(Icons.table_view_outlined, size: 16),
-              label:
-                  const Text('Excel (.xlsx)', style: TextStyle(fontSize: 12)),
             ),
             if (_canEdit) ...[
               const SizedBox(width: 8),

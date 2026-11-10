@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_client.dart';
 import '../../core/image_file_picker.dart';
 import '../../models/datacenter_models.dart';
+import '../../shared/widgets/diagram_exporter.dart';
 
 class LocationsView extends StatefulWidget {
   final RackDocApiClient api;
@@ -603,6 +604,72 @@ class _LocationsViewState extends State<LocationsView> {
     }
   }
 
+  DiagramExportDocument _buildLocationsExportDocument() {
+    final zones = <DiagramExportZone>[];
+    final nodes = <DiagramExportNode>[];
+    final edges = <DiagramExportEdge>[];
+
+    for (int i = 0; i < widget.locations.length; i++) {
+      final loc = widget.locations[i];
+      final zx = 28.0 + (i % 2) * 680.0;
+      final zy = 28.0 + (i ~/ 2) * 340.0;
+      zones.add(
+        DiagramExportZone(
+          id: 'loc_zone_${loc.id}',
+          title: '${loc.name} (${loc.code}) — ${loc.address}',
+          subtitle:
+              '${loc.floorsCount} Plantas • ${loc.racksCount} Racks • ${loc.monitoredCount} Monitorizados',
+          x: zx,
+          y: zy,
+          width: 650.0,
+          height: 310.0,
+          colorHex: '#1E3A8A',
+        ),
+      );
+      int rkIdx = 0;
+      for (final fl in loc.floors) {
+        for (final rm in fl.rooms) {
+          for (final rk in rm.racks) {
+            final col = rkIdx % 2;
+            final row = rkIdx ~/ 2;
+            nodes.add(
+              DiagramExportNode(
+                id: 'rack_${rk.id}',
+                code: rk.code,
+                name: '${rk.name} (${fl.name})',
+                subtitle: '${rk.totalUnits}U • ${rk.deviceCount} equipos',
+                ip: 'ETH:${rk.ethCablesCount} FIB:${rk.fiberCablesCount} PWR:${rk.powerCablesCount}',
+                modelName: 'Sede ${loc.code} • Sala ${rm.name}',
+                serialNumber: rk.responsiblePerson,
+                status: rk.offlineCount > 0 ? 'offline' : 'online',
+                x: zx + 20.0 + col * 305.0,
+                y: zy + 54.0 + row * 95.0,
+                width: 285.0,
+                height: 82.0,
+                colorHex: rk.offlineCount > 0 ? '#DC2626' : '#0284C7',
+              ),
+            );
+            rkIdx++;
+          }
+        }
+      }
+    }
+
+    return DiagramExportDocument(
+      moduleName: '1. Locations — Mapa de Centros de Datos',
+      title: 'Esquema Global de Sedes, Plantas y Racks (${widget.locations.length} Datacenters)',
+      subtitle:
+          'Inventario consolidado de centros de datos, salas técnicas y armarios rack',
+      fileBaseName: 'esquema_locations_datacenters',
+      canvasWidth: 1420,
+      canvasHeight:
+          (100.0 + ((widget.locations.length ~/ 2) + 1) * 350.0).clamp(900.0, 2400.0),
+      zones: zones,
+      nodes: nodes,
+      edges: edges,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final selected = _selectedLocation;
@@ -677,10 +744,12 @@ class _LocationsViewState extends State<LocationsView> {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  OutlinedButton.icon(
-                    onPressed: () => _downloadExcel(locationId: selected?.id),
-                    icon: const Icon(Icons.table_view_outlined, size: 18),
-                    label: const Text('Exportar Excel (.xlsx)'),
+                  DiagramExportMenuButton(
+                    buttonLabel:
+                        'Exportar Sedes (.xlsx / .dia / .png / .pdf / .csv)',
+                    onExportExcel: () =>
+                        _downloadExcel(locationId: selected?.id),
+                    documentBuilder: _buildLocationsExportDocument,
                   ),
                   const SizedBox(width: 10),
                   FilledButton.icon(

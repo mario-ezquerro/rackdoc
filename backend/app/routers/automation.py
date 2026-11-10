@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..schemas import AnsibleContactsRoutingWebhook, AnsibleHostDecommissionWebhook, AnsibleHostUpsertWebhook, AnsibleMaintenanceWebhook
-from ..routers._common import automation_router
+from ..routers._common import agent_or_session_router, automation_router
 from ..services.network_host_service import build_ai_agent_context_manifest, generate_prometheus_metrics_exposition, handle_ansible_contacts_routing_webhook, handle_ansible_host_decommission_webhook, handle_ansible_host_upsert_webhook, handle_ansible_maintenance_webhook
 
 # ==============================================================================
@@ -91,7 +91,7 @@ def ansible_contacts_routing_webhook_endpoint(
     return handle_ansible_contacts_routing_webhook(db=db, payload=payload.model_dump())
 
 
-@automation_router.get(
+@agent_or_session_router.get(
     "/automation/ai-context",
     tags=["Automation Webhooks (Ansible, CI/CD & AI Agents)"],
     summary="Manifiesto estructurado JSON de Contexto para Agentes de IA y Automatización",

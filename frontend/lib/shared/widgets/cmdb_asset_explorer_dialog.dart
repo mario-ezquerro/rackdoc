@@ -19,6 +19,14 @@ class CmdbAssetExplorerDialog extends StatefulWidget {
   final Set<int> alreadyInStackAssetIds;
   final bool defaultOnlyUnplaced;
 
+  /// Modo multiselección: en vez de devolver un activo, devuelve el conjunto de
+  /// ids marcados. Pensado para asignar DECENAS o CIENTOS de equipos de golpe
+  /// (p. ej. los miembros de un HostGroup de alarmas) sin una lista plana de
+  /// chips imposible de recorrer.
+  final bool multiSelect;
+  final Set<int> initialSelectedAssetIds;
+  final String? confirmLabel;
+
   const CmdbAssetExplorerDialog({
     super.key,
     required this.api,
@@ -31,6 +39,9 @@ class CmdbAssetExplorerDialog extends StatefulWidget {
     this.preselectedAssetId,
     this.alreadyInStackAssetIds = const {},
     this.defaultOnlyUnplaced = true,
+    this.multiSelect = false,
+    this.initialSelectedAssetIds = const {},
+    this.confirmLabel,
   });
 
   static Future<Map<String, dynamic>?> show(
@@ -59,6 +70,40 @@ class CmdbAssetExplorerDialog extends StatefulWidget {
         preselectedAssetId: preselectedAssetId,
         alreadyInStackAssetIds: alreadyInStackAssetIds,
         defaultOnlyUnplaced: defaultOnlyUnplaced,
+      ),
+    );
+  }
+
+  /// Abre el explorador en modo multiselección y devuelve los ids marcados
+  /// (null si se cancela). Muestra TODOS los equipos de la CMDB, ubicados en
+  /// racks o no, porque aquí no se está ubicando nada: se está eligiendo a
+  /// quién vigilar.
+  static Future<Set<int>?> showMulti(
+    BuildContext context, {
+    required RackDocApiClient api,
+    required Set<int> initialSelectedAssetIds,
+    List<Map<String, dynamic>>? initialAssets,
+    List<Map<String, dynamic>>? initialSubnets,
+    String? title,
+    String? subtitle,
+    String? confirmLabel,
+  }) {
+    return showDialog<Set<int>>(
+      context: context,
+      builder: (ctx) => CmdbAssetExplorerDialog(
+        api: api,
+        initialAssets: initialAssets,
+        initialSubnets: initialSubnets,
+        contextMode: 'general',
+        title: title ?? 'Seleccionar Equipos de la CMDB y de los Racks',
+        subtitle: subtitle ??
+            'Filtra por Subred, texto, clase o estado y marca los equipos. La lista está virtualizada: '
+            'aguanta cientos de equipos sin degradarse.',
+        alreadyInStackAssetIds: const {},
+        defaultOnlyUnplaced: false,
+        multiSelect: true,
+        initialSelectedAssetIds: initialSelectedAssetIds,
+        confirmLabel: confirmLabel,
       ),
     );
   }
@@ -107,10 +152,14 @@ class _CmdbAssetExplorerDialogState extends State<CmdbAssetExplorerDialog> {
 
   Map<String, dynamic>? _selectedAsset;
 
+  /// Ids marcados en modo multiselección.
+  late Set<int> _multiSelected;
+
   @override
   void initState() {
     super.initState();
     _onlyUnplaced = widget.defaultOnlyUnplaced;
+    _multiSelected = {...widget.initialSelectedAssetIds};
     _loadData();
   }
 
@@ -1043,10 +1092,14 @@ class _CmdbAssetExplorerDialogState extends State<CmdbAssetExplorerDialog> {
                                           final a = displayedAssets[idx];
                                           final id = (a['id'] as num?)?.toInt();
                                           final isSelected =
-                                              _selectedAsset != null &&
-                                              (_selectedAsset!['id'] as num?)
-                                                      ?.toInt() ==
-                                                  id;
+                                              widget.multiSelect
+                                              ? (id != null &&
+                                                    _multiSelected.contains(id))
+                                              : (_selectedAsset != null &&
+                                                    (_selectedAsset!['id']
+                                                            as num?)
+                                                        ?.toInt() ==
+                                                    id);
                                           return _buildAssetRow(
                                             a,
                                             isSelected: isSelected,
@@ -1072,7 +1125,77 @@ class _CmdbAssetExplorerDialogState extends State<CmdbAssetExplorerDialog> {
                   bottom: Radius.circular(14),
                 ),
               ),
-              child: Row(
+              child: widget.multiSelect
+                  ? Row(
+                      children: [
+                        Icon(
+                          _multiSelected.isEmpty
+                              ? Icons.radio_button_unchecked
+                              : Icons.check_circle,
+                          size: 18,
+                          color: _multiSelected.isEmpty
+                              ? AppPalette.slate400
+                              : AppPalette.green600,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${_multiSelected.length} equipo(s) seleccionado(s)',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: AppPalette.slate900,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        TextButton.icon(
+                          onPressed: displayedAssets.isEmpty
+                              ? null
+                              : () => setState(() {
+                                  for (final a in displayedAssets) {
+                                    final id = (a['id'] as num?)?.toInt();
+                                    if (id != null) _multiSelected.add(id);
+                                  }
+                                }),
+                          icon: const Icon(Icons.done_all_rounded, size: 16),
+                          label: Text(
+                            'Marcar los ${displayedAssets.length} filtrados',
+                            style: const TextStyle(fontSize: 11.5),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: displayedAssets.isEmpty
+                              ? null
+                              : () => setState(() {
+                                  for (final a in displayedAssets) {
+                                    final id = (a['id'] as num?)?.toInt();
+                                    if (id != null) _multiSelected.remove(id);
+                                  }
+                                }),
+                          icon: const Icon(Icons.remove_done_rounded, size: 16),
+                          label: const Text(
+                            'Desmarcar los filtrados',
+                            style: TextStyle(fontSize: 11.5),
+                          ),
+                        ),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, null),
+                          child: const Text('Cancelar'),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton.icon(
+                          onPressed: () =>
+                              Navigator.pop(context, {..._multiSelected}),
+                          icon: const Icon(Icons.playlist_add_check_rounded,
+                              size: 17),
+                          label: Text(
+                            widget.confirmLabel ??
+                                'Confirmar ${_multiSelected.length} equipo(s)',
+                          ),
+                        ),
+                      ],
+                    )
+                  : Row(
                 children: [
                   Expanded(
                     child: _selectedAsset == null
@@ -1299,8 +1422,16 @@ class _CmdbAssetExplorerDialogState extends State<CmdbAssetExplorerDialog> {
       padding: const EdgeInsets.only(bottom: 6),
       child: InkWell(
         borderRadius: BorderRadius.circular(9),
-        onTap: () => setState(() => _selectedAsset = a),
-        onDoubleTap: () {
+        onTap: () => setState(() {
+          if (!widget.multiSelect) {
+            _selectedAsset = a;
+            return;
+          }
+          final id = (a['id'] as num?)?.toInt();
+          if (id == null) return;
+          if (!_multiSelected.remove(id)) _multiSelected.add(id);
+        }),
+        onDoubleTap: widget.multiSelect ? null : () {
           final enriched = Map<String, dynamic>.from(a);
           enriched['_resolved_ip'] = netDetails['ip'];
           enriched['_resolved_subnet_mask'] = netDetails['subnet_mask'];
@@ -1322,6 +1453,24 @@ class _CmdbAssetExplorerDialogState extends State<CmdbAssetExplorerDialog> {
           ),
           child: Row(
             children: [
+              if (widget.multiSelect) ...[
+                SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: Checkbox(
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize:
+                        MaterialTapTargetSize.shrinkWrap,
+                    value: isSelected,
+                    onChanged: (_) => setState(() {
+                      final id = (a['id'] as num?)?.toInt();
+                      if (id == null) return;
+                      if (!_multiSelected.remove(id)) _multiSelected.add(id);
+                    }),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
               // Indicador estado Online/Offline
               Tooltip(
                 message: isOnline

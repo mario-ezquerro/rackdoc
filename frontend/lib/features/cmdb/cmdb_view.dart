@@ -3,6 +3,7 @@ import '../../core/widgets/avisos.dart';
 import '../../core/theme.dart';
 import 'package:flutter/services.dart';
 import '../../core/api_client.dart';
+import '../../shared/widgets/diagram_exporter.dart';
 import 'api_onboarding_dialog.dart';
 
 class CmdbView extends StatefulWidget {
@@ -678,6 +679,78 @@ class _CmdbViewState extends State<CmdbView> {
     );
   }
 
+  DiagramExportDocument _buildCmdbExportDocument() {
+    final assets = _assets;
+    final subnets = _subnets;
+    final zones = <DiagramExportZone>[];
+    for (int i = 0; i < subnets.length; i++) {
+      final sub = subnets[i];
+      zones.add(
+        DiagramExportZone(
+          id: 'sub_${sub['id'] ?? i}',
+          title: '${sub['name'] ?? 'Subred'} (${sub['cidr'] ?? ''})',
+          subtitle: 'VLAN ${sub['vlan_id'] ?? '-'} • GW ${sub['gateway'] ?? '-'}',
+          x: 24.0 + (i % 2) * 680.0,
+          y: 24.0 + (i ~/ 2) * 280.0,
+          width: 650.0,
+          height: 255.0,
+          colorHex: '#0284C7',
+        ),
+      );
+    }
+
+    final nodes = <DiagramExportNode>[];
+    final edges = <DiagramExportEdge>[];
+    for (int i = 0; i < assets.length; i++) {
+      final a = assets[i];
+      final id = 'asset_${a['id'] ?? i}';
+      final col = i % 5;
+      final row = i ~/ 5;
+      final st = (a['status'] ?? 'online').toString();
+      nodes.add(
+        DiagramExportNode(
+          id: id,
+          code: '${a['code'] ?? ''}',
+          name: '${a['name'] ?? a['hostname'] ?? ''}',
+          subtitle: '${a['asset_class_label'] ?? a['asset_class'] ?? 'CI'}',
+          ip: '${a['primary_ip'] ?? a['heartbeat_ip'] ?? ''}',
+          modelName: '${a['os_or_firmware'] ?? a['environment'] ?? ''}',
+          serialNumber: '${a['fqdn'] ?? ''}',
+          status: st,
+          x: 40.0 + col * 265.0,
+          y: 55.0 + row * 110.0,
+          width: 240.0,
+          height: 86.0,
+          colorHex: st == 'offline' ? '#DC2626' : '#1E3A8A',
+        ),
+      );
+      if (a['parent_asset_id'] != null) {
+        edges.add(
+          DiagramExportEdge(
+            id: 'edge_parent_${a['id']}',
+            sourceId: 'asset_${a['parent_asset_id']}',
+            targetId: id,
+            label: 'HOST/HIPERVISOR',
+            detail: '${a['hosting_mode'] ?? 'VM'}',
+            colorHex: '#2563EB',
+          ),
+        );
+      }
+    }
+
+    return DiagramExportDocument(
+      moduleName: '6. CMDB & Control Multi-IP',
+      title: 'Inventario CMDB & Direccionamiento IPAM (${assets.length} activos)',
+      subtitle: '${subnets.length} Subredes/VLANs • ${assets.length} CIs / Servidores / VMs',
+      fileBaseName: 'inventario_cmdb_rackdoc',
+      canvasWidth: 1420,
+      canvasHeight: (120.0 + ((assets.length ~/ 5) + 1) * 115.0).clamp(900.0, 2600.0),
+      zones: zones,
+      nodes: nodes,
+      edges: edges,
+    );
+  }
+
   Widget _buildTopBannerAndKpis(Map<String, dynamic> summary) {
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
@@ -776,23 +849,12 @@ class _CmdbViewState extends State<CmdbView> {
                 ),
               ),
               const SizedBox(width: 8),
-              if (widget.onExportExcel != null)
-                OutlinedButton.icon(
-                  onPressed: widget.onExportExcel,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppPalette.green700,
-                    side: const BorderSide(color: AppPalette.green300),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                  ),
-                  icon: const Icon(Icons.table_view_rounded, size: 17),
-                  label: const Text(
-                    'Exportar CMDB (.xlsx)',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
-                  ),
-                ),
+              DiagramExportMenuButton(
+                buttonLabel:
+                    'Exportar CMDB (.xlsx / .csv / .json / .dia / .pdf)',
+                onExportExcel: widget.onExportExcel,
+                documentBuilder: _buildCmdbExportDocument,
+              ),
               if (widget.canEdit) ...[
                 const SizedBox(width: 8),
                 FilledButton.icon(

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api_client.dart';
+import '../../models/datacenter_models.dart';
 import '../../shared/widgets/cmdb_asset_explorer_dialog.dart';
 import '../../shared/widgets/diagram_exporter.dart';
 
@@ -252,6 +253,13 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
   Map<String, dynamic> get _smtpConfig =>
       Map<String, dynamic>.from((_overview['smtp_config'] as Map?) ?? {});
 
+  /// Usuarios dados de alta en RackDoc (Administración > Usuarios, locales y de
+  /// dominio). Se usan para no tener que teclear a mano en las alarmas a gente
+  /// que ya existe en el sistema. El endpoint /users es solo de 'admin', así que
+  /// para el resto de roles esta lista queda vacía y se explica en la interfaz.
+  List<UserModel> _directoryUsers = [];
+  bool _directoryUsersDenegado = false;
+
   // Estado de la Matriz 4 Columnas (Estilo Active Directory + Drag & Drop) en '6. Avisos & Alarmas'
   int? _selectedAlertHostGroupId;
   int? _selectedAlertUserGroupId;
@@ -404,9 +412,26 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     } catch (_) {}
   }
 
+  Future<void> _loadDirectoryUsers() async {
+    try {
+      final usuarios = await widget.api.getUsers();
+      if (!mounted) return;
+      setState(() {
+        _directoryUsers = usuarios;
+        _directoryUsersDenegado = false;
+      });
+    } on RackDocAuthException catch (e) {
+      // 403: el rol no llega a 'admin'. No es un fallo, es la política de RBAC;
+      // se marca para poder decirlo en el selector en vez de callar.
+      if (!mounted) return;
+      setState(() => _directoryUsersDenegado = e.isForbidden);
+    } catch (_) {}
+  }
+
   Future<void> _loadSreAuxiliaryData() async {
     _loadAiContextManifest();
     _loadApiOnboardingGuide();
+    _loadDirectoryUsers();
     try {
       final certData = await widget.api.getCertScopeOverview();
       if (!mounted) return;
@@ -651,6 +676,11 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                         'Ver SLO / Error Budgets',
                         style: TextStyle(fontSize: 11.5),
                       ),
+                    ),
+                    DiagramExportMenuButton(
+                      buttonLabel: 'Exportar (.dia / .png / .pdf / .csv / .json)',
+                      documentBuilder: _buildCurrentStackExportDocument,
+                      darkStyle: true,
                     ),
                     ElevatedButton.icon(
                       onPressed: () => _tabController.animateTo(2),
@@ -8930,7 +8960,23 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                 if (widget.canEdit) ...[
                   const SizedBox(width: 4),
                   IconButton(
-                    tooltip: 'Nuevo Usuario / Contacto',
+                    tooltip:
+                        'Dar de alta como contacto de alarma a usuarios que ya existen en RackDoc',
+                    constraints: const BoxConstraints(),
+                    padding: EdgeInsets.zero,
+                    onPressed: () => _showPersonPickerDialog(
+                      seleccionados: const {},
+                      tituloContexto: 'RackDoc (alta masiva)',
+                    ),
+                    icon: const Icon(
+                      Icons.group_add_rounded,
+                      size: 15,
+                      color: AppTheme.accentCyan,
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  IconButton(
+                    tooltip: 'Nuevo Usuario / Contacto desde cero',
                     constraints: const BoxConstraints(),
                     padding: EdgeInsets.zero,
                     onPressed: () => _showCreateContactDialog(),
@@ -12093,6 +12139,352 @@ class profile::rackdoc_agent (
     );
   }
 
+  /// Normaliza un nombre de usuario para usarlo como código de AlertContact.
+  static String _codigoDeContactoDeUsuario(UserModel u) {
+    final limpio = u.username
+        .toUpperCase()
+        .replaceAll(RegExp(r'[^A-Z0-9]+'), '-')
+        .replaceAll(RegExp(r'^-+|-+$'), '');
+    final prefijo = u.authSource == 'ad' ? 'USR-AD' : 'USR-LOCAL';
+    return '$prefijo-${limpio.isEmpty ? 'SIN-NOMBRE' : limpio}';
+  }
+
+  /// Selector de personas para los Grupos de Avisos. Resuelve dos cosas que
+  /// antes obligaban a teclear a mano:
+  ///   1. Lista con buscador a las personas YA dadas de alta como contactos de
+  ///      alarma, en vez de una parrilla plana de chips.
+  ///   2. Ofrece además los usuarios que ya existen en RackDoc (locales y de
+  ///      dominio) y todavía no son contactos de alarma; al marcarlos se les da
+  ///      de alta como contacto con su nombre y su correo, sin reescribir nada.
+  /// Devuelve los ids de contacto seleccionados, o null si se cancela.
+  Future<Set<int>?> _showPersonPickerDialog({
+    required Set<int> seleccionados,
+    String tituloContexto = '',
+  }) async {
+    final elegidos = <int>{...seleccionados};
+    // Usuarios de RackDoc marcados para darles de alta como contacto al aceptar.
+    final usuariosAAltaIds = <int>{};
+    final buscadorCtrl = TextEditingController();
+    String consulta = '';
+    bool guardando = false;
+
+    // Un usuario de RackDoc ya es contacto de alarma si coincide el correo: es
+    // el mismo criterio que usa el backend para pintar el origen (AD / Local).
+    Set<String> correosYaContacto() => _alertContacts
+        .map((c) => '${c['email'] ?? ''}'.trim().toLowerCase())
+        .where((e) => e.isNotEmpty)
+        .toSet();
+
+    final resultado = await showDialog<Set<int>>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) {
+          final yaContacto = correosYaContacto();
+          final q = consulta.trim().toLowerCase();
+
+          bool coincide(String texto) => q.isEmpty || texto.toLowerCase().contains(q);
+
+          final contactosFiltrados = _alertContacts.where((c) {
+            return coincide(
+              '${c['full_name'] ?? ''} ${c['email'] ?? ''} ${c['code'] ?? ''} '
+              '${c['role_title'] ?? ''} ${c['source_badge'] ?? ''}',
+            );
+          }).toList();
+
+          final usuariosPendientes = _directoryUsers.where((u) {
+            if (!u.isActive) return false;
+            final correo = u.email.trim().toLowerCase();
+            if (correo.isEmpty || yaContacto.contains(correo)) return false;
+            return coincide('${u.fullName} ${u.username} ${u.email} ${u.role}');
+          }).toList();
+
+          return AlertDialog(
+            title: Text(
+              tituloContexto.isEmpty
+                  ? 'Seleccionar Personas para Avisos'
+                  : 'Personas de $tituloContexto',
+              style: const TextStyle(fontSize: 15.5),
+            ),
+            content: SizedBox(
+              width: 560,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: buscadorCtrl,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      prefixIcon: Icon(Icons.search_rounded, size: 18),
+                      hintText: 'Buscar por nombre, correo, usuario o rol…',
+                    ),
+                    onChanged: (v) => setModal(() => consulta = v),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Text(
+                        '${elegidos.length} seleccionada(s)',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const Spacer(),
+                      if (contactosFiltrados.isNotEmpty)
+                        TextButton.icon(
+                          onPressed: () => setModal(() {
+                            for (final c in contactosFiltrados) {
+                              elegidos.add(c['id'] as int);
+                            }
+                          }),
+                          icon: const Icon(Icons.done_all_rounded, size: 15),
+                          label: Text(
+                            'Marcar los ${contactosFiltrados.length} filtrados',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ),
+                      if (elegidos.isNotEmpty)
+                        TextButton.icon(
+                          onPressed: () => setModal(() => elegidos.clear()),
+                          icon: const Icon(Icons.remove_done_rounded, size: 15),
+                          label: const Text(
+                            'Limpiar',
+                            style: TextStyle(fontSize: 11),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const Divider(height: 14),
+                  SizedBox(
+                    height: 330,
+                    child: ListView(
+                      children: [
+                        _rotuloSeccionSelector(
+                          'YA DADAS DE ALTA COMO CONTACTO DE ALARMA (${contactosFiltrados.length})',
+                        ),
+                        if (contactosFiltrados.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 8,
+                            ),
+                            child: Text(
+                              'Ninguna coincide con la búsqueda.',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: AppTheme.textMuted,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ),
+                        ...contactosFiltrados.map((c) {
+                          final cid = c['id'] as int;
+                          final grupos =
+                              ((c['member_of_groups'] as List?) ?? [])
+                                  .map((g) => '${(g as Map)['code']}')
+                                  .join(', ');
+                          return CheckboxListTile(
+                            dense: true,
+                            visualDensity: VisualDensity.compact,
+                            controlAffinity: ListTileControlAffinity.leading,
+                            value: elegidos.contains(cid),
+                            onChanged: (v) => setModal(() {
+                              if (v == true) {
+                                elegidos.add(cid);
+                              } else {
+                                elegidos.remove(cid);
+                              }
+                            }),
+                            title: Text(
+                              '${c['full_name']}  ·  ${c['email']}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            subtitle: Text(
+                              '${c['code']} · ${c['source_badge'] ?? ''}'
+                              '${grupos.isNotEmpty ? ' · Ya en: $grupos' : ''}',
+                              style: const TextStyle(
+                                fontSize: 10.5,
+                                color: AppTheme.textMuted,
+                              ),
+                            ),
+                          );
+                        }),
+                        const SizedBox(height: 10),
+                        _rotuloSeccionSelector(
+                          'USUARIOS DE RACKDOC SIN CONTACTO DE ALARMA (${usuariosPendientes.length})',
+                        ),
+                        if (_directoryUsersDenegado)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 8,
+                            ),
+                            child: Text(
+                              'Tu rol no permite consultar la lista de usuarios de RackDoc '
+                              '(es información reservada a admin), así que aquí solo salen los '
+                              'contactos de alarma ya creados.',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: AppTheme.textMuted,
+                              ),
+                            ),
+                          )
+                        else if (usuariosPendientes.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 8,
+                            ),
+                            child: Text(
+                              'Todos los usuarios con correo ya tienen su contacto de alarma.',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: AppTheme.textMuted,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ),
+                        ...usuariosPendientes.map((u) {
+                          return CheckboxListTile(
+                            dense: true,
+                            visualDensity: VisualDensity.compact,
+                            controlAffinity: ListTileControlAffinity.leading,
+                            value: usuariosAAltaIds.contains(u.id),
+                            onChanged: (v) => setModal(() {
+                              if (v == true) {
+                                usuariosAAltaIds.add(u.id);
+                              } else {
+                                usuariosAAltaIds.remove(u.id);
+                              }
+                            }),
+                            title: Text(
+                              '${u.fullName.isEmpty ? u.username : u.fullName}  ·  ${u.email}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            subtitle: Text(
+                              '${u.username} · rol ${u.role} · '
+                              '${u.authSource == 'ad' ? 'Active Directory' : 'Usuario Local'}'
+                              ' · se dará de alta como ${_codigoDeContactoDeUsuario(u)}',
+                              style: const TextStyle(
+                                fontSize: 10.5,
+                                color: AppTheme.textMuted,
+                              ),
+                            ),
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
+                  if (usuariosAAltaIds.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Al aceptar se darán de alta ${usuariosAAltaIds.length} contacto(s) de alarma '
+                      'con el nombre y el correo que ya tienen en RackDoc.',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.warning,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: guardando ? null : () => Navigator.pop(ctx, null),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton.icon(
+                onPressed: guardando
+                    ? null
+                    : () async {
+                        setModal(() => guardando = true);
+                        // Dar de alta como contacto a los usuarios marcados y
+                        // recoger su id del overview que devuelve el backend.
+                        for (final uid in usuariosAAltaIds) {
+                          UserModel? u;
+                          for (final e in _directoryUsers) {
+                            if (e.id == uid) {
+                              u = e;
+                              break;
+                            }
+                          }
+                          if (u == null) continue;
+                          final codigo = _codigoDeContactoDeUsuario(u);
+                          try {
+                            final res = await widget.api.upsertAlertContact({
+                              'code': codigo,
+                              'full_name':
+                                  u.fullName.isEmpty ? u.username : u.fullName,
+                              'email': u.email,
+                              'role_title': u.authSource == 'ad'
+                                  ? '[Active Directory] ${u.role}'
+                                  : '[Usuario Local] ${u.role}',
+                              'schedule_period': '24x7',
+                            });
+                            if (mounted) setState(() => _overview = res);
+                            final creado =
+                                ((res['alert_contacts'] as List?) ?? [])
+                                    .map((e) => Map<String, dynamic>.from(e as Map))
+                                    .firstWhere(
+                                      (c) =>
+                                          '${c['code']}'.toUpperCase() ==
+                                          codigo.toUpperCase(),
+                                      orElse: () => <String, dynamic>{},
+                                    );
+                            if (creado.isNotEmpty) {
+                              elegidos.add(creado['id'] as int);
+                            }
+                          } catch (e) {
+                            _showSnack(
+                              'No se pudo dar de alta a ${u.username}: $e',
+                              isError: true,
+                            );
+                          }
+                        }
+                        if (!ctx.mounted) return;
+                        Navigator.pop(ctx, {...elegidos});
+                      },
+                icon: guardando
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.how_to_reg_rounded, size: 16),
+                label: const Text('Usar estas personas'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    buscadorCtrl.dispose();
+    return resultado;
+  }
+
+  static Widget _rotuloSeccionSelector(String texto) => Padding(
+    padding: const EdgeInsets.only(top: 2, bottom: 4),
+    child: Text(
+      texto,
+      style: const TextStyle(
+        fontSize: 10,
+        fontWeight: FontWeight.w900,
+        letterSpacing: 0.5,
+        color: AppTheme.textMuted,
+      ),
+    ),
+  );
+
   Future<void> _showCreateContactGroupDialog({
     Map<String, dynamic>? existing,
   }) async {
@@ -12192,34 +12584,91 @@ class profile::rackdoc_agent (
                     ),
                   ),
                   const SizedBox(height: 12),
-                  const Text(
-                    'Usuarios Miembros de este Grupo:',
-                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Usuarios Miembros de este Grupo:',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '${selectedMemberIds.length} seleccionada(s)',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: _alertContacts.map((c) {
-                      final cid = c['id'] as int;
-                      final isSel = selectedMemberIds.contains(cid);
-                      return FilterChip(
-                        visualDensity: VisualDensity.compact,
-                        label: Text(
-                          '${c['full_name']} (${c['email']})',
-                          style: const TextStyle(fontSize: 10.5),
-                        ),
-                        selected: isSel,
-                        onSelected: (v) => setModal(() {
-                          if (v) {
-                            selectedMemberIds.add(cid);
-                          } else {
-                            selectedMemberIds.remove(cid);
-                          }
-                        }),
+                  // El selector trae con buscador las personas ya dadas de alta
+                  // y, además, los usuarios de RackDoc que todavía no son
+                  // contacto de alarma, para no reescribir a mano a gente que ya
+                  // está en el sistema.
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final elegidas = await _showPersonPickerDialog(
+                        seleccionados: selectedMemberIds,
+                        tituloContexto: nameCtrl.text.trim().isEmpty
+                            ? 'este Grupo'
+                            : nameCtrl.text.trim(),
                       );
-                    }).toList(),
+                      if (elegidas == null) return;
+                      setModal(() {
+                        selectedMemberIds
+                          ..clear()
+                          ..addAll(elegidas);
+                      });
+                    },
+                    icon: const Icon(Icons.person_search_rounded, size: 16),
+                    label: const Text(
+                      'Seleccionar personas (contactos y usuarios de RackDoc)…',
+                      style: TextStyle(fontSize: 11.5),
+                    ),
                   ),
+                  const SizedBox(height: 8),
+                  if (selectedMemberIds.isEmpty)
+                    const Text(
+                      'Ninguna persona todavía. Un grupo sin miembros solo avisa a su correo de grupo.',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textMuted,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    )
+                  else
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 170),
+                      child: SingleChildScrollView(
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: selectedMemberIds.map((cid) {
+                            final c = _alertContacts.firstWhere(
+                              (e) => e['id'] == cid,
+                              orElse: () => <String, dynamic>{},
+                            );
+                            return InputChip(
+                              visualDensity: VisualDensity.compact,
+                              label: Text(
+                                c.isEmpty
+                                    ? 'Contacto #$cid'
+                                    : '${c['full_name']} · ${c['email']}',
+                                style: const TextStyle(fontSize: 10.5),
+                              ),
+                              onDeleted: () => setModal(
+                                () => selectedMemberIds.remove(cid),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -12320,34 +12769,100 @@ class profile::rackdoc_agent (
                     ),
                   ),
                   const SizedBox(height: 12),
-                  const Text(
-                    'Hosts / Sistemas incluidos en este Grupo:',
-                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Hosts / Sistemas incluidos en este Grupo:',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '${selectedHostIds.length} de ${_hosts.length}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: _hosts.map((h) {
-                      final hid = h['id'] as int;
-                      final isSel = selectedHostIds.contains(hid);
-                      return FilterChip(
-                        visualDensity: VisualDensity.compact,
-                        label: Text(
-                          '${h['code']} (${h['heartbeat_ip'] ?? ''})',
-                          style: const TextStyle(fontSize: 10.2),
-                        ),
-                        selected: isSel,
-                        onSelected: (v) => setModal(() {
-                          if (v) {
-                            selectedHostIds.add(hid);
-                          } else {
-                            selectedHostIds.remove(hid);
-                          }
-                        }),
+                  // Antes esto era un Wrap con un chip por cada equipo de la
+                  // CMDB: con cientos de equipos es inmanejable. Ahora se
+                  // eligen en el Explorador CMDB (virtualizado, agrupado por
+                  // subred y con filtros) y aquí solo se listan los elegidos.
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final elegidos =
+                          await CmdbAssetExplorerDialog.showMulti(
+                        context,
+                        api: widget.api,
+                        initialSelectedAssetIds: selectedHostIds,
+                        title:
+                            'Elegir los Hosts del Grupo ${codeCtrl.text.trim()}',
+                        subtitle:
+                            'Marca los equipos que este HostGroup debe vigilar. Vienen de la CMDB, '
+                            'incluidos los que ya están montados en racks, agrupados por Subred (CIDR / Máscara).',
+                        confirmLabel: 'Usar los equipos marcados',
                       );
-                    }).toList(),
+                      if (elegidos == null) return;
+                      setModal(() {
+                        selectedHostIds
+                          ..clear()
+                          ..addAll(elegidos);
+                      });
+                    },
+                    icon: const Icon(Icons.dns_rounded, size: 16),
+                    label: const Text(
+                      'Seleccionar equipos en el Explorador CMDB / Racks…',
+                      style: TextStyle(fontSize: 11.5),
+                    ),
                   ),
+                  const SizedBox(height: 8),
+                  if (selectedHostIds.isEmpty)
+                    const Text(
+                      'Ningún equipo todavía. Un HostGroup sin equipos no dispara ningún aviso.',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textMuted,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    )
+                  else
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 190),
+                      child: SingleChildScrollView(
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: selectedHostIds.map((hid) {
+                            final h = _hosts.firstWhere(
+                              (e) => e['id'] == hid,
+                              orElse: () => <String, dynamic>{},
+                            );
+                            final rotulo = h.isEmpty
+                                ? 'Activo #$hid'
+                                : '${h['code']}'
+                                      '${(h['heartbeat_ip'] ?? '').toString().isNotEmpty ? ' · ${h['heartbeat_ip']}' : ''}'
+                                      '${(h['rack_code'] ?? '').toString().isNotEmpty ? ' · ${h['rack_code']}' : ''}';
+                            return InputChip(
+                              visualDensity: VisualDensity.compact,
+                              label: Text(
+                                rotulo,
+                                style: const TextStyle(fontSize: 10.2),
+                              ),
+                              onDeleted: () => setModal(
+                                () => selectedHostIds.remove(hid),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -12403,55 +12918,311 @@ class profile::rackdoc_agent (
     );
     final minsCtrl = TextEditingController(text: '60');
 
+    // Ámbito de la ventana. Antes estaba fijado a 'single_host' con el host que
+    // hubiera seleccionado en la vista: no se podía silenciar un grupo entero ni
+    // un puñado de equipos, aunque el backend acepta los tres ámbitos.
+    String ambito = 'single_host'; // single_host | host_group | ip_or_hostname_list
+    int? equipoId = _selectedHostId;
+    int? grupoId = _hostGroups.isNotEmpty ? _hostGroups.first['id'] as int : null;
+    final variosIds = <int>{};
+
+    Map<String, dynamic> hostPorId(int? id) => _hosts.firstWhere(
+      (h) => h['id'] == id,
+      orElse: () => <String, dynamic>{},
+    );
+
     await showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Activar Ventana de Mantenimiento (Silenciar Avisos)'),
-        content: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: titleCtrl,
-                decoration: const InputDecoration(labelText: 'Título'),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: reasonCtrl,
-                decoration: const InputDecoration(labelText: 'Motivo'),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: minsCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Duración (minutos)',
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) {
+          // Cuántos equipos quedarían silenciados, para no activar a ciegas.
+          int afectados;
+          switch (ambito) {
+            case 'host_group':
+              final g = _hostGroups.firstWhere(
+                (e) => e['id'] == grupoId,
+                orElse: () => <String, dynamic>{},
+              );
+              afectados = ((g['member_asset_ids'] as List?) ?? []).length;
+              break;
+            case 'ip_or_hostname_list':
+              afectados = variosIds.length;
+              break;
+            default:
+              afectados = equipoId == null ? 0 : 1;
+          }
+
+          return AlertDialog(
+            title: const Text(
+              'Activar Ventana de Mantenimiento (Silenciar Avisos)',
+              style: TextStyle(fontSize: 15.5),
+            ),
+            content: SizedBox(
+              width: 520,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: titleCtrl,
+                      decoration: const InputDecoration(labelText: 'Título'),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: reasonCtrl,
+                      decoration: const InputDecoration(labelText: 'Motivo'),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: minsCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Duración (minutos)',
+                      ),
+                      keyboardType: TextInputType.number,
+                      onChanged: (_) => setModal(() {}),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      children: const [30, 60, 240, 480, 1440].map((m) {
+                        final rotulo = m < 60
+                            ? '$m min'
+                            : (m == 1440 ? '24 h' : '${m ~/ 60} h');
+                        return ActionChip(
+                          visualDensity: VisualDensity.compact,
+                          label: Text(
+                            rotulo,
+                            style: const TextStyle(fontSize: 10.5),
+                          ),
+                          onPressed: () =>
+                              setModal(() => minsCtrl.text = '$m'),
+                        );
+                      }).toList(),
+                    ),
+                    const Divider(height: 22),
+                    const Text(
+                      '¿A qué se aplica esta ventana?',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    DropdownButtonFormField<String>(
+                      initialValue: ambito,
+                      decoration: const InputDecoration(isDense: true),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'single_host',
+                          child: Text('Un solo equipo'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'host_group',
+                          child: Text('Un Grupo de Hosts completo'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'ip_or_hostname_list',
+                          child: Text('Varios equipos sueltos'),
+                        ),
+                      ],
+                      onChanged: (v) =>
+                          v == null ? null : setModal(() => ambito = v),
+                    ),
+                    const SizedBox(height: 10),
+                    if (ambito == 'single_host') ...[
+                      Text(
+                        equipoId == null
+                            ? 'Ningún equipo elegido.'
+                            : '[${hostPorId(equipoId)['code']}] ${hostPorId(equipoId)['name']}'
+                                  ' · ${hostPorId(equipoId)['heartbeat_ip'] ?? 'Sin IP'}',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: equipoId == null
+                              ? AppTheme.textMuted
+                              : AppTheme.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          final elegido = await CmdbAssetExplorerDialog.show(
+                            context,
+                            api: widget.api,
+                            preselectedAssetId: equipoId,
+                            defaultOnlyUnplaced: false,
+                            title: 'Elegir el equipo a silenciar',
+                            subtitle:
+                                'Busca entre todos los equipos de la CMDB, estén o no montados en un rack.',
+                          );
+                          if (elegido == null) return;
+                          setModal(
+                            () => equipoId = (elegido['id'] as num).toInt(),
+                          );
+                        },
+                        icon: const Icon(Icons.dns_rounded, size: 16),
+                        label: const Text(
+                          'Elegir equipo…',
+                          style: TextStyle(fontSize: 11.5),
+                        ),
+                      ),
+                    ] else if (ambito == 'host_group') ...[
+                      if (_hostGroups.isEmpty)
+                        const Text(
+                          'No hay ningún Grupo de Hosts creado todavía.',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: AppTheme.textMuted,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        )
+                      else
+                        DropdownButtonFormField<int>(
+                          initialValue: grupoId,
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            labelText: 'Grupo de Hosts',
+                          ),
+                          items: _hostGroups.map((g) {
+                            final n =
+                                ((g['member_asset_ids'] as List?) ?? []).length;
+                            return DropdownMenuItem(
+                              value: g['id'] as int,
+                              child: Text(
+                                '${g['code']} · ${g['name']} ($n equipos)',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (v) => setModal(() => grupoId = v),
+                        ),
+                    ] else ...[
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          final elegidos =
+                              await CmdbAssetExplorerDialog.showMulti(
+                            context,
+                            api: widget.api,
+                            initialSelectedAssetIds: variosIds,
+                            title: 'Elegir los equipos a silenciar',
+                            subtitle:
+                                'Marca todos los equipos que entran en esta ventana de mantenimiento.',
+                            confirmLabel: 'Silenciar los marcados',
+                          );
+                          if (elegidos == null) return;
+                          setModal(() {
+                            variosIds
+                              ..clear()
+                              ..addAll(elegidos);
+                          });
+                        },
+                        icon: const Icon(Icons.playlist_add_check_rounded,
+                            size: 16),
+                        label: Text(
+                          variosIds.isEmpty
+                              ? 'Elegir equipos…'
+                              : 'Cambiar los ${variosIds.length} equipos elegidos…',
+                          style: const TextStyle(fontSize: 11.5),
+                        ),
+                      ),
+                      if (variosIds.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 130),
+                          child: SingleChildScrollView(
+                            child: Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: variosIds.map((id) {
+                                final h = hostPorId(id);
+                                return InputChip(
+                                  visualDensity: VisualDensity.compact,
+                                  label: Text(
+                                    h.isEmpty
+                                        ? 'Activo #$id'
+                                        : '${h['code']}',
+                                    style: const TextStyle(fontSize: 10.2),
+                                  ),
+                                  onDeleted: () =>
+                                      setModal(() => variosIds.remove(id)),
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: (afectados == 0 ? AppTheme.error : AppTheme.warning)
+                            .withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(7),
+                      ),
+                      child: Text(
+                        afectados == 0
+                            ? 'Sin equipos en el ámbito: esta ventana no silenciaría nada.'
+                            : 'Se dejarán de enviar avisos de $afectados equipo(s) durante '
+                                  '${minsCtrl.text.trim().isEmpty ? '60' : minsCtrl.text.trim()} minutos.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: afectados == 0
+                              ? AppTheme.error
+                              : AppTheme.warning,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                onPressed: afectados == 0
+                    ? null
+                    : () async {
+                        Navigator.pop(ctx);
+                        // En el ámbito de varios equipos el backend casa por
+                        // código, hostname, FQDN o IP (target_matches), así que
+                        // se mandan los códigos de los elegidos.
+                        final codigos = ambito == 'ip_or_hostname_list'
+                            ? variosIds
+                                  .map((id) => '${hostPorId(id)['code'] ?? ''}')
+                                  .where((c) => c.isNotEmpty)
+                                  .toList()
+                            : <String>[];
+                        final res = await widget.api.createMaintenanceWindow({
+                          'title': titleCtrl.text.trim(),
+                          'reason': reasonCtrl.text.trim(),
+                          'scope_type': ambito,
+                          'asset_id': ambito == 'single_host' ? equipoId : null,
+                          'host_group_id':
+                              ambito == 'host_group' ? grupoId : null,
+                          'target_matches': codigos,
+                          'duration_minutes':
+                              int.tryParse(minsCtrl.text.trim()) ?? 60,
+                        });
+                        setState(() => _overview = res);
+                        _showSnack(
+                          'Ventana de mantenimiento activada sobre $afectados equipo(s).',
+                        );
+                      },
+                child: const Text('Activar Mantenimiento'),
+              ),
             ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              final res = await widget.api.createMaintenanceWindow({
-                'title': titleCtrl.text.trim(),
-                'reason': reasonCtrl.text.trim(),
-                'scope_type': 'single_host',
-                'asset_id': _selectedHostId,
-                'duration_minutes': int.tryParse(minsCtrl.text.trim()) ?? 60,
-              });
-              setState(() => _overview = res);
-              _showSnack('Ventana de mantenimiento activada.');
-            },
-            child: const Text('Activar Mantenimiento'),
-          ),
-        ],
+          );
+        },
       ),
     );
   }

@@ -6,7 +6,11 @@ from typing import Optional
 
 from ..models import Connection, DeviceTemplate, Port, Rack, RackDevice
 from ..schemas import ConnectionEndpointInfo, ConnectionSchema
-from ..security import enforce_rbac, require_automation_key
+from ..security import (
+    enforce_rbac,
+    require_automation_key,
+    require_automation_key_or_session,
+)
 
 # Router principal de la API: TODA ruta montada aquí exige un JWT válido y
 # que el rol del usuario alcance el mínimo de la ruta (ver security.enforce_rbac).
@@ -21,6 +25,14 @@ public_router = APIRouter()
 
 # Rutas máquina-a-máquina (Prometheus, Ansible, agentes): se autentican con X-API-Key.
 automation_router = APIRouter(dependencies=[Depends(require_automation_key)])
+
+
+# Rutas de solo lectura que consultan tanto los agentes como la propia interfaz:
+# valen la X-API-Key o el JWT de sesión. Montar aquí lo que el navegador también
+# necesita evita que un 401 de clave de automatización tumbe la sesión del usuario.
+agent_or_session_router = APIRouter(
+    dependencies=[Depends(require_automation_key_or_session)]
+)
 
 
 def _build_endpoint_info(port: Port) -> ConnectionEndpointInfo:

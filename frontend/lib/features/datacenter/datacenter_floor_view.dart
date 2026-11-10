@@ -5596,7 +5596,10 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
             DiagramExportMenuButton(
               documentBuilder: () =>
                   _buildFloorExportDocument(floor, floorRacks),
-              compact: true,
+              onExportExcel: () {
+                final url = Uri.parse(widget.api.getExcelExportUrl());
+                launchUrl(url, mode: LaunchMode.externalApplication);
+              },
             ),
             const SizedBox(width: 8),
             // Botón Deshacer (Ctrl+Z en Windows/Linux o Cmd+Z en Mac)
@@ -5908,6 +5911,18 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                   const SizedBox(width: 10),
                 ],
                 if (floor != null) ...[
+                  DiagramExportMenuButton(
+                    buttonLabel: 'Exportar Planta (.dia / .png / .pdf / .xlsx)',
+                    documentBuilder: () => _buildFloorExportDocument(
+                      floor,
+                      [for (final rm in floor.rooms) ...rm.racks],
+                    ),
+                    onExportExcel: () {
+                      final url = Uri.parse(widget.api.getExcelExportUrl());
+                      launchUrl(url, mode: LaunchMode.externalApplication);
+                    },
+                  ),
+                  const SizedBox(width: 10),
                   OutlinedButton.icon(
                     onPressed: _uploading
                         ? null

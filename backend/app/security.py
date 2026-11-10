@@ -294,6 +294,55 @@ def require_automation_key(
         )
 
 
+def require_automation_key_or_session(
+    x_api_key: Optional[str] = Header(default=None),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> None:
+    """
+    Acepta DOS formas de autenticación: la clave de automatización (X-API-Key,
+    para Ansible/agentes) o un JWT de sesión (para la propia interfaz).
+
+    Existe porque hay endpoints de solo lectura que consultan las dos partes: el
+    manifiesto de contexto lo piden los agentes y también lo muestra la pantalla
+    "4. Red & Host". Con la dependencia de clave a secas, el navegador mandaba su
+    JWT en 'Authorization: Bearer', no coincidía con AUTOMATION_API_KEY y recibía
+    un 401 que el cliente Dart interpretaba como sesión muerta: borraba el token
+    bueno y a partir de ahí TODA la aplicación respondía "se requiere un token de
+    sesión válido" hasta volver a identificarse.
+    """
+    clave = (x_api_key or "").strip()
+    bearer = ((credentials.credentials if credentials else None) or "").strip()
+
+    if AUTOMATION_API_KEY:
+        for candidato in (clave, bearer):
+            if candidato and secrets.compare_digest(candidato, AUTOMATION_API_KEY):
+                return
+
+    if bearer:
+        try:
+            payload = jwt.decode(
+                bearer,
+                JWT_SECRET,
+                algorithms=[JWT_ALGORITHM],
+                options={"require": ["exp", "sub"]},
+            )
+            usuario = db.query(User).filter(User.id == int(payload.get("sub") or 0)).first()
+            if usuario and usuario.is_active:
+                return
+        except (jwt.PyJWTError, TypeError, ValueError):
+            pass
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=(
+            "Se requiere una sesión válida ('Authorization: Bearer <JWT>') o la "
+            "clave de automatización ('X-API-Key')."
+        ),
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Protección SSRF para las descargas externas (proxy y búsqueda de fotos)
 # ---------------------------------------------------------------------------
