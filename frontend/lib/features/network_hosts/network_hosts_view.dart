@@ -11473,6 +11473,9 @@ class _DatacenterStyleHostConfigPanelState
 
   @override
   Widget build(BuildContext context) {
+    // 'hypervisors' son los posibles padres del desplegable de alojamiento y
+    // 'otherNodes' los posibles destinos de un enlace. Se calculan aquí porque
+    // cada lista la consume una sección distinta, que la recibe por parámetro.
     final hypervisors = widget.hostsList
         .where(
           (x) =>
@@ -11486,1307 +11489,1351 @@ class _DatacenterStyleHostConfigPanelState
 
     return Column(
       children: [
-        // Cabecera compacta estilo Datacenter Element Settings
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-          decoration: const BoxDecoration(
-            color: AppTheme.bgSecondary,
-            border: Border(bottom: BorderSide(color: AppTheme.border)),
-          ),
-          child: Row(
-            children: [
-              const Icon(
-                Icons.tune_rounded,
-                size: 16,
-                color: AppTheme.accentCyan,
-              ),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(
-                  widget.isNewElement
-                      ? 'NUEVO ELEMENTO / HOST (CONFIGURACIÓN)'
-                      : 'ELEMENT SETTINGS • ${_codeCtrl.text}',
-                  style: const TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w900,
-                    color: AppTheme.textPrimary,
-                    letterSpacing: 0.3,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (widget.onOpenFloatingCharts != null)
-                IconButton(
-                  tooltip: 'Abrir Ventana Flotante de Gráficas Prometheus',
-                  constraints: const BoxConstraints(),
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  icon: const Icon(
-                    Icons.analytics_outlined,
-                    size: 16,
-                    color: AppTheme.accentTeal,
-                  ),
-                  onPressed: widget.onOpenFloatingCharts,
-                ),
-              if (widget.isModalDialog && widget.onCloseModal != null)
-                IconButton(
-                  constraints: const BoxConstraints(),
-                  padding: const EdgeInsets.only(left: 4),
-                  icon: const Icon(Icons.close, size: 16),
-                  onPressed: widget.onCloseModal,
-                ),
-            ],
-          ),
-        ),
-        // Cuerpo desplazable con el mismo formato limpio y compacto del Datacenter
+        _buildCabeceraDelPanel(),
         Expanded(
           child: ListView(
             padding: const EdgeInsets.all(11),
             children: [
-              // 1. Tipo + ID + Name + IP + FQDN
+              ..._buildIdentidadDelElemento(),
+              ..._buildAlojamiento(hypervisors),
+              ..._buildEnlacesDelLienzo(otherNodes),
+              ..._buildGestionHeartbeat(),
+              ..._buildGestionConectar(),
+              ..._buildGestionCertScope(),
+            ],
+          ),
+        ),
+        if (widget.canEdit) _buildBarraDeGuardado(),
+      ],
+    );
+  }
+
+  // 1. Tipo de elemento, identificadores, IP, FQDN y sistema operativo.
+  List<Widget> _buildIdentidadDelElemento() {
+    return [
+      // 1. Tipo + ID + Name + IP + FQDN
+      DropdownButtonFormField<String>(
+        initialValue: _assetClass,
+        isExpanded: true,
+        decoration: _compactDeco('Tipo de Elemento / Sistema'),
+        items: const [
+          DropdownMenuItem(
+            value: 'virtual_machine',
+            child: Text(
+              '🖥️ Máquina Virtual (VM)',
+              style: TextStyle(fontSize: 11.5),
+            ),
+          ),
+          DropdownMenuItem(
+            value: 'container',
+            child: Text(
+              '📦 Contenedor / Pod (Docker / K8s / LXC)',
+              style: TextStyle(fontSize: 11.5),
+            ),
+          ),
+          DropdownMenuItem(
+            value: 'physical_server',
+            child: Text(
+              '🗄️ Servidor Físico / Barebone',
+              style: TextStyle(fontSize: 11.5),
+            ),
+          ),
+          DropdownMenuItem(
+            value: 'vip_cluster',
+            child: Text(
+              '⚖️ Balanceador / VIP / API Gateway',
+              style: TextStyle(fontSize: 11.5),
+            ),
+          ),
+          DropdownMenuItem(
+            value: 'network_security',
+            child: Text(
+              '🛡️ Switch / Firewall / Router / WAF',
+              style: TextStyle(fontSize: 11.5),
+            ),
+          ),
+          DropdownMenuItem(
+            value: 'storage_san_nas',
+            child: Text(
+              '💾 Storage SAN / NAS / Backup',
+              style: TextStyle(fontSize: 11.5),
+            ),
+          ),
+          DropdownMenuItem(
+            value: 'custom',
+            child: Text(
+              '✨ Otro / Personalizado (Escribir)...',
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.accentCyan,
+              ),
+            ),
+          ),
+        ],
+        onChanged: (v) {
+          if (v == null) return;
+          setState(() => _assetClass = v);
+        },
+      ),
+      if (_assetClass == 'custom') ...[
+        const SizedBox(height: 8),
+        TextField(
+          controller: _customClassCtrl,
+          style: const TextStyle(fontSize: 11.5),
+          decoration: _compactDeco(
+            'Tipo Personalizado',
+            hint: 'Ej: Sonda IoT, Centralita VoIP, Appliance...',
+          ),
+        ),
+      ],
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _codeCtrl,
+              style: const TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+              ),
+              decoration: _compactDeco('ID / Código *'),
+            ),
+          ),
+          const SizedBox(width: 7),
+          Expanded(
+            flex: 2,
+            child: TextField(
+              controller: _nameCtrl,
+              style: const TextStyle(fontSize: 11.5),
+              decoration: _compactDeco('Name / Rol *'),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _ipCtrl,
+              onChanged: (v) {
+                if (widget.isNewElement) {
+                  _connSshHostCtrl.text = v.trim();
+                  _hbHttpUrlCtrl.text =
+                      '$_hbHttpScheme://${v.trim()}/health';
+                  _connHttpUrlCtrl.text = 'http://${v.trim()}/';
+                  _connHttpsUrlCtrl.text = 'https://${v.trim()}/';
+                }
+              },
+              style: const TextStyle(
+                fontSize: 11.5,
+                fontFamily: 'monospace',
+              ),
+              decoration: _compactDeco('IP Address / Host *'),
+            ),
+          ),
+          const SizedBox(width: 7),
+          Expanded(
+            child: TextField(
+              controller: _fqdnCtrl,
+              style: const TextStyle(fontSize: 11.5),
+              decoration: _compactDeco('FQDN / DNS'),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 8),
+      TextField(
+        controller: _osCtrl,
+        style: const TextStyle(fontSize: 11.5),
+        decoration: _compactDeco('OS / Hypervisor / Firmware'),
+      ),
+      const SizedBox(height: 10),
+    ];
+  }
+
+  // 2. Alojamiento: clúster, bastidor físico o independiente.
+  List<Widget> _buildAlojamiento(List<Map<String, dynamic>> hypervisors) {
+    return [
+      // 2. Ubicación / Alojamiento compacto (Clúster sin máquina concreta | Rack Físico | Independiente)
+      Container(
+        padding: const EdgeInsets.all(9),
+        decoration: BoxDecoration(
+          color: AppTheme.bgSecondary,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppTheme.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'ALOJAMIENTO (¿Dónde reside este elemento?)',
+              style: TextStyle(
+                fontSize: 9.8,
+                fontWeight: FontWeight.w900,
+                color: AppTheme.accentPurple,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 5,
+              runSpacing: 5,
+              children: [
+                ChoiceChip(
+                  label: const Text(
+                    '☁️ Clúster (Sin máquina fija)',
+                    style: TextStyle(fontSize: 10.2),
+                  ),
+                  selected: _hostingMode == 'cluster_pool',
+                  onSelected: (_) =>
+                      setState(() => _hostingMode = 'cluster_pool'),
+                ),
+                ChoiceChip(
+                  label: const Text(
+                    '🗄️ Máquina del Rack',
+                    style: TextStyle(fontSize: 10.2),
+                  ),
+                  selected: _hostingMode == 'physical_rack_server',
+                  onSelected: (_) => setState(
+                    () => _hostingMode = 'physical_rack_server',
+                  ),
+                ),
+                ChoiceChip(
+                  label: const Text(
+                    '🌐 Independiente',
+                    style: TextStyle(fontSize: 10.2),
+                  ),
+                  selected: _hostingMode == 'standalone',
+                  onSelected: (_) =>
+                      setState(() => _hostingMode = 'standalone'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (_hostingMode == 'cluster_pool') ...[
               DropdownButtonFormField<String>(
-                initialValue: _assetClass,
+                initialValue: _clusterPreset,
                 isExpanded: true,
-                decoration: _compactDeco('Tipo de Elemento / Sistema'),
+                decoration: _compactDeco(
+                  'Clúster VMware / Proxmox / Hyper-V / K8s',
+                ),
                 items: const [
                   DropdownMenuItem(
-                    value: 'virtual_machine',
+                    value: 'VMware vSphere / ESXi Cluster (HA / DRS)',
                     child: Text(
-                      '🖥️ Máquina Virtual (VM)',
-                      style: TextStyle(fontSize: 11.5),
+                      'VMware vSphere / ESXi Cluster (HA / DRS)',
+                      style: TextStyle(fontSize: 11),
                     ),
                   ),
                   DropdownMenuItem(
-                    value: 'container',
+                    value: 'Proxmox VE HA Cluster (KVM / LXC)',
                     child: Text(
-                      '📦 Contenedor / Pod (Docker / K8s / LXC)',
-                      style: TextStyle(fontSize: 11.5),
+                      'Proxmox VE HA Cluster (KVM / LXC)',
+                      style: TextStyle(fontSize: 11),
                     ),
                   ),
                   DropdownMenuItem(
-                    value: 'physical_server',
+                    value: 'Microsoft Hyper-V Failover Cluster',
                     child: Text(
-                      '🗄️ Servidor Físico / Barebone',
-                      style: TextStyle(fontSize: 11.5),
+                      'Microsoft Hyper-V Failover Cluster',
+                      style: TextStyle(fontSize: 11),
                     ),
                   ),
                   DropdownMenuItem(
-                    value: 'vip_cluster',
+                    value: 'Kubernetes / OpenShift / Docker Swarm',
                     child: Text(
-                      '⚖️ Balanceador / VIP / API Gateway',
-                      style: TextStyle(fontSize: 11.5),
+                      'Kubernetes / OpenShift / Docker Swarm',
+                      style: TextStyle(fontSize: 11),
                     ),
                   ),
                   DropdownMenuItem(
-                    value: 'network_security',
+                    value: 'Nutanix AHV / KVM Cluster',
                     child: Text(
-                      '🛡️ Switch / Firewall / Router / WAF',
-                      style: TextStyle(fontSize: 11.5),
+                      'Nutanix AHV / KVM Cluster',
+                      style: TextStyle(fontSize: 11),
                     ),
                   ),
                   DropdownMenuItem(
-                    value: 'storage_san_nas',
+                    value: 'custom_cluster',
                     child: Text(
-                      '💾 Storage SAN / NAS / Backup',
-                      style: TextStyle(fontSize: 11.5),
-                    ),
-                  ),
-                  DropdownMenuItem(
-                    value: 'custom',
-                    child: Text(
-                      '✨ Otro / Personalizado (Escribir)...',
+                      '✨ Otro Clúster (Escribir)...',
                       style: TextStyle(
-                        fontSize: 11.5,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+                onChanged: (v) => setState(
+                  () => _clusterPreset = v ?? _clusterPreset,
+                ),
+              ),
+              if (_clusterPreset == 'custom_cluster') ...[
+                const SizedBox(height: 7),
+                TextField(
+                  controller: _customClusterCtrl,
+                  style: const TextStyle(fontSize: 11),
+                  decoration: _compactDeco(
+                    'Nombre del Clúster / Pool',
+                  ),
+                ),
+              ],
+            ] else if (_hostingMode == 'physical_rack_server') ...[
+              DropdownButtonFormField<String>(
+                initialValue: _parentAssetCode.isEmpty
+                    ? null
+                    : _parentAssetCode,
+                isExpanded: true,
+                decoration: _compactDeco(
+                  'Máquina Física del Rack Editor',
+                ),
+                items: hypervisors
+                    .map(
+                      (x) => DropdownMenuItem<String>(
+                        value: '${x['code']}',
+                        child: Text(
+                          '${x['code']} — ${x['name']}',
+                          style: const TextStyle(fontSize: 11),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (v) =>
+                    setState(() => _parentAssetCode = v ?? ''),
+              ),
+            ] else ...[
+              TextField(
+                controller: _customClusterCtrl,
+                style: const TextStyle(fontSize: 11),
+                decoration: _compactDeco(
+                  'Sala / Cloud / Ubicación (Opcional)',
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      const SizedBox(height: 10),
+    ];
+  }
+
+  // 3. Enlaces en el lienzo del stack, hacia cualquier otro elemento.
+  List<Widget> _buildEnlacesDelLienzo(List<Map<String, dynamic>> otherNodes) {
+    return [
+      // 3. Enlaces en el Lienzo (Conectar con cualquier elemento cuando estamos en el Stack)
+      if (widget.stackNode != null) ...[
+        Container(
+          padding: const EdgeInsets.all(9),
+          decoration: BoxDecoration(
+            color: AppTheme.bgSecondary,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppTheme.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'ENLACES EN EL STACK (${widget.nodeEdges.length})',
+                    style: const TextStyle(
+                      fontSize: 9.8,
+                      fontWeight: FontWeight.w900,
+                      color: AppTheme.accentCyan,
+                    ),
+                  ),
+                  if (widget.canEdit &&
+                      widget.onStartLinkMode != null)
+                    InkWell(
+                      onTap: widget.onStartLinkMode,
+                      child: const Text(
+                        '🔗 Clic para enlazar en lienzo',
+                        style: TextStyle(
+                          fontSize: 9.8,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.warning,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              if (widget.canEdit &&
+                  otherNodes.isNotEmpty &&
+                  widget.onQuickConnectToNode != null) ...[
+                const SizedBox(height: 6),
+                DropdownButtonFormField<int>(
+                  isExpanded: true,
+                  decoration: _compactDeco(
+                    '+ Conectar directamente con otro elemento...',
+                  ),
+                  items: otherNodes.map((n) {
+                    final nh = Map<String, dynamic>.from(
+                      (n['host'] as Map?) ?? {},
+                    );
+                    return DropdownMenuItem<int>(
+                      value: n['id'] as int,
+                      child: Text(
+                        '➔ ${nh['code']} (${n['custom_label'] ?? nh['name']})',
+                        style: const TextStyle(fontSize: 10.8),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (targetId) {
+                    if (targetId != null) {
+                      widget.onQuickConnectToNode!(targetId);
+                    }
+                  },
+                ),
+              ],
+              if (widget.nodeEdges.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                for (final e in widget.nodeEdges)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 3),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.sync_alt_rounded,
+                          size: 12,
+                          color: AppTheme.accentCyan,
+                        ),
+                        const SizedBox(width: 5),
+                        Expanded(
+                          child: Text(
+                            '${e['protocol_label']} (:${e['target_port'] ?? 443})',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: AppTheme.textSecondary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (widget.canEdit &&
+                            widget.onDeleteEdge != null)
+                          InkWell(
+                            onTap: () =>
+                                widget.onDeleteEdge!(e['id'] as int),
+                            child: const Icon(
+                              Icons.close,
+                              size: 13,
+                              color: AppTheme.error,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+      ],
+    ];
+  }
+
+  // Sección A: Heartbeat, la monitorización que corre en el servidor.
+  List<Widget> _buildGestionHeartbeat() {
+    return [
+      // ===============================================================
+      // SECCIÓN A: HEARTBEAT (BACKGROUND MONITORING) — ESTILO DATACENTER
+      // ===============================================================
+      Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: AppTheme.bgSecondary,
+          borderRadius: BorderRadius.circular(9),
+          border: Border.all(
+            color: _hbEnabled
+                ? AppTheme.success.withValues(alpha: 0.65)
+                : AppTheme.border,
+            width: _hbEnabled ? 1.4 : 1.0,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 9,
+                  height: 9,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _hbEnabled
+                        ? AppTheme.success
+                        : AppTheme.textMuted,
+                  ),
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    _hbEnabled
+                        ? 'Heartbeat: ACTIVO (Background)'
+                        : 'Heartbeat: DESACTIVADO',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                      color: _hbEnabled
+                          ? AppTheme.success
+                          : AppTheme.textSecondary,
+                    ),
+                  ),
+                ),
+                Switch.adaptive(
+                  value: _hbEnabled,
+                  activeThumbColor: AppTheme.success,
+                  onChanged: (v) => setState(() => _hbEnabled = v),
+                ),
+              ],
+            ),
+            if (_hbEnabled) ...[
+              const SizedBox(height: 6),
+              const Text(
+                'Protocolos Heartbeat & Exporters Prometheus:',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Wrap(
+                spacing: 5,
+                runSpacing: 5,
+                children: [
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
+                      'ICMP Ping',
+                      style: TextStyle(fontSize: 10.2),
+                    ),
+                    selected: _hbIcmp,
+                    onSelected: (v) => setState(() => _hbIcmp = v),
+                  ),
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
+                      'SSH',
+                      style: TextStyle(fontSize: 10.2),
+                    ),
+                    selected: _hbSsh,
+                    onSelected: (v) => setState(() => _hbSsh = v),
+                  ),
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
+                      'HTTP/HTTPS',
+                      style: TextStyle(fontSize: 10.2),
+                    ),
+                    selected: _hbHttp,
+                    onSelected: (v) => setState(() => _hbHttp = v),
+                  ),
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
+                      'TCP',
+                      style: TextStyle(fontSize: 10.2),
+                    ),
+                    selected: _hbTcp,
+                    onSelected: (v) => setState(() => _hbTcp = v),
+                  ),
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
+                      'UDP',
+                      style: TextStyle(fontSize: 10.2),
+                    ),
+                    selected: _hbUdp,
+                    onSelected: (v) => setState(() => _hbUdp = v),
+                  ),
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
+                      'SNMP',
+                      style: TextStyle(fontSize: 10.2),
+                    ),
+                    selected: _hbSnmp,
+                    onSelected: (v) => setState(() => _hbSnmp = v),
+                  ),
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
+                      'Node Exp :9100',
+                      style: TextStyle(fontSize: 10.2),
+                    ),
+                    selected: _expNode,
+                    onSelected: (v) => setState(() => _expNode = v),
+                  ),
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
+                      'Win Exp :9182',
+                      style: TextStyle(fontSize: 10.2),
+                    ),
+                    selected: _expWin,
+                    onSelected: (v) => setState(() => _expWin = v),
+                  ),
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
+                      'Nginx',
+                      style: TextStyle(fontSize: 10.2),
+                    ),
+                    selected: _expNginx,
+                    onSelected: (v) => setState(() => _expNginx = v),
+                  ),
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
+                      'Apache',
+                      style: TextStyle(fontSize: 10.2),
+                    ),
+                    selected: _expApache,
+                    onSelected: (v) => setState(() => _expApache = v),
+                  ),
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
+                      'Docker',
+                      style: TextStyle(fontSize: 10.2),
+                    ),
+                    selected: _expDocker,
+                    onSelected: (v) => setState(() => _expDocker = v),
+                  ),
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
+                      'PostgreSQL',
+                      style: TextStyle(fontSize: 10.2),
+                    ),
+                    selected: _expPostgres,
+                    onSelected: (v) =>
+                        setState(() => _expPostgres = v),
+                  ),
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
+                      'MySQL',
+                      style: TextStyle(fontSize: 10.2),
+                    ),
+                    selected: _expMysql,
+                    onSelected: (v) => setState(() => _expMysql = v),
+                  ),
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
+                      'Redis',
+                      style: TextStyle(fontSize: 10.2),
+                    ),
+                    selected: _expRedis,
+                    onSelected: (v) => setState(() => _expRedis = v),
+                  ),
+                  ActionChip(
+                    visualDensity: VisualDensity.compact,
+                    avatar: const Icon(
+                      Icons.add,
+                      size: 13,
+                      color: AppTheme.accentCyan,
+                    ),
+                    label: const Text(
+                      'Personalizado',
+                      style: TextStyle(
+                        fontSize: 10.2,
                         fontWeight: FontWeight.w800,
                         color: AppTheme.accentCyan,
                       ),
                     ),
+                    onPressed: () => setState(
+                      () => _showAddCustomCheckRow =
+                          !_showAddCustomCheckRow,
+                    ),
                   ),
                 ],
-                onChanged: (v) {
-                  if (v == null) return;
-                  setState(() => _assetClass = v);
-                },
               ),
-              if (_assetClass == 'custom') ...[
+              if (_hbHttp) ...[
                 const SizedBox(height: 8),
-                TextField(
-                  controller: _customClassCtrl,
-                  style: const TextStyle(fontSize: 11.5),
-                  decoration: _compactDeco(
-                    'Tipo Personalizado',
-                    hint: 'Ej: Sonda IoT, Centralita VoIP, Appliance...',
-                  ),
-                ),
-              ],
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _codeCtrl,
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w700,
-                      ),
-                      decoration: _compactDeco('ID / Código *'),
-                    ),
-                  ),
-                  const SizedBox(width: 7),
-                  Expanded(
-                    flex: 2,
-                    child: TextField(
-                      controller: _nameCtrl,
-                      style: const TextStyle(fontSize: 11.5),
-                      decoration: _compactDeco('Name / Rol *'),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _ipCtrl,
-                      onChanged: (v) {
-                        if (widget.isNewElement) {
-                          _connSshHostCtrl.text = v.trim();
-                          _hbHttpUrlCtrl.text =
-                              '$_hbHttpScheme://${v.trim()}/health';
-                          _connHttpUrlCtrl.text = 'http://${v.trim()}/';
-                          _connHttpsUrlCtrl.text = 'https://${v.trim()}/';
-                        }
-                      },
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        fontFamily: 'monospace',
-                      ),
-                      decoration: _compactDeco('IP Address / Host *'),
-                    ),
-                  ),
-                  const SizedBox(width: 7),
-                  Expanded(
-                    child: TextField(
-                      controller: _fqdnCtrl,
-                      style: const TextStyle(fontSize: 11.5),
-                      decoration: _compactDeco('FQDN / DNS'),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _osCtrl,
-                style: const TextStyle(fontSize: 11.5),
-                decoration: _compactDeco('OS / Hypervisor / Firmware'),
-              ),
-              const SizedBox(height: 10),
-
-              // 2. Ubicación / Alojamiento compacto (Clúster sin máquina concreta | Rack Físico | Independiente)
-              Container(
-                padding: const EdgeInsets.all(9),
-                decoration: BoxDecoration(
-                  color: AppTheme.bgSecondary,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppTheme.border),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                Row(
                   children: [
-                    const Text(
-                      'ALOJAMIENTO (¿Dónde reside este elemento?)',
-                      style: TextStyle(
-                        fontSize: 9.8,
-                        fontWeight: FontWeight.w900,
-                        color: AppTheme.accentPurple,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 5,
-                      runSpacing: 5,
-                      children: [
-                        ChoiceChip(
-                          label: const Text(
-                            '☁️ Clúster (Sin máquina fija)',
-                            style: TextStyle(fontSize: 10.2),
-                          ),
-                          selected: _hostingMode == 'cluster_pool',
-                          onSelected: (_) =>
-                              setState(() => _hostingMode = 'cluster_pool'),
-                        ),
-                        ChoiceChip(
-                          label: const Text(
-                            '🗄️ Máquina del Rack',
-                            style: TextStyle(fontSize: 10.2),
-                          ),
-                          selected: _hostingMode == 'physical_rack_server',
-                          onSelected: (_) => setState(
-                            () => _hostingMode = 'physical_rack_server',
-                          ),
-                        ),
-                        ChoiceChip(
-                          label: const Text(
-                            '🌐 Independiente',
-                            style: TextStyle(fontSize: 10.2),
-                          ),
-                          selected: _hostingMode == 'standalone',
-                          onSelected: (_) =>
-                              setState(() => _hostingMode = 'standalone'),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    if (_hostingMode == 'cluster_pool') ...[
-                      DropdownButtonFormField<String>(
-                        initialValue: _clusterPreset,
-                        isExpanded: true,
-                        decoration: _compactDeco(
-                          'Clúster VMware / Proxmox / Hyper-V / K8s',
-                        ),
+                    SizedBox(
+                      width: 82,
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _hbHttpScheme,
+                        decoration: _compactDeco('Proto'),
                         items: const [
                           DropdownMenuItem(
-                            value: 'VMware vSphere / ESXi Cluster (HA / DRS)',
+                            value: 'https',
                             child: Text(
-                              'VMware vSphere / ESXi Cluster (HA / DRS)',
-                              style: TextStyle(fontSize: 11),
+                              'HTTPS',
+                              style: TextStyle(fontSize: 10.5),
                             ),
                           ),
                           DropdownMenuItem(
-                            value: 'Proxmox VE HA Cluster (KVM / LXC)',
+                            value: 'http',
                             child: Text(
-                              'Proxmox VE HA Cluster (KVM / LXC)',
-                              style: TextStyle(fontSize: 11),
-                            ),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Microsoft Hyper-V Failover Cluster',
-                            child: Text(
-                              'Microsoft Hyper-V Failover Cluster',
-                              style: TextStyle(fontSize: 11),
-                            ),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Kubernetes / OpenShift / Docker Swarm',
-                            child: Text(
-                              'Kubernetes / OpenShift / Docker Swarm',
-                              style: TextStyle(fontSize: 11),
-                            ),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Nutanix AHV / KVM Cluster',
-                            child: Text(
-                              'Nutanix AHV / KVM Cluster',
-                              style: TextStyle(fontSize: 11),
-                            ),
-                          ),
-                          DropdownMenuItem(
-                            value: 'custom_cluster',
-                            child: Text(
-                              '✨ Otro Clúster (Escribir)...',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                              ),
+                              'HTTP',
+                              style: TextStyle(fontSize: 10.5),
                             ),
                           ),
                         ],
                         onChanged: (v) => setState(
-                          () => _clusterPreset = v ?? _clusterPreset,
+                          () => _hbHttpScheme = v ?? 'https',
                         ),
                       ),
-                      if (_clusterPreset == 'custom_cluster') ...[
-                        const SizedBox(height: 7),
-                        TextField(
-                          controller: _customClusterCtrl,
-                          style: const TextStyle(fontSize: 11),
-                          decoration: _compactDeco(
-                            'Nombre del Clúster / Pool',
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: TextField(
+                        controller: _hbHttpUrlCtrl,
+                        style: const TextStyle(fontSize: 10.8),
+                        decoration: _compactDeco('HTTP/S URL Check'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (_hbTcp) ...[
+                const SizedBox(height: 7),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: _hbTcpNameCtrl,
+                        style: const TextStyle(fontSize: 10.8),
+                        decoration: _compactDeco('Nombre TCP'),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: TextField(
+                        controller: _hbTcpPortCtrl,
+                        style: const TextStyle(fontSize: 10.8),
+                        decoration: _compactDeco('Puerto TCP'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (_hbUdp) ...[
+                const SizedBox(height: 7),
+                TextField(
+                  controller: _hbUdpPortCtrl,
+                  style: const TextStyle(fontSize: 10.8),
+                  decoration: _compactDeco('Puerto UDP Check'),
+                ),
+              ],
+              if (_hbSnmp) ...[
+                const SizedBox(height: 7),
+                TextField(
+                  controller: _hbSnmpCommCtrl,
+                  style: const TextStyle(fontSize: 10.8),
+                  decoration: _compactDeco('Comunidad SNMP (:161)'),
+                ),
+              ],
+              if (_showAddCustomCheckRow) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.bgCard,
+                    borderRadius: BorderRadius.circular(7),
+                    border: Border.all(
+                      color: AppTheme.accentCyan.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: TextField(
+                              controller: _customChkNameCtrl,
+                              style: const TextStyle(fontSize: 10.5),
+                              decoration: _compactDeco('Servicio'),
+                            ),
                           ),
-                        ),
-                      ],
-                    ] else if (_hostingMode == 'physical_rack_server') ...[
-                      DropdownButtonFormField<String>(
-                        initialValue: _parentAssetCode.isEmpty
-                            ? null
-                            : _parentAssetCode,
-                        isExpanded: true,
-                        decoration: _compactDeco(
-                          'Máquina Física del Rack Editor',
-                        ),
-                        items: hypervisors
-                            .map(
-                              (x) => DropdownMenuItem<String>(
-                                value: '${x['code']}',
-                                child: Text(
-                                  '${x['code']} — ${x['name']}',
-                                  style: const TextStyle(fontSize: 11),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (v) =>
-                            setState(() => _parentAssetCode = v ?? ''),
+                          const SizedBox(width: 5),
+                          Expanded(
+                            child: TextField(
+                              controller: _customChkTypeCtrl,
+                              style: const TextStyle(fontSize: 10.5),
+                              decoration: _compactDeco('Proto'),
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          SizedBox(
+                            width: 64,
+                            child: TextField(
+                              controller: _customChkPortCtrl,
+                              style: const TextStyle(fontSize: 10.5),
+                              decoration: _compactDeco('Port'),
+                            ),
+                          ),
+                        ],
                       ),
-                    ] else ...[
-                      TextField(
-                        controller: _customClusterCtrl,
-                        style: const TextStyle(fontSize: 11),
-                        decoration: _compactDeco(
-                          'Sala / Cloud / Ubicación (Opcional)',
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _customChkUrlCtrl,
+                              style: const TextStyle(fontSize: 10.5),
+                              decoration: _compactDeco(
+                                'Target / URL (opcional)',
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          ElevatedButton(
+                            onPressed: () {
+                              final nm = _customChkNameCtrl.text.trim();
+                              if (nm.isEmpty) return;
+                              setState(() {
+                                _customChecks.add({
+                                  'name': nm,
+                                  'type': _customChkTypeCtrl.text
+                                      .trim(),
+                                  'port':
+                                      int.tryParse(
+                                        _customChkPortCtrl.text.trim(),
+                                      ) ??
+                                      8443,
+                                  'url':
+                                      _customChkUrlCtrl.text
+                                          .trim()
+                                          .isNotEmpty
+                                      ? _customChkUrlCtrl.text.trim()
+                                      : _ipCtrl.text.trim(),
+                                });
+                                _showAddCustomCheckRow = false;
+                              });
+                            },
+                            child: const Text(
+                              '+ Añadir',
+                              style: TextStyle(fontSize: 10.5),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              if (_customChecks.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: _customChecks.asMap().entries.map((entry) {
+                    final idx = entry.key;
+                    final c = entry.value;
+                    return InputChip(
+                      visualDensity: VisualDensity.compact,
+                      label: Text(
+                        '${c['name']} (${c['type']}:${c['port']})',
+                        style: const TextStyle(fontSize: 9.8),
+                      ),
+                      onDeleted: () =>
+                          setState(() => _customChecks.removeAt(idx)),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ],
+          ],
+        ),
+      ),
+      const SizedBox(height: 10),
+    ];
+  }
+
+  // Sección B: Conectar, los accesos que se lanzan desde el navegador.
+  List<Widget> _buildGestionConectar() {
+    return [
+      // ===============================================================
+      // SECCIÓN B: CONECTAR (EJECUTADO DESDE EL FRONTEND) — ESTILO DATACENTER
+      // ===============================================================
+      Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: AppTheme.bgSecondary,
+          borderRadius: BorderRadius.circular(9),
+          border: Border.all(
+            color: _connEnabled
+                ? AppTheme.accentBlue.withValues(alpha: 0.65)
+                : AppTheme.border,
+            width: _connEnabled ? 1.4 : 1.0,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.terminal_rounded,
+                  size: 15,
+                  color: _connEnabled
+                      ? AppTheme.accentBlue
+                      : AppTheme.textMuted,
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    _connEnabled
+                        ? 'Conectar: ACTIVO (Frontend)'
+                        : 'Conectar: DESACTIVADO',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                      color: _connEnabled
+                          ? AppTheme.accentBlue
+                          : AppTheme.textSecondary,
+                    ),
+                  ),
+                ),
+                Switch.adaptive(
+                  value: _connEnabled,
+                  activeThumbColor: AppTheme.accentBlue,
+                  onChanged: (v) => setState(() => _connEnabled = v),
+                ),
+              ],
+            ),
+            if (_connEnabled) ...[
+              const SizedBox(height: 5),
+              Wrap(
+                spacing: 6,
+                runSpacing: 5,
+                children: [
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
+                      'SSH',
+                      style: TextStyle(fontSize: 10.2),
+                    ),
+                    selected: _connSsh,
+                    onSelected: (v) => setState(() => _connSsh = v),
+                  ),
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
+                      'HTTP',
+                      style: TextStyle(fontSize: 10.2),
+                    ),
+                    selected: _connHttp,
+                    onSelected: (v) => setState(() => _connHttp = v),
+                  ),
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
+                      'HTTPS',
+                      style: TextStyle(fontSize: 10.2),
+                    ),
+                    selected: _connHttps,
+                    onSelected: (v) => setState(() => _connHttps = v),
+                  ),
+                ],
+              ),
+              if (_connSsh) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: _connSshHostCtrl,
+                        style: const TextStyle(fontSize: 10.8),
+                        decoration: _compactDeco('SSH Host'),
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: TextField(
+                        controller: _connSshUserCtrl,
+                        style: const TextStyle(fontSize: 10.8),
+                        decoration: _compactDeco('User'),
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    SizedBox(
+                      width: 62,
+                      child: TextField(
+                        controller: _connSshPortCtrl,
+                        style: const TextStyle(fontSize: 10.8),
+                        decoration: _compactDeco('Port'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (_connHttp) ...[
+                const SizedBox(height: 7),
+                TextField(
+                  controller: _connHttpUrlCtrl,
+                  style: const TextStyle(fontSize: 10.8),
+                  decoration: _compactDeco('HTTP URL'),
+                ),
+              ],
+              if (_connHttps) ...[
+                const SizedBox(height: 7),
+                TextField(
+                  controller: _connHttpsUrlCtrl,
+                  style: const TextStyle(fontSize: 10.8),
+                  decoration: _compactDeco('HTTPS URL'),
+                ),
+              ],
+              const SizedBox(height: 8),
+              // Botones de lanzamiento directo idénticos a Datacenter
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  if (_connSsh && widget.onOpenSsh != null)
+                    OutlinedButton.icon(
+                      onPressed: widget.onOpenSsh,
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                      ),
+                      icon: const Icon(
+                        Icons.terminal_rounded,
+                        size: 13,
+                        color: AppTheme.accentCyan,
+                      ),
+                      label: const Text(
+                        'Conectar por SSH',
+                        style: TextStyle(fontSize: 10.2),
+                      ),
+                    ),
+                  if (_connHttps)
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        final u = _connHttpsUrlCtrl.text.trim();
+                        if (u.isNotEmpty) {
+                          launchUrl(
+                            Uri.parse(u),
+                            mode: LaunchMode.externalApplication,
+                          );
+                        }
+                      },
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                      ),
+                      icon: const Icon(
+                        Icons.open_in_browser_rounded,
+                        size: 13,
+                      ),
+                      label: const Text(
+                        'Abrir HTTPS',
+                        style: TextStyle(fontSize: 10.2),
+                      ),
+                    ),
+                  if (_connHttp)
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        final u = _connHttpUrlCtrl.text.trim();
+                        if (u.isNotEmpty) {
+                          launchUrl(
+                            Uri.parse(u),
+                            mode: LaunchMode.externalApplication,
+                          );
+                        }
+                      },
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                      ),
+                      icon: const Icon(Icons.public_rounded, size: 13),
+                      label: const Text(
+                        'Abrir HTTP',
+                        style: TextStyle(fontSize: 10.2),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+      const SizedBox(height: 10),
+    ];
+  }
+
+  // Sección C: CertScope, verificación de certificados HTTPS/TLS.
+  List<Widget> _buildGestionCertScope() {
+    return [
+      // ===============================================================
+      // SECCIÓN C (3ª GESTIÓN): CERTSCOPE — VERIFICACIÓN HTTPS/TLS
+      // ===============================================================
+      Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: _csEnabled
+              ? AppTheme.accentPurple.withValues(alpha: 0.08)
+              : AppTheme.bgSecondary,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: _csEnabled ? AppTheme.accentPurple : AppTheme.border,
+            width: _csEnabled ? 1.4 : 1.0,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.verified_user_rounded,
+                  size: 16,
+                  color: _csEnabled
+                      ? AppTheme.accentPurple
+                      : AppTheme.textSecondary,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '3. CERTSCOPE — VERIFICACIÓN HTTPS / TLS',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w900,
+                          color: _csEnabled
+                              ? AppTheme.textPrimary
+                              : AppTheme.textSecondary,
+                        ),
+                      ),
+                      const Text(
+                        'Comprueba caducidad de certificado SSL/TLS y sincroniza con 7. CertScope',
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          color: AppTheme.textSecondary,
                         ),
                       ),
                     ],
-                  ],
+                  ),
+                ),
+                Switch.adaptive(
+                  value: _csEnabled,
+                  activeThumbColor: AppTheme.accentPurple,
+                  onChanged: (v) => setState(() => _csEnabled = v),
+                ),
+              ],
+            ),
+            if (_csEnabled) ...[
+              const SizedBox(height: 7),
+              TextField(
+                controller: _csUrlCtrl,
+                style: const TextStyle(fontSize: 10.8),
+                decoration: _compactDeco(
+                  'URL / Host HTTPS a verificar en CertScope',
+                  hint: 'https://10.20.20.160:443/',
                 ),
               ),
-              const SizedBox(height: 10),
-
-              // 3. Enlaces en el Lienzo (Conectar con cualquier elemento cuando estamos en el Stack)
-              if (widget.stackNode != null) ...[
+              const SizedBox(height: 7),
+              Row(
+                children: [
+                  SizedBox(
+                    width: 90,
+                    child: TextField(
+                      controller: _csPortCtrl,
+                      style: const TextStyle(fontSize: 10.8),
+                      decoration: _compactDeco('Puerto TLS'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _csRenewalType,
+                      isExpanded: true,
+                      decoration: _compactDeco('Renovación'),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'manual',
+                          child: Text(
+                            '🔔 Manual (Avisar)',
+                            style: TextStyle(fontSize: 10.8),
+                          ),
+                        ),
+                        DropdownMenuItem(
+                          value: 'auto_acme',
+                          child: Text(
+                            '🤖 Automática ACME',
+                            style: TextStyle(fontSize: 10.8),
+                          ),
+                        ),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) {
+                          setState(() => _csRenewalType = v);
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              if ((_csSummary['common_name'] ?? '')
+                      .toString()
+                      .isNotEmpty ||
+                  (_csSummary['last_error'] ?? '')
+                      .toString()
+                      .isNotEmpty) ...[
+                const SizedBox(height: 7),
                 Container(
-                  padding: const EdgeInsets.all(9),
+                  padding: const EdgeInsets.all(7),
                   decoration: BoxDecoration(
-                    color: AppTheme.bgSecondary,
-                    borderRadius: BorderRadius.circular(8),
+                    color: AppTheme.bgPrimary,
+                    borderRadius: BorderRadius.circular(6),
                     border: Border.all(color: AppTheme.border),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'ENLACES EN EL STACK (${widget.nodeEdges.length})',
-                            style: const TextStyle(
-                              fontSize: 9.8,
-                              fontWeight: FontWeight.w900,
-                              color: AppTheme.accentCyan,
-                            ),
-                          ),
-                          if (widget.canEdit &&
-                              widget.onStartLinkMode != null)
-                            InkWell(
-                              onTap: widget.onStartLinkMode,
-                              child: const Text(
-                                '🔗 Clic para enlazar en lienzo',
-                                style: TextStyle(
-                                  fontSize: 9.8,
-                                  fontWeight: FontWeight.w800,
-                                  color: AppTheme.warning,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      if (widget.canEdit &&
-                          otherNodes.isNotEmpty &&
-                          widget.onQuickConnectToNode != null) ...[
-                        const SizedBox(height: 6),
-                        DropdownButtonFormField<int>(
-                          isExpanded: true,
-                          decoration: _compactDeco(
-                            '+ Conectar directamente con otro elemento...',
-                          ),
-                          items: otherNodes.map((n) {
-                            final nh = Map<String, dynamic>.from(
-                              (n['host'] as Map?) ?? {},
-                            );
-                            return DropdownMenuItem<int>(
-                              value: n['id'] as int,
-                              child: Text(
-                                '➔ ${nh['code']} (${n['custom_label'] ?? nh['name']})',
-                                style: const TextStyle(fontSize: 10.8),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            );
-                          }).toList(),
-                          onChanged: (targetId) {
-                            if (targetId != null) {
-                              widget.onQuickConnectToNode!(targetId);
-                            }
-                          },
+                      Text(
+                        (_csSummary['common_name'] ?? '')
+                                .toString()
+                                .isNotEmpty
+                            ? 'CN: ${_csSummary['common_name']} (${_csSummary['days_remaining'] ?? '?'} días)'
+                            : 'Estado TLS: ${_csSummary['status'] ?? 'Pendiente'}',
+                        style: const TextStyle(
+                          fontSize: 10.2,
+                          fontWeight: FontWeight.w800,
                         ),
-                      ],
-                      if (widget.nodeEdges.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        for (final e in widget.nodeEdges)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 3),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.sync_alt_rounded,
-                                  size: 12,
-                                  color: AppTheme.accentCyan,
-                                ),
-                                const SizedBox(width: 5),
-                                Expanded(
-                                  child: Text(
-                                    '${e['protocol_label']} (:${e['target_port'] ?? 443})',
-                                    style: const TextStyle(
-                                      fontSize: 10,
-                                      color: AppTheme.textSecondary,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                if (widget.canEdit &&
-                                    widget.onDeleteEdge != null)
-                                  InkWell(
-                                    onTap: () =>
-                                        widget.onDeleteEdge!(e['id'] as int),
-                                    child: const Icon(
-                                      Icons.close,
-                                      size: 13,
-                                      color: AppTheme.error,
-                                    ),
-                                  ),
-                              ],
-                            ),
+                      ),
+                      if ((_csSummary['issuer_cn'] ?? '')
+                          .toString()
+                          .isNotEmpty)
+                        Text(
+                          'CA: ${_csSummary['issuer_cn']} · Vence: ${(_csSummary['valid_until'] ?? '').toString().split('T').first}',
+                          style: const TextStyle(
+                            fontSize: 9.5,
+                            color: AppTheme.textSecondary,
                           ),
-                      ],
+                        ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 10),
               ],
-
-              // ===============================================================
-              // SECCIÓN A: HEARTBEAT (BACKGROUND MONITORING) — ESTILO DATACENTER
-              // ===============================================================
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppTheme.bgSecondary,
-                  borderRadius: BorderRadius.circular(9),
-                  border: Border.all(
-                    color: _hbEnabled
-                        ? AppTheme.success.withValues(alpha: 0.65)
-                        : AppTheme.border,
-                    width: _hbEnabled ? 1.4 : 1.0,
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 9,
-                          height: 9,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: _hbEnabled
-                                ? AppTheme.success
-                                : AppTheme.textMuted,
-                          ),
-                        ),
-                        const SizedBox(width: 7),
-                        Expanded(
-                          child: Text(
-                            _hbEnabled
-                                ? 'Heartbeat: ACTIVO (Background)'
-                                : 'Heartbeat: DESACTIVADO',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w900,
-                              color: _hbEnabled
-                                  ? AppTheme.success
-                                  : AppTheme.textSecondary,
-                            ),
-                          ),
-                        ),
-                        Switch.adaptive(
-                          value: _hbEnabled,
-                          activeThumbColor: AppTheme.success,
-                          onChanged: (v) => setState(() => _hbEnabled = v),
-                        ),
-                      ],
-                    ),
-                    if (_hbEnabled) ...[
-                      const SizedBox(height: 6),
-                      const Text(
-                        'Protocolos Heartbeat & Exporters Prometheus:',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                      const SizedBox(height: 5),
-                      Wrap(
-                        spacing: 5,
-                        runSpacing: 5,
-                        children: [
-                          FilterChip(
-                            visualDensity: VisualDensity.compact,
-                            label: const Text(
-                              'ICMP Ping',
-                              style: TextStyle(fontSize: 10.2),
-                            ),
-                            selected: _hbIcmp,
-                            onSelected: (v) => setState(() => _hbIcmp = v),
-                          ),
-                          FilterChip(
-                            visualDensity: VisualDensity.compact,
-                            label: const Text(
-                              'SSH',
-                              style: TextStyle(fontSize: 10.2),
-                            ),
-                            selected: _hbSsh,
-                            onSelected: (v) => setState(() => _hbSsh = v),
-                          ),
-                          FilterChip(
-                            visualDensity: VisualDensity.compact,
-                            label: const Text(
-                              'HTTP/HTTPS',
-                              style: TextStyle(fontSize: 10.2),
-                            ),
-                            selected: _hbHttp,
-                            onSelected: (v) => setState(() => _hbHttp = v),
-                          ),
-                          FilterChip(
-                            visualDensity: VisualDensity.compact,
-                            label: const Text(
-                              'TCP',
-                              style: TextStyle(fontSize: 10.2),
-                            ),
-                            selected: _hbTcp,
-                            onSelected: (v) => setState(() => _hbTcp = v),
-                          ),
-                          FilterChip(
-                            visualDensity: VisualDensity.compact,
-                            label: const Text(
-                              'UDP',
-                              style: TextStyle(fontSize: 10.2),
-                            ),
-                            selected: _hbUdp,
-                            onSelected: (v) => setState(() => _hbUdp = v),
-                          ),
-                          FilterChip(
-                            visualDensity: VisualDensity.compact,
-                            label: const Text(
-                              'SNMP',
-                              style: TextStyle(fontSize: 10.2),
-                            ),
-                            selected: _hbSnmp,
-                            onSelected: (v) => setState(() => _hbSnmp = v),
-                          ),
-                          FilterChip(
-                            visualDensity: VisualDensity.compact,
-                            label: const Text(
-                              'Node Exp :9100',
-                              style: TextStyle(fontSize: 10.2),
-                            ),
-                            selected: _expNode,
-                            onSelected: (v) => setState(() => _expNode = v),
-                          ),
-                          FilterChip(
-                            visualDensity: VisualDensity.compact,
-                            label: const Text(
-                              'Win Exp :9182',
-                              style: TextStyle(fontSize: 10.2),
-                            ),
-                            selected: _expWin,
-                            onSelected: (v) => setState(() => _expWin = v),
-                          ),
-                          FilterChip(
-                            visualDensity: VisualDensity.compact,
-                            label: const Text(
-                              'Nginx',
-                              style: TextStyle(fontSize: 10.2),
-                            ),
-                            selected: _expNginx,
-                            onSelected: (v) => setState(() => _expNginx = v),
-                          ),
-                          FilterChip(
-                            visualDensity: VisualDensity.compact,
-                            label: const Text(
-                              'Apache',
-                              style: TextStyle(fontSize: 10.2),
-                            ),
-                            selected: _expApache,
-                            onSelected: (v) => setState(() => _expApache = v),
-                          ),
-                          FilterChip(
-                            visualDensity: VisualDensity.compact,
-                            label: const Text(
-                              'Docker',
-                              style: TextStyle(fontSize: 10.2),
-                            ),
-                            selected: _expDocker,
-                            onSelected: (v) => setState(() => _expDocker = v),
-                          ),
-                          FilterChip(
-                            visualDensity: VisualDensity.compact,
-                            label: const Text(
-                              'PostgreSQL',
-                              style: TextStyle(fontSize: 10.2),
-                            ),
-                            selected: _expPostgres,
-                            onSelected: (v) =>
-                                setState(() => _expPostgres = v),
-                          ),
-                          FilterChip(
-                            visualDensity: VisualDensity.compact,
-                            label: const Text(
-                              'MySQL',
-                              style: TextStyle(fontSize: 10.2),
-                            ),
-                            selected: _expMysql,
-                            onSelected: (v) => setState(() => _expMysql = v),
-                          ),
-                          FilterChip(
-                            visualDensity: VisualDensity.compact,
-                            label: const Text(
-                              'Redis',
-                              style: TextStyle(fontSize: 10.2),
-                            ),
-                            selected: _expRedis,
-                            onSelected: (v) => setState(() => _expRedis = v),
-                          ),
-                          ActionChip(
-                            visualDensity: VisualDensity.compact,
-                            avatar: const Icon(
-                              Icons.add,
-                              size: 13,
-                              color: AppTheme.accentCyan,
-                            ),
-                            label: const Text(
-                              'Personalizado',
-                              style: TextStyle(
-                                fontSize: 10.2,
-                                fontWeight: FontWeight.w800,
-                                color: AppTheme.accentCyan,
-                              ),
-                            ),
-                            onPressed: () => setState(
-                              () => _showAddCustomCheckRow =
-                                  !_showAddCustomCheckRow,
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (_hbHttp) ...[
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            SizedBox(
-                              width: 82,
-                              child: DropdownButtonFormField<String>(
-                                initialValue: _hbHttpScheme,
-                                decoration: _compactDeco('Proto'),
-                                items: const [
-                                  DropdownMenuItem(
-                                    value: 'https',
-                                    child: Text(
-                                      'HTTPS',
-                                      style: TextStyle(fontSize: 10.5),
-                                    ),
-                                  ),
-                                  DropdownMenuItem(
-                                    value: 'http',
-                                    child: Text(
-                                      'HTTP',
-                                      style: TextStyle(fontSize: 10.5),
-                                    ),
-                                  ),
-                                ],
-                                onChanged: (v) => setState(
-                                  () => _hbHttpScheme = v ?? 'https',
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: TextField(
-                                controller: _hbHttpUrlCtrl,
-                                style: const TextStyle(fontSize: 10.8),
-                                decoration: _compactDeco('HTTP/S URL Check'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                      if (_hbTcp) ...[
-                        const SizedBox(height: 7),
-                        Row(
-                          children: [
-                            Expanded(
-                              flex: 2,
-                              child: TextField(
-                                controller: _hbTcpNameCtrl,
-                                style: const TextStyle(fontSize: 10.8),
-                                decoration: _compactDeco('Nombre TCP'),
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: TextField(
-                                controller: _hbTcpPortCtrl,
-                                style: const TextStyle(fontSize: 10.8),
-                                decoration: _compactDeco('Puerto TCP'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                      if (_hbUdp) ...[
-                        const SizedBox(height: 7),
-                        TextField(
-                          controller: _hbUdpPortCtrl,
-                          style: const TextStyle(fontSize: 10.8),
-                          decoration: _compactDeco('Puerto UDP Check'),
-                        ),
-                      ],
-                      if (_hbSnmp) ...[
-                        const SizedBox(height: 7),
-                        TextField(
-                          controller: _hbSnmpCommCtrl,
-                          style: const TextStyle(fontSize: 10.8),
-                          decoration: _compactDeco('Comunidad SNMP (:161)'),
-                        ),
-                      ],
-                      if (_showAddCustomCheckRow) ...[
-                        const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: AppTheme.bgCard,
-                            borderRadius: BorderRadius.circular(7),
-                            border: Border.all(
-                              color: AppTheme.accentCyan.withValues(alpha: 0.4),
-                            ),
-                          ),
-                          child: Column(
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    flex: 2,
-                                    child: TextField(
-                                      controller: _customChkNameCtrl,
-                                      style: const TextStyle(fontSize: 10.5),
-                                      decoration: _compactDeco('Servicio'),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 5),
-                                  Expanded(
-                                    child: TextField(
-                                      controller: _customChkTypeCtrl,
-                                      style: const TextStyle(fontSize: 10.5),
-                                      decoration: _compactDeco('Proto'),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 5),
-                                  SizedBox(
-                                    width: 64,
-                                    child: TextField(
-                                      controller: _customChkPortCtrl,
-                                      style: const TextStyle(fontSize: 10.5),
-                                      decoration: _compactDeco('Port'),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: TextField(
-                                      controller: _customChkUrlCtrl,
-                                      style: const TextStyle(fontSize: 10.5),
-                                      decoration: _compactDeco(
-                                        'Target / URL (opcional)',
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  ElevatedButton(
-                                    onPressed: () {
-                                      final nm = _customChkNameCtrl.text.trim();
-                                      if (nm.isEmpty) return;
-                                      setState(() {
-                                        _customChecks.add({
-                                          'name': nm,
-                                          'type': _customChkTypeCtrl.text
-                                              .trim(),
-                                          'port':
-                                              int.tryParse(
-                                                _customChkPortCtrl.text.trim(),
-                                              ) ??
-                                              8443,
-                                          'url':
-                                              _customChkUrlCtrl.text
-                                                  .trim()
-                                                  .isNotEmpty
-                                              ? _customChkUrlCtrl.text.trim()
-                                              : _ipCtrl.text.trim(),
-                                        });
-                                        _showAddCustomCheckRow = false;
-                                      });
-                                    },
-                                    child: const Text(
-                                      '+ Añadir',
-                                      style: TextStyle(fontSize: 10.5),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                      if (_customChecks.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        Wrap(
-                          spacing: 4,
-                          runSpacing: 4,
-                          children: _customChecks.asMap().entries.map((entry) {
-                            final idx = entry.key;
-                            final c = entry.value;
-                            return InputChip(
-                              visualDensity: VisualDensity.compact,
-                              label: Text(
-                                '${c['name']} (${c['type']}:${c['port']})',
-                                style: const TextStyle(fontSize: 9.8),
-                              ),
-                              onDeleted: () =>
-                                  setState(() => _customChecks.removeAt(idx)),
-                            );
-                          }).toList(),
-                        ),
-                      ],
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(height: 10),
-
-              // ===============================================================
-              // SECCIÓN B: CONECTAR (EJECUTADO DESDE EL FRONTEND) — ESTILO DATACENTER
-              // ===============================================================
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppTheme.bgSecondary,
-                  borderRadius: BorderRadius.circular(9),
-                  border: Border.all(
-                    color: _connEnabled
-                        ? AppTheme.accentBlue.withValues(alpha: 0.65)
-                        : AppTheme.border,
-                    width: _connEnabled ? 1.4 : 1.0,
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.terminal_rounded,
-                          size: 15,
-                          color: _connEnabled
-                              ? AppTheme.accentBlue
-                              : AppTheme.textMuted,
-                        ),
-                        const SizedBox(width: 7),
-                        Expanded(
-                          child: Text(
-                            _connEnabled
-                                ? 'Conectar: ACTIVO (Frontend)'
-                                : 'Conectar: DESACTIVADO',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w900,
-                              color: _connEnabled
-                                  ? AppTheme.accentBlue
-                                  : AppTheme.textSecondary,
-                            ),
-                          ),
-                        ),
-                        Switch.adaptive(
-                          value: _connEnabled,
-                          activeThumbColor: AppTheme.accentBlue,
-                          onChanged: (v) => setState(() => _connEnabled = v),
-                        ),
-                      ],
-                    ),
-                    if (_connEnabled) ...[
-                      const SizedBox(height: 5),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 5,
-                        children: [
-                          FilterChip(
-                            visualDensity: VisualDensity.compact,
-                            label: const Text(
-                              'SSH',
-                              style: TextStyle(fontSize: 10.2),
-                            ),
-                            selected: _connSsh,
-                            onSelected: (v) => setState(() => _connSsh = v),
-                          ),
-                          FilterChip(
-                            visualDensity: VisualDensity.compact,
-                            label: const Text(
-                              'HTTP',
-                              style: TextStyle(fontSize: 10.2),
-                            ),
-                            selected: _connHttp,
-                            onSelected: (v) => setState(() => _connHttp = v),
-                          ),
-                          FilterChip(
-                            visualDensity: VisualDensity.compact,
-                            label: const Text(
-                              'HTTPS',
-                              style: TextStyle(fontSize: 10.2),
-                            ),
-                            selected: _connHttps,
-                            onSelected: (v) => setState(() => _connHttps = v),
-                          ),
-                        ],
-                      ),
-                      if (_connSsh) ...[
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Expanded(
-                              flex: 2,
-                              child: TextField(
-                                controller: _connSshHostCtrl,
-                                style: const TextStyle(fontSize: 10.8),
-                                decoration: _compactDeco('SSH Host'),
-                              ),
-                            ),
-                            const SizedBox(width: 5),
-                            Expanded(
-                              child: TextField(
-                                controller: _connSshUserCtrl,
-                                style: const TextStyle(fontSize: 10.8),
-                                decoration: _compactDeco('User'),
-                              ),
-                            ),
-                            const SizedBox(width: 5),
-                            SizedBox(
-                              width: 62,
-                              child: TextField(
-                                controller: _connSshPortCtrl,
-                                style: const TextStyle(fontSize: 10.8),
-                                decoration: _compactDeco('Port'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                      if (_connHttp) ...[
-                        const SizedBox(height: 7),
-                        TextField(
-                          controller: _connHttpUrlCtrl,
-                          style: const TextStyle(fontSize: 10.8),
-                          decoration: _compactDeco('HTTP URL'),
-                        ),
-                      ],
-                      if (_connHttps) ...[
-                        const SizedBox(height: 7),
-                        TextField(
-                          controller: _connHttpsUrlCtrl,
-                          style: const TextStyle(fontSize: 10.8),
-                          decoration: _compactDeco('HTTPS URL'),
-                        ),
-                      ],
-                      const SizedBox(height: 8),
-                      // Botones de lanzamiento directo idénticos a Datacenter
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
-                          if (_connSsh && widget.onOpenSsh != null)
-                            OutlinedButton.icon(
-                              onPressed: widget.onOpenSsh,
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                              ),
-                              icon: const Icon(
-                                Icons.terminal_rounded,
-                                size: 13,
-                                color: AppTheme.accentCyan,
-                              ),
-                              label: const Text(
-                                'Conectar por SSH',
-                                style: TextStyle(fontSize: 10.2),
-                              ),
-                            ),
-                          if (_connHttps)
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                final u = _connHttpsUrlCtrl.text.trim();
-                                if (u.isNotEmpty) {
-                                  launchUrl(
-                                    Uri.parse(u),
-                                    mode: LaunchMode.externalApplication,
-                                  );
-                                }
-                              },
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                              ),
-                              icon: const Icon(
-                                Icons.open_in_browser_rounded,
-                                size: 13,
-                              ),
-                              label: const Text(
-                                'Abrir HTTPS',
-                                style: TextStyle(fontSize: 10.2),
-                              ),
-                            ),
-                          if (_connHttp)
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                final u = _connHttpUrlCtrl.text.trim();
-                                if (u.isNotEmpty) {
-                                  launchUrl(
-                                    Uri.parse(u),
-                                    mode: LaunchMode.externalApplication,
-                                  );
-                                }
-                              },
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                              ),
-                              icon: const Icon(Icons.public_rounded, size: 13),
-                              label: const Text(
-                                'Abrir HTTP',
-                                style: TextStyle(fontSize: 10.2),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(height: 10),
-
-              // ===============================================================
-              // SECCIÓN C (3ª GESTIÓN): CERTSCOPE — VERIFICACIÓN HTTPS/TLS
-              // ===============================================================
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: _csEnabled
-                      ? AppTheme.accentPurple.withValues(alpha: 0.08)
-                      : AppTheme.bgSecondary,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: _csEnabled ? AppTheme.accentPurple : AppTheme.border,
-                    width: _csEnabled ? 1.4 : 1.0,
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.verified_user_rounded,
-                          size: 16,
-                          color: _csEnabled
-                              ? AppTheme.accentPurple
-                              : AppTheme.textSecondary,
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '3. CERTSCOPE — VERIFICACIÓN HTTPS / TLS',
-                                style: TextStyle(
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.w900,
-                                  color: _csEnabled
-                                      ? AppTheme.textPrimary
-                                      : AppTheme.textSecondary,
-                                ),
-                              ),
-                              const Text(
-                                'Comprueba caducidad de certificado SSL/TLS y sincroniza con 7. CertScope',
-                                style: TextStyle(
-                                  fontSize: 9.5,
-                                  color: AppTheme.textSecondary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Switch.adaptive(
-                          value: _csEnabled,
-                          activeThumbColor: AppTheme.accentPurple,
-                          onChanged: (v) => setState(() => _csEnabled = v),
-                        ),
-                      ],
-                    ),
-                    if (_csEnabled) ...[
-                      const SizedBox(height: 7),
-                      TextField(
-                        controller: _csUrlCtrl,
-                        style: const TextStyle(fontSize: 10.8),
-                        decoration: _compactDeco(
-                          'URL / Host HTTPS a verificar en CertScope',
-                          hint: 'https://10.20.20.160:443/',
-                        ),
-                      ),
-                      const SizedBox(height: 7),
-                      Row(
-                        children: [
-                          SizedBox(
-                            width: 90,
-                            child: TextField(
-                              controller: _csPortCtrl,
-                              style: const TextStyle(fontSize: 10.8),
-                              decoration: _compactDeco('Puerto TLS'),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              initialValue: _csRenewalType,
-                              isExpanded: true,
-                              decoration: _compactDeco('Renovación'),
-                              items: const [
-                                DropdownMenuItem(
-                                  value: 'manual',
-                                  child: Text(
-                                    '🔔 Manual (Avisar)',
-                                    style: TextStyle(fontSize: 10.8),
-                                  ),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'auto_acme',
-                                  child: Text(
-                                    '🤖 Automática ACME',
-                                    style: TextStyle(fontSize: 10.8),
-                                  ),
-                                ),
-                              ],
-                              onChanged: (v) {
-                                if (v != null) {
-                                  setState(() => _csRenewalType = v);
-                                }
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-                      if ((_csSummary['common_name'] ?? '')
-                              .toString()
-                              .isNotEmpty ||
-                          (_csSummary['last_error'] ?? '')
-                              .toString()
-                              .isNotEmpty) ...[
-                        const SizedBox(height: 7),
-                        Container(
-                          padding: const EdgeInsets.all(7),
-                          decoration: BoxDecoration(
-                            color: AppTheme.bgPrimary,
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: AppTheme.border),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                (_csSummary['common_name'] ?? '')
-                                        .toString()
-                                        .isNotEmpty
-                                    ? 'CN: ${_csSummary['common_name']} (${_csSummary['days_remaining'] ?? '?'} días)'
-                                    : 'Estado TLS: ${_csSummary['status'] ?? 'Pendiente'}',
-                                style: const TextStyle(
-                                  fontSize: 10.2,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              if ((_csSummary['issuer_cn'] ?? '')
-                                  .toString()
-                                  .isNotEmpty)
-                                Text(
-                                  'CA: ${_csSummary['issuer_cn']} · Vence: ${(_csSummary['valid_until'] ?? '').toString().split('T').first}',
-                                  style: const TextStyle(
-                                    fontSize: 9.5,
-                                    color: AppTheme.textSecondary,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ],
-                  ],
-                ),
-              ),
             ],
+          ],
+        ),
+      ),
+    ];
+  }
+
+  // Cabecera del panel: título del elemento y accesos directos.
+  Widget _buildCabeceraDelPanel() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: const BoxDecoration(
+        color: AppTheme.bgSecondary,
+        border: Border(bottom: BorderSide(color: AppTheme.border)),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.tune_rounded,
+            size: 16,
+            color: AppTheme.accentCyan,
+          ),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              widget.isNewElement
+                  ? 'NUEVO ELEMENTO / HOST (CONFIGURACIÓN)'
+                  : 'ELEMENT SETTINGS • ${_codeCtrl.text}',
+              style: const TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w900,
+                color: AppTheme.textPrimary,
+                letterSpacing: 0.3,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (widget.onOpenFloatingCharts != null)
+            IconButton(
+              tooltip: 'Abrir Ventana Flotante de Gráficas Prometheus',
+              constraints: const BoxConstraints(),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              icon: const Icon(
+                Icons.analytics_outlined,
+                size: 16,
+                color: AppTheme.accentTeal,
+              ),
+              onPressed: widget.onOpenFloatingCharts,
+            ),
+          if (widget.isModalDialog && widget.onCloseModal != null)
+            IconButton(
+              constraints: const BoxConstraints(),
+              padding: const EdgeInsets.only(left: 4),
+              icon: const Icon(Icons.close, size: 16),
+              onPressed: widget.onCloseModal,
+            ),
+        ],
+      ),
+    );
+  }
+
+  // Barra inferior de guardado. Quien llama decide si se muestra,
+  // igual que antes hacía el 'if (widget.canEdit)' del árbol.
+  Widget _buildBarraDeGuardado() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: const BoxDecoration(
+        color: AppTheme.bgSecondary,
+        border: Border(top: BorderSide(color: AppTheme.border)),
+      ),
+      child: ElevatedButton.icon(
+        onPressed: _saving
+            ? null
+            : () async {
+                setState(() => _saving = true);
+                try {
+                  await widget.onSaveHostConfig(_buildSavePayload());
+                } finally {
+                  if (mounted) setState(() => _saving = false);
+                }
+              },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppTheme.accentBlue,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 10),
+        ),
+        icon: _saving
+            ? const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : const Icon(Icons.check_circle_outline_rounded, size: 16),
+        label: Text(
+          widget.isNewElement
+              ? 'Añadir Elemento y Aplicar Configuración'
+              : 'Aplicar Cambios del Elemento',
+          style: const TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w800,
           ),
         ),
-        // Barra inferior de guardado estilo Datacenter Settings
-        if (widget.canEdit)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(10),
-            decoration: const BoxDecoration(
-              color: AppTheme.bgSecondary,
-              border: Border(top: BorderSide(color: AppTheme.border)),
-            ),
-            child: ElevatedButton.icon(
-              onPressed: _saving
-                  ? null
-                  : () async {
-                      setState(() => _saving = true);
-                      try {
-                        await widget.onSaveHostConfig(_buildSavePayload());
-                      } finally {
-                        if (mounted) setState(() => _saving = false);
-                      }
-                    },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.accentBlue,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 10),
-              ),
-              icon: _saving
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.check_circle_outline_rounded, size: 16),
-              label: Text(
-                widget.isNewElement
-                    ? 'Añadir Elemento y Aplicar Configuración'
-                    : 'Aplicar Cambios del Elemento',
-                style: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ),
-      ],
+      ),
     );
   }
 }
