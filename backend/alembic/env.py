@@ -9,7 +9,12 @@ from app import models  # noqa: F401  (importa los modelos para que Base los reg
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False es obligatorio aquí: Alembic corre dentro
+    # del arranque de la aplicación, y con el valor por defecto (True) esta
+    # llamada apaga todos los loggers ya creados —los de uvicorn y los de
+    # 'rackdoc'—, de modo que a partir de la migración no se vuelve a ver una
+    # sola línea de registro.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
 

@@ -19,6 +19,9 @@ from ..models import (
     FloorDevice,
 )
 from ..seed import create_ports_from_template, ensure_rack_external_outlets
+from ..logging_setup import get_logger
+
+logger = get_logger(__name__)
 
 
 FLOOR_DEVICE_TYPE_LABELS: Dict[str, str] = {
@@ -1192,7 +1195,9 @@ def generate_datacenter_excel(
             ])
         _style_worksheet(ws_cmdb)
     except Exception:
-        pass
+        # El Excel se entrega igualmente, pero sin la hoja de CMDB: si no se
+        # registra, el usuario se descarga un fichero incompleto sin saberlo.
+        logger.error("No se pudo construir la hoja de CMDB del Excel.", exc_info=True)
 
     output = BytesIO()
     wb.save(output)

@@ -1,4 +1,3 @@
-from datetime import datetime
 from sqlalchemy import (
     Column,
     Integer,
@@ -12,6 +11,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from .database import Base
+from .time_utils import utcnow
 
 
 class ADServer(Base):
@@ -28,7 +28,7 @@ class ADServer(Base):
     default_role = Column(String(30), default="viewer")  # admin | editor | operator | viewer
     group_role_mapping = Column(JSON, default=list)  # Lista de {"group_name": str, "group_dn": str, "role": str}
     enabled = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     users = relationship("User", back_populates="ad_server")
 
@@ -51,7 +51,7 @@ class User(Base):
     ad_server_id = Column(Integer, ForeignKey("ad_servers.id", ondelete="SET NULL"), nullable=True)
     ad_dn = Column(String(255), default="")
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     ad_server = relationship("ADServer", back_populates="users")
 
@@ -319,7 +319,7 @@ class CmdbSubnet(Base):
     environment = Column(String(40), default="production")  # production | preprod | dev | mgmt | dmz | storage | cloud
     location_id = Column(Integer, ForeignKey("locations.id", ondelete="SET NULL"), nullable=True)
     notes = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     ip_addresses = relationship("CmdbIpAddress", back_populates="subnet")
 
@@ -370,8 +370,8 @@ class CmdbAsset(Base):
     management_links = Column(JSON, default=list)
     custom_fields = Column(JSON, default=dict)
     notes = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow)
 
     # Equipo de rack que hospeda este CI (por ejemplo, el host físico de una VM).
     # CmdbAsset tiene DOS claves ajenas hacia rack_devices (rack_device_id y
@@ -439,7 +439,7 @@ class HostGroup(Base):
     color_hex = Column(String(16), default="#1E3A8A")
     member_asset_ids = Column(JSON, default=list)  # Lista de CmdbAsset.id pertenecientes al grupo
     description = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class MonitoredServiceCheck(Base):
@@ -475,7 +475,7 @@ class MonitoredServiceCheck(Base):
     enabled = Column(Boolean, default=True)
     is_primary_heartbeat = Column(Boolean, default=False)
     last_checked_at = Column(DateTime, nullable=True)
-    last_state_change_at = Column(DateTime, default=datetime.utcnow)
+    last_state_change_at = Column(DateTime, default=utcnow)
 
 
 class SwitchSnmpPort(Base):
@@ -507,7 +507,7 @@ class SwitchSnmpPort(Base):
     lldp_neighbor_ip = Column(String(64), default="")
     lldp_neighbor_asset_id = Column(Integer, ForeignKey("cmdb_assets.id", ondelete="SET NULL"), nullable=True)
     synced_rack_port_id = Column(Integer, ForeignKey("ports.id", ondelete="SET NULL"), nullable=True)
-    last_polled_at = Column(DateTime, default=datetime.utcnow)
+    last_polled_at = Column(DateTime, default=utcnow)
 
 
 class LogicalTopologyLink(Base):
@@ -529,7 +529,7 @@ class LogicalTopologyLink(Base):
     status = Column(String(24), default="UP")  # UP | WARNING | DOWN | MAINTENANCE
     auto_discovered = Column(Boolean, default=False)
     notes = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class InfraConnector(Base):
@@ -556,7 +556,7 @@ class InfraConnector(Base):
     last_sync_at = Column(DateTime, nullable=True)
     last_sync_summary = Column(Text, default="")
     discovered_items_count = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class AlertContact(Base):
@@ -627,7 +627,7 @@ class MaintenanceWindow(Base):
     asset_id = Column(Integer, ForeignKey("cmdb_assets.id", ondelete="SET NULL"), nullable=True)
     host_group_id = Column(Integer, ForeignKey("network_host_groups.id", ondelete="SET NULL"), nullable=True)
     target_matches = Column(JSON, default=list)  # Lista de códigos, hostnames o IPs incluidos en mantenimiento
-    starts_at = Column(DateTime, default=datetime.utcnow)
+    starts_at = Column(DateTime, default=utcnow)
     ends_at = Column(DateTime, nullable=False)
     is_active = Column(Boolean, default=True)
     suppress_notifications = Column(Boolean, default=True)
@@ -637,7 +637,7 @@ class AlertNotificationLog(Base):
     __tablename__ = "network_alert_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
     asset_code = Column(String(80), default="")
     service_name = Column(String(120), default="")
     event_state = Column(String(40), default="HARD CRITICAL")
@@ -682,7 +682,7 @@ class TechStackDiagram(Base):
     criticality = Column(String(24), default="critical")
     map_scale = Column(Float, default=1.0)
     canvas_boxes = Column(JSON, default=list)  # Cajas/Zonas libres con texto/datos en esquina superior [{id, title, corner_data, pos_x, pos_y, width_px, height_px, color_hex}]
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class TechStackNode(Base):
@@ -783,8 +783,8 @@ class TlsCertificate(Base):
     last_notified_severity = Column(String(32), default="")
     renewal_notes = Column(Text, default="")
     notes = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     asset = relationship("CmdbAsset")
     rack_device = relationship("RackDevice")

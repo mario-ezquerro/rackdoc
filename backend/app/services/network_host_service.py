@@ -52,6 +52,10 @@ from .cmdb_service import (
     sync_physical_devices_to_cmdb,
 )
 from .monitor import check_host_connectivity
+from ..logging_setup import get_logger
+from ..time_utils import utcnow
+
+logger = get_logger(__name__)
 
 PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://rackdoc-prometheus:9090").rstrip("/")
 PROMETHEUS_PUBLIC_URL = os.getenv("PROMETHEUS_PUBLIC_URL", "http://localhost:9090").rstrip("/")
@@ -284,7 +288,7 @@ def is_asset_in_maintenance(
     host_groups_by_id: Dict[int, HostGroup],
 ) -> Optional[MaintenanceWindow]:
     """Comprueba si un Host/VM está cubierto por una ventana activa de mantenimiento (manual o Ansible)."""
-    now = datetime.utcnow()
+    now = utcnow()
     asset_ips = {ip.ip_address.strip() for ip in asset.ip_addresses if ip.ip_address}
     for win in active_windows:
         if not win.is_active or win.ends_at < now:
@@ -421,7 +425,7 @@ def _dispatch_alert_notification(
                 f"Servicio / Heartbeat: {service_name}\n"
                 f"Estado: {event_state}\n"
                 f"Detalle: {detail}\n"
-                f"Fecha UTC: {datetime.utcnow().isoformat()}\n"
+                f"Fecha UTC: {utcnow().isoformat()}\n"
             )
             with smtplib.SMTP(smtp_cfg.smtp_host, smtp_cfg.smtp_port, timeout=3.0) as server:
                 if smtp_cfg.use_tls:
@@ -457,9 +461,9 @@ def _check_ssl_days_remaining(host: str, port: int = 443, timeout_sec: float = 2
                 cert = ssock.getpeercert()
                 if cert and "notAfter" in cert:
                     exp_dt = datetime.strptime(cert["notAfter"], "%b %d %H:%M:%S %Y %Z")
-                    return max(0, (exp_dt - datetime.utcnow()).days)
+                    return max(0, (exp_dt - utcnow()).days)
     except Exception:
-        pass
+        logger.debug("Sondeo TLS fallido contra %s:%s.", host, port, exc_info=True)
     return None
 
 
@@ -539,7 +543,7 @@ def _scrape_real_exporter_metrics(host: str, port: int, check_type: str, timeout
                         elif line.startswith("BusyWorkers:"):
                             snapshot["busy_workers"] = int(line.split(":", 1)[1].strip())
     except Exception:
-        pass
+        logger.debug("No se pudo leer el estado de Apache/Nginx.", exc_info=True)
     return snapshot
 
 
@@ -555,7 +559,7 @@ def run_single_service_check(
     Apache, Nginx, Docker, Proxmox, VMware, PostgreSQL, Node/Windows Exporter) aplicando la
     máquina de estados de Nagios Core (SOFT 1..N -> HARD) sin ninguna simulación.
     """
-    now = datetime.utcnow()
+    now = utcnow()
     if active_windows is None:
         active_windows = (
             db.query(MaintenanceWindow)
@@ -781,7 +785,7 @@ def run_snmp_switch_discovery(
             monitor_port=port,
             status="online",
             last_ping_ms=lat,
-            last_checked_at=datetime.utcnow(),
+            last_checked_at=utcnow(),
         )
         db.add(asset)
         db.flush()
@@ -800,7 +804,7 @@ def run_snmp_switch_discovery(
                 is_heartbeat_ip=True,
                 allocation_status="assigned",
                 last_verification_status="active_in_network",
-                last_verified_at=datetime.utcnow(),
+                last_verified_at=utcnow(),
             )
         )
         db.commit()
@@ -818,7 +822,7 @@ def run_snmp_switch_discovery(
         }
 
     asset.last_ping_ms = lat if st == "online" else None
-    asset.last_checked_at = datetime.utcnow()
+    asset.last_checked_at = utcnow()
     asset.status = "online" if st == "online" else "offline"
     db.commit()
 
@@ -982,7 +986,7 @@ def _query_prom_range_series(promql: str, start_ts: int, end_ts: int, step_sec: 
                             values_by_ts[int(float(ts_val))] = round(v, 2)
                 return True, values_by_ts
     except Exception:
-        pass
+        logger.debug("Consulta a Prometheus fallida.", exc_info=True)
     return False, values_by_ts
 
 
@@ -1125,7 +1129,7 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
     """
     ensure_network_hosts_seeded(db)
 
-    now = datetime.utcnow()
+    now = utcnow()
     racks = {r.id: r for r in db.query(Rack).all()}
     rack_devs = {d.id: d for d in db.query(RackDevice).options(joinedload(RackDevice.template)).all()}
     assets = db.query(CmdbAsset).options(joinedload(CmdbAsset.ip_addresses)).order_by(CmdbAsset.id).all()
@@ -1990,7 +1994,7 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
     asset.responsible_person = str(payload.get("responsible_person") or "Alex Geng").strip()
     asset.monitoring_enabled = monitoring_enabled
     asset.status = "online" if monitoring_enabled else "unmonitored"
-    asset.last_checked_at = datetime.utcnow() if monitoring_enabled else None
+    asset.last_checked_at = utcnow() if monitoring_enabled else None
     if not monitoring_enabled:
         asset.last_ping_ms = None
     asset.notes = str(payload.get("notes") or "Registrado en Red & Host y CMDB").strip()
@@ -2142,7 +2146,7 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
                 is_heartbeat_ip=True,
                 allocation_status="assigned",
                 last_verification_status="active_in_network",
-                last_verified_at=datetime.utcnow(),
+                last_verified_at=utcnow(),
             )
         )
     else:
@@ -2176,7 +2180,7 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
                 is_heartbeat_ip=bool(extra_ip.get("is_heartbeat_ip", False)),
                 allocation_status="assigned",
                 last_verification_status="active_in_network",
-                last_verified_at=datetime.utcnow(),
+                last_verified_at=utcnow(),
             )
         )
 
@@ -2225,7 +2229,7 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
                     is_primary_heartbeat=True,
                     latency_ms=None,
                     status_output=f"Pendiente de sondeo ICMP a {primary_ip}",
-                    last_checked_at=datetime.utcnow(),
+                    last_checked_at=utcnow(),
                 )
             )
 
@@ -2247,7 +2251,7 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
                         state_type="SOFT",
                         latency_ms=None,
                         status_output=f"Pendiente de sondeo en {primary_ip}:{eport}",
-                        last_checked_at=datetime.utcnow(),
+                        last_checked_at=utcnow(),
                     )
                 )
 
@@ -2273,7 +2277,7 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
                         latency_ms=None,
                         ssl_days_remaining=None,
                         status_output=f"Pendiente de sondeo ({hurl}{f':{hport}' if hport and f':{hport}' not in hurl else ''})",
-                        last_checked_at=datetime.utcnow(),
+                        last_checked_at=utcnow(),
                     )
                 )
 
@@ -2364,24 +2368,24 @@ def handle_ansible_maintenance_webhook(db: Session, payload: Dict[str, Any]) -> 
                 hg = db.query(HostGroup).filter(HostGroup.id == win.host_group_id).first()
                 if hg and hg.code.upper() == hg_code:
                     win.is_active = False
-                    win.ends_at = datetime.utcnow()
+                    win.ends_at = utcnow()
                     closed_count += 1
                     continue
             if targets:
                 overlap = set(t.lower() for t in targets) & set(str(m).lower() for m in (win.target_matches or []))
                 if overlap:
                     win.is_active = False
-                    win.ends_at = datetime.utcnow()
+                    win.ends_at = utcnow()
                     closed_count += 1
             elif not hg_code and not targets:
                 win.is_active = False
-                win.ends_at = datetime.utcnow()
+                win.ends_at = utcnow()
                 closed_count += 1
         db.commit()
         return {"status": "ok", "action": "stopped", "closed_windows": closed_count}
 
     dur = max(1, int(payload.get("duration_minutes") or 45))
-    now = datetime.utcnow()
+    now = utcnow()
     hg_id = None
     scope = "ip_or_hostname_list"
     if hg_code:
@@ -2422,7 +2426,7 @@ def evaluate_all_network_service_checks(db: Session) -> Dict[str, Any]:
     el archivo de targets de Prometheus.
     """
     ensure_network_hosts_seeded(db)
-    now = datetime.utcnow()
+    now = utcnow()
     active_windows = (
         db.query(MaintenanceWindow)
         .filter(MaintenanceWindow.is_active == True, MaintenanceWindow.ends_at >= now)  # noqa: E712

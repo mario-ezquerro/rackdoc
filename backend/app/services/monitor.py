@@ -7,10 +7,10 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime
 from typing import Dict, Any, Tuple, List, Union
 from sqlalchemy.orm import Session
 from ..models import RackDevice, FloorDevice
+from ..time_utils import utcnow
 
 
 def _encode_ber_length(length: int) -> bytes:
@@ -481,7 +481,7 @@ def check_single_device(
 
     device.status = global_status
     device.last_ping_ms = best_latency
-    device.last_checked_at = datetime.utcnow()
+    device.last_checked_at = utcnow()
     cf["last_heartbeat_detail"] = summary_text
     cf["last_heartbeat_checks"] = check_results
     device.custom_fields = cf
@@ -578,7 +578,7 @@ def run_device_remote_console(
             "protocol": str(payload.get("protocol") or "ssh"),
             "target": device.ip_address or device.fqdn or "",
             "output": "⛔ La Conexión / Gestión Remota está deshabilitada en la configuración de este equipo.",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow().isoformat(),
         }
 
     action = str(payload.get("action") or payload.get("protocol") or "heartbeat").lower().strip()
@@ -608,7 +608,7 @@ def run_device_remote_console(
             "latency_ms": res["last_ping_ms"],
             "output": "\n".join(lines),
             "checks": res.get("checks", []),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow().isoformat(),
         }
 
     per_checks = dict(hb_cfg.get("checks") or {})
@@ -635,7 +635,7 @@ def run_device_remote_console(
             "target": target,
             "latency_ms": lat,
             "output": f"$ ping -c 2 {target}\n{raw_out}\n\n➔ Resultado: {det}",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow().isoformat(),
         }
 
     if action == "ssh":
@@ -684,7 +684,7 @@ def run_device_remote_console(
             "ssh_command": f"ssh -p {port} {user}@{target}",
             "ssh_uri": f"ssh://{user}@{target}:{port}",
             "output": "\n".join(lines),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow().isoformat(),
         }
 
     if action in ("http", "https"):
@@ -705,7 +705,7 @@ def run_device_remote_console(
             "url": url,
             "latency_ms": lat,
             "output": "\n".join(lines),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow().isoformat(),
         }
 
     if action == "snmp":
@@ -724,7 +724,7 @@ def run_device_remote_console(
             "port": port,
             "latency_ms": lat,
             "output": "\n".join(lines),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow().isoformat(),
         }
 
     # TCP o UDP
@@ -737,6 +737,6 @@ def run_device_remote_console(
         "port": port,
         "latency_ms": lat,
         "output": f"$ nc -zv {flag}{target} {port}\n{det}",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow().isoformat(),
     }
 

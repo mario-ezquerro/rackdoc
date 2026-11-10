@@ -4,6 +4,7 @@ from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..database import get_db
+from ..logging_setup import get_logger
 from ..models import CmdbAsset, Connection, DeviceTemplate, Floor, FloorDevice, Port, Rack, RackDevice, Room, TlsCertificate
 from ..rack_sync import _extract_floor_device_id_from_port, _sync_rack_floor_devices_box
 from ..schemas import ConnectionCreate, ConnectionSchema, ConnectionUpdate, ExternalOutletCreate, ExternalOutletUpdate, RackCreate, RackDeviceCreate, RackDeviceSchema, RackDeviceUpdate, RackUpdate
@@ -15,6 +16,9 @@ from ..services.certscope_service import (
     sync_or_probe_device_certificate,
     sync_entity_certscope_from_custom_fields,
 )
+
+logger = get_logger(__name__)
+
 
 @api_router.post(
     "/racks",
@@ -403,7 +407,15 @@ def add_device_to_rack(rack_id: int, payload: RackDeviceCreate, db: Session = De
                 )
                 db.refresh(device)
             except Exception:
-                pass
+                # El commit de arriba ya dejó guardado el resto del cambio, así
+                # que aquí solo se descarta la resolución de colisión fallida.
+                # Sin este rollback la sesión queda inservible y el siguiente
+                # commit revienta con un error que no dice de qué viene.
+                db.rollback()
+                logger.warning(
+                    "No se pudo resolver la colisión de IP %s del equipo %s.",
+                    (device.ip_address or "").strip(), device.id, exc_info=True,
+                )
     sync_entity_certscope_from_custom_fields(
         db,
         rack_device=device,
@@ -676,7 +688,15 @@ def update_rack_device(device_id: int, payload: RackDeviceUpdate, db: Session = 
                 )
                 db.refresh(device)
             except Exception:
-                pass
+                # El commit de arriba ya dejó guardado el resto del cambio, así
+                # que aquí solo se descarta la resolución de colisión fallida.
+                # Sin este rollback la sesión queda inservible y el siguiente
+                # commit revienta con un error que no dice de qué viene.
+                db.rollback()
+                logger.warning(
+                    "No se pudo resolver la colisión de IP %s del equipo %s.",
+                    (device.ip_address or "").strip(), device.id, exc_info=True,
+                )
 
     sync_entity_certscope_from_custom_fields(
         db,

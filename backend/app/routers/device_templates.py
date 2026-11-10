@@ -13,6 +13,9 @@ from ..models import DeviceTemplate, RackDevice
 from ..schemas import DeviceLibraryImportRequest, DeviceTemplateCreate, DeviceTemplateSchema, DeviceTemplateUpdate
 from ..security import MAX_EXTERNAL_DOWNLOAD_BYTES, assert_safe_external_url, no_redirect_opener
 from ..routers._common import api_router, public_router
+from ..logging_setup import get_logger
+
+logger = get_logger(__name__)
 
 @api_router.get(
     "/templates",
@@ -191,6 +194,7 @@ def search_hardware_photos(q: str = "server rack"):
                         }
                     )
         except Exception:
+            logger.debug("Búsqueda de imágenes en Wikimedia fallida.", exc_info=True)
             continue
 
     return {"query": query_str, "results": results[:12]}
