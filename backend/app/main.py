@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from .database import SessionLocal
 from .db_migrations import run_migrations
+from .logging_setup import configure_logging, get_logger
 from .models import Rack, User
 from .monitoring_settings import _background_heartbeat_loop, crear_evento_despertar_monitorizacion, despertar_monitorizacion
 from .rack_sync import _resync_rack_boxes
@@ -110,9 +111,8 @@ def _migrate_plaintext_passwords(db: Session) -> int:
         migrated += 1
     if migrated:
         db.commit()
-        print(
-            f"[RackDoc][seguridad] {migrated} contraseña(s) en texto plano migradas a bcrypt.",
-            flush=True,
+        get_logger(__name__).warning(
+            "%d contraseña(s) en texto plano migradas a bcrypt.", migrated
         )
     return migrated
 
@@ -124,16 +124,18 @@ def _ensure_demo_floor_devices(db: Session):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    nivel = configure_logging()
+    logger = get_logger(__name__)
+    logger.info("Registro iniciado (LOG_LEVEL=%s).", nivel)
     if JWT_SECRET_IS_EPHEMERAL:
-        print(
-            "[RackDoc][seguridad] JWT_SECRET no está configurado: se ha generado un "
-            "secreto aleatorio para este proceso. Las sesiones caducarán al reiniciar "
-            "y no se compartirán entre réplicas. Define JWT_SECRET en producción.",
-            flush=True,
+        logger.warning(
+            "JWT_SECRET no está configurado: se ha generado un secreto aleatorio "
+            "para este proceso. Las sesiones caducarán al reiniciar y no se "
+            "compartirán entre réplicas. Define JWT_SECRET en producción."
         )
     # El esquema lo gobierna Alembic (backend/alembic/versions), no create_all.
     accion = run_migrations()
-    print(f"[RackDoc][bd] Esquema al día mediante Alembic (acción: {accion}).", flush=True)
+    logger.info("Esquema al día mediante Alembic (acción: %s).", accion)
     db = SessionLocal()
     try:
         seed_initial_data(db)

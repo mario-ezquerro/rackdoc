@@ -13,6 +13,7 @@ import json
 from sqlalchemy.orm import Session
 
 from .. import models
+from ..time_utils import utcnow
 
 
 def clean_host_and_port(raw_host: str, default_port: int = 443) -> Tuple[str, int, str]:
@@ -97,7 +98,7 @@ def compute_cert_status_and_days(
             return "manual_unverified", None
         return ("unreachable" if probe_error else "unknown"), None
 
-    now = datetime.utcnow()
+    now = utcnow()
     delta_seconds = (valid_until - now).total_seconds()
     days_remaining = int(delta_seconds // 86400)
 
@@ -634,7 +635,7 @@ def sync_or_probe_device_certificate(
             contact_group_ids=contact_group_ids or [],
             contact_ids=contact_ids or [],
             notify_emails=notify_emails or "",
-            created_at=datetime.utcnow(),
+            created_at=utcnow(),
         )
         db.add(existing)
     else:
@@ -663,7 +664,7 @@ def sync_or_probe_device_certificate(
 
     # Intentar sondar el certificado HTTPS en vivo
     probe = probe_tls_certificate(host_clean, clean_port, existing.sni_hostname, timeout_sec=2.8)
-    existing.last_checked_at = datetime.utcnow()
+    existing.last_checked_at = utcnow()
     if probe.get("ok"):
         existing.common_name = probe.get("common_name") or host_clean
         existing.issuer_cn = probe.get("issuer_cn") or ""
@@ -694,7 +695,7 @@ def sync_or_probe_device_certificate(
             existing.last_probe_error,
         )
 
-    existing.updated_at = datetime.utcnow()
+    existing.updated_at = utcnow()
     db.flush()
     return existing
 
@@ -1196,7 +1197,7 @@ def send_certificate_expiry_notification(
     recipients_summary = ", ".join(recipient_labels) if recipient_labels else "Equipo de Seguridad & Sistemas"
 
     log_entry = models.AlertNotificationLog(
-        created_at=datetime.utcnow(),
+        created_at=utcnow(),
         asset_code=cert.code,
         service_name=f"CertScope SSL/TLS ({cert.common_name or cert.target_host}:{cert.port})",
         event_state="HARD CRITICAL" if status in ("expired", "critical") else f"CERTSCOPE {status.upper()}",
@@ -1208,7 +1209,7 @@ def send_certificate_expiry_notification(
     )
     db.add(log_entry)
 
-    cert.last_notified_at = datetime.utcnow()
+    cert.last_notified_at = utcnow()
     cert.last_notified_severity = status
     db.commit()
 

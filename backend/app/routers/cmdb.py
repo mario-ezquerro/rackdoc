@@ -1,6 +1,5 @@
 """CMDB, IPAM, verificación de direcciones IP y resolución de colisiones."""
 
-from datetime import datetime
 from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -16,6 +15,7 @@ from ..services.certscope_service import (
     sync_or_probe_device_certificate,
     sync_entity_certscope_from_custom_fields,
 )
+from ..time_utils import utcnow
 
 
 def _align_cmdb_asset_with_floor_device(
@@ -287,7 +287,7 @@ def update_cmdb_asset_endpoint(
             setattr(asset, k, v.strip().upper())
         else:
             setattr(asset, k, v)
-    asset.updated_at = datetime.utcnow()
+    asset.updated_at = utcnow()
 
     subnets = db.query(CmdbSubnet).all()
     if ip_inputs is not None:
@@ -452,7 +452,7 @@ def add_ip_to_cmdb_asset_endpoint(
         is_heartbeat_ip=payload.is_heartbeat_ip,
         allocation_status=payload.allocation_status or "assigned",
         last_verification_status="active_in_network",
-        last_verified_at=datetime.utcnow(),
+        last_verified_at=utcnow(),
         notes=payload.notes,
     )
     db.add(new_ip)

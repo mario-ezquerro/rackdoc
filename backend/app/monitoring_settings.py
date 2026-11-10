@@ -3,16 +3,19 @@
 import asyncio
 import json
 
-from datetime import datetime
 from sqlalchemy.orm import Session
 from typing import Optional
 
 from .database import DEFAULT_DB_PATH, SessionLocal
+from .logging_setup import get_logger
 from .models import FloorDevice, RackDevice
 from .services.monitor import check_all_monitored_devices
 from .services.network_host_service import evaluate_all_network_service_checks
+from .time_utils import utcnow
 
 MONITORING_SETTINGS_PATH = DEFAULT_DB_PATH.parent / "monitoring_settings.json"
+
+logger = get_logger(__name__)
 
 
 _monitoring_wakeup_event: Optional[asyncio.Event] = None
@@ -44,7 +47,10 @@ def _load_monitoring_settings() -> dict:
             if isinstance(raw, dict):
                 default_cfg.update(raw)
         except Exception:
-            pass
+            logger.warning(
+                "No se pudo leer %s; se usan los ajustes por defecto.",
+                MONITORING_SETTINGS_PATH, exc_info=True,
+            )
     sec = int(default_cfg.get("interval_seconds") or 300)
     default_cfg["interval_seconds"] = max(15, min(86400, sec))
     default_cfg["interval_minutes"] = max(1, round(default_cfg["interval_seconds"] / 60))
@@ -64,7 +70,12 @@ def _save_monitoring_settings(cfg: dict) -> dict:
             encoding="utf-8",
         )
     except Exception:
-        pass
+        # Importante que se vea: el usuario cambia el intervalo en la interfaz,
+        # la respuesta sale bien y el ajuste no sobrevive al reinicio.
+        logger.error(
+            "No se pudieron guardar los ajustes de monitorización en %s.",
+            MONITORING_SETTINGS_PATH, exc_info=True,
+        )
     return current
 
 
@@ -75,10 +86,14 @@ def _execute_background_monitoring_pass() -> list[dict]:
         try:
             evaluate_all_network_service_checks(db)
         except Exception:
-            pass
+            logger.error(
+                "La ronda de chequeos de servicio de red ha fallado entera; "
+                "los heartbeats de Red & Host no se han actualizado.",
+                exc_info=True,
+            )
         _save_monitoring_settings(
             {
-                "last_run_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+                "last_run_at": utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
                 "last_checked_count": len(results),
             }
         )

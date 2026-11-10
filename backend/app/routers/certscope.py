@@ -1,6 +1,5 @@
 """Módulo 7: CertScope — Auditoría y Caducidad de Certificados SSL/TLS (Automáticos y Manuales)."""
 
-from datetime import datetime
 from typing import Dict, Any
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -9,6 +8,7 @@ from .. import models, schemas
 from ..database import get_db
 from ..routers._common import api_router
 from ..services import certscope_service
+from ..time_utils import utcnow
 
 
 @api_router.get("/certscope/overview", tags=["CertScope SSL/TLS"])
@@ -96,8 +96,8 @@ def create_certificate(
         location_id=payload.location_id,
         renewal_notes=payload.renewal_notes or "",
         notes=payload.notes or "",
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=utcnow(),
+        updated_at=utcnow(),
     )
     db.add(cert)
     certscope_service.auto_link_certificate_entities(cert, db)
@@ -114,13 +114,13 @@ def create_certificate(
             cert.is_self_signed = bool(pem_res.get("is_self_signed"))
             cert.valid_from = pem_res.get("valid_from_dt") or cert.valid_from
             cert.valid_until = pem_res.get("valid_until_dt") or cert.valid_until
-            cert.last_checked_at = datetime.utcnow()
+            cert.last_checked_at = utcnow()
             cert.last_probe_error = ""
     elif cert.check_mode == "https_live" and cert.target_host:
         probe = certscope_service.probe_tls_certificate(
             cert.target_host, cert.port, cert.sni_hostname, timeout_sec=3.5
         )
-        cert.last_checked_at = datetime.utcnow()
+        cert.last_checked_at = utcnow()
         if probe.get("ok"):
             cert.common_name = probe.get("common_name") or cert.common_name or cert.target_host
             cert.issuer_cn = probe.get("issuer_cn") or cert.issuer_cn
@@ -256,7 +256,7 @@ def update_certificate(
         cert.check_mode,
         cert.last_probe_error or "",
     )
-    cert.updated_at = datetime.utcnow()
+    cert.updated_at = utcnow()
     db.commit()
     return certscope_service.build_certscope_overview(db)
 
@@ -283,7 +283,7 @@ def verify_single_certificate(
     if not cert:
         raise HTTPException(status_code=404, detail="Certificado no encontrado.")
 
-    cert.last_checked_at = datetime.utcnow()
+    cert.last_checked_at = utcnow()
     if cert.check_mode == "https_live" and cert.target_host:
         probe = certscope_service.probe_tls_certificate(
             cert.target_host, cert.port or 443, cert.sni_hostname or "", timeout_sec=3.8
@@ -312,7 +312,7 @@ def verify_single_certificate(
         cert.check_mode,
         cert.last_probe_error or "",
     )
-    cert.updated_at = datetime.utcnow()
+    cert.updated_at = utcnow()
     db.commit()
     return certscope_service.build_certscope_overview(db)
 
@@ -332,7 +332,7 @@ def verify_all_certificates(
             probe = certscope_service.probe_tls_certificate(
                 cert.target_host, cert.port or 443, cert.sni_hostname or "", timeout_sec=2.8
             )
-            cert.last_checked_at = datetime.utcnow()
+            cert.last_checked_at = utcnow()
             if probe.get("ok"):
                 cert.common_name = probe.get("common_name") or cert.common_name or cert.target_host
                 cert.issuer_cn = probe.get("issuer_cn") or cert.issuer_cn
@@ -357,7 +357,7 @@ def verify_all_certificates(
             cert.check_mode,
             cert.last_probe_error or "",
         )
-        cert.updated_at = datetime.utcnow()
+        cert.updated_at = utcnow()
 
         if (
             cert.notify_enabled

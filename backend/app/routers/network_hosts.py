@@ -1,6 +1,5 @@
 """Red y Host: topología lógica, chequeos Nagios, SNMP, avisos y tech-stacks."""
 
-from datetime import datetime
 from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from typing import Optional
@@ -10,6 +9,7 @@ from ..models import AlertContact, AlertContactGroup, CmdbAsset, HostGroup, Infr
 from ..schemas import AlertContactGroupInput, AlertContactInput, AnsibleHostUpsertWebhook, HostGroupInput, HostSshCommandInput, InfraConnectorInput, LogicalLinkInput, MaintenanceWindowInput, NotificationRoutingRuleInput, ServiceCheckInput, SmtpAlertConfigInput, SnmpWalkDiscoveryRequest, TechStackDiagramInput, TechStackDiagramUpdateInput, TechStackEdgeInput, TechStackEdgeUpdateInput, TechStackNodeInput, TechStackNodeMoveInput
 from ..routers._common import api_router
 from ..services.network_host_service import _dispatch_alert_notification, build_network_hosts_overview, ensure_network_hosts_seeded, evaluate_all_network_service_checks, execute_host_ssh_diagnostic, get_asset_telemetry_timeseries, handle_ansible_host_upsert_webhook, run_single_service_check, run_snmp_switch_discovery, sync_prometheus_targets_file
+from ..time_utils import utcnow
 
 @api_router.get(
     "/network-hosts/overview",
@@ -85,8 +85,8 @@ def create_service_check_endpoint(payload: ServiceCheckInput, db: Session = Depe
         state_type="HARD",
         current_attempt=1,
         enabled=payload.enabled,
-        last_checked_at=datetime.utcnow(),
-        last_state_change_at=datetime.utcnow(),
+        last_checked_at=utcnow(),
+        last_state_change_at=utcnow(),
     )
     db.add(chk)
     db.commit()
@@ -218,7 +218,7 @@ def create_infra_connector_endpoint(payload: InfraConnectorInput, db: Session = 
         extra_settings=payload.extra_settings or {},
         enabled=payload.enabled,
         last_sync_status="ok",
-        last_sync_at=datetime.utcnow(),
+        last_sync_at=utcnow(),
         last_sync_summary=f"Conector {payload.connector_type} registrado y sincronizado con Prometheus.",
         discovered_items_count=1,
     )
@@ -247,7 +247,7 @@ def sync_infra_connector_endpoint(connector_id: int, db: Session = Depends(get_d
             rack_device_id=conn.linked_rack_device_id,
         )
         conn.last_sync_status = "ok"
-        conn.last_sync_at = datetime.utcnow()
+        conn.last_sync_at = utcnow()
         conn.discovered_items_count = disc["discovered_ports_count"]
         conn.last_sync_summary = (
             f"SNMP Walk completado ({conn.endpoint_host}): {disc['discovered_ports_count']} bocas IF-MIB "
@@ -255,7 +255,7 @@ def sync_infra_connector_endpoint(connector_id: int, db: Session = Depends(get_d
         )
     else:
         conn.last_sync_status = "ok"
-        conn.last_sync_at = datetime.utcnow()
+        conn.last_sync_at = utcnow()
     db.commit()
     sync_prometheus_targets_file(db)
     return build_network_hosts_overview(db)
@@ -491,7 +491,7 @@ def delete_notification_rule_endpoint(rule_id: int, db: Session = Depends(get_db
 def create_maintenance_window_endpoint(payload: MaintenanceWindowInput, db: Session = Depends(get_db)):
     from datetime import timedelta as _timedelta
 
-    now = datetime.utcnow()
+    now = utcnow()
     win = MaintenanceWindow(
         title=payload.title.strip(),
         reason=payload.reason,
@@ -520,7 +520,7 @@ def stop_maintenance_window_endpoint(window_id: int, db: Session = Depends(get_d
     if not win:
         raise HTTPException(status_code=404, detail="Ventana de mantenimiento no encontrada.")
     win.is_active = False
-    win.ends_at = datetime.utcnow()
+    win.ends_at = utcnow()
     db.commit()
     return build_network_hosts_overview(db)
 

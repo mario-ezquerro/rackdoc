@@ -27,6 +27,10 @@ from ..models import (
     TechStackNode,
 )
 from .monitor import check_host_connectivity
+from ..logging_setup import get_logger
+from ..time_utils import utcnow
+
+logger = get_logger(__name__)
 
 
 ASSET_CLASS_LABELS: Dict[str, str] = {
@@ -443,6 +447,7 @@ def _lookup_arp_mac(target_ip: str) -> Optional[str]:
                 if mac != "FF:FF:FF:FF:FF:FF" and mac != "00:00:00:00:00:00":
                     return mac
         except Exception:
+            logger.debug("Lectura de la tabla ARP fallida.", exc_info=True)
             continue
     return None
 
@@ -844,7 +849,7 @@ def verify_ip_target_or_find_free(
             probe_outputs_by_ip[ip_key] = fut.result()
 
     # 3. Ensamblar resultados manteniendo el orden y actualizar registros CMDB + RackDevice existentes
-    now_dt = datetime.utcnow()
+    now_dt = utcnow()
     results: List[Dict[str, Any]] = []
     db_modified = False
 
@@ -991,10 +996,10 @@ def import_discovered_hosts_to_cmdb(
             if ptr_in and not existing_ip.fqdn:
                 existing_ip.fqdn = ptr_in
             existing_ip.last_verification_status = "active_in_network"
-            existing_ip.last_verified_at = datetime.utcnow()
+            existing_ip.last_verified_at = utcnow()
             if ast_ex:
                 ast_ex.status = "online"
-                ast_ex.last_checked_at = datetime.utcnow()
+                ast_ex.last_checked_at = utcnow()
                 if ptr_in and not ast_ex.fqdn:
                     ast_ex.fqdn = ptr_in
                 if item_loc_id is not None:
@@ -1006,7 +1011,7 @@ def import_discovered_hosts_to_cmdb(
                     rdev = db.query(RackDevice).filter(RackDevice.id == ast_ex.rack_device_id).first()
                     if rdev:
                         rdev.status = "online"
-                        rdev.last_checked_at = datetime.utcnow()
+                        rdev.last_checked_at = utcnow()
                         if mac_in and not rdev.mac_address:
                             rdev.mac_address = mac_in
                         if ptr_in and not rdev.fqdn:
@@ -1080,7 +1085,7 @@ def import_discovered_hosts_to_cmdb(
             monitor_method=mon_method,
             monitor_port=mon_port,
             status="online",
-            last_checked_at=datetime.utcnow(),
+            last_checked_at=utcnow(),
             custom_fields=custom_f,
             notes=str(item.get("notes") or f"Incorporado desde escaneo de rango ({ip_str})"),
         )
@@ -1102,7 +1107,7 @@ def import_discovered_hosts_to_cmdb(
             is_heartbeat_ip=True,
             allocation_status="assigned",
             last_verification_status="active_in_network",
-            last_verified_at=datetime.utcnow(),
+            last_verified_at=utcnow(),
             last_verification_detail="Añadido tras verificación de rango IP en CMDB",
         )
         db.add(new_ip_rec)
@@ -1152,7 +1157,7 @@ def check_cmdb_asset_heartbeat(db: Session, asset: CmdbAsset) -> Dict[str, Any]:
     if not target:
         asset.status = "offline"
         asset.last_ping_ms = None
-        asset.last_checked_at = datetime.utcnow()
+        asset.last_checked_at = utcnow()
         db.commit()
         return {
             "asset_id": asset.id,
@@ -1172,7 +1177,7 @@ def check_cmdb_asset_heartbeat(db: Session, asset: CmdbAsset) -> Dict[str, Any]:
         extra_config=dict(asset.custom_fields or {}),
         device_code=asset.code,
     )
-    now_dt = datetime.utcnow()
+    now_dt = utcnow()
     asset.status = st
     asset.last_ping_ms = lat
     asset.last_checked_at = now_dt
