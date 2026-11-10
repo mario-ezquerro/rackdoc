@@ -124,8 +124,16 @@ class _CmdbViewState extends State<CmdbView> {
       setState(() {
         _overview = data;
         if (subnets.isNotEmpty) {
-          final firstSubId = (subnets.first as Map)['id'] as int?;
-          _verifySelectedSubnetId ??= firstSubId;
+          final firstSub = Map<String, dynamic>.from(subnets.first as Map);
+          final firstSubId = firstSub['id'] as int?;
+          if (_verifySelectedSubnetId == null && firstSubId != null) {
+            _verifySelectedSubnetId = firstSubId;
+            final firstCidr = (firstSub['cidr'] ?? '').toString().trim();
+            if (firstCidr.isNotEmpty &&
+                _verifyIpCtrl.text.trim() == '192.168.2.0/24') {
+              _verifyIpCtrl.text = firstCidr;
+            }
+          }
           _selectedIpamSubnetId ??= firstSubId;
         }
         _loading = false;
@@ -576,8 +584,16 @@ class _CmdbViewState extends State<CmdbView> {
       setState(() {
         _overview = updatedOverview;
         if (subnets.isNotEmpty) {
-          final firstSubId = (subnets.first as Map)['id'] as int?;
-          _verifySelectedSubnetId ??= firstSubId;
+          final firstSub = Map<String, dynamic>.from(subnets.first as Map);
+          final firstSubId = firstSub['id'] as int?;
+          if (_verifySelectedSubnetId == null && firstSubId != null) {
+            _verifySelectedSubnetId = firstSubId;
+            final firstCidr = (firstSub['cidr'] ?? '').toString().trim();
+            if (firstCidr.isNotEmpty &&
+                _verifyIpCtrl.text.trim() == '192.168.2.0/24') {
+              _verifyIpCtrl.text = firstCidr;
+            }
+          }
           _selectedIpamSubnetId ??= firstSubId;
         }
         _importingDiscovered = false;
@@ -3805,8 +3821,57 @@ class _CmdbViewState extends State<CmdbView> {
                               child: Text('${s['cidr']} — ${s['name']}'),
                             );
                           }).toList(),
-                          onChanged: (v) =>
-                              setState(() => _verifySelectedSubnetId = v),
+                          onChanged: (v) {
+                            setState(() {
+                              _verifySelectedSubnetId = v;
+                              if (v != null) {
+                                final match = _subnets
+                                    .where((s) => s['id'] == v)
+                                    .firstOrNull;
+                                final cidr =
+                                    (match?['cidr'] ?? '').toString().trim();
+                                if (cidr.isNotEmpty) {
+                                  _verifyIpCtrl.text = cidr;
+                                }
+                              }
+                            });
+                          },
+                        ),
+                      ),
+                    ),
+                    FilledButton.icon(
+                      onPressed: _verifyingIp || _verifySelectedSubnetId == null
+                          ? null
+                          : () {
+                              final match = _subnets
+                                  .where(
+                                    (s) => s['id'] == _verifySelectedSubnetId,
+                                  )
+                                  .firstOrNull;
+                              final cidr =
+                                  (match?['cidr'] ?? '').toString().trim();
+                              if (cidr.isNotEmpty) {
+                                setState(() => _verifyIpCtrl.text = cidr);
+                                _runManualVerification(
+                                  customIp: cidr,
+                                  onlySuggestFree: false,
+                                );
+                              }
+                            },
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppPalette.blue600,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 15,
+                          vertical: 14,
+                        ),
+                      ),
+                      icon: const Icon(Icons.radar_rounded, size: 17),
+                      label: const Text(
+                        'Escanear Subred Seleccionada',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 12,
                         ),
                       ),
                     ),
@@ -3832,6 +3897,213 @@ class _CmdbViewState extends State<CmdbView> {
                       ),
                     ),
                   ],
+                ),
+                // Barra rápida de Rangos de la CMDB (Subredes dadas de alta + Rangos /24 autodetectados en activos) con botón directo de Escanear
+                Builder(
+                  builder: (context) {
+                    final explicitCidrs = <String>{};
+                    final rangeCards = <Map<String, dynamic>>[];
+
+                    for (final s in _subnets) {
+                      final cidr = (s['cidr'] ?? '').toString().trim();
+                      if (cidr.isEmpty) continue;
+                      explicitCidrs.add(cidr);
+                      rangeCards.add({
+                        'cidr': cidr,
+                        'label': (s['name'] ?? cidr).toString(),
+                        'subnet_id': s['id'] as int?,
+                        'vlan_id': s['vlan_id'],
+                        'occupied': s['occupied_count'] ?? 0,
+                        'is_explicit': true,
+                      });
+                    }
+
+                    final autoCounts = <String, int>{};
+                    for (final a in _assets) {
+                      final ip = (a['heartbeat_ip'] ?? '').toString().trim();
+                      final parts = ip.split('.');
+                      if (parts.length == 4) {
+                        final cidr24 =
+                            '${parts[0]}.${parts[1]}.${parts[2]}.0/24';
+                        if (!explicitCidrs.contains(cidr24)) {
+                          autoCounts[cidr24] = (autoCounts[cidr24] ?? 0) + 1;
+                        }
+                      }
+                    }
+                    for (final entry in autoCounts.entries) {
+                      rangeCards.add({
+                        'cidr': entry.key,
+                        'label': 'Rango detectado en CMDB',
+                        'subnet_id': null,
+                        'vlan_id': null,
+                        'occupied': entry.value,
+                        'is_explicit': false,
+                      });
+                    }
+
+                    if (rangeCards.isEmpty) return const SizedBox.shrink();
+
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 9,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppPalette.slate50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppPalette.slate200),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Row(
+                              children: [
+                                Icon(
+                                  Icons.lan_outlined,
+                                  size: 14,
+                                  color: AppPalette.blue700,
+                                ),
+                                SizedBox(width: 6),
+                                Text(
+                                  'RANGOS EN CMDB (Redes dadas de alta y rangos detectados en activos — Pulsa "Escanear" directamente):',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w900,
+                                    color: AppPalette.slate700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: rangeCards.map((rc) {
+                                final cidr = rc['cidr'] as String;
+                                final label = rc['label'] as String;
+                                final subId = rc['subnet_id'] as int?;
+                                final vlanId = rc['vlan_id'];
+                                final occ = rc['occupied'] as int;
+                                final isExp = rc['is_explicit'] as bool;
+                                final isCurrent =
+                                    _verifyIpCtrl.text.trim() == cidr;
+
+                                return Container(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    10,
+                                    5,
+                                    6,
+                                    5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: isCurrent
+                                        ? AppPalette.blue50
+                                        : Colors.white,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: isCurrent
+                                          ? AppPalette.blue600
+                                          : AppPalette.slate300,
+                                      width: isCurrent ? 1.5 : 1.0,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      InkWell(
+                                        onTap: () {
+                                          setState(() {
+                                            _verifyIpCtrl.text = cidr;
+                                            if (subId != null) {
+                                              _verifySelectedSubnetId = subId;
+                                            }
+                                          });
+                                        },
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              isExp
+                                                  ? Icons.hub_outlined
+                                                  : Icons.auto_awesome_mosaic,
+                                              size: 13,
+                                              color: isExp
+                                                  ? AppPalette.blue700
+                                                  : AppPalette.sky700,
+                                            ),
+                                            const SizedBox(width: 5),
+                                            Text(
+                                              cidr,
+                                              style: const TextStyle(
+                                                fontSize: 11.5,
+                                                fontFamily: 'monospace',
+                                                fontWeight: FontWeight.w900,
+                                                color: AppPalette.slate900,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 5),
+                                            Text(
+                                              '• $label${vlanId != null ? " (VLAN $vlanId)" : ""} ($occ eq.)',
+                                              style: const TextStyle(
+                                                fontSize: 10.8,
+                                                fontWeight: FontWeight.w600,
+                                                color: AppPalette.slate600,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      FilledButton.tonalIcon(
+                                        style: FilledButton.styleFrom(
+                                          visualDensity: VisualDensity.compact,
+                                          backgroundColor: AppPalette.blue600,
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 4,
+                                          ),
+                                          minimumSize: const Size(0, 26),
+                                        ),
+                                        onPressed: _verifyingIp
+                                            ? null
+                                            : () {
+                                                setState(() {
+                                                  _verifyIpCtrl.text = cidr;
+                                                  if (subId != null) {
+                                                    _verifySelectedSubnetId =
+                                                        subId;
+                                                  }
+                                                });
+                                                _runManualVerification(
+                                                  customIp: cidr,
+                                                  onlySuggestFree: false,
+                                                );
+                                              },
+                                        icon: const Icon(
+                                          Icons.radar_rounded,
+                                          size: 13,
+                                        ),
+                                        label: const Text(
+                                          'Escanear',
+                                          style: TextStyle(
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w900,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
                 ),
                 if (_verifyError != null) ...[
                   const SizedBox(height: 12),
