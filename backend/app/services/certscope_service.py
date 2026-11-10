@@ -281,10 +281,17 @@ def auto_link_certificate_entities(cert: models.TlsCertificate, db: Session) -> 
     host_clean, _, _ = clean_host_and_port(cert.target_host, cert.port)
 
     # 1. Si no tiene asset_id pero tiene rack_device_id o floor_device_id o host_clean
+    # No existe FloorDevice.cmdb_asset_id: la clave ajena vive en
+    # cmdb_assets.floor_device_id, así que se busca el activo por su columna,
+    # igual que el bloque de abajo hace con el equipo de rack.
     if not cert.asset_id and cert.floor_device_id:
-        fdev = db.query(models.FloorDevice).filter(models.FloorDevice.id == cert.floor_device_id).first()
-        if fdev and fdev.cmdb_asset_id:
-            cert.asset_id = fdev.cmdb_asset_id
+        asset_by_fdev = (
+            db.query(models.CmdbAsset)
+            .filter(models.CmdbAsset.floor_device_id == cert.floor_device_id)
+            .first()
+        )
+        if asset_by_fdev:
+            cert.asset_id = asset_by_fdev.id
 
     if not cert.asset_id and cert.rack_device_id:
         asset_by_rdev = (
@@ -796,10 +803,9 @@ def sync_entity_certscope_from_custom_fields(
             .first()
         )
     if floor_device and not cmdb_asset:
-        if floor_device.cmdb_asset_id:
-            cmdb_asset = db.query(models.CmdbAsset).filter(models.CmdbAsset.id == floor_device.cmdb_asset_id).first()
-        if not cmdb_asset:
-            cmdb_asset = db.query(models.CmdbAsset).filter(models.CmdbAsset.floor_device_id == floor_device.id).first()
+        # Antes se intentaba primero floor_device.cmdb_asset_id, que no existe.
+        # La consulta buena es esta: el activo apunta al dispositivo de planta.
+        cmdb_asset = db.query(models.CmdbAsset).filter(models.CmdbAsset.floor_device_id == floor_device.id).first()
     if cmdb_asset:
         if not rack_device and (cmdb_asset.rack_device_id or cmdb_asset.host_rack_device_id):
             r_id = cmdb_asset.rack_device_id or cmdb_asset.host_rack_device_id

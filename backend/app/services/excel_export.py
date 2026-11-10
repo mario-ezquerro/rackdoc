@@ -1454,8 +1454,8 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
                         name=loc_name,
                         latitude=40.4168,
                         longitude=-3.7038,
-                        pos_x=loc_pos_x,
-                        pos_y=loc_pos_y,
+                        plan_pos_x=loc_pos_x,
+                        plan_pos_y=loc_pos_y,
                     )
                     db.add(loc)
                     db.flush()
@@ -1797,18 +1797,18 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
                     continue
                 sp = (
                     db.query(Port)
-                    .filter(Port.device_id == s_dev.id, Port.port_number == s_port_num)
+                    .filter(Port.rack_device_id == s_dev.id, Port.port_number == s_port_num)
                     .first()
                 )
                 tp = (
                     db.query(Port)
-                    .filter(Port.device_id == t_dev.id, Port.port_number == t_port_num)
+                    .filter(Port.rack_device_id == t_dev.id, Port.port_number == t_port_num)
                     .first()
                 )
                 if not sp:
-                    sp = db.query(Port).filter(Port.device_id == s_dev.id).first()
+                    sp = db.query(Port).filter(Port.rack_device_id == s_dev.id).first()
                 if not tp:
-                    tp = db.query(Port).filter(Port.device_id == t_dev.id).first()
+                    tp = db.query(Port).filter(Port.rack_device_id == t_dev.id).first()
                 if not sp or not tp or sp.id == tp.id:
                     continue
                 busy = (

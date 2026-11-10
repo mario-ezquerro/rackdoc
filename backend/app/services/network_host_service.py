@@ -828,17 +828,24 @@ def run_snmp_switch_discovery(
     if st == "online" and sync_ports_to_rack_device and asset.rack_device_id:
         rdev = db.query(RackDevice).filter(RackDevice.id == asset.rack_device_id).first()
         if rdev:
-            existing_rports = {rp.name: rp for rp in db.query(Port).filter(Port.device_id == rdev.id).all()}
+            # Port se identifica por 'port_number' y su clave ajena es
+            # 'rack_device_id'. No tiene name / connector / speed_mbps /
+            # mac_address: la velocidad ya vive en SwitchSnmpPort, que queda
+            # enlazado por synced_rack_port_id.
+            existing_rports = {
+                rp.port_number: rp
+                for rp in db.query(Port).filter(Port.rack_device_id == rdev.id).all()
+            }
             for sp in existing_ports:
                 if sp.if_name not in existing_rports:
                     new_rp = Port(
-                        device_id=rdev.id,
-                        name=sp.if_name,
-                        port_type="data",
-                        connector="SFP+ (LC)" if sp.speed_mbps >= 10000 else "RJ45",
-                        speed_mbps=sp.speed_mbps,
-                        vlan=str(sp.vlan_id or 1),
-                        mac_address=sp.mac_address,
+                        rack_device_id=rdev.id,
+                        port_number=sp.if_name,
+                        label=sp.if_alias or "",
+                        # 'speed_mbps' puede venir a None por SNMP, de ahí el 'or 0'.
+                        port_type="sfp" if (sp.speed_mbps or 0) >= 10000 else "rj45",
+                        vlan=sp.vlan_id,
+                        mac_or_ip=sp.mac_address or "",
                     )
                     db.add(new_rp)
                     db.flush()
