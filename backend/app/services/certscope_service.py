@@ -321,14 +321,11 @@ def auto_link_certificate_entities(cert: models.TlsCertificate, db: Session) -> 
         if asset:
             if not cert.rack_device_id and asset.host_rack_device_id:
                 cert.rack_device_id = asset.host_rack_device_id
-            if not cert.floor_device_id:
-                fdev = (
-                    db.query(models.FloorDevice)
-                    .filter(models.FloorDevice.cmdb_asset_id == asset.id)
-                    .first()
-                )
-                if fdev:
-                    cert.floor_device_id = fdev.id
+            # El vínculo va de CmdbAsset hacia FloorDevice (columna
+            # cmdb_assets.floor_device_id), no al revés: FloorDevice no tiene
+            # cmdb_asset_id. Se lee igual que la línea de arriba para el rack.
+            if not cert.floor_device_id and asset.floor_device_id:
+                cert.floor_device_id = asset.floor_device_id
 
     # 3. Si sigue sin rack_device_id ni floor_device_id, buscar por IP/FQDN directo
     if not cert.rack_device_id and host_clean:
@@ -433,9 +430,12 @@ def serialize_certificate(
 
     fdev = cert.floor_device
     if not fdev and cert.asset_id:
+        # Igual que arriba: la columna vive en cmdb_assets.floor_device_id,
+        # así que se llega al dispositivo de planta a través del activo.
         fdev = (
             db.query(models.FloorDevice)
-            .filter(models.FloorDevice.cmdb_asset_id == cert.asset_id)
+            .join(models.CmdbAsset, models.CmdbAsset.floor_device_id == models.FloorDevice.id)
+            .filter(models.CmdbAsset.id == cert.asset_id)
             .first()
         )
     if fdev and fdev.floor:
