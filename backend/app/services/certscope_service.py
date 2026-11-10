@@ -217,45 +217,214 @@ def parse_pem_certificate(pem_text: str) -> Dict[str, Any]:
     }
 
 
+# Catálogo de puertos TLS/SSL habituales en entornos empresariales (Web, Tomcat, WildFly, JBoss, WebLogic, WebSphere, Proxmox, K8s, LDAPS, STARTTLS)
+STANDARD_TLS_PORTS_CATALOG: List[Dict[str, Any]] = [
+    {"port": 443, "service": "HTTPS / Reverse Proxy (Nginx / Apache / IIS / Firewall)", "starttls": ""},
+    {"port": 8443, "service": "Apache Tomcat / WildFly / JBoss / Spring Boot HTTPS", "starttls": ""},
+    {"port": 9993, "service": "WildFly / JBoss EAP Management Console HTTPS", "starttls": ""},
+    {"port": 9443, "service": "IBM WebSphere / OpenLiberty / WSO2 / Portainer HTTPS", "starttls": ""},
+    {"port": 9043, "service": "IBM WebSphere Admin Console HTTPS", "starttls": ""},
+    {"port": 7002, "service": "Oracle WebLogic Server SSL", "starttls": ""},
+    {"port": 8006, "service": "Proxmox VE Web / API HTTPS", "starttls": ""},
+    {"port": 6443, "service": "Kubernetes API Server TLS", "starttls": ""},
+    {"port": 8444, "service": "Tomcat / App Server HTTPS Secundario", "starttls": ""},
+    {"port": 9090, "service": "Cockpit Linux / Prometheus TLS", "starttls": ""},
+    {"port": 10000, "service": "Webmin / Virtualmin HTTPS", "starttls": ""},
+    {"port": 10443, "service": "FortiGate / VPN SSL Portal HTTPS", "starttls": ""},
+    {"port": 636, "service": "LDAPS (Active Directory / OpenLDAP SSL)", "starttls": ""},
+    {"port": 3269, "service": "Active Directory Global Catalog LDAPS", "starttls": ""},
+    {"port": 465, "service": "SMTPS (Correo Saliente SSL Implícito)", "starttls": ""},
+    {"port": 993, "service": "IMAPS (Correo Entrante SSL Implícito)", "starttls": ""},
+    {"port": 587, "service": "SMTP Submission (STARTTLS)", "starttls": "smtp"},
+    {"port": 389, "service": "LDAP (STARTTLS)", "starttls": "ldap"},
+    {"port": 5432, "service": "PostgreSQL Database (STARTTLS)", "starttls": "postgres"},
+]
+
+STARTTLS_BY_PORT: Dict[int, str] = {
+    25: "smtp",
+    587: "smtp",
+    143: "imap",
+    110: "pop3",
+    389: "ldap",
+    5432: "postgres",
+    3306: "mysql",
+    21: "ftp",
+}
+
+SERVICE_LABEL_BY_PORT: Dict[int, str] = {
+    item["port"]: item["service"] for item in STANDARD_TLS_PORTS_CATALOG
+}
+
+
+def _is_ip_literal(val: str) -> bool:
+    import ipaddress
+    try:
+        ipaddress.ip_address((val or "").strip())
+        return True
+    except ValueError:
+        return False
+
+
+def _probe_via_openssl_s_client(
+    host: str,
+    port: int,
+    sni: str = "",
+    starttls_proto: str = "",
+    timeout_sec: float = 4.0,
+) -> Dict[str, Any]:
+    """
+    Sondeo TLS todoterreno mediante `openssl s_client`:
+    - Soporta servidores Java antiguos (Tomcat 7/8/9, WildFly, JBoss, WebLogic, WebSphere) con DH pequeño, TLS 1.0/1.1 o renegociación legacy.
+    - Soporta protocolos con negociación STARTTLS (SMTP :587/:25, LDAP :389, IMAP :143, PostgreSQL :5432, MySQL :3306).
+    - Evita enviar IPs literales como SNI (`-noservername`) para no provocar `SSLHandshakeException` en motores JSSE (Tomcat/WildFly).
+    """
+    cmd = [
+        "openssl",
+        "s_client",
+        "-connect",
+        f"{host}:{port}",
+        "-showcerts",
+        "-cipher",
+        "ALL:@SECLEVEL=0",
+    ]
+    if sni and not _is_ip_literal(sni):
+        cmd.extend(["-servername", sni])
+    else:
+        cmd.append("-noservername")
+
+    eff_starttls = (starttls_proto or STARTTLS_BY_PORT.get(port, "")).strip().lower()
+    if eff_starttls in ("smtp", "imap", "pop3", "ldap", "postgres", "mysql", "ftp"):
+        cmd.extend(["-starttls", eff_starttls])
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            input="Q\n",
+            text=True,
+            capture_output=True,
+            timeout=max(2.5, timeout_sec),
+        )
+    except Exception as exc:
+        return {"ok": False, "error": f"Fallo ejecutando openssl s_client en {host}:{port}: {exc}"}
+
+    combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    m = re.search(
+        r"(-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----)",
+        combined,
+        flags=re.DOTALL,
+    )
+    if not m:
+        return {
+            "ok": False,
+            "error": f"No se obtuvo certificado X.509 en {host}:{port} tras probar TLS directo/legacy/STARTTLS.",
+        }
+
+    pem_block = m.group(1)
+    parsed = parse_pem_certificate(pem_block)
+    if not parsed.get("ok"):
+        return parsed
+
+    proto_m = re.search(r"Protocol\s*:\s*([^\s\r\n]+)", combined)
+    cipher_m = re.search(r"Cipher\s*(?:is|:)\s*([^\s\r\n]+)", combined)
+    parsed["target_host"] = host
+    parsed["port"] = port
+    parsed["sni_hostname"] = sni if not _is_ip_literal(sni) else ""
+    parsed["tls_version"] = proto_m.group(1) if proto_m else "TLS"
+    parsed["cipher_suite"] = cipher_m.group(1) if cipher_m else ""
+    parsed["detected_service"] = SERVICE_LABEL_BY_PORT.get(port, f"Servicio TLS (:{port})")
+    return parsed
+
+
 def probe_tls_certificate(
     target_host: str,
     port: int = 443,
     sni_hostname: str = "",
     timeout_sec: float = 3.8,
+    starttls_protocol: str = "",
 ) -> Dict[str, Any]:
-    """Conecta por TLS/SSL en vivo a `target_host:port` (aceptando autofirmados/PKI privada) y extrae el certificado X.509."""
+    """
+    Conecta por TLS/SSL en vivo a `target_host:port` y extrae el certificado X.509 contemplando todos los escenarios:
+    1. HTTPS / TLS estándar (443, 8443 Tomcat/WildFly, 9993 WildFly Admin, 9443 WebSphere, 7002 WebLogic, 8006 Proxmox, 6443 K8s, 636 LDAPS...).
+    2. Servidores Java JSSE (Tomcat / WildFly / JBoss / WebLogic): evita mandar IPs literales en la extensión SNI RFC 6066 (que provoca rechazo en Java) y reintenta sin SNI si fuera necesario.
+    3. TLS Legacy (TLS 1.0 / 1.1, claves DH/RSA pequeñas, SHA-1, renegociación legacy `SECLEVEL=0`).
+    4. Protocolos STARTTLS (SMTP :587/:25, LDAP :389, IMAP :143, PostgreSQL :5432, MySQL :3306) mediante fallback automático con `openssl s_client`.
+    """
     host, clean_port, default_sni = clean_host_and_port(target_host, port or 443)
     if not host:
         return {"ok": False, "error": "Debe indicar un host, dominio o dirección IP para conectar."}
 
-    sni = (sni_hostname or "").strip() or default_sni
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    raw_sni = (sni_hostname or "").strip() or default_sni
+    # En Tomcat/WildFly/JBoss (Java JSSE), enviar una IP literal como SNI viola RFC 6066 y puede abortar el handshake
+    effective_sni = "" if _is_ip_literal(raw_sni) else raw_sni
 
-    try:
-        with socket.create_connection((host, clean_port), timeout=timeout_sec) as raw_sock:
-            with ctx.wrap_socket(raw_sock, server_hostname=sni if sni else None) as ssock:
-                der_bytes = ssock.getpeercert(binary_form=True)
-                tls_version = ssock.version() or ""
-                cipher_info = ssock.cipher()
-                cipher_suite = cipher_info[0] if cipher_info else ""
-    except Exception as exc:
-        return {
-            "ok": False,
-            "target_host": host,
-            "port": clean_port,
-            "sni_hostname": sni,
-            "error": f"No se pudo establecer handshake TLS en {host}:{clean_port} ({exc})",
-        }
+    eff_starttls = (starttls_protocol or STARTTLS_BY_PORT.get(clean_port, "")).strip().lower()
+    if eff_starttls:
+        return _probe_via_openssl_s_client(
+            host=host,
+            port=clean_port,
+            sni=effective_sni,
+            starttls_proto=eff_starttls,
+            timeout_sec=timeout_sec,
+        )
 
+    der_bytes = None
+    tls_version = ""
+    cipher_suite = ""
+    last_exc: Optional[Exception] = None
+
+    # Intento 1: Contexto TLS flexible (con SECLEVEL=0 y OP_LEGACY_SERVER_CONNECT si están disponibles para soportar Tomcat/WildFly antiguos)
+    sni_candidates = [effective_sni, ""] if effective_sni else [""]
+    for sni_try in sni_candidates:
+        for use_legacy_ciphers in (False, True):
+            try:
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                if hasattr(ssl, "OP_LEGACY_SERVER_CONNECT"):
+                    ctx.options |= getattr(ssl, "OP_LEGACY_SERVER_CONNECT")
+                if use_legacy_ciphers:
+                    try:
+                        ctx.minimum_version = ssl.TLSVersion.MINIMUM_SUPPORTED
+                    except Exception:
+                        pass
+                    try:
+                        ctx.set_ciphers("ALL:@SECLEVEL=0")
+                    except Exception:
+                        pass
+                with socket.create_connection((host, clean_port), timeout=timeout_sec) as raw_sock:
+                    with ctx.wrap_socket(
+                        raw_sock,
+                        server_hostname=sni_try if sni_try else None,
+                    ) as ssock:
+                        der_bytes = ssock.getpeercert(binary_form=True)
+                        tls_version = ssock.version() or ""
+                        cipher_info = ssock.cipher()
+                        cipher_suite = cipher_info[0] if cipher_info else ""
+                if der_bytes:
+                    break
+            except Exception as exc:
+                last_exc = exc
+        if der_bytes:
+            break
+
+    # Intento 2: Fallback con `openssl s_client` (para handshakes peculiares de Java/WildFly/WebLogic o STARTTLS no estándar)
     if not der_bytes:
+        fallback = _probe_via_openssl_s_client(
+            host=host,
+            port=clean_port,
+            sni=effective_sni,
+            starttls_proto=eff_starttls,
+            timeout_sec=timeout_sec,
+        )
+        if fallback.get("ok"):
+            return fallback
         return {
             "ok": False,
             "target_host": host,
             "port": clean_port,
-            "sni_hostname": sni,
-            "error": f"El servidor {host}:{clean_port} no entregó ningún certificado X.509.",
+            "sni_hostname": effective_sni,
+            "detected_service": SERVICE_LABEL_BY_PORT.get(clean_port, f"Puerto :{clean_port}"),
+            "error": f"No se pudo establecer handshake TLS en {host}:{clean_port} ({last_exc or fallback.get('error', 'sin respuesta')})",
         }
 
     pem_text = ssl.DER_cert_to_PEM_cert(der_bytes)
@@ -265,16 +434,74 @@ def probe_tls_certificate(
             "ok": False,
             "target_host": host,
             "port": clean_port,
-            "sni_hostname": sni,
+            "sni_hostname": effective_sni,
             "error": parsed.get("error", "Error procesando certificado recibido."),
         }
 
     parsed["target_host"] = host
     parsed["port"] = clean_port
-    parsed["sni_hostname"] = sni
+    parsed["sni_hostname"] = effective_sni
     parsed["tls_version"] = tls_version
     parsed["cipher_suite"] = cipher_suite
+    parsed["detected_service"] = SERVICE_LABEL_BY_PORT.get(clean_port, f"Servicio TLS (:{clean_port})")
     return parsed
+
+
+def scan_host_tls_ports(
+    target_host: str,
+    sni_hostname: str = "",
+    extra_ports: Optional[List[int]] = None,
+    timeout_sec: float = 1.6,
+) -> List[Dict[str, Any]]:
+    """
+    Escanea en paralelo todos los puertos TLS/SSL habituales de un servidor (443, 8443 Tomcat/WildFly,
+    9993 WildFly Admin, 9443 WebSphere/Portainer, 7002 WebLogic, 8006 Proxmox, 6443 K8s, 636 LDAPS, 587 STARTTLS, etc.)
+    y devuelve todos los conectores donde se haya encontrado un certificado X.509 activo.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    host, explicit_port, default_sni = clean_host_and_port(target_host, 443)
+    if not host:
+        return []
+
+    candidate_ports: List[int] = []
+    if explicit_port and explicit_port not in candidate_ports:
+        candidate_ports.append(explicit_port)
+    for item in STANDARD_TLS_PORTS_CATALOG:
+        p = int(item["port"])
+        if p not in candidate_ports:
+            candidate_ports.append(p)
+    for ep in (extra_ports or []):
+        try:
+            p = int(ep)
+            if 1 <= p <= 65535 and p not in candidate_ports:
+                candidate_ports.append(p)
+        except Exception:
+            pass
+
+    def _check_single_port(p: int) -> Optional[Dict[str, Any]]:
+        # Primero comprobar rápidamente si el socket TCP abre antes de negociar TLS
+        try:
+            with socket.create_connection((host, p), timeout=min(1.1, timeout_sec)):
+                pass
+        except Exception:
+            return None
+        res = probe_tls_certificate(
+            target_host=host,
+            port=p,
+            sni_hostname=sni_hostname or default_sni,
+            timeout_sec=timeout_sec,
+        )
+        if res.get("ok"):
+            return res
+        return None
+
+    discovered: List[Dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=min(12, len(candidate_ports) or 1)) as pool:
+        for res in pool.map(_check_single_port, candidate_ports):
+            if res is not None:
+                discovered.append(res)
+    return discovered
 
 
 def auto_link_certificate_entities(cert: models.TlsCertificate, db: Session) -> None:
@@ -886,9 +1113,15 @@ def sync_entity_certscope_from_custom_fields(
         loc_id = floor_device.floor.location_id
 
     dev_name = getattr(primary_entity, "name", "") or target_host
+    svc_label = SERVICE_LABEL_BY_PORT.get(port, "")
+    cert_title = (
+        f"Certificado TLS {dev_name} ({svc_label.split('(')[0].strip()} :{port})"
+        if port != 443 and svc_label
+        else f"Certificado TLS {dev_name}"
+    )
     cert = sync_or_probe_device_certificate(
         db,
-        name=f"Certificado TLS {dev_name}",
+        name=cert_title,
         target_host=target_host,
         port=port,
         sni_hostname=sni_hostname,
@@ -902,6 +1135,49 @@ def sync_entity_certscope_from_custom_fields(
         location_id=loc_id,
     )
 
+    # Si el puerto por defecto (:443) no responde (p.ej. es un Tomcat en :8443, un WildFly en :8443/:9993,
+    # un WebLogic en :7002, un WebSphere en :9443, un Proxmox en :8006, un K8s en :6443 o LDAPS en :636),
+    # auto-escanear todos los puertos TLS estándar del host y registrar cada conector TLS encontrado
+    detected_ports_summary: List[Dict[str, Any]] = []
+    if cert and cert.status == "unreachable" and explicit_port is None:
+        discovered_list = scan_host_tls_ports(target_host, sni_hostname=sni_hostname, timeout_sec=1.5)
+        if discovered_list:
+            # Eliminar el registro :443 vacío si no era el puerto real y registrar todos los puertos TLS reales encontrados
+            if all(int(d.get("port") or 0) != port for d in discovered_list):
+                db.delete(cert)
+                db.flush()
+                cert = None
+            for idx, d_item in enumerate(discovered_list):
+                d_port = int(d_item.get("port") or 443)
+                d_svc = str(d_item.get("detected_service") or f"Puerto :{d_port}")
+                c_obj = sync_or_probe_device_certificate(
+                    db,
+                    name=f"Certificado TLS {dev_name} — {d_svc}",
+                    target_host=target_host,
+                    port=d_port,
+                    sni_hostname=sni_hostname,
+                    renewal_type=renewal_type,
+                    environment=getattr(cmdb_asset, "environment", "production") if cmdb_asset else "production",
+                    responsible_person=getattr(primary_entity, "responsible_person", "Alex Geng") or "Alex Geng",
+                    owner_team=getattr(cmdb_asset, "owner_team", "Seguridad & Sistemas") if cmdb_asset else "Seguridad & Sistemas",
+                    asset_id=cmdb_asset.id if cmdb_asset else None,
+                    rack_device_id=rack_device.id if rack_device else None,
+                    floor_device_id=floor_device.id if floor_device else None,
+                    location_id=loc_id,
+                )
+                if c_obj:
+                    if idx == 0:
+                        cert = c_obj
+                    detected_ports_summary.append(
+                        {
+                            "port": d_port,
+                            "service": d_svc,
+                            "common_name": c_obj.common_name or "",
+                            "days_remaining": c_obj.days_remaining,
+                            "status": c_obj.status,
+                        }
+                    )
+
     if cert:
         cs_summary = {
             "enabled": True,
@@ -910,6 +1186,8 @@ def sync_entity_certscope_from_custom_fields(
             "target_url": f"https://{cert.target_host}:{cert.port}",
             "target_host": cert.target_host,
             "port": cert.port,
+            "detected_service": SERVICE_LABEL_BY_PORT.get(cert.port, f"TLS :{cert.port}"),
+            "detected_ports": detected_ports_summary,
             "sni_hostname": cert.sni_hostname or "",
             "renewal_type": cert.renewal_type or "manual",
             "status": cert.status,
@@ -937,11 +1215,11 @@ def auto_discover_https_devices_into_certscope(
 ) -> Dict[str, int]:
     """
     Recorre los elementos creados en Rack Editor, Datacenter Planta y CMDB:
-    - Si tienen HTTPS activo (en 'certscope_config', 'connect_config', 'heartbeat_config' o 'MonitoredServiceCheck'),
-      los vincula y analiza automáticamente en CertScope.
-    - Si `probe_all_active_ips=True` (botón 'Auto-Analizar Equipos Existentes'), prueba además el puerto 443
-      en todos los equipos con IP de CMDB/Rack/Planta (salvo los que tengan CertScope desactivado explícitamente)
-      y registra aquellos que respondan por HTTPS/TLS o tengan verificación activa.
+    - Si tienen HTTPS/TLS activo (en 'certscope_config', 'connect_config', 'heartbeat_config' o 'MonitoredServiceCheck'),
+      los vincula y analiza automáticamente en CertScope (incluyendo múltiples puertos TLS por máquina, ej. :443 + :8443 Tomcat + :9993 WildFly).
+    - Si `probe_all_active_ips=True` (botón 'Auto-Analizar Equipos HTTPS'), escanea todos los puertos TLS empresariales
+      (`STANDARD_TLS_PORTS_CATALOG`: 443, 8443 Tomcat/WildFly, 9993 WildFly Admin, 9443 WebSphere/Portainer, 7002 WebLogic,
+      8006 Proxmox, 6443 K8s, 636 LDAPS, 587 STARTTLS, etc.) en todos los equipos de CMDB/Rack/Planta y registra cada conector TLS encontrado.
     """
     synced_count = 0
     probed_candidates = 0
@@ -974,9 +1252,14 @@ def auto_discover_https_devices_into_certscope(
         elif probe_all_active_ips and (rdev.ip_address or rdev.fqdn):
             probed_candidates += 1
             host = (rdev.ip_address or rdev.fqdn or "").strip()
-            probe = probe_tls_certificate(host, 443, rdev.fqdn or "", timeout_sec=1.8)
-            if probe.get("ok"):
-                cert = sync_entity_certscope_from_custom_fields(db, rack_device=rdev, explicit_enabled=True)
+            found_ports = scan_host_tls_ports(host, sni_hostname=rdev.fqdn or "", timeout_sec=1.4)
+            for fp in found_ports:
+                cert = sync_entity_certscope_from_custom_fields(
+                    db,
+                    rack_device=rdev,
+                    explicit_enabled=True,
+                    explicit_port=int(fp.get("port") or 443),
+                )
                 if cert:
                     synced_count += 1
 
@@ -1006,17 +1289,28 @@ def auto_discover_https_devices_into_certscope(
         elif probe_all_active_ips and (fdev.ip_address or fdev.fqdn):
             probed_candidates += 1
             host = (fdev.ip_address or fdev.fqdn or "").strip()
-            probe = probe_tls_certificate(host, 443, fdev.fqdn or "", timeout_sec=1.8)
-            if probe.get("ok"):
-                cert = sync_entity_certscope_from_custom_fields(db, floor_device=fdev, explicit_enabled=True)
+            found_ports = scan_host_tls_ports(host, sni_hostname=fdev.fqdn or "", timeout_sec=1.4)
+            for fp in found_ports:
+                cert = sync_entity_certscope_from_custom_fields(
+                    db,
+                    floor_device=fdev,
+                    explicit_enabled=True,
+                    explicit_port=int(fp.get("port") or 443),
+                )
                 if cert:
                     synced_count += 1
 
-    # 3. Máquinas y Activos en CMDB y Red & Host (incluyendo chequeos HTTPS de Nagios)
-    https_checks_by_asset = {}
+    # 3. Máquinas y Activos en CMDB y Red & Host (incluyendo TODOS los chequeos HTTPS/TLS de Nagios por máquina)
+    https_checks_by_asset: Dict[int, List[models.MonitoredServiceCheck]] = {}
     for chk in db.query(models.MonitoredServiceCheck).filter(models.MonitoredServiceCheck.enabled == True).all():
-        if chk.check_type == "https" or str(chk.target_ip_or_url or "").lower().startswith("https://"):
-            https_checks_by_asset[chk.asset_id] = chk
+        chk_port = int(chk.port or 0)
+        is_tls_chk = (
+            chk.check_type == "https"
+            or str(chk.target_ip_or_url or "").lower().startswith("https://")
+            or chk_port in (443, 8443, 9993, 9443, 9043, 7002, 8006, 6443, 636, 3269, 465, 993)
+        )
+        if is_tls_chk:
+            https_checks_by_asset.setdefault(chk.asset_id, []).append(chk)
 
     for asset in db.query(models.CmdbAsset).all():
         cf = dict(asset.custom_fields or {})
@@ -1034,37 +1328,45 @@ def auto_discover_https_devices_into_certscope(
             monitor_method=asset.monitor_method or "",
             monitor_port=asset.monitor_port or 443,
         )
-        has_https_chk = asset.id in https_checks_by_asset
-        if parsed["enabled"] or has_https_chk:
+        asset_tls_checks = https_checks_by_asset.get(asset.id, [])
+        if parsed["enabled"] or asset_tls_checks:
             existing = (
                 db.query(models.TlsCertificate)
                 .filter(models.TlsCertificate.asset_id == asset.id)
                 .first()
             )
             if not existing or probe_all_active_ips:
-                chk_port = https_checks_by_asset[asset.id].port if has_https_chk else None
+                ports_to_sync: List[int] = []
+                if parsed["enabled"] and parsed["port"]:
+                    ports_to_sync.append(int(parsed["port"]))
+                for chk in asset_tls_checks:
+                    p = int(chk.port or 443)
+                    if p not in ports_to_sync:
+                        ports_to_sync.append(p)
+                if not ports_to_sync:
+                    ports_to_sync.append(443)
+                for p in ports_to_sync:
+                    cert = sync_entity_certscope_from_custom_fields(
+                        db,
+                        cmdb_asset=asset,
+                        explicit_enabled=True,
+                        explicit_port=p,
+                    )
+                    if cert:
+                        synced_count += 1
+        elif probe_all_active_ips and (hb_ip or asset.fqdn):
+            probed_candidates += 1
+            host = (hb_ip or asset.fqdn or "").strip()
+            found_ports = scan_host_tls_ports(host, sni_hostname=asset.fqdn or "", timeout_sec=1.4)
+            for fp in found_ports:
                 cert = sync_entity_certscope_from_custom_fields(
                     db,
                     cmdb_asset=asset,
                     explicit_enabled=True,
-                    explicit_port=chk_port or parsed["port"] or 443,
+                    explicit_port=int(fp.get("port") or 443),
                 )
                 if cert:
                     synced_count += 1
-        elif probe_all_active_ips and (hb_ip or asset.fqdn):
-            existing = (
-                db.query(models.TlsCertificate)
-                .filter(models.TlsCertificate.asset_id == asset.id)
-                .first()
-            )
-            if not existing:
-                probed_candidates += 1
-                host = (hb_ip or asset.fqdn or "").strip()
-                probe = probe_tls_certificate(host, 443, asset.fqdn or "", timeout_sec=1.8)
-                if probe.get("ok"):
-                    cert = sync_entity_certscope_from_custom_fields(db, cmdb_asset=asset, explicit_enabled=True)
-                    if cert:
-                        synced_count += 1
 
     db.commit()
     return {"synced_count": synced_count, "probed_candidates": probed_candidates}

@@ -32,12 +32,67 @@ def probe_certificate_endpoint(
         res.pop("valid_until_dt", None)
         return res
 
+    req_port = int(payload.port or 0)
+    if req_port <= 0:
+        discovered = certscope_service.scan_host_tls_ports(
+            target_host=payload.target_host,
+            sni_hostname=payload.sni_hostname or "",
+            timeout_sec=1.6,
+        )
+        if discovered:
+            first = dict(discovered[0])
+            first.pop("valid_from_dt", None)
+            first.pop("valid_until_dt", None)
+            first["detected_ports"] = [
+                {
+                    "port": d.get("port"),
+                    "service": d.get("detected_service"),
+                    "common_name": d.get("common_name"),
+                    "days_remaining": d.get("days_remaining"),
+                }
+                for d in discovered
+            ]
+            return first
+        return {
+            "ok": False,
+            "target_host": payload.target_host,
+            "port": 443,
+            "error": (
+                f"No se detectó ningún servicio TLS/SSL activo en {payload.target_host} "
+                "tras escanear 443, 8443 (Tomcat/WildFly), 9993 (WildFly Admin), 9443 (WebSphere), "
+                "7002 (WebLogic), 8006 (Proxmox), 6443 (K8s), 636 (LDAPS) y 587 (STARTTLS)."
+            ),
+        }
+
     res = certscope_service.probe_tls_certificate(
         target_host=payload.target_host,
-        port=payload.port or 443,
+        port=req_port,
         sni_hostname=payload.sni_hostname or "",
-        timeout_sec=payload.timeout_sec or 4.0,
+        timeout_sec=payload.timeout_sec or 3.8,
     )
+    # Si el puerto solicitado (ej. :443 por defecto) falla, escanear automáticamente los puertos de Tomcat/WildFly/WebLogic/Proxmox/K8s/LDAPS
+    if not res.get("ok"):
+        discovered = certscope_service.scan_host_tls_ports(
+            target_host=payload.target_host,
+            sni_hostname=payload.sni_hostname or "",
+            timeout_sec=1.5,
+        )
+        if discovered:
+            first = dict(discovered[0])
+            first.pop("valid_from_dt", None)
+            first.pop("valid_until_dt", None)
+            first["auto_discovered_port"] = True
+            first["detected_ports"] = [
+                {
+                    "port": d.get("port"),
+                    "service": d.get("detected_service"),
+                    "common_name": d.get("common_name"),
+                    "days_remaining": d.get("days_remaining"),
+                }
+                for d in discovered
+            ]
+            return first
+
     res.pop("valid_from_dt", None)
     res.pop("valid_until_dt", None)
     return res

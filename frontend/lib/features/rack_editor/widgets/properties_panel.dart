@@ -663,9 +663,14 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
       });
       if (!mounted) return;
       setState(() {
+        if (res['port'] != null) {
+          _certScopePortCtrl.text = '${res['port']}';
+        }
         _certScopeSummary = {
           ..._certScopeSummary,
           'enabled': _certScopeEnabled,
+          'port': res['port'] ?? port,
+          'detected_service': res['detected_service'] ?? '',
           'status': res['status'] ?? (res['ok'] == true ? 'valid' : 'unreachable'),
           'days_remaining': res['days_remaining'],
           'common_name': res['common_name'] ?? '',
@@ -2232,8 +2237,48 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
               ] else ...[
                 const Divider(height: 14),
                 _CompactInput(
-                  label: 'URL / Host HTTPS a verificar (ej. https://10.28.0.10:443/)',
+                  label: 'URL / Host TLS a verificar (ej. https://10.28.0.10:8443/)',
                   controller: _certScopeUrlCtrl,
+                ),
+                const SizedBox(height: 5),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: [
+                    for (final pItem in const [
+                      {'p': '443', 'l': 'Web :443'},
+                      {'p': '8443', 'l': 'Tomcat/WildFly :8443'},
+                      {'p': '9993', 'l': 'WildFly Admin :9993'},
+                      {'p': '9443', 'l': 'WebSphere :9443'},
+                      {'p': '7002', 'l': 'WebLogic :7002'},
+                      {'p': '8006', 'l': 'Proxmox :8006'},
+                      {'p': '636', 'l': 'LDAPS :636'},
+                      {'p': '587', 'l': 'STARTTLS :587'},
+                    ])
+                      InkWell(
+                        onTap: () => setState(() => _certScopePortCtrl.text = pItem['p']!),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: _certScopePortCtrl.text.trim() == pItem['p']
+                                ? AppPalette.violet600
+                                : Colors.white,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: AppPalette.slate300),
+                          ),
+                          child: Text(
+                            pItem['l']!,
+                            style: TextStyle(
+                              fontSize: 9.2,
+                              fontWeight: FontWeight.w700,
+                              color: _certScopePortCtrl.text.trim() == pItem['p']
+                                  ? Colors.white
+                                  : AppPalette.slate700,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 6),
                 Row(

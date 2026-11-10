@@ -1109,9 +1109,13 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
       });
       if (!mounted) return;
       setState(() {
+        if (res['port'] != null) {
+          _fdCertScopePortCtrl.text = '${res['port']}';
+        }
         _fdCertScopeSummary = {
           ..._fdCertScopeSummary,
           'enabled': _fdCertScopeEnabled,
+          'port': res['port'] ?? port,
           'status': res['status'] ?? (res['ok'] == true ? 'valid' : 'unreachable'),
           'days_remaining': res['days_remaining'],
           'common_name': res['common_name'] ?? '',

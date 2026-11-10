@@ -12640,8 +12640,48 @@ class _DatacenterStyleHostConfigPanelState
                 style: const TextStyle(fontSize: 10.8),
                 decoration: _compactDeco(
                   'URL / Host HTTPS a verificar en CertScope',
-                  hint: 'https://10.20.20.160:443/',
+                  hint: 'https://10.20.20.160:8443/',
                 ),
+              ),
+              const SizedBox(height: 5),
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: [
+                  for (final pItem in const [
+                    {'p': '443', 'l': 'Web :443'},
+                    {'p': '8443', 'l': 'Tomcat/WildFly :8443'},
+                    {'p': '9993', 'l': 'WildFly Admin :9993'},
+                    {'p': '9443', 'l': 'WebSphere :9443'},
+                    {'p': '7002', 'l': 'WebLogic :7002'},
+                    {'p': '8006', 'l': 'Proxmox :8006'},
+                    {'p': '636', 'l': 'LDAPS :636'},
+                    {'p': '587', 'l': 'STARTTLS :587'},
+                  ])
+                    InkWell(
+                      onTap: () => setState(() => _csPortCtrl.text = pItem['p']!),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: _csPortCtrl.text.trim() == pItem['p']
+                              ? AppTheme.accentPurple
+                              : AppTheme.bgPrimary,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: AppTheme.border),
+                        ),
+                        child: Text(
+                          pItem['l']!,
+                          style: TextStyle(
+                            fontSize: 9.2,
+                            fontWeight: FontWeight.w700,
+                            color: _csPortCtrl.text.trim() == pItem['p']
+                                ? Colors.white
+                                : AppTheme.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
               const SizedBox(height: 7),
               Row(

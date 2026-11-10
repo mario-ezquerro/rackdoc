@@ -7187,8 +7187,13 @@ class _CmdbViewState extends State<CmdbView> {
                                               });
                                           setModalState(() {
                                             probingCertNow = false;
+                                            if (res['port'] != null) {
+                                              certscopePortCtrl.text = '${res['port']}';
+                                            }
                                             certProbeResult = {
                                               ...certProbeResult,
+                                              'port': res['port'],
+                                              'detected_service': res['detected_service'] ?? '',
                                               'status':
                                                   res['status'] ??
                                                   (res['ok'] == true

@@ -366,3 +366,51 @@ curl -X POST "http://localhost:8180/api/v1/certscope/certificates" \
     "renewal_notes": "Generar CSR en FortiGate Cluster y firmar en servidor AD CS interno antes del vencimiento."
   }'
 ```
+
+---
+
+## 8. Escenarios Especiales: Apache Tomcat, WildFly / JBoss, WebLogic, WebSphere, STARTTLS y Keystores Java (`JKS` / `PKCS12`)
+
+El motor de auto-verificación de **CertScope** contempla tanto servidores web estándar como servidores de aplicaciones Java, consolas de gestión con TLS antiguo y servicios con negociación `STARTTLS`:
+
+1. **Auto-Descubrimiento Multi-Puerto (`STANDARD_TLS_PORTS_CATALOG`)**:
+   - Cuando activas **`3. CertScope`** en una máquina o pulsas **«Auto-Analizar Equipos HTTPS»** (o **«🔍 Escanear Todos los Puertos TLS»**), si el puerto `:443` no responde o hay varios conectores, RackDoc escanea en paralelo:
+     - `:443` — HTTPS Estándar / Nginx / Apache / IIS / Balanceadores
+     - `:8443` — **Apache Tomcat / WildFly / JBoss EAP / Spring Boot / Jenkins / Nexus**
+     - `:9993` — **WildFly / JBoss EAP Management Console** (`management-https`)
+     - `:9443` / `:9043` — **IBM WebSphere / OpenLiberty / WSO2 / Portainer**
+     - `:7002` — **Oracle WebLogic Server SSL**
+     - `:8006` — **Proxmox VE** · `:6443` — **Kubernetes API** · `:9090` — **Cockpit** · `:10000` — **Webmin**
+     - `:636` / `:3269` — **LDAPS / Active Directory Global Catalog**
+     - `:465` / `:993` — **SMTPS / IMAPS**
+     - `:587` (SMTP), `:389` (LDAP), `:5432` (PostgreSQL) — **Negociación `STARTTLS`**
+   - Si una misma máquina tiene varios conectores TLS activos (por ejemplo, **WildFly** en `:8443` para la app y `:9993` para administración), **CertScope registra y monitoriza cada puerto como un certificado independiente** vinculado a la misma máquina.
+2. **Compatibilidad con Java JSSE (RFC 6066 SNI) y TLS Legacy (`SECLEVEL=0`)**:
+   - Los motores Java (`sun.security.ssl` en Tomcat/WildFly/JBoss/WebLogic) rechazan el handshake si se envía una dirección IP literal dentro de la extensión `server_name` (SNI). CertScope detecta automáticamente si el objetivo es una IP y omite el SNI literal (`-noservername`), además de soportar `ALL:@SECLEVEL=0` y renegociación legacy para servidores Java 7/8 o iDRAC/iLO antiguos.
+3. **Extracción desde Keystore Java Local (`JKS` / `PKCS12` `.p12`) vía Ansible o `keytool` (cuando el puerto está cerrado al exterior)**:
+   - Si un Tomcat o WildFly está en una red aislada sin acceso desde RackDoc, puedes extraer el PEM directamente del `keystore.jks` o `keystore.p12` con `keytool` y enviarlo a `POST /api/v1/certscope/certificates` para que RackDoc calcule automáticamente su `CN`, `CA`, `SHA-256` y fecha de caducidad:
+
+```bash
+# Extraer certificado X.509 en formato PEM desde un Keystore JKS/PKCS12 de Tomcat o WildFly y subirlo a CertScope
+PEM_CONTENT=$(keytool -exportcert -rfc -keystore /opt/wildfly/standalone/configuration/application.keystore -alias server -storepass changeit)
+
+curl -X POST "http://localhost:8180/api/v1/certscope/certificates" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d "$(jq -n \
+    --arg code "CERT-WILDFLY-ERP-8443" \
+    --arg name "WildFly ERP Keystore (application.keystore :8443)" \
+    --arg host "10.20.20.45" \
+    --arg pem "$PEM_CONTENT" \
+    '{
+      code: $code,
+      name: $name,
+      check_mode: "manual",
+      target_host: $host,
+      port: 8443,
+      pem_text: $pem,
+      renewal_type: "manual",
+      owner_team: "Middleware & Java Apps",
+      responsible_person: "Alex Geng"
+    }')"
+```

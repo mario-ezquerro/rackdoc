@@ -1524,15 +1524,16 @@ class _CertScopeViewState extends State<CertScopeView> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) {
-          Future<void> runLiveProbe() async {
+          Future<void> runLiveProbe({int? overridePort}) async {
             setModalState(() {
               probing = true;
               probeFeedback = null;
             });
             try {
+              final effPort = overridePort ?? (int.tryParse(portCtrl.text.trim()) ?? 443);
               final res = await widget.api.probeCertificate({
                 'target_host': hostCtrl.text.trim(),
-                'port': int.tryParse(portCtrl.text.trim()) ?? 443,
+                'port': effPort,
                 'sni_hostname': sniCtrl.text.trim(),
                 'pem_text': pemCtrl.text.trim(),
               });
@@ -1540,17 +1541,26 @@ class _CertScopeViewState extends State<CertScopeView> {
                 probing = false;
                 if (res['ok'] == true) {
                   probeOk = true;
+                  if (res['port'] != null) {
+                    portCtrl.text = '${res['port']}';
+                  }
                   cnCtrl.text = (res['common_name'] ?? '').toString();
                   issuerCnCtrl.text = (res['issuer_cn'] ?? '').toString();
                   issuerOrgCtrl.text = (res['issuer_org'] ?? '').toString();
                   sanCtrl.text = ((res['san_domains'] as List?) ?? []).join(', ');
                   validFromCtrl.text = (res['valid_from'] ?? '').toString().split('T').first;
                   validUntilCtrl.text = (res['valid_until'] ?? '').toString().split('T').first;
+                  final svcName = (res['detected_service'] ?? '').toString();
                   if (nameCtrl.text.trim().isEmpty) {
                     nameCtrl.text = 'Certificado TLS ${cnCtrl.text.isNotEmpty ? cnCtrl.text : hostCtrl.text}';
                   }
+                  final detPorts = ((res['detected_ports'] as List?) ?? [])
+                      .map((e) => ':${(e as Map)['port']} (${e['service']})')
+                      .join(', ');
                   probeFeedback =
-                      'Certificado X.509 extraído correctamente: CN=${cnCtrl.text} · Emisor=${issuerCnCtrl.text} · Vence=${validUntilCtrl.text} (${res['days_remaining']} días restantes).';
+                      'Certificado X.509 extraído en puerto :${portCtrl.text}${svcName.isNotEmpty ? ' [$svcName]' : ''}: '
+                      'CN=${cnCtrl.text} · Emisor=${issuerCnCtrl.text} · Vence=${validUntilCtrl.text} (${res['days_remaining']} días restantes).'
+                      '${detPorts.isNotEmpty ? '\nPuertos TLS detectados en este servidor: $detPorts' : ''}';
                 } else {
                   probeOk = false;
                   probeFeedback = (res['error'] ?? 'No se pudo obtener el certificado.').toString();
@@ -1974,7 +1984,7 @@ class _CertScopeViewState extends State<CertScopeView> {
                               backgroundColor: AppPalette.sky600,
                               foregroundColor: Colors.white,
                             ),
-                            onPressed: probing ? null : runLiveProbe,
+                            onPressed: probing ? null : () => runLiveProbe(),
                             icon: probing
                                 ? const SizedBox(
                                     width: 14,
@@ -1986,13 +1996,70 @@ class _CertScopeViewState extends State<CertScopeView> {
                                   )
                                 : const Icon(Icons.radar_rounded, size: 16),
                             label: const Text(
-                              'Probar HTTPS Ahora',
+                              'Probar TLS / Auto-Detectar',
                               style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
                             ),
                           ),
                         ],
                       ],
                     ),
+                    if (checkMode == 'https_live') ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          const Text(
+                            'Perfiles TLS (Web / Tomcat / WildFly / JBoss / STARTTLS):',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w800,
+                              color: AppPalette.slate700,
+                            ),
+                          ),
+                          for (final preset in const <Map<String, dynamic>>[
+                            {'port': 443, 'label': 'Web / Proxy :443'},
+                            {'port': 8443, 'label': 'Tomcat / WildFly / Spring :8443'},
+                            {'port': 9993, 'label': 'WildFly / JBoss Admin :9993'},
+                            {'port': 9443, 'label': 'WebSphere / Portainer :9443'},
+                            {'port': 7002, 'label': 'WebLogic SSL :7002'},
+                            {'port': 8006, 'label': 'Proxmox :8006'},
+                            {'port': 6443, 'label': 'K8s API :6443'},
+                            {'port': 636, 'label': 'LDAPS :636'},
+                            {'port': 587, 'label': 'SMTP STARTTLS :587'},
+                            {'port': 5432, 'label': 'PostgreSQL TLS :5432'},
+                            {'port': 0, 'label': '🔍 Escanear Todos los Puertos TLS'},
+                          ])
+                            ActionChip(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                              backgroundColor: portCtrl.text.trim() == '${preset['port']}'
+                                  ? AppPalette.blue100
+                                  : AppPalette.slate100,
+                              label: Text(
+                                preset['label'] as String,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: portCtrl.text.trim() == '${preset['port']}'
+                                      ? AppPalette.blue900
+                                      : AppPalette.slate800,
+                                ),
+                              ),
+                              onPressed: () {
+                                final p = preset['port'] as int;
+                                setModalState(() {
+                                  if (p > 0) portCtrl.text = '$p';
+                                });
+                                if (hostCtrl.text.trim().isNotEmpty) {
+                                  runLiveProbe(overridePort: p);
+                                }
+                              },
+                            ),
+                        ],
+                      ),
+                    ],
                     if (probeFeedback != null) ...[
                       const SizedBox(height: 8),
                       Container(
