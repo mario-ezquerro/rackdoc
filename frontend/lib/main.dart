@@ -64,6 +64,14 @@ class _RackDocShellState extends State<RackDocShell> {
   int? _highlightedDeviceId;
   int? _highlightedStackId;
   int? _highlightedStackNodeId;
+  int _sreInitialTabIndex = 0;
+
+  void _openSreAlarms({int tabIndex = 0}) {
+    setState(() {
+      _sreInitialTabIndex = tabIndex;
+      _activeNav = 'sre_alarms';
+    });
+  }
 
   // Estado de expansión del árbol jerárquico en la columna izquierda ("DATACENTERS & RACKS"):
   // Cada Datacenter tiene su triángulo (gira 90°) para mostrar sus Pisos, y cada Piso tiene su triángulo (gira 90°) para mostrar sus Racks.
@@ -1277,8 +1285,14 @@ class _RackDocShellState extends State<RackDocShell> {
                   onTap: () => setState(() => _activeNav = 'certscope'),
                 ),
                 _SidebarItem(
+                  icon: Icons.notifications_active_rounded,
+                  label: '8. Alarmas SRE',
+                  active: _activeNav == 'sre_alarms',
+                  onTap: () => _openSreAlarms(tabIndex: 0),
+                ),
+                _SidebarItem(
                   icon: Icons.settings_rounded,
-                  label: '8. Configuración (Usuarios/AD)',
+                  label: '9. Configuración (Usuarios/AD)',
                   active: _activeNav == 'admin',
                   onTap: () => setState(() => _activeNav = 'admin'),
                 ),
@@ -1931,6 +1945,8 @@ class _RackDocShellState extends State<RackDocShell> {
                     _buildKioskQuickNavChip('6. CMDB', 'cmdb'),
                     const SizedBox(width: 4),
                     _buildKioskQuickNavChip('7. CertScope', 'certscope'),
+                    const SizedBox(width: 4),
+                    _buildKioskQuickNavChip('8. Alarmas SRE', 'sre_alarms'),
                     Container(
                       width: 1,
                       height: 16,
@@ -2085,10 +2101,28 @@ class _RackDocShellState extends State<RackDocShell> {
 
     if (_activeNav == 'network_hosts') {
       return NetworkHostsView(
+        key: const ValueKey('network_hosts_view'),
         api: _api,
         canEdit: _currentUser.canEdit,
         initialStackId: _highlightedStackId,
         initialStackNodeId: _highlightedStackNodeId,
+        onOpenSreDocs: () => _openSreAlarms(tabIndex: 2),
+        onNavigateToRackDevice: (rackId, deviceId) {
+          _openRack(rackId, highlightDeviceId: deviceId);
+        },
+        onNavigateToCmdb: (_) {
+          setState(() => _activeNav = 'cmdb');
+        },
+      );
+    }
+
+    if (_activeNav == 'sre_alarms') {
+      return NetworkHostsView(
+        key: const ValueKey('sre_alarms_view'),
+        api: _api,
+        canEdit: _currentUser.canEdit,
+        isSreAlarmsMode: true,
+        initialSreTabIndex: _sreInitialTabIndex,
         onNavigateToRackDevice: (rackId, deviceId) {
           _openRack(rackId, highlightDeviceId: deviceId);
         },
@@ -2102,6 +2136,7 @@ class _RackDocShellState extends State<RackDocShell> {
       return CmdbView(
         api: _api,
         canEdit: _currentUser.canEdit,
+        onNavigateToSreDocs: () => _openSreAlarms(tabIndex: 2),
         onNavigateToRackDevice: (rackId, deviceId) {
           _openRack(rackId, highlightDeviceId: deviceId);
         },
@@ -2146,6 +2181,7 @@ class _RackDocShellState extends State<RackDocShell> {
         api: _api,
         canEdit: _currentUser.canEdit,
         canOperate: _currentUser.canEdit,
+        onNavigateToSreDocs: () => _openSreAlarms(tabIndex: 2),
         onNavigateToRack: (rackId, deviceId) {
           _openRack(rackId, highlightDeviceId: deviceId);
         },

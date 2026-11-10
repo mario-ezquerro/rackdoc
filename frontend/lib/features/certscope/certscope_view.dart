@@ -12,6 +12,7 @@ class CertScopeView extends StatefulWidget {
   final void Function(int floorId, int? floorDeviceId)? onNavigateToFloor;
   final void Function(int stackId, int? nodeId)? onNavigateToStack;
   final VoidCallback? onNavigateToCmdb;
+  final VoidCallback? onNavigateToSreDocs;
 
   const CertScopeView({
     super.key,
@@ -22,6 +23,7 @@ class CertScopeView extends StatefulWidget {
     this.onNavigateToFloor,
     this.onNavigateToStack,
     this.onNavigateToCmdb,
+    this.onNavigateToSreDocs,
   });
 
   @override
@@ -445,10 +447,16 @@ class _CertScopeViewState extends State<CertScopeView> {
               foregroundColor: AppPalette.blue900,
               side: const BorderSide(color: AppPalette.blue300),
             ),
-            onPressed: () => showApiOnboardingGuideDialog(context, api: widget.api),
-            icon: const Icon(Icons.terminal_rounded, size: 16),
+            onPressed: () {
+              if (widget.onNavigateToSreDocs != null) {
+                widget.onNavigateToSreDocs!();
+              } else {
+                showApiOnboardingGuideDialog(context, api: widget.api);
+              }
+            },
+            icon: const Icon(Icons.menu_book_rounded, size: 16),
             label: const Text(
-              'Alta vía API (cURL / Ansible / Puppet)',
+              'Ir a Documentación & API (8. Alarmas SRE)',
               style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
             ),
           ),

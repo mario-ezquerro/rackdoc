@@ -13,6 +13,7 @@ class CmdbView extends StatefulWidget {
       onNavigateToFloorDevice;
   final void Function(int stackId, int? nodeId)? onNavigateToStackNode;
   final VoidCallback? onExportExcel;
+  final VoidCallback? onNavigateToSreDocs;
 
   const CmdbView({
     super.key,
@@ -22,6 +23,7 @@ class CmdbView extends StatefulWidget {
     this.onNavigateToFloorDevice,
     this.onNavigateToStackNode,
     this.onExportExcel,
+    this.onNavigateToSreDocs,
   });
 
   @override
@@ -728,10 +730,16 @@ class _CmdbViewState extends State<CmdbView> {
               ),
               const SizedBox(width: 10),
               OutlinedButton.icon(
-                onPressed: () => showApiOnboardingGuideDialog(
-                  context,
-                  api: widget.api,
-                ),
+                onPressed: () {
+                  if (widget.onNavigateToSreDocs != null) {
+                    widget.onNavigateToSreDocs!();
+                  } else {
+                    showApiOnboardingGuideDialog(
+                      context,
+                      api: widget.api,
+                    );
+                  }
+                },
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppPalette.blue900,
                   side: const BorderSide(color: AppPalette.blue300, width: 1.4),
@@ -741,9 +749,9 @@ class _CmdbViewState extends State<CmdbView> {
                     vertical: 10,
                   ),
                 ),
-                icon: const Icon(Icons.terminal_rounded, size: 17),
+                icon: const Icon(Icons.menu_book_rounded, size: 17),
                 label: const Text(
-                  'Alta vía API (cURL / Ansible / Puppet)',
+                  'Ir a Documentación & API (8. Alarmas SRE)',
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
                 ),
               ),

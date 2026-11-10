@@ -12,19 +12,25 @@ import '../../shared/widgets/diagram_exporter.dart';
 class NetworkHostsView extends StatefulWidget {
   final RackDocApiClient api;
   final bool canEdit;
+  final bool isSreAlarmsMode;
+  final int initialSreTabIndex;
   final int? initialStackId;
   final int? initialStackNodeId;
   final void Function(int rackId, int? deviceId)? onNavigateToRackDevice;
   final void Function(String? assetCode)? onNavigateToCmdb;
+  final VoidCallback? onOpenSreDocs;
 
   const NetworkHostsView({
     super.key,
     required this.api,
     this.canEdit = true,
+    this.isSreAlarmsMode = false,
+    this.initialSreTabIndex = 0,
     this.initialStackId,
     this.initialStackNodeId,
     this.onNavigateToRackDevice,
     this.onNavigateToCmdb,
+    this.onOpenSreDocs,
   });
 
   @override
@@ -117,33 +123,57 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
   String _stateFilter = 'all';
 
   Map<String, dynamic>? _aiContextManifest;
+  Map<String, dynamic>? _apiOnboardingGuide;
+  Map<String, dynamic>? _certScopeOverview;
 
   @override
   void initState() {
     super.initState();
     _selectedStackId = widget.initialStackId;
     _selectedStackNodeId = widget.initialStackNodeId;
-    _tabController = TabController(length: 7, vsync: this);
+    final tabLen = widget.isSreAlarmsMode ? 3 : 5;
+    final initIdx = widget.isSreAlarmsMode
+        ? widget.initialSreTabIndex.clamp(0, 2)
+        : 0;
+    _tabController = TabController(
+      length: tabLen,
+      initialIndex: initIdx,
+      vsync: this,
+    );
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging && mounted) {
-        if (_tabController.index == 4 && _selectedHostId != null) {
+        if (!widget.isSreAlarmsMode &&
+            _tabController.index == 4 &&
+            _selectedHostId != null) {
           _loadHostTelemetry(_selectedHostId!);
-        } else if (_tabController.index == 6 && _aiContextManifest == null) {
-          _loadAiContextManifest();
+        } else if (widget.isSreAlarmsMode && _tabController.index == 2) {
+          if (_aiContextManifest == null) _loadAiContextManifest();
+          if (_apiOnboardingGuide == null) _loadApiOnboardingGuide();
         }
         setState(() {});
       }
     });
     _loadOverview();
+    if (widget.isSreAlarmsMode) {
+      _loadSreAuxiliaryData();
+    }
   }
 
   @override
   void didUpdateWidget(covariant NetworkHostsView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if ((widget.initialStackId != null &&
-            widget.initialStackId != oldWidget.initialStackId) ||
-        (widget.initialStackNodeId != null &&
-            widget.initialStackNodeId != oldWidget.initialStackNodeId)) {
+    if (widget.isSreAlarmsMode &&
+        widget.initialSreTabIndex != oldWidget.initialSreTabIndex) {
+      final target = widget.initialSreTabIndex.clamp(0, 2);
+      if (_tabController.index != target) {
+        _tabController.animateTo(target);
+      }
+    }
+    if (!widget.isSreAlarmsMode &&
+        ((widget.initialStackId != null &&
+                widget.initialStackId != oldWidget.initialStackId) ||
+            (widget.initialStackNodeId != null &&
+                widget.initialStackNodeId != oldWidget.initialStackNodeId))) {
       setState(() {
         if (widget.initialStackId != null) {
           _selectedStackId = widget.initialStackId;
@@ -366,6 +396,24 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     } catch (_) {}
   }
 
+  Future<void> _loadApiOnboardingGuide() async {
+    try {
+      final res = await widget.api.getApiOnboardingGuide();
+      if (!mounted) return;
+      setState(() => _apiOnboardingGuide = res);
+    } catch (_) {}
+  }
+
+  Future<void> _loadSreAuxiliaryData() async {
+    _loadAiContextManifest();
+    _loadApiOnboardingGuide();
+    try {
+      final certData = await widget.api.getCertScopeOverview();
+      if (!mounted) return;
+      setState(() => _certScopeOverview = certData);
+    } catch (_) {}
+  }
+
   void _showSnack(String msg, {bool isError = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -470,15 +518,19 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
         Expanded(
           child: TabBarView(
             controller: _tabController,
-            children: [
-              _buildTechStacksCanvasTab(),
-              _buildLogicalTopologyTab(),
-              _buildNagiosServiceMonitorTab(),
-              _buildSnmpSwitchesAndConnectorsTab(),
-              _buildPrometheusChartsAndAgentsTab(),
-              _buildAlertsContactsAndMaintenanceTab(),
-              _buildAnsibleWebhooksAndAiDocsTab(),
-            ],
+            children: widget.isSreAlarmsMode
+                ? [
+                    _buildAlertsContactsAndMaintenanceTab(),
+                    _buildSloSreObjectivesTab(),
+                    _buildAnsibleWebhooksAndAiDocsTab(),
+                  ]
+                : [
+                    _buildTechStacksCanvasTab(),
+                    _buildLogicalTopologyTab(),
+                    _buildNagiosServiceMonitorTab(),
+                    _buildSnmpSwitchesAndConnectorsTab(),
+                    _buildPrometheusChartsAndAgentsTab(),
+                  ],
           ),
         ),
       ],
@@ -493,6 +545,200 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     final s = _summary;
     final promUrl =
         (s['prometheus_url'] as String?) ?? 'http://localhost:9090';
+
+    if (widget.isSreAlarmsMode) {
+      final totalHosts = ((s['hosts_up'] as int?) ?? 0) +
+          ((s['hosts_down'] as int?) ?? 0) +
+          ((s['hosts_unreachable'] as int?) ?? 0);
+      final hostsUp = (s['hosts_up'] as int?) ?? 0;
+      final hostSli = totalHosts > 0 ? (hostsUp / totalHosts) * 100.0 : 100.0;
+      final totalServices = ((s['services_ok'] as int?) ?? 0) +
+          ((s['services_warning'] as int?) ?? 0) +
+          ((s['services_critical'] as int?) ?? 0);
+      final servicesOk = (s['services_ok'] as int?) ?? 0;
+      final serviceSli =
+          totalServices > 0 ? (servicesOk / totalServices) * 100.0 : 100.0;
+
+      return Container(
+        padding: const EdgeInsets.fromLTRB(18, 12, 18, 10),
+        decoration: const BoxDecoration(
+          color: AppTheme.bgSecondary,
+          border: Border(bottom: BorderSide(color: AppTheme.border)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: 12,
+              runSpacing: 10,
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(9),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            AppTheme.accentPurple.withValues(alpha: 0.28),
+                            AppTheme.accentCyan.withValues(alpha: 0.25),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: AppTheme.accentCyan.withValues(alpha: 0.45),
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.notifications_active_rounded,
+                        color: AppTheme.accentCyan,
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '8. ALARMAS SRE — AVISOS, OBJETIVOS SLO/SLI, ERROR BUDGETS & DOCUMENTACIÓN',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.4,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Enrutamiento de Alarmas (Personas / Grupos AD / HostGroups) • Ventanas de Mantenimiento • Objetivos SLO/SLI & Error Budgets • Centro Unificado de Documentación (Ansible, API cURL, Puppet, Prometheus & IA)',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _runningAction ? null : _runAllChecksNow,
+                      icon: _runningAction
+                          ? const SizedBox(
+                              width: 13,
+                              height: 13,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.bolt_rounded, size: 15),
+                      label: const Text(
+                        'Evaluar SLI / Heartbeats Ahora',
+                        style: TextStyle(fontSize: 11.5),
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _tabController.animateTo(1),
+                      icon: const Icon(
+                        Icons.speed_rounded,
+                        size: 15,
+                        color: AppTheme.accentTeal,
+                      ),
+                      label: const Text(
+                        'Ver SLO / Error Budgets',
+                        style: TextStyle(fontSize: 11.5),
+                      ),
+                    ),
+                    ElevatedButton.icon(
+                      onPressed: () => _tabController.animateTo(2),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.accentBlue,
+                        foregroundColor: Colors.white,
+                      ),
+                      icon: const Icon(Icons.menu_book_rounded, size: 15),
+                      label: const Text(
+                        'Documentación, Ansible & API',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _buildTacCounterChip(
+                    label: 'SLI DISPONIBILIDAD HOSTS',
+                    count: '${hostSli.toStringAsFixed(2)}%',
+                    color: hostSli >= 99.5
+                        ? AppTheme.success
+                        : (hostSli >= 95.0 ? AppTheme.warning : AppTheme.error),
+                    icon: Icons.verified_user_rounded,
+                  ),
+                  const SizedBox(width: 8),
+                  _buildTacCounterChip(
+                    label: 'SLI SERVICIOS OK',
+                    count: '${serviceSli.toStringAsFixed(2)}%',
+                    color: serviceSli >= 99.0
+                        ? AppTheme.success
+                        : (serviceSli >= 95.0
+                              ? AppTheme.warning
+                              : AppTheme.error),
+                    icon: Icons.monitor_heart_rounded,
+                  ),
+                  const SizedBox(width: 8),
+                  _buildTacCounterChip(
+                    label: 'OBJETIVO SLO GLOBAL',
+                    count: '99.90%',
+                    color: AppTheme.accentCyan,
+                    icon: Icons.track_changes_rounded,
+                  ),
+                  const SizedBox(width: 8),
+                  _buildTacCounterChip(
+                    label: 'HOSTS EN MANTENIMIENTO',
+                    count: '${s['hosts_maintenance'] ?? 0}',
+                    color: AppTheme.accentPurple,
+                    icon: Icons.build_circle_rounded,
+                  ),
+                  const SizedBox(width: 14),
+                  Container(width: 1, height: 26, color: AppTheme.border),
+                  const SizedBox(width: 14),
+                  _buildTacCounterChip(
+                    label: 'CONTACTOS / USUARIOS AD',
+                    count: '${_alertContacts.length}',
+                    color: AppTheme.accentBlue,
+                    icon: Icons.badge_rounded,
+                  ),
+                  const SizedBox(width: 8),
+                  _buildTacCounterChip(
+                    label: 'GRUPOS GUARDIA / AD',
+                    count: '${_alertContactGroups.length}',
+                    color: AppTheme.accentTeal,
+                    icon: Icons.groups_rounded,
+                  ),
+                  const SizedBox(width: 8),
+                  _buildTacCounterChip(
+                    label: 'HOSTGROUPS MONITORIZADOS',
+                    count: '${_hostGroups.length}',
+                    color: AppTheme.warning,
+                    icon: Icons.dns_rounded,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 12, 18, 10),
@@ -551,7 +797,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                       ),
                       SizedBox(height: 2),
                       Text(
-                        'Coordinado en vivo con 3. Rack Editor y 6. CMDB • Comprobación SNMP de switches • Estados Nagios (SOFT/HARD + UNREACHABLE) • Series Temporales Prometheus • Webhooks Ansible',
+                        'Coordinado en vivo con 3. Rack Editor, 6. CMDB y 8. Alarmas SRE • Comprobación SNMP de switches • Estados Nagios (SOFT/HARD + UNREACHABLE) • Series Temporales Prometheus',
                         style: TextStyle(
                           fontSize: 11,
                           color: AppTheme.textSecondary,
@@ -591,6 +837,22 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                     documentBuilder: _buildCurrentStackExportDocument,
                     darkStyle: true,
                   ),
+                  if (widget.onOpenSreDocs != null)
+                    OutlinedButton.icon(
+                      onPressed: widget.onOpenSreDocs,
+                      icon: const Icon(
+                        Icons.menu_book_rounded,
+                        size: 15,
+                        color: AppTheme.accentCyan,
+                      ),
+                      label: const Text(
+                        'Documentación & Alarmas SRE (8)',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
                   if (widget.canEdit) ...[
                     ElevatedButton.icon(
                       onPressed: () =>
@@ -760,36 +1022,48 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
         labelColor: AppTheme.accentCyan,
         unselectedLabelColor: AppTheme.textSecondary,
         labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-        tabs: const [
-          Tab(
-            icon: Icon(Icons.layers_rounded, size: 16),
-            text: '1. Stacks Tecnológicos & Lógica de Negocio (Lienzo 2D + SSH)',
-          ),
-          Tab(
-            icon: Icon(Icons.schema_rounded, size: 16),
-            text: '2. Topología de Capas (Red / Rack / VMs)',
-          ),
-          Tab(
-            icon: Icon(Icons.monitor_heart_rounded, size: 16),
-            text: '3. Estados Nagios & Heartbeats (HTTP/HTTPS/SSL/TCP)',
-          ),
-          Tab(
-            icon: Icon(Icons.settings_ethernet_rounded, size: 16),
-            text: '4. Switches SNMP & Conectores (Proxmox/VMware/Docker/Web)',
-          ),
-          Tab(
-            icon: Icon(Icons.multiline_chart_rounded, size: 16),
-            text: '5. Gráficas Prometheus TSDB & Agentes a Instalar',
-          ),
-          Tab(
-            icon: Icon(Icons.notifications_active_rounded, size: 16),
-            text: '6. Avisos de Alarmas (Personas/Grupos/HostGroups) & Mantenimiento',
-          ),
-          Tab(
-            icon: Icon(Icons.smart_toy_rounded, size: 16),
-            text: '7. Automatización Ansible, Webhooks & Guía Agentes IA',
-          ),
-        ],
+        tabs: widget.isSreAlarmsMode
+            ? const [
+                Tab(
+                  icon: Icon(Icons.notifications_active_rounded, size: 16),
+                  text:
+                      '1. Avisos de Alarmas (Personas / Grupos AD / HostGroups) & Mantenimiento',
+                ),
+                Tab(
+                  icon: Icon(Icons.speed_rounded, size: 16),
+                  text:
+                      '2. Objetivos SLO / SLI, Error Budgets & Indicadores SRE',
+                ),
+                Tab(
+                  icon: Icon(Icons.menu_book_rounded, size: 16),
+                  text:
+                      '3. Documentación, Automatización Ansible, API (cURL/Puppet) & Agentes',
+                ),
+              ]
+            : const [
+                Tab(
+                  icon: Icon(Icons.layers_rounded, size: 16),
+                  text:
+                      '1. Stacks Tecnológicos & Lógica de Negocio (Lienzo 2D + SSH)',
+                ),
+                Tab(
+                  icon: Icon(Icons.schema_rounded, size: 16),
+                  text: '2. Topología de Capas (Red / Rack / VMs)',
+                ),
+                Tab(
+                  icon: Icon(Icons.monitor_heart_rounded, size: 16),
+                  text: '3. Estados Nagios & Heartbeats (HTTP/HTTPS/SSL/TCP)',
+                ),
+                Tab(
+                  icon: Icon(Icons.settings_ethernet_rounded, size: 16),
+                  text:
+                      '4. Switches SNMP & Conectores (Proxmox/VMware/Docker/Web)',
+                ),
+                Tab(
+                  icon: Icon(Icons.multiline_chart_rounded, size: 16),
+                  text: '5. Gráficas Prometheus TSDB & Telemetría en Tiempo Real',
+                ),
+              ],
       ),
     );
   }
@@ -6763,12 +7037,19 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                                         }
                                       },
                                     ),
-                                  // BOTÓN PARA VER Y DESCARGAR EN MARKDOWN.MD QUÉ INSTALAR PARA MONITORIZAR
+                                  // BOTÓN DE ENLACE AL CENTRO DE DOCUMENTACIÓN EN 8. ALARMAS SRE
                                   ElevatedButton.icon(
-                                    onPressed: () =>
+                                    onPressed: () {
+                                      if (widget.onOpenSreDocs != null) {
+                                        widget.onOpenSreDocs!();
+                                      } else if (widget.isSreAlarmsMode) {
+                                        _tabController.animateTo(2);
+                                      } else {
                                         _showWhatToInstallMarkdownDialog(
                                           selectedHost,
-                                        ),
+                                        );
+                                      }
+                                    },
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: AppTheme.accentBlue,
                                       foregroundColor: Colors.white,
@@ -6778,11 +7059,11 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                                       ),
                                     ),
                                     icon: const Icon(
-                                      Icons.download_for_offline_rounded,
+                                      Icons.menu_book_rounded,
                                       size: 16,
                                     ),
                                     label: const Text(
-                                      'Qué instalar para monitorizar (.md)',
+                                      'Ir a Documentación Agentes (.md) en 8. Alarmas SRE',
                                       style: TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w800,
@@ -9276,13 +9557,809 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
   }
 
   // ===========================================================================
-  // TAB 6: AUTOMATIZACIÓN ANSIBLE, WEBHOOKS & GUÍA PARA AGENTES IA
+  // TAB 2 (EN MODO 8. ALARMAS SRE): OBJETIVOS SLO / SLI, ERROR BUDGETS & SRE
+  // ===========================================================================
+
+  Widget _buildSloSreObjectivesTab() {
+    final s = _summary;
+    final hostsUp = (s['hosts_up'] as int?) ?? 0;
+    final hostsDown = (s['hosts_down'] as int?) ?? 0;
+    final hostsUnreach = (s['hosts_unreachable'] as int?) ?? 0;
+    final totalHosts = hostsUp + hostsDown + hostsUnreach;
+    final hostSli = totalHosts > 0 ? (hostsUp / totalHosts) * 100.0 : 100.0;
+
+    final svcOk = (s['services_ok'] as int?) ?? 0;
+    final svcWarn = (s['services_warning'] as int?) ?? 0;
+    final svcCrit = (s['services_critical'] as int?) ?? 0;
+    final totalServices = svcOk + svcWarn + svcCrit;
+    final serviceSli =
+        totalServices > 0 ? (svcOk / totalServices) * 100.0 : 100.0;
+
+    // Cálculo de Latencia y Saturación sobre los hosts inventariados
+    final allChecks = <Map<String, dynamic>>[
+      for (final h in _hosts)
+        ...((h['service_checks'] as List?) ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map)),
+    ];
+    int fastChecks = 0;
+    double avgLatencyMs = 0.0;
+    if (allChecks.isNotEmpty) {
+      double sumLat = 0.0;
+      for (final chk in allChecks) {
+        final ms = (chk['latency_ms'] as num?)?.toDouble() ?? 12.0;
+        sumLat += ms;
+        if (ms < 50.0) fastChecks++;
+      }
+      avgLatencyMs = sumLat / allChecks.length;
+    }
+    final latencySli =
+        allChecks.isNotEmpty ? (fastChecks / allChecks.length) * 100.0 : 100.0;
+
+    int unsaturatedHosts = 0;
+    double maxCpuSeen = 0.0;
+    double maxMemSeen = 0.0;
+    for (final h in _hosts) {
+      final cpu = (h['cpu_pct'] as num?)?.toDouble() ?? 0.0;
+      final mem = (h['memory_pct'] as num?)?.toDouble() ?? 0.0;
+      final disk = (h['disk_pct'] as num?)?.toDouble() ?? 0.0;
+      if (cpu > maxCpuSeen) maxCpuSeen = cpu;
+      if (mem > maxMemSeen) maxMemSeen = mem;
+      if (cpu < 85.0 && mem < 90.0 && disk < 90.0) {
+        unsaturatedHosts++;
+      }
+    }
+    final saturationSli =
+        _hosts.isNotEmpty ? (unsaturatedHosts / _hosts.length) * 100.0 : 100.0;
+
+    // Continuidad criptográfica CertScope SSL/TLS
+    final certSummary =
+        (_certScopeOverview?['summary'] as Map?)?.cast<String, dynamic>() ?? {};
+    final totalCerts = (certSummary['total'] as int?) ?? 0;
+    final expiredCerts = (certSummary['expired'] as int?) ?? 0;
+    final certSli = totalCerts > 0
+        ? (((totalCerts - expiredCerts).clamp(0, totalCerts)) / totalCerts) *
+              100.0
+        : 100.0;
+
+    // Ventana mensual SRE: 30 días = 43.200 minutos
+    const windowMinutes = 43200.0;
+
+    Map<String, dynamic> calcErrorBudget({
+      required double currentSli,
+      required double targetSlo,
+    }) {
+      final allowedErrorPct = (100.0 - targetSlo).clamp(0.001, 100.0);
+      final budgetTotalMin = windowMinutes * (allowedErrorPct / 100.0);
+      final currentErrorPct = (100.0 - currentSli).clamp(0.0, 100.0);
+      final consumedRatio =
+          (currentErrorPct / allowedErrorPct).clamp(0.0, 10.0);
+      final consumedMin =
+          (budgetTotalMin * consumedRatio).clamp(0.0, budgetTotalMin);
+      final remainingMin =
+          (budgetTotalMin - consumedMin).clamp(0.0, budgetTotalMin);
+      final burnRate = consumedRatio;
+      return {
+        'budget_total_min': budgetTotalMin,
+        'consumed_min': consumedMin,
+        'remaining_min': remainingMin,
+        'remaining_pct':
+            ((remainingMin / budgetTotalMin) * 100.0).clamp(0.0, 100.0),
+        'burn_rate': burnRate,
+      };
+    }
+
+    final sloDefinitions = <Map<String, dynamic>>[
+      {
+        'code': 'SLO-INFRA-AVAIL',
+        'title': 'Disponibilidad de Infraestructura (Hosts & Racks)',
+        'signal': 'Availability (Golden Signal)',
+        'sli_formula': 'hosts_up / (hosts_up + hosts_down + hosts_unreachable)',
+        'target_slo': 99.90,
+        'current_sli': hostSli,
+        'detail':
+            '$hostsUp UP de $totalHosts activos • $hostsDown DOWN • $hostsUnreach UNREACHABLE',
+        'icon': Icons.dns_rounded,
+        'color': AppTheme.accentCyan,
+      },
+      {
+        'code': 'SLO-SVC-HEARTBEAT',
+        'title': 'Disponibilidad de Servicios Críticos (HTTP/TCP/DB)',
+        'signal': 'Errors / Success Rate',
+        'sli_formula': 'services_ok / total_active_service_checks',
+        'target_slo': 99.50,
+        'current_sli': serviceSli,
+        'detail':
+            '$svcOk OK de $totalServices chequeos • $svcWarn WARNING • $svcCrit CRITICAL',
+        'icon': Icons.monitor_heart_rounded,
+        'color': AppTheme.success,
+      },
+      {
+        'code': 'SLO-NET-LATENCY',
+        'title': 'Latencia de Red y Respuesta de Servicios (< 50 ms)',
+        'signal': 'Latency (Golden Signal)',
+        'sli_formula': 'checks_with_latency_under_50ms / total_checks',
+        'target_slo': 99.00,
+        'current_sli': latencySli,
+        'detail':
+            '$fastChecks/${allChecks.length} respuestas < 50 ms • Media actual: ${avgLatencyMs.toStringAsFixed(1)} ms',
+        'icon': Icons.speed_rounded,
+        'color': AppTheme.accentBlue,
+      },
+      {
+        'code': 'SLO-CAP-SATURATION',
+        'title': 'Capacidad Libre sin Saturación (CPU < 85%, RAM/Disco < 90%)',
+        'signal': 'Saturation (Golden Signal)',
+        'sli_formula': 'hosts_within_safe_thresholds / total_monitored_hosts',
+        'target_slo': 98.00,
+        'current_sli': saturationSli,
+        'detail':
+            '$unsaturatedHosts/${_hosts.length} dentro de umbral • Pico CPU ${maxCpuSeen.toStringAsFixed(0)}% • Pico RAM ${maxMemSeen.toStringAsFixed(0)}%',
+        'icon': Icons.memory_rounded,
+        'color': AppTheme.accentPurple,
+      },
+      {
+        'code': 'SLO-SEC-CERTSCOPE',
+        'title': 'Continuidad Criptográfica SSL/TLS (0 Certificados Expirados)',
+        'signal': 'Security & Compliance SLO',
+        'sli_formula': '(total_certs - expired_certs) / total_certs',
+        'target_slo': 100.00,
+        'current_sli': certSli,
+        'detail':
+            '${totalCerts - expiredCerts}/$totalCerts vigentes en 7. CertScope • $expiredCerts expirados',
+        'icon': Icons.verified_user_rounded,
+        'color': AppTheme.accentTeal,
+      },
+    ];
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        // 1. Banner Superior de Filosofía SRE (SLI / SLO / SLA / Error Budget)
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppTheme.bgSecondary,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppTheme.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.track_changes_rounded,
+                        color: AppTheme.accentCyan,
+                        size: 22,
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        'PANEL DE FIABILIDAD SRE (SITE RELIABILITY ENGINEERING) — OBJETIVOS SLO, MÉTRICAS SLI & ERROR BUDGETS (30 DÍAS)',
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w900,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: () => _tabController.animateTo(0),
+                        icon: const Icon(
+                          Icons.notifications_active_rounded,
+                          size: 14,
+                        ),
+                        label: const Text(
+                          'Configurar Enrutamiento Alarmas',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => _tabController.animateTo(2),
+                        icon: const Icon(Icons.menu_book_rounded, size: 14),
+                        label: const Text(
+                          'Playbooks Ansible & Documentación',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Basado en las prácticas de Google SRE: un SLI (Service Level Indicator) mide en tiempo real el comportamiento de la infraestructura desde Prometheus, Nagios Heartbeats, CMDB y CertScope; un SLO (Service Level Objective) fija el umbral objetivo de fiabilidad; y el Error Budget (Presupuesto de Error en una ventana móvil de 30 días = 43.200 min) determina si se pueden desplegar cambios rápido o si hay que priorizar estabilidad y remediación.',
+                style: TextStyle(fontSize: 11.4, color: AppTheme.textSecondary),
+              ),
+              const SizedBox(height: 12),
+              // Los 4 Golden Signals aplicados a RackDoc
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  _buildGoldenSignalMiniCard(
+                    signal: '1. LATENCIA (Latency)',
+                    metric: '${avgLatencyMs.toStringAsFixed(1)} ms media',
+                    desc: 'Tiempo de respuesta ICMP/TCP/HTTP en 4. Red & Host',
+                    color: AppTheme.accentBlue,
+                    icon: Icons.timer_outlined,
+                  ),
+                  _buildGoldenSignalMiniCard(
+                    signal: '2. TRÁFICO (Traffic)',
+                    metric:
+                        '${s['total_snmp_ports'] ?? 0} bocas / ${_techStacks.length} stacks',
+                    desc: 'Caudal de red SNMP y peticiones req/s en Prometheus',
+                    color: AppTheme.accentCyan,
+                    icon: Icons.swap_calls_rounded,
+                  ),
+                  _buildGoldenSignalMiniCard(
+                    signal: '3. ERRORES (Errors)',
+                    metric:
+                        '$hostsDown Hosts DOWN • $svcCrit Checks CRITICAL',
+                    desc: 'Fallos explícitos HTTP 5xx, timeouts TCP o caída SNMP',
+                    color: (hostsDown + svcCrit) == 0
+                        ? AppTheme.success
+                        : AppTheme.error,
+                    icon: Icons.error_outline_rounded,
+                  ),
+                  _buildGoldenSignalMiniCard(
+                    signal: '4. SATURACIÓN (Saturation)',
+                    metric:
+                        'Máx CPU ${maxCpuSeen.toStringAsFixed(0)}% • RAM ${maxMemSeen.toStringAsFixed(0)}%',
+                    desc: 'Capacidad comprometida en CPU, RAM, Disco o Bocas',
+                    color: maxCpuSeen < 85 ? AppTheme.accentTeal : AppTheme.warning,
+                    icon: Icons.speed_rounded,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // 2. Tarjetas de Objetivos SLO & Error Budgets (30 días = 43.200 min)
+        const Text(
+          'OBJETIVOS DE NIVEL DE SERVICIO (SLO) ACTIVOS Y PRESUPUESTO DE ERROR (ERROR BUDGET 30 DÍAS)',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 0.4,
+            color: AppTheme.accentCyan,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 14,
+          runSpacing: 14,
+          children: [
+            for (final slo in sloDefinitions)
+              _buildSloObjectiveCard(
+                slo: slo,
+                budget: calcErrorBudget(
+                  currentSli: slo['current_sli'] as double,
+                  targetSlo: slo['target_slo'] as double,
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 20),
+
+        // 3. Matriz SRE por HostGroup / Stack de Negocio y Política de Actuación ante Burn Rate
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              flex: 58,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppTheme.bgSecondary,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(
+                          Icons.layers_rounded,
+                          color: AppTheme.accentCyan,
+                          size: 18,
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          'CUMPLIMIENTO SLI / SLO POR GRUPO DE HOST Y SERVICIO DE NEGOCIO',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    for (final hg in _hostGroups)
+                      Builder(
+                        builder: (context) {
+                          final hgId = hg['id'] as int;
+                          final members = _hosts.where((h) {
+                            final ids =
+                                ((h['host_group_ids'] as List?) ?? []).cast<int>();
+                            return ids.contains(hgId);
+                          }).toList();
+                          final upCount = members
+                              .where((h) => h['nagios_state'] == 'UP')
+                              .length;
+                          final sliPct = members.isNotEmpty
+                              ? (upCount / members.length) * 100.0
+                              : 100.0;
+                          final meetsSlo = sliPct >= 99.0;
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppTheme.bgCard,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: meetsSlo
+                                    ? AppTheme.border
+                                    : AppTheme.error.withValues(alpha: 0.6),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  meetsSlo
+                                      ? Icons.check_circle_rounded
+                                      : Icons.warning_amber_rounded,
+                                  size: 16,
+                                  color: meetsSlo
+                                      ? AppTheme.success
+                                      : AppTheme.error,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '${hg['name']} (${hg['code']})',
+                                        style: const TextStyle(
+                                          fontSize: 11.8,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                      Text(
+                                        '${members.length} hosts asociados • $upCount UP • Enrutado a ${((hg['contact_group_names'] as List?) ?? []).join(', ').isEmpty ? 'Guardia SRE Global' : ((hg['contact_group_names'] as List?) ?? []).join(', ')}',
+                                        style: const TextStyle(
+                                          fontSize: 10.5,
+                                          color: AppTheme.textSecondary,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 9,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: (meetsSlo
+                                            ? AppTheme.success
+                                            : AppTheme.error)
+                                        .withValues(alpha: 0.14),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'SLI ${sliPct.toStringAsFixed(1)}% (SLO 99.0%)',
+                                    style: TextStyle(
+                                      fontSize: 10.8,
+                                      fontWeight: FontWeight.w900,
+                                      color: meetsSlo
+                                          ? AppTheme.success
+                                          : AppTheme.error,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              flex: 42,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppTheme.bgSecondary,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(
+                          Icons.policy_rounded,
+                          color: AppTheme.warning,
+                          size: 18,
+                        ),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'POLÍTICA SRE DE ERROR BUDGET Y REGLAS DE ESCALADO',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    _buildSrePolicyRuleItem(
+                      badge: 'Burn Rate < 1.0x (Verde)',
+                      title: 'Presupuesto Saludable — Despliegues Abiertos',
+                      desc:
+                          'Se permiten despliegues continuos vía Ansible. Las ventanas de mantenimiento programadas (`POST /api/v1/automation/webhook/maintenance`) congelan el consumo de Error Budget y silencian falsos avisos.',
+                      color: AppTheme.success,
+                    ),
+                    const SizedBox(height: 8),
+                    _buildSrePolicyRuleItem(
+                      badge: 'Burn Rate 1.0x – 2.5x (Ámbar)',
+                      title: 'Consumo Acelerado — Alerta Preventiva a Guardia',
+                      desc:
+                          'Se envía notificación SMTP a los grupos AD asignados al HostGroup afectado. Se revisan cuellos de botella en las gráficas TSDB de Prometheus (CPU/RAM/Latencia) y certificados próximos a caducar.',
+                      color: AppTheme.warning,
+                    ),
+                    const SizedBox(height: 8),
+                    _buildSrePolicyRuleItem(
+                      badge: 'Burn Rate > 2.5x o Budget 0% (Rojo)',
+                      title: 'Error Budget Agotado — Freeze de Cambios & Postmortem',
+                      desc:
+                          'Se congelan despliegues no críticos (salvo parches de seguridad o remediación). El incidente requiere diagnóstico en la topología padre/hijo (evitando tormentas de alarmas por nodos UNREACHABLE).',
+                      color: AppTheme.error,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGoldenSignalMiniCard({
+    required String signal,
+    required String metric,
+    required String desc,
+    required Color color,
+    required IconData icon,
+  }) {
+    return Container(
+      width: 285,
+      padding: const EdgeInsets.all(11),
+      decoration: BoxDecoration(
+        color: AppTheme.bgCard,
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(7),
+            ),
+            child: Icon(icon, size: 17, color: color),
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  signal,
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w900,
+                    color: color,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  metric,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  desc,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSloObjectiveCard({
+    required Map<String, dynamic> slo,
+    required Map<String, dynamic> budget,
+  }) {
+    final currentSli = slo['current_sli'] as double;
+    final targetSlo = slo['target_slo'] as double;
+    final meetsSlo = currentSli >= targetSlo;
+    final remainingPct = budget['remaining_pct'] as double;
+    final remainingMin = budget['remaining_min'] as double;
+    final totalMin = budget['budget_total_min'] as double;
+    final burnRate = budget['burn_rate'] as double;
+    final statusColor = meetsSlo
+        ? AppTheme.success
+        : (remainingPct > 25.0 ? AppTheme.warning : AppTheme.error);
+
+    return Container(
+      width: 480,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.bgSecondary,
+        borderRadius: BorderRadius.circular(11),
+        border: Border.all(color: statusColor.withValues(alpha: 0.45)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                slo['icon'] as IconData,
+                size: 18,
+                color: slo['color'] as Color,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '${slo['code']} — ${slo['title']}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  meetsSlo ? 'CUMPLIENDO SLO' : 'SLO EN RIESGO',
+                  style: TextStyle(
+                    fontSize: 9.8,
+                    fontWeight: FontWeight.w900,
+                    color: statusColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Señal: ${slo['signal']} • Fórmula SLI: ${slo['sli_formula']}',
+            style: const TextStyle(
+              fontSize: 10.2,
+              fontFamily: 'monospace',
+              color: AppTheme.textMuted,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildTechMetricBadge(
+                'SLI Actual',
+                '${currentSli.toStringAsFixed(2)}%',
+                statusColor,
+              ),
+              _buildTechMetricBadge(
+                'Objetivo SLO',
+                '${targetSlo.toStringAsFixed(2)}%',
+                AppTheme.accentCyan,
+              ),
+              _buildTechMetricBadge(
+                'Burn Rate',
+                '${burnRate.toStringAsFixed(2)}x',
+                burnRate <= 1.0 ? AppTheme.success : AppTheme.warning,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Error Budget restante (30d): ${remainingPct.toStringAsFixed(0)}%',
+                style: const TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+              Text(
+                '${remainingMin.toStringAsFixed(0)} min libres de ${totalMin.toStringAsFixed(0)} min/mes',
+                style: const TextStyle(
+                  fontSize: 10.2,
+                  color: AppTheme.textMuted,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(5),
+            child: LinearProgressIndicator(
+              value: (remainingPct / 100.0).clamp(0.0, 1.0),
+              minHeight: 7,
+              backgroundColor: AppTheme.bgPrimary,
+              valueColor: AlwaysStoppedAnimation<Color>(statusColor),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${slo['detail']}',
+            style: const TextStyle(
+              fontSize: 10.8,
+              color: AppTheme.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSrePolicyRuleItem({
+    required String badge,
+    required String title,
+    required String desc,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppTheme.bgCard,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: Text(
+                  badge,
+                  style: TextStyle(
+                    fontSize: 9.8,
+                    fontWeight: FontWeight.w900,
+                    color: color,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 11.2,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Text(
+            desc,
+            style: const TextStyle(
+              fontSize: 10.5,
+              color: AppTheme.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ===========================================================================
+  // TAB 3 (EN MODO 8. ALARMAS SRE): CENTRO UNIFICADO DE DOCUMENTACIÓN,
+  // AUTOMATIZACIÓN ANSIBLE, API (cURL / PUPPET), AGENTES PROMETHEUS (.MD) & IA
   // ===========================================================================
 
   Widget _buildAnsibleWebhooksAndAiDocsTab() {
     final apiKey =
         (_summary['automation_api_key_hint'] as String?) ??
         'rackdoc-ansible-secret-key-2026';
+
+    final examples = (_apiOnboardingGuide?['examples'] as Map?)
+            ?.cast<String, dynamic>() ??
+        <String, dynamic>{};
+
+    final curlWebhook = (examples['curl_webhook_all_in_one'] as String?) ??
+        '''curl -X POST "http://localhost:8180/api/v1/automation/webhook/host-upsert" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: $apiKey" \\
+  -d '{
+    "code": "SRV-WEB-PROD-01",
+    "hostname": "srv-web-prod-01",
+    "fqdn": "srv-web-prod-01.corp.local",
+    "asset_class": "virtual_machine",
+    "environment": "production",
+    "primary_ip": "10.20.30.45",
+    "exporters": [{"type": "node_exporter", "port": 9100}],
+    "heartbeats": [{"name": "HTTPS Portal", "type": "https", "port": 443, "url": "https://srv-web-prod-01.corp.local/health"}]
+  }' ''';
+
+    final curlJwt = (examples['curl_jwt_cmdb_and_certscope'] as String?) ??
+        '''# 1. Obtener Token Bearer JWT:
+TOKEN=\$(curl -s -X POST "http://localhost:8180/api/v1/auth/login" \\
+  -H "Content-Type: application/json" \\
+  -d '{"username":"admin","password":"ChangeMe123!"}' | jq -r .access_token)
+
+# 2. Dar de alta activo en CMDB (6. CMDB) o Certificado en CertScope (7. CertScope):
+curl -X POST "http://localhost:8180/api/v1/cmdb/assets" \\
+  -H "Authorization: Bearer \$TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{"code":"SRV-DB-01","name":"PostgreSQL Primary","asset_class":"virtual_machine","primary_ip":"10.20.30.50"}' ''';
+
+    final puppetManifest = (examples['puppet_manifest'] as String?) ??
+        '''# Manifiesto Puppet (rackdoc_register.pp) usando hechos de Facter:
+class profile::rackdoc_agent (
+  String \$rackdoc_url = 'http://localhost:8180',
+  String \$api_key     = '$apiKey',
+) {
+  exec { 'register_node_in_rackdoc':
+    command => "/usr/bin/curl -sS -X POST '\${rackdoc_url}/api/v1/automation/webhook/host-upsert' -H 'Content-Type: application/json' -H 'X-API-Key: \${api_key}' -d '{\"code\":\"\${facts['networking']['hostname']}\",\"hostname\":\"\${facts['networking']['hostname']}\",\"fqdn\":\"\${facts['networking']['fqdn']}\",\"primary_ip\":\"\${facts['networking']['ip']}\"}'",
+    unless  => "/usr/bin/test -f /var/lib/puppet/state/rackdoc_registered.lock",
+  }
+}''';
 
     final playbookUpsert = '''---
 # Playbook Ansible: Alta / Actualización de Host en RackDoc + CMDB + Prometheus SD
@@ -9351,9 +10428,17 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
       delegate_to: localhost
       run_once: true''';
 
+    final selectedHost = _hosts.firstWhere(
+      (h) => h['id'] == _selectedHostId,
+      orElse: () => _hosts.isNotEmpty ? _hosts.first : <String, dynamic>{},
+    );
+    final hostMarkdown = _buildMonitoringInstallMarkdown(selectedHost);
+    final hostCode = '${selectedHost['code'] ?? 'host'}'.toLowerCase();
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // BLOQUE 1: ALTA Y SINCRONIZACIÓN VÍA API (CMDB + RED & HOST + CERTSCOPE + PROMETHEUS)
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -9367,21 +10452,29 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
               const Row(
                 children: [
                   Icon(
-                    Icons.smart_toy_rounded,
+                    Icons.integration_instructions_rounded,
                     color: AppTheme.accentCyan,
                     size: 20,
                   ),
                   SizedBox(width: 8),
-                  Text(
-                    'AUTOMATIZACIÓN VÍA ANSIBLE WEBHOOKS Y MANIFIESTO PARA AGENTES DE IA',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                  Expanded(
+                    child: Text(
+                      '1. CENTRO UNIFICADO DE DOCUMENTACIÓN API (cURL / JWT / ANSIBLE / PUPPET FACTER) — CMDB, RED & HOST Y CERTSCOPE',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                   ),
                 ],
               ),
               const SizedBox(height: 6),
-              const Text(
-                'Documentación completa en el repositorio: docs/AUTOMATION_ANSIBLE_PROMETHEUS_AGENTS.md • Todos los webhooks regeneran automáticamente el Service Discovery de Prometheus.',
-                style: TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
+              Text(
+                'Toda la documentación del dashboard está centralizada en este apartado. Clave X-API-Key activa: $apiKey • Regenera automáticamente /app/data/prometheus/targets_dynamic.json.',
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  color: AppTheme.textSecondary,
+                ),
               ),
               const SizedBox(height: 14),
               Wrap(
@@ -9389,24 +10482,194 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                 runSpacing: 14,
                 children: [
                   _buildCodeSnippetCard(
-                    '1. Playbook Ansible: Alta / Actualización de Host + Prometheus SD',
+                    'A. Webhook Todo-en-Uno (cURL + X-API-Key: CMDB + Red & Host + CertScope + Prometheus)',
+                    curlWebhook,
+                  ),
+                  _buildCodeSnippetCard(
+                    'B. API REST Directa con Bearer Token JWT (6. CMDB / 7. CertScope)',
+                    curlJwt,
+                  ),
+                  _buildCodeSnippetCard(
+                    'C. Playbook Ansible: Alta / Actualización de Host + Prometheus SD',
                     playbookUpsert,
                   ),
                   _buildCodeSnippetCard(
-                    '2. Playbook Ansible: Ventanas de Mantenimiento (start / stop)',
+                    'D. Playbook Ansible: Ventanas de Mantenimiento SRE (start / stop)',
                     playbookMaint,
+                  ),
+                  _buildCodeSnippetCard(
+                    'E. Manifiesto Puppet (Facter) para Autoregistro de Nodos',
+                    puppetManifest,
                   ),
                 ],
               ),
-              const SizedBox(height: 14),
-              if (_aiContextManifest != null)
-                _buildCodeSnippetCard(
-                  '3. Manifiesto JSON en Vivo para Agentes IA (GET /api/v1/automation/ai-context)',
-                  const JsonEncoder.withIndent('  ').convert(_aiContextManifest),
-                ),
             ],
           ),
         ),
+        const SizedBox(height: 16),
+
+        // BLOQUE 2: GENERADOR INTERACTIVO DE GUÍA MARKDOWN (.MD) DE AGENTES Y EXPORTERS POR HOST
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppTheme.bgSecondary,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppTheme.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.terminal_rounded,
+                        color: AppTheme.accentTeal,
+                        size: 20,
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        '2. GUÍA DE INSTALACIÓN DE AGENTES Y EXPORTERS PROMETHEUS / SNMP (.MD POR HOST)',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (_hosts.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.bgCard,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: AppTheme.border),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<int>(
+                              value: selectedHost['id'] as int?,
+                              dropdownColor: AppTheme.bgCard,
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textPrimary,
+                              ),
+                              items: _hosts
+                                  .map(
+                                    (h) => DropdownMenuItem<int>(
+                                      value: h['id'] as int,
+                                      child: Text(
+                                        '${h['code']} — ${h['name']} (${h['heartbeat_ip']})',
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (val) {
+                                if (val != null) {
+                                  setState(() => _selectedHostId = val);
+                                }
+                              },
+                            ),
+                          ),
+                        ),
+                      ElevatedButton.icon(
+                        onPressed: () => _downloadMarkdownGuide(
+                          hostMarkdown,
+                          'guia_monitorizacion_$hostCode.md',
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.accentBlue,
+                          foregroundColor: Colors.white,
+                        ),
+                        icon: const Icon(
+                          Icons.download_for_offline_rounded,
+                          size: 16,
+                        ),
+                        label: Text(
+                          'Descargar guia_monitorizacion_$hostCode.md',
+                          style: const TextStyle(
+                            fontSize: 11.2,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                height: 300,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.bgPrimary,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppTheme.border),
+                ),
+                child: SingleChildScrollView(
+                  child: SelectableText(
+                    hostMarkdown,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // BLOQUE 3: MANIFIESTO JSON EN VIVO PARA AGENTES IA
+        if (_aiContextManifest != null)
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.bgSecondary,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(
+                      Icons.smart_toy_rounded,
+                      color: AppTheme.accentPurple,
+                      size: 20,
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      '3. MANIFIESTO JSON EN VIVO PARA AGENTES DE IA (GET /api/v1/automation/ai-context)',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                _buildCodeSnippetCard(
+                  'Esquema JSON de Capacidades, Endpoints y Contratos para Agentes IA / LLMs',
+                  const JsonEncoder.withIndent('  ').convert(_aiContextManifest),
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }
