@@ -1298,32 +1298,11 @@ class _RackDocShellState extends State<RackDocShell> {
                   onTap: () => setState(() => _activeNav = 'admin'),
                 ),
                 if (_activeNav != 'admin')
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 6, 10, 2),
-                    child: OutlinedButton.icon(
-                      onPressed: () => _setKioskMode(true),
-                      style: OutlinedButton.styleFrom(
-                        backgroundColor: AppPalette.slate900,
-                        foregroundColor: Colors.white,
-                        side: const BorderSide(color: AppPalette.sky400),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                      ),
-                      icon: const Icon(
-                        Icons.tv_rounded,
-                        size: 16,
-                        color: AppPalette.sky400,
-                      ),
-                      label: const Text(
-                        'Modo Kiosco (Monitor)',
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
+                  _SidebarItem(
+                    icon: Icons.tv_rounded,
+                    label: 'Modo Kiosco (Monitor)',
+                    active: _isKioskMode,
+                    onTap: () => _setKioskMode(true),
                   ),
 
                 Padding(
@@ -2105,12 +2084,62 @@ class _RackDocShellState extends State<RackDocShell> {
         canEdit: _currentUser.canEdit,
         initialStackId: _highlightedStackId,
         initialStackNodeId: _highlightedStackNodeId,
-        onOpenSreDocs: () => _openSreAlarms(tabIndex: 2),
+        onOpenSreDocs: () => _openSreAlarms(tabIndex: 3),
+        onNavigateToLocation: (locationId) {
+          setState(() {
+            if (locationId != null) {
+              _activeLocationId = locationId;
+              _expandedLocationIds.add(locationId);
+            }
+            _activeNav = 'locations';
+          });
+        },
+        onNavigateToFloorDevice: (locationId, floorId, floorDeviceId) async {
+          await _refreshDataSilently();
+          if (!mounted) return;
+          setState(() {
+            if (locationId != null) {
+              _activeLocationId = locationId;
+              _expandedLocationIds.add(locationId);
+            } else if (floorId != null) {
+              for (final loc in _locations) {
+                if (loc.floors.any((fl) => fl.id == floorId)) {
+                  _activeLocationId = loc.id;
+                  _expandedLocationIds.add(loc.id);
+                  break;
+                }
+              }
+            }
+            if (floorId != null) {
+              _activeFloorId = floorId;
+              _expandedFloorIds.add(floorId);
+            }
+            _highlightedFloorDeviceId = floorDeviceId;
+            _activeNav = 'datacenter';
+          });
+        },
         onNavigateToRackDevice: (rackId, deviceId) {
           _openRack(rackId, highlightDeviceId: deviceId);
         },
+        onNavigateToNetworkHost: (assetId, stackId, stackNodeId) {
+          setState(() {
+            if (stackId != null) _highlightedStackId = stackId;
+            if (stackNodeId != null) _highlightedStackNodeId = stackNodeId;
+            _activeNav = 'network_hosts';
+          });
+        },
+        onNavigateToDashboard: (rackId) {
+          setState(() {
+            if (rackId != null) _dashSelectedRackId = rackId;
+            _activeNav = 'dashboard';
+          });
+          _refreshDataSilently();
+        },
         onNavigateToCmdb: (_) {
           setState(() => _activeNav = 'cmdb');
+        },
+        onNavigateToCertScope: (_) {
+          setState(() => _activeNav = 'certscope');
         },
       );
     }
@@ -2122,11 +2151,61 @@ class _RackDocShellState extends State<RackDocShell> {
         canEdit: _currentUser.canEdit,
         isSreAlarmsMode: true,
         initialSreTabIndex: _sreInitialTabIndex,
+        onNavigateToLocation: (locationId) {
+          setState(() {
+            if (locationId != null) {
+              _activeLocationId = locationId;
+              _expandedLocationIds.add(locationId);
+            }
+            _activeNav = 'locations';
+          });
+        },
+        onNavigateToFloorDevice: (locationId, floorId, floorDeviceId) async {
+          await _refreshDataSilently();
+          if (!mounted) return;
+          setState(() {
+            if (locationId != null) {
+              _activeLocationId = locationId;
+              _expandedLocationIds.add(locationId);
+            } else if (floorId != null) {
+              for (final loc in _locations) {
+                if (loc.floors.any((fl) => fl.id == floorId)) {
+                  _activeLocationId = loc.id;
+                  _expandedLocationIds.add(loc.id);
+                  break;
+                }
+              }
+            }
+            if (floorId != null) {
+              _activeFloorId = floorId;
+              _expandedFloorIds.add(floorId);
+            }
+            _highlightedFloorDeviceId = floorDeviceId;
+            _activeNav = 'datacenter';
+          });
+        },
         onNavigateToRackDevice: (rackId, deviceId) {
           _openRack(rackId, highlightDeviceId: deviceId);
         },
+        onNavigateToNetworkHost: (assetId, stackId, stackNodeId) {
+          setState(() {
+            if (stackId != null) _highlightedStackId = stackId;
+            if (stackNodeId != null) _highlightedStackNodeId = stackNodeId;
+            _activeNav = 'network_hosts';
+          });
+        },
+        onNavigateToDashboard: (rackId) {
+          setState(() {
+            if (rackId != null) _dashSelectedRackId = rackId;
+            _activeNav = 'dashboard';
+          });
+          _refreshDataSilently();
+        },
         onNavigateToCmdb: (_) {
           setState(() => _activeNav = 'cmdb');
+        },
+        onNavigateToCertScope: (_) {
+          setState(() => _activeNav = 'certscope');
         },
       );
     }
@@ -2135,7 +2214,7 @@ class _RackDocShellState extends State<RackDocShell> {
       return CmdbView(
         api: _api,
         canEdit: _currentUser.canEdit,
-        onNavigateToSreDocs: () => _openSreAlarms(tabIndex: 2),
+        onNavigateToSreDocs: () => _openSreAlarms(tabIndex: 3),
         onNavigateToRackDevice: (rackId, deviceId) {
           _openRack(rackId, highlightDeviceId: deviceId);
         },
@@ -2180,7 +2259,7 @@ class _RackDocShellState extends State<RackDocShell> {
         api: _api,
         canEdit: _currentUser.canEdit,
         canOperate: _currentUser.canEdit,
-        onNavigateToSreDocs: () => _openSreAlarms(tabIndex: 2),
+        onNavigateToSreDocs: () => _openSreAlarms(tabIndex: 3),
         onNavigateToRack: (rackId, deviceId) {
           _openRack(rackId, highlightDeviceId: deviceId);
         },

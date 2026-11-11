@@ -27,9 +27,11 @@ from ..models import (
     CmdbIpAddress,
     CmdbSubnet,
     Connection,
+    Floor,
     FloorDevice,
     HostGroup,
     InfraConnector,
+    Location,
     LogicalTopologyLink,
     MaintenanceWindow,
     MonitoredServiceCheck,
@@ -37,6 +39,7 @@ from ..models import (
     Port,
     Rack,
     RackDevice,
+    Room,
     SmtpAlertConfig,
     SwitchSnmpPort,
     TechStackDiagram,
@@ -1175,6 +1178,10 @@ def build_network_hosts_overview(db: Session, sync_access_control: bool = False)
     ensure_network_hosts_seeded(db)
 
     now = utcnow()
+    locations = {loc.id: loc for loc in db.query(Location).all()}
+    floors = {fl.id: fl for fl in db.query(Floor).all()}
+    rooms = {rm.id: rm for rm in db.query(Room).all()}
+    floor_devs = {fd.id: fd for fd in db.query(FloorDevice).all()}
     racks = {r.id: r for r in db.query(Rack).all()}
     rack_devs = {d.id: d for d in db.query(RackDevice).options(joinedload(RackDevice.template)).all()}
     assets = db.query(CmdbAsset).options(joinedload(CmdbAsset.ip_addresses)).order_by(CmdbAsset.id).all()
@@ -1211,6 +1218,10 @@ def build_network_hosts_overview(db: Session, sync_access_control: bool = False)
         host_rdev = rack_devs.get(ast.host_rack_device_id) if ast.host_rack_device_id else None
         effective_rdev = rdev or host_rdev
         rk = racks.get(effective_rdev.rack_id) if effective_rdev else None
+        fdev = floor_devs.get(ast.floor_device_id) if ast.floor_device_id else None
+        rm = rooms.get(rk.room_id) if rk else None
+        fl = floors.get(rm.floor_id) if rm else (floors.get(fdev.floor_id) if fdev else None)
+        loc = locations.get(fl.location_id) if fl else None
 
         layer_key, layer_label = classify_logical_layer(ast, rdev)
         maint_win = is_asset_in_maintenance(ast, active_windows, hg_by_id)
@@ -1278,9 +1289,49 @@ def build_network_hosts_overview(db: Session, sync_access_control: bool = False)
                 "status_output": ch.status_output,
                 "is_primary_heartbeat": ch.is_primary_heartbeat,
                 "last_checked_at": ch.last_checked_at.isoformat() if ch.last_checked_at else None,
+                "last_state_change_at": (
+                    ch.last_state_change_at.isoformat()
+                    if ch.last_state_change_at
+                    else (ch.last_checked_at.isoformat() if ch.last_checked_at else None)
+                ),
             }
             for ch in ast_checks
         ]
+
+        has_crit_chk = any((c.nagios_state or "").upper() == "CRITICAL" for c in ast_checks)
+        has_warn_chk = any((c.nagios_state or "").upper() == "WARNING" for c in ast_checks)
+        if nagios_host_state == "MAINTENANCE":
+            overall_alarm_state = "MAINTENANCE"
+        elif nagios_host_state == "DOWN" or has_crit_chk:
+            overall_alarm_state = "CRITICAL"
+        elif nagios_host_state == "UNREACHABLE":
+            overall_alarm_state = "UNREACHABLE"
+        elif has_warn_chk or (ast.status or "").lower() == "warning":
+            overall_alarm_state = "WARNING"
+        else:
+            overall_alarm_state = "OK"
+
+        alarm_timestamps = [
+            c.last_state_change_at or c.last_checked_at
+            for c in ast_checks
+            if (c.nagios_state or "").upper() in ("CRITICAL", "WARNING") and (c.last_state_change_at or c.last_checked_at)
+        ]
+        all_chk_timestamps = [
+            c.last_state_change_at or c.last_checked_at
+            for c in ast_checks
+            if (c.last_state_change_at or c.last_checked_at)
+        ]
+        if maint_win and maint_win.starts_at:
+            state_since_dt = maint_win.starts_at
+        elif alarm_timestamps:
+            state_since_dt = min(alarm_timestamps)
+        elif overall_alarm_state in ("CRITICAL", "UNREACHABLE", "WARNING") and (ast.last_checked_at or ast.updated_at):
+            state_since_dt = ast.last_checked_at or ast.updated_at
+        elif all_chk_timestamps:
+            state_since_dt = min(all_chk_timestamps)
+        else:
+            state_since_dt = ast.last_checked_at or ast.updated_at or ast.created_at
+        state_since_at = state_since_dt.isoformat() if state_since_dt else None
 
         ast_ports = ports_by_asset.get(ast.id, [])
         serialized_ports = [
@@ -1397,8 +1448,15 @@ def build_network_hosts_overview(db: Session, sync_access_control: bool = False)
                 "heartbeat_ip": hb_ip,
                 "all_ips": all_ips_str,
                 "ip_count": len(all_ips_str),
-                # Coordinación directa con el Rack Editor
+                # Coordinación directa con Mapa, Planta, Rack Editor, Red & Host, CMDB y CertScope
                 "sync_source": ast.sync_source,
+                "location_id": loc.id if loc else None,
+                "location_code": loc.code if loc else "",
+                "location_name": loc.name if loc else "",
+                "floor_id": fl.id if fl else None,
+                "floor_name": fl.name if fl else "",
+                "floor_device_id": fdev.id if fdev else ast.floor_device_id,
+                "floor_device_code": fdev.code if fdev else "",
                 "rack_device_id": ast.rack_device_id,
                 "host_rack_device_id": ast.host_rack_device_id,
                 "target_rack_device_id": effective_rdev.id if effective_rdev else None,
@@ -1414,6 +1472,9 @@ def build_network_hosts_overview(db: Session, sync_access_control: bool = False)
                 "heartbeat_config": hb_cfg_raw,
                 "nagios_host_state": nagios_host_state,  # UP | DOWN | UNREACHABLE | MAINTENANCE
                 "nagios_state_type": nagios_state_type,
+                "overall_alarm_state": overall_alarm_state,  # CRITICAL | WARNING | UNREACHABLE | MAINTENANCE | OK
+                "state_since_at": state_since_at,
+                "last_checked_at": ast.last_checked_at.isoformat() if ast.last_checked_at else None,
                 "in_maintenance": maint_win is not None,
                 "maintenance_title": maint_win.title if maint_win else "",
                 "last_ping_ms": ast.last_ping_ms,
@@ -1453,6 +1514,7 @@ def build_network_hosts_overview(db: Session, sync_access_control: bool = False)
                 "service_checks": serialized_checks,
                 "snmp_ports": serialized_ports,
                 "snmp_ports_count": len(serialized_ports),
+                "stack_links": [],
             }
         )
 
@@ -1480,6 +1542,14 @@ def build_network_hosts_overview(db: Session, sync_access_control: bool = False)
             h_dict = hosts_by_id.get(sn.asset_id)
             if not h_dict:
                 continue
+            h_dict["stack_links"].append(
+                {
+                    "stack_id": st.id,
+                    "stack_code": st.code,
+                    "stack_name": st.name,
+                    "node_id": sn.id,
+                }
+            )
             hb_ip = h_dict.get("ssh_host") or h_dict.get("heartbeat_ip") or "127.0.0.1"
             eff_ssh_enabled = bool(sn.ssh_enabled and h_dict.get("ssh_enabled", True))
             eff_ssh_user = sn.ssh_user or h_dict.get("ssh_user") or "root"
