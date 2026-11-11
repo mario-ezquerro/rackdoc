@@ -628,6 +628,12 @@ class RackDocApiClient {
     await _delete('/ad-servers/$adId');
   }
 
+  Future<Map<String, dynamic>> testAdServerConnection(int adId) async {
+    return Map<String, dynamic>.from(
+      await _post('/ad-servers/$adId/test', {}) as Map,
+    );
+  }
+
   Future<Map<String, dynamic>> searchAdUsers(int adId, String query) async {
     return Map<String, dynamic>.from(await _post('/ad-servers/$adId/search-users', {'query': query}) as Map);
   }
@@ -760,8 +766,17 @@ class RackDocApiClient {
   // 4. RED & HOST (TOPOLOGÍA LÓGICA, NAGIOS, SNMP, CONECTORES Y PROMETHEUS)
   // ---------------------------------------------------------------------------
 
-  Future<Map<String, dynamic>> getNetworkHostsOverview() async {
-    return Map<String, dynamic>.from(await _get('/network-hosts/overview') as Map);
+  Future<Map<String, dynamic>> getNetworkHostsOverview({
+    bool syncAd = false,
+  }) async {
+    return Map<String, dynamic>.from(
+      await _get(
+            syncAd
+                ? '/network-hosts/overview?sync_ad=true'
+                : '/network-hosts/overview',
+          )
+          as Map,
+    );
   }
 
   Future<Map<String, dynamic>> getNetworkHostTelemetry(

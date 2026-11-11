@@ -181,6 +181,7 @@ class ADUserImportItem(BaseModel):
     email: str = ""
     ad_dn: str = ""
     role: str = "viewer"
+    initial_password: str = ""
 
 
 class ADUserImportRequest(BaseModel):

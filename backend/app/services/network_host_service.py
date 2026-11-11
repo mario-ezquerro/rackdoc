@@ -1160,7 +1160,7 @@ def get_asset_telemetry_timeseries(
     }
 
 
-def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
+def build_network_hosts_overview(db: Session, sync_access_control: bool = False) -> Dict[str, Any]:
     """
     Construye el estado consolidado completo para la vista '4. Red & Host':
     - Resumen TAC estilo Nagios (Hosts UP, DOWN, UNREACHABLE, MAINTENANCE; Servicios OK, WARNING, CRITICAL)
@@ -1629,94 +1629,95 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
     contacts_by_code = {c.code.upper(): c for c in contacts if c.code}
     cgroups_by_code = {cg.code.upper(): cg for cg in contact_groups if cg.code}
 
+    should_sync_access_control = sync_access_control or (len(contacts) == 0 and len(contact_groups) == 0)
     dirty_sync = False
-    for u in access_users:
-        u_email = (u.email or f"{u.username}@empresa.local").strip().lower()
-        u_code = f"USR-{'AD' if u.auth_source == 'ad' else 'LOCAL'}-{u.username.upper().replace('.', '-')}"[:48]
-        existing_c = contacts_by_email.get(u_email) or contacts_by_code.get(u_code)
-        ad_srv = ad_by_id.get(u.ad_server_id) if u.ad_server_id else None
-        origin_prefix = f"[AD {ad_srv.domain or ad_srv.name}]" if u.auth_source == "ad" and ad_srv else (
-            "[Active Directory]" if u.auth_source == "ad" else "[Usuario Local]"
-        )
-        role_desc = f"{origin_prefix} Rol RBAC: {u.role.upper()}" + (f" • {u.ad_dn}" if u.ad_dn else "")
-        if not existing_c:
-            new_c = AlertContact(
-                code=u_code,
-                full_name=u.full_name or u.username,
-                role_title=role_desc[:120],
-                email=u.email or u_email,
-                phone_or_telegram=f"@{u.username}",
-                schedule_period="24x7",
-                notify_on_down=True,
-                notify_on_critical=True,
-                notify_on_warning=True,
-                notify_on_unreachable=False,
-                notify_on_recovery=True,
-                active=bool(u.is_active),
+    if should_sync_access_control:
+        for u in access_users:
+            u_email = (u.email or f"{u.username}@empresa.local").strip().lower()
+            u_code = f"USR-{'AD' if u.auth_source == 'ad' else 'LOCAL'}-{u.username.upper().replace('.', '-')}"[:48]
+            existing_c = contacts_by_email.get(u_email) or contacts_by_code.get(u_code)
+            ad_srv = ad_by_id.get(u.ad_server_id) if u.ad_server_id else None
+            origin_prefix = f"[AD {ad_srv.domain or ad_srv.name}]" if u.auth_source == "ad" and ad_srv else (
+                "[Active Directory]" if u.auth_source == "ad" else "[Usuario Local]"
             )
-            db.add(new_c)
-            contacts.append(new_c)
-            contacts_by_email[u_email] = new_c
-            contacts_by_code[u_code] = new_c
-            dirty_sync = True
-        elif not (existing_c.role_title or "").startswith("["):
-            existing_c.role_title = f"{origin_prefix} {existing_c.role_title or u.role.upper()}"[:120]
-            dirty_sync = True
-
-    if dirty_sync:
-        db.flush()
-
-    # Asegurar que cada grupo mapeado en Active Directory y un grupo de Control de Acceso Local existan en AlertContactGroup
-    for srv in ad_servers:
-        dom = srv.domain or "corp.local"
-        for idx, gm in enumerate(srv.group_role_mapping or []):
-            gname = str(gm.get("group_name") or f"AD Group {idx+1}").strip()
-            gdn = str(gm.get("group_dn") or f"CN={gname},OU=Groups,{srv.base_dn or 'DC=corp,DC=local'}").strip()
-            grole = str(gm.get("role") or srv.default_role).upper()
-            slug = re.sub(r"[^A-Z0-9]+", "-", gname.upper()).strip("-")[:28]
-            gcode = f"CG-AD-{slug}"[:48]
-            if gcode not in cgroups_by_code:
-                mail_slug = re.sub(r"[^a-z0-9]+", "-", gname.lower()).strip("-")[:24] or f"ad-group-{idx+1}"
-                # Miembros AD cuyo rol coincide o que pertenecen al servidor AD
-                ad_member_ids = [
-                    c.id
-                    for c in contacts
-                    if c.id is not None and ("AD" in (c.code or "") or "[AD" in (c.role_title or ""))
-                ]
-                new_cg = AlertContactGroup(
-                    code=gcode,
-                    name=gname,
-                    description=f"[Active Directory: {dom}] {gdn} • Rol RBAC: {grole}",
-                    group_email=f"{mail_slug}@{dom}",
-                    channel_webhook_url="",
-                    member_contact_ids=ad_member_ids[:4] if ad_member_ids else [c.id for c in contacts[:2] if c.id],
+            role_desc = f"{origin_prefix} Rol RBAC: {u.role.upper()}" + (f" • {u.ad_dn}" if u.ad_dn else "")
+            if not existing_c:
+                new_c = AlertContact(
+                    code=u_code,
+                    full_name=u.full_name or u.username,
+                    role_title=role_desc[:120],
+                    email=u.email or u_email,
+                    phone_or_telegram=f"@{u.username}",
+                    schedule_period="24x7",
+                    notify_on_down=True,
+                    notify_on_critical=True,
+                    notify_on_warning=True,
+                    notify_on_unreachable=False,
+                    notify_on_recovery=True,
+                    active=bool(u.is_active),
                 )
-                db.add(new_cg)
-                contact_groups.append(new_cg)
-                cgroups_by_code[gcode] = new_cg
+                db.add(new_c)
+                contacts.append(new_c)
+                contacts_by_email[u_email] = new_c
+                contacts_by_code[u_code] = new_c
+                dirty_sync = True
+            elif not (existing_c.role_title or "").startswith("["):
+                existing_c.role_title = f"{origin_prefix} {existing_c.role_title or u.role.upper()}"[:120]
                 dirty_sync = True
 
-    if "CG-LOCAL-ADMINS" not in cgroups_by_code:
-        local_member_ids = [
-            c.id for c in contacts if c.id is not None and ("[Usuario Local]" in (c.role_title or "") or "LOCAL" in (c.code or ""))
-        ]
-        cg_loc = AlertContactGroup(
-            code="CG-LOCAL-ADMINS",
-            name="Administradores & Operadores Locales (RBAC)",
-            description="[Grupo Local] Usuarios locales registrados en Control de Acceso de RackDoc.",
-            group_email="admin-local@rackdoc.internal",
-            channel_webhook_url="",
-            member_contact_ids=local_member_ids if local_member_ids else [c.id for c in contacts[:2] if c.id],
-        )
-        db.add(cg_loc)
-        contact_groups.append(cg_loc)
-        cgroups_by_code["CG-LOCAL-ADMINS"] = cg_loc
-        dirty_sync = True
+        if dirty_sync:
+            db.flush()
 
-    if dirty_sync:
-        db.commit()
-        contacts = db.query(AlertContact).order_by(AlertContact.id).all()
-        contact_groups = db.query(AlertContactGroup).order_by(AlertContactGroup.id).all()
+        # Asegurar que cada grupo mapeado en Active Directory y un grupo de Control de Acceso Local existan en AlertContactGroup
+        for srv in ad_servers:
+            dom = srv.domain or "corp.local"
+            for idx, gm in enumerate(srv.group_role_mapping or []):
+                gname = str(gm.get("group_name") or f"AD Group {idx+1}").strip()
+                gdn = str(gm.get("group_dn") or f"CN={gname},OU=Groups,{srv.base_dn or 'DC=corp,DC=local'}").strip()
+                grole = str(gm.get("role") or srv.default_role).upper()
+                slug = re.sub(r"[^A-Z0-9]+", "-", gname.upper()).strip("-")[:28]
+                gcode = f"CG-AD-{slug}"[:48]
+                if gcode not in cgroups_by_code:
+                    mail_slug = re.sub(r"[^a-z0-9]+", "-", gname.lower()).strip("-")[:24] or f"ad-group-{idx+1}"
+                    ad_member_ids = [
+                        c.id
+                        for c in contacts
+                        if c.id is not None and ("AD" in (c.code or "") or "[AD" in (c.role_title or ""))
+                    ]
+                    new_cg = AlertContactGroup(
+                        code=gcode,
+                        name=gname,
+                        description=f"[Active Directory: {dom}] {gdn} • Rol RBAC: {grole}",
+                        group_email=f"{mail_slug}@{dom}",
+                        channel_webhook_url="",
+                        member_contact_ids=ad_member_ids[:4] if ad_member_ids else [c.id for c in contacts[:2] if c.id],
+                    )
+                    db.add(new_cg)
+                    contact_groups.append(new_cg)
+                    cgroups_by_code[gcode] = new_cg
+                    dirty_sync = True
+
+        if "CG-LOCAL-ADMINS" not in cgroups_by_code:
+            local_member_ids = [
+                c.id for c in contacts if c.id is not None and ("[Usuario Local]" in (c.role_title or "") or "LOCAL" in (c.code or ""))
+            ]
+            cg_loc = AlertContactGroup(
+                code="CG-LOCAL-ADMINS",
+                name="Administradores & Operadores Locales (RBAC)",
+                description="[Grupo Local] Usuarios locales registrados en Control de Acceso de RackDoc.",
+                group_email="admin-local@rackdoc.internal",
+                channel_webhook_url="",
+                member_contact_ids=local_member_ids if local_member_ids else [c.id for c in contacts[:2] if c.id],
+            )
+            db.add(cg_loc)
+            contact_groups.append(cg_loc)
+            cgroups_by_code["CG-LOCAL-ADMINS"] = cg_loc
+            dirty_sync = True
+
+        if dirty_sync:
+            db.commit()
+            contacts = db.query(AlertContact).order_by(AlertContact.id).all()
+            contact_groups = db.query(AlertContactGroup).order_by(AlertContactGroup.id).all()
 
     contacts_by_id = {c.id: c for c in contacts}
     cgroups_by_id = {cg.id: cg for cg in contact_groups}
@@ -1905,6 +1906,19 @@ def build_network_hosts_overview(db: Session) -> Dict[str, Any]:
                 "enabled": srv.enabled,
             }
             for srv in ad_servers
+        ],
+        "known_directory_users": [
+            {
+                "id": u.id,
+                "username": u.username,
+                "full_name": u.full_name or u.username,
+                "email": (u.email or f"{u.username}@empresa.local").strip(),
+                "role": u.role,
+                "auth_source": u.auth_source or "local",
+                "ad_dn": u.ad_dn or "",
+                "is_active": bool(u.is_active),
+            }
+            for u in access_users
         ],
         "notification_rules": [
             {

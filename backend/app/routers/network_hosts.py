@@ -21,8 +21,8 @@ from ..time_utils import utcnow
         "cacheable."
     ),
 )
-def get_network_hosts_overview_endpoint(db: Session = Depends(get_db)):
-    return build_network_hosts_overview(db)
+def get_network_hosts_overview_endpoint(sync_ad: bool = False, db: Session = Depends(get_db)):
+    return build_network_hosts_overview(db, sync_access_control=sync_ad)
 
 
 @api_router.get(
@@ -377,9 +377,11 @@ def delete_host_group_endpoint(group_id: int, db: Session = Depends(get_db)):
     hg = db.query(HostGroup).filter(HostGroup.id == group_id).first()
     if not hg:
         raise HTTPException(status_code=404, detail="Grupo de hosts no encontrado.")
+    for r in db.query(NotificationRoutingRule).filter(NotificationRoutingRule.host_group_id == group_id).all():
+        db.delete(r)
     db.delete(hg)
     db.commit()
-    return build_network_hosts_overview(db)
+    return build_network_hosts_overview(db, sync_access_control=False)
 
 
 @api_router.post(
@@ -406,7 +408,7 @@ def create_or_update_alert_contact_endpoint(payload: AlertContactInput, db: Sess
     c.notify_on_recovery = payload.notify_on_recovery
     c.active = payload.active
     db.commit()
-    return build_network_hosts_overview(db)
+    return build_network_hosts_overview(db, sync_access_control=False)
 
 
 @api_router.delete(
@@ -418,9 +420,17 @@ def delete_alert_contact_endpoint(contact_id: int, db: Session = Depends(get_db)
     c = db.query(AlertContact).filter(AlertContact.id == contact_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Contacto no encontrado.")
+    for cg in db.query(AlertContactGroup).all():
+        mids = list(cg.member_contact_ids or [])
+        if contact_id in mids:
+            cg.member_contact_ids = [x for x in mids if x != contact_id]
+    for r in db.query(NotificationRoutingRule).all():
+        cids = list(r.contact_ids or [])
+        if contact_id in cids:
+            r.contact_ids = [x for x in cids if x != contact_id]
     db.delete(c)
     db.commit()
-    return build_network_hosts_overview(db)
+    return build_network_hosts_overview(db, sync_access_control=False)
 
 
 @api_router.post(
@@ -440,7 +450,7 @@ def create_or_update_alert_contact_group_endpoint(payload: AlertContactGroupInpu
     cg.channel_webhook_url = payload.channel_webhook_url.strip()
     cg.member_contact_ids = payload.member_contact_ids
     db.commit()
-    return build_network_hosts_overview(db)
+    return build_network_hosts_overview(db, sync_access_control=False)
 
 
 @api_router.delete(
@@ -452,9 +462,13 @@ def delete_alert_contact_group_endpoint(group_id: int, db: Session = Depends(get
     cg = db.query(AlertContactGroup).filter(AlertContactGroup.id == group_id).first()
     if not cg:
         raise HTTPException(status_code=404, detail="Grupo de personas no encontrado.")
+    for r in db.query(NotificationRoutingRule).all():
+        gids = list(r.contact_group_ids or [])
+        if group_id in gids:
+            r.contact_group_ids = [x for x in gids if x != group_id]
     db.delete(cg)
     db.commit()
-    return build_network_hosts_overview(db)
+    return build_network_hosts_overview(db, sync_access_control=False)
 
 
 @api_router.post(

@@ -260,11 +260,13 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
   List<UserModel> _directoryUsers = [];
   bool _directoryUsersDenegado = false;
 
-  // Estado de la Matriz 4 Columnas (Estilo Active Directory + Drag & Drop) en '6. Avisos & Alarmas'
+  // Estado de la Matriz 5 Columnas (Estilo Active Directory + Drag & Drop) en '1. Avisos de Alarmas'
   int? _selectedAlertHostGroupId;
   int? _selectedAlertUserGroupId;
   int? _selectedAlertContactId;
   String _alertGroupSourceFilter = 'all'; // 'all' | 'ad' | 'local' | 'custom'
+  String _knownUsersSourceFilter = 'all'; // 'all' | 'ad' | 'local' | 'custom'
+  String _knownUsersSearchQuery = '';
   bool _showAllUsersInCol4 = false;
   bool _showAlertBottomLogs = true;
 
@@ -7779,7 +7781,12 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
               ),
               OutlinedButton.icon(
                 onPressed: () async {
-                  await _loadOverview();
+                  final res = await widget.api.getNetworkHostsOverview(
+                    syncAd: true,
+                  );
+                  await _loadDirectoryUsers();
+                  if (!mounted) return;
+                  setState(() => _overview = res);
                   _showSnack(
                     'Usuarios y Grupos sincronizados con Control de Acceso (Local + Active Directory).',
                   );
@@ -7877,7 +7884,7 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
             ],
           ),
         ),
-        // Banner explicativo del flujo izquierda -> derecha con Drag & Drop
+        // Banner explicativo del flujo izquierda -> derecha con Drag & Drop (5 Columnas)
         Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -7895,9 +7902,9 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
               SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  'Flujo Active Directory & Alarmas (Izquierda → Derecha):  [1. Grupo de Host]  ➔  [2. Hosts del Grupo]  ⬅(Arrastra y suelta)⬅  [3. Grupo de Usuarios (con su correo)]  ➔  [4. Usuario (con su correo, grupos MemberOf y hosts que le avisan)].',
+                  'Flujo Active Directory & Alarmas (5 Columnas):  [1. Grupo de Host] ➔ [2. Hosts del Grupo] ⬅(Arrastra alarmas)⬅ [3. Grupo de Usuarios] ➔ [4. Usuarios del Grupo + Ficha AD] ⬅(Arrastra al grupo)⬅ [5. Usuarios Conocidos (AD/Local/Directorio)].',
                   style: TextStyle(
-                    fontSize: 10.6,
+                    fontSize: 10.5,
                     fontWeight: FontWeight.w700,
                     color: AppTheme.textSecondary,
                   ),
@@ -7907,7 +7914,7 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
             ],
           ),
         ),
-        // 2. Matriz Principal de 4 Columnas (Izquierda a Derecha)
+        // 2. Matriz Principal de 5 Columnas (Izquierda a Derecha)
         Expanded(
           child: Padding(
             padding: const EdgeInsets.all(10),
@@ -7916,26 +7923,32 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
               children: [
                 // COLUMNA 1: GRUPOS DE HOST (DROP TARGET)
                 Expanded(
-                  flex: 24,
+                  flex: 20,
                   child: _buildAlertsCol1HostGroups(),
                 ),
                 _buildAlertsFlowConnectorArrow('contiene\nhosts ➔'),
                 // COLUMNA 2: HOSTS DEL GRUPO SELECCIONADO (DROP TARGET)
                 Expanded(
-                  flex: 25,
+                  flex: 20,
                   child: _buildAlertsCol2HostsInGroup(),
                 ),
-                _buildAlertsFlowConnectorArrow('⬅ arrastra\npara alarmar'),
-                // COLUMNA 3: GRUPOS DE USUARIOS (AD / LOCAL / A MEDIDA) — DRAGGABLE
+                _buildAlertsFlowConnectorArrow('⬅ arrastra\nalarmas'),
+                // COLUMNA 3: GRUPOS DE USUARIOS (AD / LOCAL / A MEDIDA) — DRAGGABLE & DROP TARGET DE USUARIOS
                 Expanded(
-                  flex: 25,
+                  flex: 20,
                   child: _buildAlertsCol3UserGroups(),
                 ),
-                _buildAlertsFlowConnectorArrow('miembros\n& AD ➔'),
-                // COLUMNA 4: USUARIOS + FICHA ACTIVE DIRECTORY (MEMBEROF & HOSTS QUE LE ENVÍAN ALARMAS)
+                _buildAlertsFlowConnectorArrow('miembros\ngrupo ➔'),
+                // COLUMNA 4: USUARIOS DEL GRUPO SELECCIONADO + FICHA ACTIVE DIRECTORY (DROP TARGET DE COL 5)
                 Expanded(
-                  flex: 26,
+                  flex: 21,
                   child: _buildAlertsCol4UsersAndAdCard(),
+                ),
+                _buildAlertsFlowConnectorArrow('⬅ arrastra\nal grupo'),
+                // COLUMNA 5: USUARIOS CONOCIDOS (DIRECTORIO AD / LOCAL / RACKDOC) — DRAGGABLE HACIA COL 4, 3, 2, 1
+                Expanded(
+                  flex: 21,
+                  child: _buildAlertsCol5KnownUsers(),
                 ),
               ],
             ),
@@ -8086,7 +8099,8 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                   onWillAcceptWithDetails: (details) =>
                       widget.canEdit &&
                       (details.data.startsWith('ug:') ||
-                          details.data.startsWith('u:')),
+                          details.data.startsWith('u:') ||
+                          details.data.startsWith('du:')),
                   onAcceptWithDetails: (details) => _handleDropRecipientOnTarget(
                     dragToken: details.data,
                     scopeType: 'host_group',
@@ -8141,7 +8155,7 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
-                                if (widget.canEdit)
+                                if (widget.canEdit) ...[
                                   IconButton(
                                     tooltip: 'Editar HostGroup y sus Hosts',
                                     constraints: const BoxConstraints(),
@@ -8154,6 +8168,19 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                                       color: AppTheme.textMuted,
                                     ),
                                   ),
+                                  IconButton(
+                                    tooltip: 'Eliminar Grupo de Host',
+                                    constraints: const BoxConstraints(),
+                                    padding: const EdgeInsets.only(left: 5),
+                                    onPressed: () =>
+                                        _confirmAndDeleteHostGroup(hg),
+                                    icon: const Icon(
+                                      Icons.delete_outline_rounded,
+                                      size: 14.5,
+                                      color: AppTheme.error,
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                             const SizedBox(height: 3),
@@ -8205,7 +8232,7 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                               child: (assignedCgIds.isEmpty &&
                                       assignedContactIds.isEmpty)
                                   ? const Text(
-                                      '📥 Arrastra aquí un Grupo de Usuarios para asignar alarmas',
+                                      '📥 Arrastra aquí un Grupo de Usuarios o Usuario para asignar alarmas',
                                       style: TextStyle(
                                         fontSize: 9.4,
                                         fontStyle: FontStyle.italic,
@@ -8351,6 +8378,19 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                if (widget.canEdit && selectedHg != null)
+                  IconButton(
+                    tooltip: 'Añadir o editar Hosts de este Grupo',
+                    constraints: const BoxConstraints(),
+                    padding: EdgeInsets.zero,
+                    onPressed: () =>
+                        _showCreateHostGroupDialog(existing: selectedHg),
+                    icon: const Icon(
+                      Icons.add_circle_outline_rounded,
+                      size: 16,
+                      color: AppTheme.accentBlue,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -8415,7 +8455,8 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                         onWillAcceptWithDetails: (details) =>
                             widget.canEdit &&
                             (details.data.startsWith('ug:') ||
-                                details.data.startsWith('u:')),
+                                details.data.startsWith('u:') ||
+                                details.data.startsWith('du:')),
                         onAcceptWithDetails: (details) =>
                             _handleDropRecipientOnTarget(
                               dragToken: details.data,
@@ -8473,6 +8514,24 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                                         color: AppTheme.textMuted,
                                       ),
                                     ),
+                                    if (widget.canEdit && selectedHg != null) ...[
+                                      const SizedBox(width: 4),
+                                      InkWell(
+                                        onTap: () => _removeHostFromHostGroup(
+                                          selectedHg,
+                                          assetId,
+                                        ),
+                                        child: const Tooltip(
+                                          message:
+                                              'Quitar este Host del Grupo de Host actual',
+                                          child: Icon(
+                                            Icons.delete_outline_rounded,
+                                            size: 13.5,
+                                            color: AppTheme.error,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ],
                                 ),
                                 const SizedBox(height: 5),
@@ -8581,7 +8640,7 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
   }
 
   // ---------------------------------------------------------------------------
-  // COLUMNA 3: GRUPOS DE USUARIOS (AD / LOCAL / A MEDIDA) — DRAGGABLE
+  // COLUMNA 3: GRUPOS DE USUARIOS (AD / LOCAL / A MEDIDA) — DRAGGABLE & DROP TARGET DE COL 5
   // ---------------------------------------------------------------------------
   Widget _buildAlertsCol3UserGroups() {
     final filteredGroups = _alertContactGroups.where((cg) {
@@ -8685,176 +8744,217 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                     ((cg['alerting_host_group_codes'] as List?) ?? [])
                         .cast<String>();
 
-                final cardBody = GestureDetector(
-                  onTap: () => setState(() {
-                    _selectedAlertUserGroupId = cgId;
-                    _showAllUsersInCol4 = false;
-                    if (memberIds.isNotEmpty &&
-                        !memberIds.contains(_selectedAlertContactId)) {
-                      _selectedAlertContactId = memberIds.first;
-                    }
-                  }),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 120),
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? AppTheme.accentPurple.withValues(alpha: 0.09)
-                          : AppTheme.bgPrimary,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: isSelected
-                            ? AppTheme.accentPurple
-                            : AppTheme.border,
-                        width: isSelected ? 1.8 : 1.0,
+                return DragTarget<String>(
+                  onWillAcceptWithDetails: (details) =>
+                      widget.canEdit &&
+                      (details.data.startsWith('u:') ||
+                          details.data.startsWith('du:')),
+                  onAcceptWithDetails: (details) =>
+                      _handleDropUserIntoContactGroup(
+                        dragToken: details.data,
+                        targetGroup: cg,
                       ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
+                  builder: (ctx, candidateData, rejectedData) {
+                    final isHoveringUserDrop = candidateData.isNotEmpty;
+                    final cardBody = GestureDetector(
+                      onTap: () => setState(() {
+                        _selectedAlertUserGroupId = cgId;
+                        _showAllUsersInCol4 = false;
+                        if (memberIds.isNotEmpty &&
+                            !memberIds.contains(_selectedAlertContactId)) {
+                          _selectedAlertContactId = memberIds.first;
+                        }
+                      }),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 120),
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: isHoveringUserDrop
+                              ? AppTheme.success.withValues(alpha: 0.14)
+                              : (isSelected
+                                    ? AppTheme.accentPurple.withValues(
+                                        alpha: 0.09,
+                                      )
+                                    : AppTheme.bgPrimary),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isHoveringUserDrop
+                                ? AppTheme.success
+                                : (isSelected
+                                      ? AppTheme.accentPurple
+                                      : AppTheme.border),
+                            width: (isHoveringUserDrop || isSelected)
+                                ? 1.8
+                                : 1.0,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Icon(
-                              Icons.drag_indicator_rounded,
-                              size: 15,
-                              color: AppTheme.accentPurple,
-                            ),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: Text(
-                                '${cg['name']}',
-                                style: const TextStyle(
-                                  fontSize: 11.3,
-                                  fontWeight: FontWeight.w800,
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.drag_indicator_rounded,
+                                  size: 15,
+                                  color: AppTheme.accentPurple,
                                 ),
-                                overflow: TextOverflow.ellipsis,
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    '${cg['name']}',
+                                    style: const TextStyle(
+                                      fontSize: 11.3,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                _buildOriginBadge(srcType, srcBadge),
+                                if (widget.canEdit) ...[
+                                  const SizedBox(width: 4),
+                                  InkWell(
+                                    onTap: () => _showCreateContactGroupDialog(
+                                      existing: cg,
+                                    ),
+                                    child: const Tooltip(
+                                      message: 'Editar Grupo de Usuarios',
+                                      child: Icon(
+                                        Icons.edit_outlined,
+                                        size: 14,
+                                        color: AppTheme.textMuted,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 5),
+                                  InkWell(
+                                    onTap: () =>
+                                        _confirmAndDeleteContactGroup(cg),
+                                    child: const Tooltip(
+                                      message: 'Eliminar Grupo de Usuarios',
+                                      child: Icon(
+                                        Icons.delete_outline_rounded,
+                                        size: 14.5,
+                                        color: AppTheme.error,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            const SizedBox(height: 5),
+                            // Correo propio del Grupo de Usuarios
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTheme.bgSecondary,
+                                borderRadius: BorderRadius.circular(5),
+                                border: Border.all(color: AppTheme.border),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.alternate_email_rounded,
+                                    size: 12,
+                                    color: AppTheme.accentCyan,
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Expanded(
+                                    child: Text(
+                                      (cg['group_email'] as String? ?? '')
+                                              .isNotEmpty
+                                          ? 'Correo grupo: ${cg['group_email']}'
+                                          : 'Sin correo de lista (usa correo de cada miembro)',
+                                      style: const TextStyle(
+                                        fontSize: 9.8,
+                                        fontFamily: 'monospace',
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            _buildOriginBadge(srcType, srcBadge),
-                            if (widget.canEdit) ...[
-                              const SizedBox(width: 4),
-                              InkWell(
-                                onTap: () => _showCreateContactGroupDialog(
-                                  existing: cg,
+                            const SizedBox(height: 5),
+                            Row(
+                              children: [
+                                Text(
+                                  '👥 ${memberIds.length} miembros',
+                                  style: const TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.textSecondary,
+                                  ),
                                 ),
-                                child: const Icon(
-                                  Icons.edit_outlined,
-                                  size: 14,
-                                  color: AppTheme.textMuted,
-                                ),
-                              ),
-                            ],
+                                const Spacer(),
+                                if (alertHgs.isNotEmpty)
+                                  Flexible(
+                                    child: Text(
+                                      '🔔 Recibe de: ${alertHgs.join(", ")}',
+                                      style: const TextStyle(
+                                        fontSize: 9.0,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppTheme.accentTeal,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  )
+                                else
+                                  const Text(
+                                    'Arrastra a Col 1 o Col 2',
+                                    style: TextStyle(
+                                      fontSize: 9.0,
+                                      color: AppTheme.textMuted,
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ],
                         ),
-                        const SizedBox(height: 5),
-                        // Correo propio del Grupo de Usuarios
-                        Container(
+                      ),
+                    );
+
+                    if (!widget.canEdit) return cardBody;
+                    return Draggable<String>(
+                      data: 'ug:$cgId',
+                      feedback: Material(
+                        elevation: 8,
+                        borderRadius: BorderRadius.circular(10),
+                        color: AppTheme.accentPurple,
+                        child: Padding(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 7,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppTheme.bgSecondary,
-                            borderRadius: BorderRadius.circular(5),
-                            border: Border.all(color: AppTheme.border),
+                            horizontal: 14,
+                            vertical: 9,
                           ),
                           child: Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
                               const Icon(
-                                Icons.alternate_email_rounded,
-                                size: 12,
-                                color: AppTheme.accentCyan,
+                                Icons.groups_rounded,
+                                size: 16,
+                                color: Colors.white,
                               ),
-                              const SizedBox(width: 5),
-                              Expanded(
-                                child: Text(
-                                  (cg['group_email'] as String? ?? '')
-                                          .isNotEmpty
-                                      ? 'Correo grupo: ${cg['group_email']}'
-                                      : 'Sin correo de lista (usa correo de cada miembro)',
-                                  style: const TextStyle(
-                                    fontSize: 9.8,
-                                    fontFamily: 'monospace',
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
+                              const SizedBox(width: 8),
+                              Text(
+                                'Asignar Grupo: ${cg['name']} (${cg['group_email']})',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white,
                                 ),
                               ),
                             ],
                           ),
                         ),
-                        const SizedBox(height: 5),
-                        Row(
-                          children: [
-                            Text(
-                              '👥 ${memberIds.length} miembros',
-                              style: const TextStyle(
-                                fontSize: 9.5,
-                                fontWeight: FontWeight.w700,
-                                color: AppTheme.textSecondary,
-                              ),
-                            ),
-                            const Spacer(),
-                            if (alertHgs.isNotEmpty)
-                              Text(
-                                '🔔 Recibe de: ${alertHgs.join(", ")}',
-                                style: const TextStyle(
-                                  fontSize: 9.0,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppTheme.accentTeal,
-                                ),
-                              )
-                            else
-                              const Text(
-                                'Arrastra a Col 1 o Col 2',
-                                style: TextStyle(
-                                  fontSize: 9.0,
-                                  color: AppTheme.textMuted,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-
-                if (!widget.canEdit) return cardBody;
-                return Draggable<String>(
-                  data: 'ug:$cgId',
-                  feedback: Material(
-                    elevation: 8,
-                    borderRadius: BorderRadius.circular(10),
-                    color: AppTheme.accentPurple,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 9,
                       ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.groups_rounded,
-                            size: 16,
-                            color: Colors.white,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Asignar Grupo: ${cg['name']} (${cg['group_email']})',
-                            style: const TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  childWhenDragging: Opacity(opacity: 0.45, child: cardBody),
-                  child: cardBody,
+                      childWhenDragging: Opacity(opacity: 0.45, child: cardBody),
+                      child: cardBody,
+                    );
+                  },
                 );
               },
             ),
@@ -8865,7 +8965,7 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
   }
 
   // ---------------------------------------------------------------------------
-  // COLUMNA 4 (DERECHA): USUARIOS + FICHA ACTIVE DIRECTORY (MEMBEROF & HOSTS)
+  // COLUMNA 4: USUARIOS DEL GRUPO SELECCIONADO + FICHA ACTIVE DIRECTORY (DROP TARGET DE COL 5)
   // ---------------------------------------------------------------------------
   Widget _buildAlertsCol4UsersAndAdCard() {
     final selectedCg = _alertContactGroups
@@ -8888,6 +8988,471 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
             .firstOrNull ??
         (visibleUsers.isNotEmpty ? visibleUsers.first : null);
 
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (details) =>
+          widget.canEdit &&
+          selectedCg != null &&
+          (details.data.startsWith('u:') || details.data.startsWith('du:')),
+      onAcceptWithDetails: (details) {
+        if (selectedCg != null) {
+          _handleDropUserIntoContactGroup(
+            dragToken: details.data,
+            targetGroup: selectedCg,
+          );
+        }
+      },
+      builder: (ctx, candidateData, rejectedData) {
+        final isHoveringDrop = candidateData.isNotEmpty;
+        return Container(
+          decoration: BoxDecoration(
+            color: isHoveringDrop
+                ? AppTheme.success.withValues(alpha: 0.08)
+                : AppTheme.bgSecondary,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isHoveringDrop ? AppTheme.success : AppTheme.border,
+              width: isHoveringDrop ? 2.0 : 1.0,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 9,
+                ),
+                decoration: const BoxDecoration(
+                  color: AppTheme.bgCard,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(11)),
+                  border: Border(bottom: BorderSide(color: AppTheme.border)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.success.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: const Text(
+                        '4',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w900,
+                          color: AppTheme.success,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        _showAllUsersInCol4
+                            ? 'TODOS (${visibleUsers.length})'
+                            : (selectedCg != null
+                                  ? 'EN ${selectedCg['code']} (${visibleUsers.length})'
+                                  : 'USUARIOS DEL GRUPO (${visibleUsers.length})'),
+                        style: const TextStyle(
+                          fontSize: 10.9,
+                          fontWeight: FontWeight.w900,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    TextButton(
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 2,
+                        ),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      onPressed: () => setState(
+                        () => _showAllUsersInCol4 = !_showAllUsersInCol4,
+                      ),
+                      child: Text(
+                        _showAllUsersInCol4 ? 'Solo grupo' : 'Todos',
+                        style: const TextStyle(
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    if (widget.canEdit) ...[
+                      const SizedBox(width: 3),
+                      IconButton(
+                        tooltip: selectedCg != null
+                            ? 'Seleccionar y añadir usuarios existentes al grupo "${selectedCg['name']}"'
+                            : 'Seleccionar usuarios existentes de RackDoc / AD',
+                        constraints: const BoxConstraints(),
+                        padding: EdgeInsets.zero,
+                        onPressed: () async {
+                          final elegidas = await _showPersonPickerDialog(
+                            seleccionados: groupMemberIds,
+                            tituloContexto: selectedCg != null
+                                ? '${selectedCg['name']}'
+                                : 'RackDoc (alta masiva)',
+                          );
+                          if (elegidas == null) return;
+                          if (selectedCg != null) {
+                            final merged = <int>{
+                              ...groupMemberIds,
+                              ...elegidas,
+                            }.toList();
+                            final res = await widget.api.upsertAlertContactGroup({
+                              'code': selectedCg['code'],
+                              'name': selectedCg['name'],
+                              'description': selectedCg['description'] ?? '',
+                              'group_email': selectedCg['group_email'] ?? '',
+                              'channel_webhook_url':
+                                  selectedCg['channel_webhook_url'] ?? '',
+                              'member_contact_ids': merged,
+                            });
+                            if (!mounted) return;
+                            setState(() {
+                              _overview = res;
+                              _showAllUsersInCol4 = false;
+                              if (elegidas.isNotEmpty) {
+                                _selectedAlertContactId = elegidas.first;
+                              }
+                            });
+                            _showSnack(
+                              'Usuarios añadidos al grupo "${selectedCg['name']}" (${merged.length} miembros).',
+                            );
+                          }
+                        },
+                        icon: const Icon(
+                          Icons.group_add_rounded,
+                          size: 15,
+                          color: AppTheme.accentCyan,
+                        ),
+                      ),
+                      const SizedBox(width: 3),
+                      IconButton(
+                        tooltip: 'Nuevo Usuario / Contacto desde cero',
+                        constraints: const BoxConstraints(),
+                        padding: EdgeInsets.zero,
+                        onPressed: () => _showCreateContactDialog(),
+                        icon: const Icon(
+                          Icons.person_add_alt_1_rounded,
+                          size: 15,
+                          color: AppTheme.success,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                color: AppTheme.success.withValues(alpha: 0.05),
+                child: Text(
+                  selectedCg != null
+                      ? '📥 Arrastra usuarios desde la Columna 5 (Derecha) hacia aquí para incluirlos en "${selectedCg['name']}".'
+                      : '💡 Selecciona un Grupo en la Columna 3 o arrastra usuarios desde la Columna 5.',
+                  style: const TextStyle(
+                    fontSize: 9.2,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ),
+              // Lista superior de usuarios del grupo (también arrastrables hacia Col 1 y Col 2)
+              Expanded(
+                flex: 5,
+                child: visibleUsers.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Text(
+                            selectedCg != null
+                                ? 'Sin usuarios en "${selectedCg['name']}". Arrastra usuarios conocidos desde la Columna 5 (derecha) o pulsa el icono de añadir personas.'
+                                : 'Sin usuarios en este grupo.',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: 10.2,
+                              color: AppTheme.textMuted,
+                            ),
+                          ),
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(8),
+                        itemCount: visibleUsers.length,
+                        itemBuilder: (ctx, i) {
+                          final c = visibleUsers[i];
+                          final cId = c['id'] as int;
+                          final isSelected = selectedUser?['id'] == cId;
+                          final srcType =
+                              (c['source_type'] as String?) ?? 'custom';
+                          final srcBadge =
+                              (c['source_badge'] as String?) ?? 'A Medida';
+                          final hostCodes =
+                              ((c['alerting_host_codes'] as List?) ?? [])
+                                  .cast<String>();
+
+                          final userTile = GestureDetector(
+                            onTap: () =>
+                                setState(() => _selectedAlertContactId = cId),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 120),
+                              margin: const EdgeInsets.only(bottom: 6),
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? AppTheme.success.withValues(alpha: 0.09)
+                                    : AppTheme.bgPrimary,
+                                borderRadius: BorderRadius.circular(9),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? AppTheme.success
+                                      : AppTheme.border,
+                                  width: isSelected ? 1.8 : 1.0,
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.person_rounded,
+                                        size: 15,
+                                        color: AppTheme.success,
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Expanded(
+                                        child: Text(
+                                          '${c['full_name']}',
+                                          style: const TextStyle(
+                                            fontSize: 11.0,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      _buildOriginBadge(srcType, srcBadge),
+                                      if (widget.canEdit) ...[
+                                        const SizedBox(width: 4),
+                                        InkWell(
+                                          onTap: () =>
+                                              _showCreateContactDialog(
+                                                existing: c,
+                                              ),
+                                          child: const Tooltip(
+                                            message: 'Editar Usuario / Contacto',
+                                            child: Icon(
+                                              Icons.edit_outlined,
+                                              size: 13.5,
+                                              color: AppTheme.textMuted,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 5),
+                                        InkWell(
+                                          onTap: () =>
+                                              _handleRemoveOrDeleteUserFromCol4(
+                                                contact: c,
+                                                selectedCg: _showAllUsersInCol4
+                                                    ? null
+                                                    : selectedCg,
+                                              ),
+                                          child: Tooltip(
+                                            message:
+                                                (!_showAllUsersInCol4 &&
+                                                    selectedCg != null)
+                                                ? 'Quitar usuario del grupo o eliminar'
+                                                : 'Eliminar Usuario / Contacto',
+                                            child: const Icon(
+                                              Icons.delete_outline_rounded,
+                                              size: 14,
+                                              color: AppTheme.error,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.mail_outline_rounded,
+                                        size: 11,
+                                        color: AppTheme.accentCyan,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          '${c['email']}',
+                                          style: const TextStyle(
+                                            fontSize: 9.6,
+                                            fontFamily: 'monospace',
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      Text(
+                                        '🔔 ${hostCodes.length} hosts',
+                                        style: const TextStyle(
+                                          fontSize: 9.0,
+                                          fontWeight: FontWeight.w800,
+                                          color: AppTheme.accentTeal,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+
+                          if (!widget.canEdit) return userTile;
+                          return Draggable<String>(
+                            data: 'u:$cId',
+                            feedback: Material(
+                              elevation: 8,
+                              borderRadius: BorderRadius.circular(9),
+                              color: AppTheme.success,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                child: Text(
+                                  '👤 Asignar Usuario: ${c['full_name']} (${c['email']})',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            childWhenDragging: Opacity(
+                              opacity: 0.45,
+                              child: userTile,
+                            ),
+                            child: userTile,
+                          );
+                        },
+                      ),
+              ),
+              // Ficha Inferior estilo Active Directory ("MemberOf" y "Hosts que le envían alarmas")
+              if (selectedUser != null)
+                Expanded(
+                  flex: 6,
+                  child: _buildActiveDirectoryUserInspector(selectedUser),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // COLUMNA 5 (DERECHA): USUARIOS CONOCIDOS (DIRECTORIO AD / LOCAL / CONTACTOS) — DRAGGABLE
+  // ---------------------------------------------------------------------------
+  List<Map<String, dynamic>> _buildMergedKnownUsersList() {
+    final result = <Map<String, dynamic>>[];
+    final emailsSeen = <String>{};
+    final codesSeen = <String>{};
+
+    for (final c in _alertContacts) {
+      final em = '${c['email'] ?? ''}'.trim().toLowerCase();
+      final cd = '${c['code'] ?? ''}'.trim().toUpperCase();
+      if (em.isNotEmpty) emailsSeen.add(em);
+      if (cd.isNotEmpty) codesSeen.add(cd);
+      result.add({...c, '_is_contact': true});
+    }
+
+    // Añadir también cualquier usuario conocido de Control de Acceso / Active Directory que aún no sea AlertContact
+    final rawKnown = ((_overview['known_directory_users'] as List?) ?? [])
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+    for (final u in _directoryUsers) {
+      if (!rawKnown.any((rk) => rk['id'] == u.id)) {
+        rawKnown.add({
+          'id': u.id,
+          'username': u.username,
+          'full_name': u.fullName.isEmpty ? u.username : u.fullName,
+          'email': u.email,
+          'role': u.role,
+          'auth_source': u.authSource,
+          'ad_dn': u.adDn ?? '',
+          'is_active': u.isActive,
+        });
+      }
+    }
+
+    for (final ku in rawKnown) {
+      final uname = '${ku['username'] ?? ''}'.trim();
+      final em =
+          '${ku['email'] ?? '$uname@empresa.local'}'.trim().toLowerCase();
+      final authSrc = '${ku['auth_source'] ?? 'local'}'.toLowerCase();
+      final genCode =
+          'USR-${authSrc == 'ad' ? 'AD' : 'LOCAL'}-${uname.toUpperCase().replaceAll('.', '-')}'
+              .substring(
+                0,
+                ('USR-${authSrc == 'ad' ? 'AD' : 'LOCAL'}-${uname.toUpperCase().replaceAll('.', '-')}')
+                    .length
+                    .clamp(0, 48),
+              );
+      if (emailsSeen.contains(em) || codesSeen.contains(genCode)) continue;
+      emailsSeen.add(em);
+      codesSeen.add(genCode);
+      result.add({
+        'id': -(ku['id'] as int),
+        'directory_user_id': ku['id'],
+        'username': uname,
+        'code': genCode,
+        'full_name': '${ku['full_name'] ?? uname}',
+        'email': em,
+        'role_title': authSrc == 'ad'
+            ? '[Active Directory] Rol RBAC: ${ku['role']}'
+            : '[Usuario Local] Rol RBAC: ${ku['role']}',
+        'source_type': authSrc == 'ad' ? 'ad' : 'local',
+        'source_badge': authSrc == 'ad' ? 'Active Directory' : 'Usuario Local',
+        'ad_dn': '${ku['ad_dn'] ?? ''}',
+        'member_of_group_ids': const <int>[],
+        'member_of_groups': const <Map<String, dynamic>>[],
+        'alerting_host_codes': const <String>[],
+        '_is_contact': false,
+      });
+    }
+    return result;
+  }
+
+  Widget _buildAlertsCol5KnownUsers() {
+    final selectedCg = _alertContactGroups
+        .where((cg) => cg['id'] == _selectedAlertUserGroupId)
+        .firstOrNull;
+    final groupMemberIds =
+        ((selectedCg?['member_contact_ids'] as List?) ?? [])
+            .cast<int>()
+            .toSet();
+
+    final allKnown = _buildMergedKnownUsersList();
+    final q = _knownUsersSearchQuery.trim().toLowerCase();
+    final filteredKnown = allKnown.where((u) {
+      if (_knownUsersSourceFilter != 'all' &&
+          (u['source_type'] as String? ?? 'custom') !=
+              _knownUsersSourceFilter) {
+        return false;
+      }
+      if (q.isEmpty) return true;
+      final haystack =
+          '${u['full_name'] ?? ''} ${u['email'] ?? ''} ${u['code'] ?? ''} ${u['role_title'] ?? ''}'
+              .toLowerCase();
+      return haystack.contains(q);
+    }).toList();
+
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.bgSecondary,
@@ -8898,7 +9463,7 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
             decoration: const BoxDecoration(
               color: AppTheme.bgCard,
               borderRadius: BorderRadius.vertical(top: Radius.circular(11)),
@@ -8912,126 +9477,145 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                     vertical: 2,
                   ),
                   decoration: BoxDecoration(
-                    color: AppTheme.success.withValues(alpha: 0.15),
+                    color: AppTheme.accentTeal.withValues(alpha: 0.16),
                     borderRadius: BorderRadius.circular(5),
                   ),
                   child: const Text(
-                    '4',
+                    '5',
                     style: TextStyle(
                       fontSize: 10.5,
                       fontWeight: FontWeight.w900,
-                      color: AppTheme.success,
+                      color: AppTheme.accentTeal,
                     ),
                   ),
                 ),
-                const SizedBox(width: 7),
+                const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    _showAllUsersInCol4
-                        ? 'TODOS LOS USUARIOS (${visibleUsers.length})'
-                        : 'USUARIOS DEL GRUPO (${visibleUsers.length})',
+                    'USUARIOS CONOCIDOS (${filteredKnown.length})',
                     style: const TextStyle(
-                      fontSize: 11.2,
+                      fontSize: 10.9,
                       fontWeight: FontWeight.w900,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                TextButton(
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
-                    ),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  onPressed: () => setState(
-                    () => _showAllUsersInCol4 = !_showAllUsersInCol4,
-                  ),
-                  child: Text(
-                    _showAllUsersInCol4 ? 'Ver solo grupo' : 'Ver todos',
-                    style: const TextStyle(
-                      fontSize: 9.8,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                if (widget.canEdit) ...[
-                  const SizedBox(width: 4),
+                if (widget.canEdit)
                   IconButton(
-                    tooltip:
-                        'Dar de alta como contacto de alarma a usuarios que ya existen en RackDoc',
-                    constraints: const BoxConstraints(),
-                    padding: EdgeInsets.zero,
-                    onPressed: () => _showPersonPickerDialog(
-                      seleccionados: const {},
-                      tituloContexto: 'RackDoc (alta masiva)',
-                    ),
-                    icon: const Icon(
-                      Icons.group_add_rounded,
-                      size: 15,
-                      color: AppTheme.accentCyan,
-                    ),
-                  ),
-                  const SizedBox(width: 2),
-                  IconButton(
-                    tooltip: 'Nuevo Usuario / Contacto desde cero',
+                    tooltip: 'Crear nuevo Usuario / Contacto en el Directorio',
                     constraints: const BoxConstraints(),
                     padding: EdgeInsets.zero,
                     onPressed: () => _showCreateContactDialog(),
                     icon: const Icon(
                       Icons.person_add_alt_1_rounded,
-                      size: 15,
-                      color: AppTheme.success,
+                      size: 16,
+                      color: AppTheme.accentTeal,
                     ),
                   ),
-                ],
               ],
             ),
           ),
-          // Lista superior de usuarios (también arrastrables individualmente)
+          // Buscador y filtros de origen en Columna 5
+          Container(
+            padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: AppTheme.border)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  height: 28,
+                  child: TextField(
+                    onChanged: (v) =>
+                        setState(() => _knownUsersSearchQuery = v),
+                    style: const TextStyle(fontSize: 10.5),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: 'Buscar usuario conocido (AD, Local, Correo)…',
+                      hintStyle: const TextStyle(fontSize: 10),
+                      prefixIcon: const Icon(Icons.search_rounded, size: 14),
+                      prefixIconConstraints: const BoxConstraints(minWidth: 28),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 5,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: [
+                    _buildKnownUserFilterChip('all', 'Todos'),
+                    _buildKnownUserFilterChip('ad', 'AD'),
+                    _buildKnownUserFilterChip('local', 'Locales'),
+                    _buildKnownUserFilterChip('custom', 'A Medida'),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            color: AppTheme.accentTeal.withValues(alpha: 0.05),
+            child: const Text(
+              '💡 Arrastra cualquier usuario hacia Col 4 / Col 3 para meterlo en un Grupo, o hacia Col 1 / Col 2 para asignarle alarmas.',
+              style: TextStyle(fontSize: 9.1, color: AppTheme.textSecondary),
+            ),
+          ),
           Expanded(
-            flex: 5,
-            child: visibleUsers.isEmpty
+            child: filteredKnown.isEmpty
                 ? const Center(
-                    child: Text(
-                      'Sin usuarios en este grupo. Pulsa "Ver todos" o edita el grupo.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 10.5, color: AppTheme.textMuted),
+                    child: Padding(
+                      padding: EdgeInsets.all(12),
+                      child: Text(
+                        'No hay usuarios que coincidan con el filtro.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
                     ),
                   )
                 : ListView.builder(
                     padding: const EdgeInsets.all(8),
-                    itemCount: visibleUsers.length,
+                    itemCount: filteredKnown.length,
                     itemBuilder: (ctx, i) {
-                      final c = visibleUsers[i];
-                      final cId = c['id'] as int;
-                      final isSelected = selectedUser?['id'] == cId;
-                      final srcType = (c['source_type'] as String?) ?? 'custom';
+                      final u = filteredKnown[i];
+                      final isContact = u['_is_contact'] == true;
+                      final cId = u['id'] as int;
+                      final alreadyInSelectedGroup =
+                          isContact && groupMemberIds.contains(cId);
+                      final srcType =
+                          (u['source_type'] as String?) ?? 'custom';
                       final srcBadge =
-                          (c['source_badge'] as String?) ?? 'A Medida';
-                      final hostCodes =
-                          ((c['alerting_host_codes'] as List?) ?? [])
-                              .cast<String>();
+                          (u['source_badge'] as String?) ?? 'A Medida';
+                      final dragToken = isContact
+                          ? 'u:$cId'
+                          : 'du:${u['directory_user_id']}';
 
-                      final userTile = GestureDetector(
-                        onTap: () =>
-                            setState(() => _selectedAlertContactId = cId),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 120),
+                      final card = GestureDetector(
+                        onTap: () {
+                          if (isContact) {
+                            setState(() => _selectedAlertContactId = cId);
+                          }
+                        },
+                        child: Container(
                           margin: const EdgeInsets.only(bottom: 6),
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: isSelected
-                                ? AppTheme.success.withValues(alpha: 0.09)
-                                : AppTheme.bgPrimary,
+                            color: AppTheme.bgPrimary,
                             borderRadius: BorderRadius.circular(9),
                             border: Border.all(
-                              color: isSelected
-                                  ? AppTheme.success
+                              color: alreadyInSelectedGroup
+                                  ? AppTheme.success.withValues(alpha: 0.55)
                                   : AppTheme.border,
-                              width: isSelected ? 1.8 : 1.0,
                             ),
                           ),
                           child: Column(
@@ -9040,16 +9624,16 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                               Row(
                                 children: [
                                   const Icon(
-                                    Icons.person_rounded,
-                                    size: 15,
-                                    color: AppTheme.success,
+                                    Icons.drag_indicator_rounded,
+                                    size: 14,
+                                    color: AppTheme.accentTeal,
                                   ),
-                                  const SizedBox(width: 5),
+                                  const SizedBox(width: 4),
                                   Expanded(
                                     child: Text(
-                                      '${c['full_name']}',
+                                      '${u['full_name']}',
                                       style: const TextStyle(
-                                        fontSize: 11.0,
+                                        fontSize: 10.9,
                                         fontWeight: FontWeight.w800,
                                       ),
                                       overflow: TextOverflow.ellipsis,
@@ -9059,14 +9643,48 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                                   if (widget.canEdit) ...[
                                     const SizedBox(width: 4),
                                     InkWell(
-                                      onTap: () =>
-                                          _showCreateContactDialog(existing: c),
-                                      child: const Icon(
-                                        Icons.edit_outlined,
-                                        size: 13.5,
-                                        color: AppTheme.textMuted,
+                                      onTap: () async {
+                                        if (isContact) {
+                                          await _showCreateContactDialog(
+                                            existing: u,
+                                          );
+                                        } else {
+                                          final ensured =
+                                              await _ensureContactFromDirectoryEntry(
+                                                u,
+                                              );
+                                          if (ensured != null) {
+                                            await _showCreateContactDialog(
+                                              existing: ensured,
+                                            );
+                                          }
+                                        }
+                                      },
+                                      child: const Tooltip(
+                                        message: 'Editar Usuario / Contacto',
+                                        child: Icon(
+                                          Icons.edit_outlined,
+                                          size: 13.5,
+                                          color: AppTheme.textMuted,
+                                        ),
                                       ),
                                     ),
+                                    if (isContact) ...[
+                                      const SizedBox(width: 5),
+                                      InkWell(
+                                        onTap: () =>
+                                            _confirmAndDeleteContact(u),
+                                        child: const Tooltip(
+                                          message:
+                                              'Eliminar Usuario / Contacto',
+                                          child: Icon(
+                                            Icons.delete_outline_rounded,
+                                            size: 14,
+                                            color: AppTheme.error,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ],
                                 ],
                               ),
@@ -9081,23 +9699,69 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                                   const SizedBox(width: 4),
                                   Expanded(
                                     child: Text(
-                                      '${c['email']}',
+                                      '${u['email']}',
                                       style: const TextStyle(
-                                        fontSize: 9.6,
+                                        fontSize: 9.4,
                                         fontFamily: 'monospace',
                                         fontWeight: FontWeight.w700,
                                       ),
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
-                                  Text(
-                                    '🔔 ${hostCodes.length} hosts',
-                                    style: const TextStyle(
-                                      fontSize: 9.0,
-                                      fontWeight: FontWeight.w800,
-                                      color: AppTheme.accentTeal,
-                                    ),
-                                  ),
+                                  if (selectedCg != null && widget.canEdit)
+                                    alreadyInSelectedGroup
+                                        ? Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 5,
+                                              vertical: 1.5,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: AppTheme.success
+                                                  .withValues(alpha: 0.14),
+                                              borderRadius:
+                                                  BorderRadius.circular(4),
+                                            ),
+                                            child: const Text(
+                                              '✓ En grupo',
+                                              style: TextStyle(
+                                                fontSize: 8.5,
+                                                fontWeight: FontWeight.w800,
+                                                color: AppTheme.success,
+                                              ),
+                                            ),
+                                          )
+                                        : InkWell(
+                                            onTap: () =>
+                                                _handleDropUserIntoContactGroup(
+                                                  dragToken: dragToken,
+                                                  targetGroup: selectedCg,
+                                                ),
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 5,
+                                                    vertical: 1.5,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: AppTheme.accentTeal
+                                                    .withValues(alpha: 0.14),
+                                                borderRadius:
+                                                    BorderRadius.circular(4),
+                                                border: Border.all(
+                                                  color: AppTheme.accentTeal
+                                                      .withValues(alpha: 0.45),
+                                                ),
+                                              ),
+                                              child: const Text(
+                                                '⬅ Al grupo',
+                                                style: TextStyle(
+                                                  fontSize: 8.5,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: AppTheme.accentTeal,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
                                 ],
                               ),
                             ],
@@ -9105,44 +9769,74 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                         ),
                       );
 
-                      if (!widget.canEdit) return userTile;
+                      if (!widget.canEdit) return card;
                       return Draggable<String>(
-                        data: 'u:$cId',
+                        data: dragToken,
                         feedback: Material(
                           elevation: 8,
                           borderRadius: BorderRadius.circular(9),
-                          color: AppTheme.success,
+                          color: AppTheme.accentTeal,
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 12,
                               vertical: 8,
                             ),
-                            child: Text(
-                              '👤 Asignar Usuario: ${c['full_name']} (${c['email']})',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white,
-                              ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.person_add_alt_1_rounded,
+                                  size: 15,
+                                  color: Colors.white,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Arrastrar Usuario: ${u['full_name']} (${u['email']})',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
-                        childWhenDragging: Opacity(
-                          opacity: 0.45,
-                          child: userTile,
-                        ),
-                        child: userTile,
+                        childWhenDragging: Opacity(opacity: 0.45, child: card),
+                        child: card,
                       );
                     },
                   ),
           ),
-          // Ficha Inferior estilo Active Directory ("MemberOf" y "Hosts que le envían alarmas")
-          if (selectedUser != null)
-            Expanded(
-              flex: 6,
-              child: _buildActiveDirectoryUserInspector(selectedUser),
-            ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildKnownUserFilterChip(String key, String label) {
+    final selected = _knownUsersSourceFilter == key;
+    return InkWell(
+      onTap: () => setState(() => _knownUsersSourceFilter = key),
+      borderRadius: BorderRadius.circular(5),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppTheme.accentTeal.withValues(alpha: 0.15)
+              : AppTheme.bgPrimary,
+          borderRadius: BorderRadius.circular(5),
+          border: Border.all(
+            color: selected ? AppTheme.accentTeal : AppTheme.border,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 8.8,
+            fontWeight: FontWeight.w800,
+            color: selected ? AppTheme.accentTeal : AppTheme.textSecondary,
+          ),
+        ),
       ),
     );
   }
@@ -9265,7 +9959,7 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
             const SizedBox(height: 4),
             if (alertingHgs.isEmpty && alertingHosts.isEmpty)
               const Text(
-                'Ningún Host asignado aún. Arrastra su Grupo (Col 3) o este Usuario (Col 4) hacia un Grupo de Host (Col 1) o Host (Col 2).',
+                'Ningún Host asignado aún. Arrastra su Grupo (Col 3) o este Usuario (Col 4 / Col 5) hacia un Grupo de Host (Col 1) o Host (Col 2).',
                 style: TextStyle(fontSize: 9.0, color: AppTheme.textMuted),
               )
             else
@@ -9409,6 +10103,265 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
     );
   }
 
+  Future<Map<String, dynamic>?> _ensureContactFromDirectoryEntry(
+    Map<String, dynamic> dirEntry,
+  ) async {
+    final code = '${dirEntry['code'] ?? ''}'.trim().toUpperCase();
+    final res = await widget.api.upsertAlertContact({
+      'code': code,
+      'full_name': '${dirEntry['full_name'] ?? ''}',
+      'email': '${dirEntry['email'] ?? ''}',
+      'role_title': '${dirEntry['role_title'] ?? ''}',
+      'schedule_period': '24x7',
+    });
+    if (mounted) {
+      setState(() => _overview = res);
+    }
+    final contacts = ((res['alert_contacts'] as List?) ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    return contacts
+        .where((c) => '${c['code']}'.toUpperCase() == code)
+        .firstOrNull;
+  }
+
+  Future<int?> _resolveContactIdFromDragToken(String dragToken) async {
+    if (dragToken.startsWith('u:')) {
+      return int.tryParse(dragToken.split(':').last);
+    }
+    if (dragToken.startsWith('du:')) {
+      final dirId = int.tryParse(dragToken.split(':').last);
+      if (dirId == null) return null;
+      final known = _buildMergedKnownUsersList()
+          .where((e) => e['directory_user_id'] == dirId)
+          .firstOrNull;
+      if (known == null) return null;
+      final created = await _ensureContactFromDirectoryEntry(known);
+      return created?['id'] as int?;
+    }
+    return null;
+  }
+
+  Future<void> _handleDropUserIntoContactGroup({
+    required String dragToken,
+    required Map<String, dynamic> targetGroup,
+  }) async {
+    final cid = await _resolveContactIdFromDragToken(dragToken);
+    if (cid == null) return;
+    final cgId = targetGroup['id'] as int;
+    final currentMembers =
+        ((targetGroup['member_contact_ids'] as List?) ?? [])
+            .cast<int>()
+            .toSet();
+    if (currentMembers.contains(cid)) {
+      _showSnack('El usuario ya pertenece al grupo "${targetGroup['name']}".');
+      return;
+    }
+    currentMembers.add(cid);
+    final res = await widget.api.upsertAlertContactGroup({
+      'code': targetGroup['code'],
+      'name': targetGroup['name'],
+      'description': targetGroup['description'] ?? '',
+      'group_email': targetGroup['group_email'] ?? '',
+      'channel_webhook_url': targetGroup['channel_webhook_url'] ?? '',
+      'member_contact_ids': currentMembers.toList(),
+    });
+    if (!mounted) return;
+    setState(() {
+      _overview = res;
+      _selectedAlertUserGroupId = cgId;
+      _selectedAlertContactId = cid;
+      _showAllUsersInCol4 = false;
+    });
+    _showSnack('Usuario añadido al grupo "${targetGroup['name']}".');
+  }
+
+  Future<void> _confirmAndDeleteHostGroup(Map<String, dynamic> hg) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar Grupo de Host'),
+        content: Text(
+          '¿Seguro que deseas eliminar el Grupo de Host "${hg['name']}" (${hg['code']})?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.error,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.delete_outline_rounded, size: 16),
+            label: const Text('Eliminar Grupo de Host'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final res = await widget.api.deleteHostGroup(hg['id'] as int);
+    if (!mounted) return;
+    setState(() => _overview = res);
+    _showSnack('Grupo de Host "${hg['name']}" eliminado.');
+  }
+
+  Future<void> _removeHostFromHostGroup(
+    Map<String, dynamic> hg,
+    int assetId,
+  ) async {
+    final members =
+        ((hg['member_asset_ids'] as List?) ?? []).cast<int>().toSet()
+          ..remove(assetId);
+    final res = await widget.api.upsertHostGroup({
+      'code': hg['code'],
+      'name': hg['name'],
+      'category': hg['category'] ?? 'compute',
+      'environment': hg['environment'] ?? 'production',
+      'color_hex': hg['color_hex'] ?? '#06B6D4',
+      'description': hg['description'] ?? '',
+      'member_asset_ids': members.toList(),
+    });
+    if (!mounted) return;
+    setState(() => _overview = res);
+    _showSnack('Host quitado del grupo "${hg['name']}".');
+  }
+
+  Future<void> _confirmAndDeleteContactGroup(Map<String, dynamic> cg) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar Grupo de Usuarios'),
+        content: Text(
+          '¿Seguro que deseas eliminar el Grupo de Usuarios "${cg['name']}" (${cg['code']})?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.error,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.delete_outline_rounded, size: 16),
+            label: const Text('Eliminar Grupo'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final res = await widget.api.deleteAlertContactGroup(cg['id'] as int);
+    if (!mounted) return;
+    setState(() => _overview = res);
+    _showSnack('Grupo de Usuarios "${cg['name']}" eliminado.');
+  }
+
+  Future<void> _confirmAndDeleteContact(Map<String, dynamic> c) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar Usuario / Contacto'),
+        content: Text(
+          '¿Seguro que deseas eliminar el usuario "${c['full_name']}" (${c['email']}) de las alarmas SRE?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.error,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.delete_outline_rounded, size: 16),
+            label: const Text('Eliminar Usuario'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final res = await widget.api.deleteAlertContact(c['id'] as int);
+    if (!mounted) return;
+    setState(() => _overview = res);
+    _showSnack('Usuario "${c['full_name']}" eliminado.');
+  }
+
+  Future<void> _handleRemoveOrDeleteUserFromCol4({
+    required Map<String, dynamic> contact,
+    required Map<String, dynamic>? selectedCg,
+  }) async {
+    if (selectedCg == null) {
+      await _confirmAndDeleteContact(contact);
+      return;
+    }
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Gestionar "${contact['full_name']}"'),
+        content: Text(
+          '¿Deseas quitar a "${contact['full_name']}" únicamente del grupo "${selectedCg['name']}" '
+          'o eliminar su contacto permanentemente?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, null),
+            child: const Text('Cancelar'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.pop(ctx, 'delete_all'),
+            icon: const Icon(
+              Icons.delete_forever_rounded,
+              size: 16,
+              color: AppTheme.error,
+            ),
+            label: const Text(
+              'Eliminar Contacto del Sistema',
+              style: TextStyle(color: AppTheme.error),
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(ctx, 'remove_from_group'),
+            icon: const Icon(Icons.person_remove_rounded, size: 16),
+            label: Text('Quitar de "${selectedCg['name']}"'),
+          ),
+        ],
+      ),
+    );
+    if (action == 'remove_from_group') {
+      final cid = contact['id'] as int;
+      final members =
+          ((selectedCg['member_contact_ids'] as List?) ?? [])
+              .cast<int>()
+              .toSet()
+            ..remove(cid);
+      final res = await widget.api.upsertAlertContactGroup({
+        'code': selectedCg['code'],
+        'name': selectedCg['name'],
+        'description': selectedCg['description'] ?? '',
+        'group_email': selectedCg['group_email'] ?? '',
+        'channel_webhook_url': selectedCg['channel_webhook_url'] ?? '',
+        'member_contact_ids': members.toList(),
+      });
+      if (!mounted) return;
+      setState(() => _overview = res);
+      _showSnack(
+        'Usuario "${contact['full_name']}" quitado del grupo "${selectedCg['name']}".',
+      );
+    } else if (action == 'delete_all') {
+      final res = await widget.api.deleteAlertContact(contact['id'] as int);
+      if (!mounted) return;
+      setState(() => _overview = res);
+      _showSnack('Usuario "${contact['full_name']}" eliminado.');
+    }
+  }
+
   Future<void> _handleDropRecipientOnTarget({
     required String dragToken,
     required String scopeType,
@@ -9417,7 +10370,12 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
     required String targetName,
   }) async {
     final isGroup = dragToken.startsWith('ug:');
-    final id = int.tryParse(dragToken.split(':').last);
+    int? id;
+    if (isGroup) {
+      id = int.tryParse(dragToken.split(':').last);
+    } else {
+      id = await _resolveContactIdFromDragToken(dragToken);
+    }
     if (id == null) return;
 
     final res = await widget.api.createNotificationRule({
@@ -12097,9 +13055,15 @@ class profile::rackdoc_agent (
                           codeCtrl.text.trim().toUpperCase(),
                     )
                     .firstOrNull;
+                int? createdContactId;
                 if (savedUser != null) {
                   final cid = savedUser['id'] as int;
-                  for (final cg in _alertContactGroups) {
+                  createdContactId = cid;
+                  final currentGroups =
+                      ((res['alert_contact_groups'] as List?) ?? _alertContactGroups)
+                          .map((e) => Map<String, dynamic>.from(e as Map))
+                          .toList();
+                  for (final cg in currentGroups) {
                     final gid = cg['id'] as int;
                     final members =
                         ((cg['member_contact_ids'] as List?) ?? [])
@@ -12129,7 +13093,14 @@ class profile::rackdoc_agent (
                     }
                   }
                 }
-                setState(() => _overview = res);
+                if (mounted) {
+                  setState(() {
+                    _overview = res;
+                    if (createdContactId != null) {
+                      _selectedAlertContactId = createdContactId;
+                    }
+                  });
+                }
               },
               child: const Text('Guardar Usuario'),
             ),

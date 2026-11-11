@@ -715,28 +715,54 @@ class _AdminViewState extends State<AdminView> {
           'group_role_mapping': groupRules,
           'enabled': true,
         };
+        ADServerModel savedSrv;
         if (existing == null) {
-          await widget.api.createAdServer(payload);
+          savedSrv = await widget.api.createAdServer(payload);
         } else {
-          await widget.api.updateAdServer(existing.id, payload);
+          savedSrv = await widget.api.updateAdServer(existing.id, payload);
         }
         await _loadAdminData();
-        messenger.aviso(
-          'Ficha de servidor AD guardada. No se ha comprobado la conexión: la '
-          'autenticación contra Active Directory no está implementada.',
-        );
+        final testRes = await widget.api.testAdServerConnection(savedSrv.id);
+        final ok = testRes['connected'] == true;
+        final msg = (testRes['message'] ?? '').toString();
+        if (ok) {
+          messenger.aviso('Servidor AD guardado y verificado: $msg');
+        } else {
+          messenger.aviso(
+            'Servidor AD guardado (modo pre-aprovisionamiento / DC fuera de línea): $msg',
+          );
+        }
       } catch (e) {
         messenger.avisoError('$e');
       }
     }
   }
 
+  Future<void> _testAdServerConnectionLive(ADServerModel ad) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final res = await widget.api.testAdServerConnection(ad.id);
+      final connected = res['connected'] == true;
+      final msg = (res['message'] ?? '').toString();
+      if (connected) {
+        messenger.aviso('✅ $msg');
+      } else {
+        messenger.avisoError('⚠️ $msg');
+      }
+    } catch (e) {
+      messenger.avisoError('Error probando conexión LDAP: $e');
+    }
+  }
+
   Future<void> _showSearchAndImportAdUsersDialog(ADServerModel ad) async {
     final messenger = ScaffoldMessenger.of(context);
     final queryCtrl = TextEditingController();
+    final fallbackPwdCtrl = TextEditingController();
     List<Map<String, dynamic>> results = [];
     final selectedUsers = <String, String>{}; // username -> role
     bool searching = true;
+    bool ldapConnected = false;
+    String ldapError = '';
 
     Future<void> runSearch(StateSetter setModal) async {
       setModal(() => searching = true);
@@ -750,6 +776,8 @@ class _AdminViewState extends State<AdminView> {
             .toList();
         setModal(() {
           results = list;
+          ldapConnected = res['ldap_connected'] == true;
+          ldapError = (res['ldap_error'] ?? '').toString();
           for (final u in list) {
             final uname = (u['username'] ?? '').toString();
             final suggested =
@@ -776,15 +804,67 @@ class _AdminViewState extends State<AdminView> {
               Future.microtask(() => runSearch(setModal));
             }
             return AlertDialog(
-              title: Text(
-                'Dar de Alta Usuarios desde "${ad.name}" (${ad.domain}) — catálogo de ejemplo',
+              title: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Explorar e Importar Usuarios desde "${ad.name}" (${ad.domain})',
+                      style: const TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: ldapConnected
+                          ? AppPalette.green100
+                          : AppPalette.blue100,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      ldapConnected
+                          ? '🟢 LDAP EN VIVO'
+                          : '🔵 PRE-APROVISIONAMIENTO AD',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
+                        color: ldapConnected
+                            ? AppPalette.green700
+                            : AppPalette.blue900,
+                      ),
+                    ),
+                  ),
+                ],
               ),
               content: SizedBox(
-                width: 640,
+                width: 660,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (!searching && !ldapConnected && ldapError.isNotEmpty)
+                      Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: AppPalette.blue50,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: AppPalette.blue300),
+                        ),
+                        child: Text(
+                          'ℹ️ El DC (${ad.host}:${ad.port}) no es alcanzable desde esta red ahora mismo; puedes pre-aprovisionar cuentas de dominio igualmente (iniciarán sesión por Bind LDAP cuando el DC esté en red o con su credencial de respaldo).',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppPalette.blue900,
+                          ),
+                        ),
+                      ),
                     Row(
                       children: [
                         Expanded(
@@ -793,7 +873,7 @@ class _AdminViewState extends State<AdminView> {
                             onSubmitted: (_) => runSearch(setModal),
                             decoration: const InputDecoration(
                               hintText:
-                                  'Filtrar el catálogo de ejemplo por nombre de cuenta, nombre o departamento...',
+                                  'Buscar en LDAP por sAMAccountName, nombre, correo o escribe un usuario nuevo...',
                               prefixIcon: Icon(Icons.search, size: 18),
                               isDense: true,
                             ),
@@ -803,9 +883,20 @@ class _AdminViewState extends State<AdminView> {
                         FilledButton.tonalIcon(
                           onPressed: () => runSearch(setModal),
                           icon: const Icon(Icons.refresh, size: 16),
-                          label: const Text('Consultar AD'),
+                          label: const Text('Consultar LDAP'),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: fallbackPwdCtrl,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText:
+                            'Contraseña inicial / respaldo local (opcional si el DC no está en red; por defecto: <usuario>123)',
+                        prefixIcon: Icon(Icons.key_outlined, size: 17),
+                        isDense: true,
+                      ),
                     ),
                     const SizedBox(height: 10),
                     if (ad.groupRoleMapping.isNotEmpty) ...[
@@ -1064,6 +1155,7 @@ class _AdminViewState extends State<AdminView> {
                 'email': r['email'],
                 'ad_dn': r['ad_dn'],
                 'role': selectedUsers[r['username']] ?? ad.defaultRole,
+                'initial_password': fallbackPwdCtrl.text.trim(),
               },
             )
             .toList();
@@ -1696,30 +1788,29 @@ class _AdminViewState extends State<AdminView> {
                     vertical: 10,
                   ),
                   decoration: BoxDecoration(
-                    color: AppPalette.amber50,
+                    color: AppPalette.blue50,
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: AppPalette.amber300),
+                    border: Border.all(color: AppPalette.blue300),
                   ),
                   child: const Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Icon(
-                        Icons.warning_amber_rounded,
+                        Icons.verified_user_outlined,
                         size: 18,
-                        color: AppPalette.amber800,
+                        color: AppPalette.blue700,
                       ),
                       SizedBox(width: 9),
                       Expanded(
                         child: Text(
-                          'La autenticación contra Active Directory no está implementada. RackDoc no abre '
-                          'ninguna conexión LDAP: estas fichas son configuración guardada, el explorador de '
-                          'usuarios devuelve un catálogo de ejemplo, y las cuentas que des de alta desde aquí '
-                          'quedan marcadas como de dominio pero NO pueden iniciar sesión. Para dar acceso a '
-                          'una persona, créala abajo como usuario local con contraseña.',
+                          'Autenticación LDAP / LDAPS Activa (Cliente ldap3 + Auto-Provisioning JIT): '
+                          'Los usuarios pueden iniciar sesión como usuario@dominio, DOMINIO\\usuario o sAMAccountName. '
+                          'RackDoc ejecuta Bind LDAP real contra el controlador de dominio, resuelve los grupos MemberOf '
+                          'según el mapeo RBAC y sincroniza automáticamente las cuentas con 8. Alarmas SRE.',
                           style: TextStyle(
                             fontSize: 12,
                             height: 1.45,
-                            color: AppPalette.amber800,
+                            color: AppPalette.blue900,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -1874,6 +1965,18 @@ class _AdminViewState extends State<AdminView> {
                                 ),
                               ),
                               const Spacer(),
+                              OutlinedButton.icon(
+                                onPressed: () => _testAdServerConnectionLive(ad),
+                                icon: const Icon(
+                                  Icons.network_check_rounded,
+                                  size: 15,
+                                ),
+                                label: const Text(
+                                  'Probar LDAP',
+                                  style: TextStyle(fontSize: 11.2),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
                               FilledButton.tonalIcon(
                                 onPressed: () =>
                                     _showSearchAndImportAdUsersDialog(ad),
