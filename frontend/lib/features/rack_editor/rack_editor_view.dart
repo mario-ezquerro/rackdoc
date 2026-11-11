@@ -51,7 +51,7 @@ class _RackEditorViewState extends State<RackEditorView> {
   String? _error;
 
   // Cara activa del rack ('front', 'back' o 'both' para ver Front & Back a la vez)
-  String _activeFace = 'both';
+  String _activeFace = 'front';
 
   // Mostrar / Ocultar foto de referencia / bisel realista en los equipos montados
   bool _showEquipmentPhotos = false;
@@ -6219,103 +6219,107 @@ class _RackEditorViewState extends State<RackEditorView> {
             children: [
               // COLUMNA IZQUIERDA: Librería de Dispositivos (oculta en Modo Kiosco)
               if (!widget.isKioskMode)
-                DeviceCatalogPanel(
-                  templates: widget.templates,
-                  selectedTemplateForClickMount: _selectedTemplateForClick,
-                  onSelectTemplate: (tpl) {
-                    setState(() => _selectedTemplateForClick = tpl);
-                  },
-                  onMountFromCmdb: _openInstallFromCmdbAtFirstFreeU,
-                  onCreateCustomTemplate: _showCreateCustomTemplateDialog,
-                  onConfigureTemplatePhoto: (tpl) =>
-                      _showHardwarePhotoSearchDialog(template: tpl),
-                  selectedLibraryGroup: _selectedLibraryGroup,
-                  onSelectLibraryGroup: (group) {
-                    setState(() => _selectedLibraryGroup = group);
-                  },
-                  onExportLibrary: _handleExportLibraryDialog,
-                  onImportLibrary: _handleImportLibraryDialog,
-                  canEdit: _canEdit,
+                SelectionContainer.disabled(
+                  child: DeviceCatalogPanel(
+                    templates: widget.templates,
+                    selectedTemplateForClickMount: _selectedTemplateForClick,
+                    onSelectTemplate: (tpl) {
+                      setState(() => _selectedTemplateForClick = tpl);
+                    },
+                    onMountFromCmdb: _openInstallFromCmdbAtFirstFreeU,
+                    onCreateCustomTemplate: _showCreateCustomTemplateDialog,
+                    onConfigureTemplatePhoto: (tpl) =>
+                        _showHardwarePhotoSearchDialog(template: tpl),
+                    selectedLibraryGroup: _selectedLibraryGroup,
+                    onSelectLibraryGroup: (group) {
+                      setState(() => _selectedLibraryGroup = group);
+                    },
+                    onExportLibrary: _handleExportLibraryDialog,
+                    onImportLibrary: _handleImportLibraryDialog,
+                    canEdit: _canEdit,
+                  ),
                 ),
 
               // COLUMNA CENTRAL: Lienzo interactivo del Rack con soporte simultáneo Front + Back y Bandeja Inter-Rack
               Expanded(
-                child: Container(
-                  color: const Color(0xFFF4F5F7),
-                  child: Stack(
-                    children: [
-                      _buildBastidoresInteractivos(rack, extOutlets, totalCanvasHeight, computedRoutes, activeSourceOffset, connectedPortColors, occupiedUsFront, occupiedUsBack, outboundConnections),
+                child: SelectionContainer.disabled(
+                  child: Container(
+                    color: const Color(0xFFF4F5F7),
+                    child: Stack(
+                      children: [
+                        _buildBastidoresInteractivos(rack, extOutlets, totalCanvasHeight, computedRoutes, activeSourceOffset, connectedPortColors, occupiedUsFront, occupiedUsBack, outboundConnections),
 
-                      // Capa superior cuando se pulsa la Barra Espaciadora (Modo Mano para arrastrar todo el dashboard del Rack)
-                      if (_isPanHandMode)
-                        Positioned.fill(
-                          child: MouseRegion(
-                            cursor: _isSpaceDragging
-                                ? SystemMouseCursors.grabbing
-                                : SystemMouseCursors.grab,
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onPanStart: (_) {
-                                setState(() => _isSpaceDragging = true);
-                              },
-                              onPanUpdate: (details) {
-                                final m = _transformController.value.clone();
-                                m.storage[12] += details.delta.dx;
-                                m.storage[13] += details.delta.dy;
-                                _transformController.value = m;
-                              },
-                              onPanEnd: (_) {
-                                setState(() => _isSpaceDragging = false);
-                              },
-                              onPanCancel: () {
-                                setState(() => _isSpaceDragging = false);
-                              },
-                              child: Align(
-                                alignment: Alignment.bottomCenter,
-                                child: Padding(
-                                  padding: const EdgeInsets.only(bottom: 18),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 14,
-                                      vertical: 6,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xEE0F172A),
-                                      borderRadius: BorderRadius.circular(20),
-                                      border: Border.all(
-                                        color: AppPalette.sky400,
-                                        width: 1.4,
+                        // Capa superior cuando se pulsa la Barra Espaciadora (Modo Mano para arrastrar todo el dashboard del Rack)
+                        if (_isPanHandMode)
+                          Positioned.fill(
+                            child: MouseRegion(
+                              cursor: _isSpaceDragging
+                                  ? SystemMouseCursors.grabbing
+                                  : SystemMouseCursors.grab,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onPanStart: (_) {
+                                  setState(() => _isSpaceDragging = true);
+                                },
+                                onPanUpdate: (details) {
+                                  final m = _transformController.value.clone();
+                                  m.storage[12] += details.delta.dx;
+                                  m.storage[13] += details.delta.dy;
+                                  _transformController.value = m;
+                                },
+                                onPanEnd: (_) {
+                                  setState(() => _isSpaceDragging = false);
+                                },
+                                onPanCancel: () {
+                                  setState(() => _isSpaceDragging = false);
+                                },
+                                child: Align(
+                                  alignment: Alignment.bottomCenter,
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(bottom: 18),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 6,
                                       ),
-                                    ),
-                                    child: const Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          Icons.pan_tool_alt_rounded,
-                                          size: 15,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xEE0F172A),
+                                        borderRadius: BorderRadius.circular(20),
+                                        border: Border.all(
                                           color: AppPalette.sky400,
+                                          width: 1.4,
                                         ),
-                                        SizedBox(width: 6),
-                                        Text(
-                                          'Modo Mano activo — Arrastra con el ratón para mover el dashboard del Rack',
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 11.5,
-                                            fontWeight: FontWeight.w800,
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.pan_tool_alt_rounded,
+                                            size: 15,
+                                            color: AppPalette.sky400,
                                           ),
-                                        ),
-                                      ],
+                                          SizedBox(width: 6),
+                                          Text(
+                                            'Modo Mano activo — Arrastra con el ratón para mover el dashboard del Rack',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 11.5,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
 
-                      // Controles Flotantes Superiores Izquierdos: [♊ Front + Back | Front | Back] + [📷 Foto Equipos ON/OFF] + Filtro de Cables + Mano + Deshacer
-                      _buildControlesFlotantes(),
-                    ],
+                        // Controles Flotantes Superiores Izquierdos: [♊ Front + Back | Front | Back] + [📷 Foto Equipos ON/OFF] + Filtro de Cables + Mano + Deshacer
+                        _buildControlesFlotantes(),
+                      ],
+                    ),
                   ),
                 ),
               ),

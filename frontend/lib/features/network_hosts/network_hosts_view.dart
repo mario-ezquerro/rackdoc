@@ -2596,10 +2596,13 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
               : Row(
                   children: [
                     if (_showStackLeftLibrary)
-                      _buildStackLeftLibraryPanel(activeStack, nodes),
+                      SelectionContainer.disabled(
+                        child: _buildStackLeftLibraryPanel(activeStack, nodes),
+                      ),
                     Expanded(
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
+                      child: SelectionContainer.disabled(
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
                           return DragTarget<String>(
                             onWillAcceptWithDetails: (_) => widget.canEdit,
                             onAcceptWithDetails: (details) async {
@@ -2800,6 +2803,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                         },
                       ),
                     ),
+                  ),
                     if (_showStackRightSettings)
                       _buildStackRightSettingsPanel(
                         activeStack: activeStack,
@@ -5349,12 +5353,13 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                 ),
               ),
               if (!_floatingWinMinimized)
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Selector de pestaña interna + rango horario de Prometheus
+                SelectionArea(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Selector de pestaña interna + rango horario de Prometheus
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -5607,6 +5612,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                       ),
                     ],
                   ),
+                ),
                 ),
             ],
           ),
@@ -9983,40 +9989,42 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                     );
 
                     if (!widget.canEdit) return cardBody;
-                    return Draggable<String>(
-                      data: 'ug:$cgId',
-                      feedback: Material(
-                        elevation: 8,
-                        borderRadius: BorderRadius.circular(10),
-                        color: AppTheme.accentPurple,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 9,
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.groups_rounded,
-                                size: 16,
-                                color: Colors.white,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Asignar Grupo: ${cg['name']} (${cg['group_email']})',
-                                style: const TextStyle(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w800,
+                    return SelectionContainer.disabled(
+                      child: Draggable<String>(
+                        data: 'ug:$cgId',
+                        feedback: Material(
+                          elevation: 8,
+                          borderRadius: BorderRadius.circular(10),
+                          color: AppTheme.accentPurple,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 9,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.groups_rounded,
+                                  size: 16,
                                   color: Colors.white,
                                 ),
-                              ),
-                            ],
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Asignar Grupo: ${cg['name']} (${cg['group_email']})',
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
+                        childWhenDragging: Opacity(opacity: 0.45, child: cardBody),
+                        child: cardBody,
                       ),
-                      childWhenDragging: Opacity(opacity: 0.45, child: cardBody),
-                      child: cardBody,
                     );
                   },
                 );
@@ -10376,32 +10384,34 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                           );
 
                           if (!widget.canEdit) return userTile;
-                          return Draggable<String>(
-                            data: 'u:$cId',
-                            feedback: Material(
-                              elevation: 8,
-                              borderRadius: BorderRadius.circular(9),
-                              color: AppTheme.success,
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                child: Text(
-                                  '👤 Asignar Usuario: ${c['full_name']} (${c['email']})',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w800,
-                                    color: Colors.white,
+                          return SelectionContainer.disabled(
+                            child: Draggable<String>(
+                              data: 'u:$cId',
+                              feedback: Material(
+                                elevation: 8,
+                                borderRadius: BorderRadius.circular(9),
+                                color: AppTheme.success,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                  child: Text(
+                                    '👤 Asignar Usuario: ${c['full_name']} (${c['email']})',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.white,
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                            childWhenDragging: Opacity(
-                              opacity: 0.45,
+                              childWhenDragging: Opacity(
+                                opacity: 0.45,
+                                child: userTile,
+                              ),
                               child: userTile,
                             ),
-                            child: userTile,
                           );
                         },
                       ),
@@ -10834,40 +10844,42 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
                       );
 
                       if (!widget.canEdit) return card;
-                      return Draggable<String>(
-                        data: dragToken,
-                        feedback: Material(
-                          elevation: 8,
-                          borderRadius: BorderRadius.circular(9),
-                          color: AppTheme.accentTeal,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
-                                  Icons.person_add_alt_1_rounded,
-                                  size: 15,
-                                  color: Colors.white,
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  'Arrastrar Usuario: ${u['full_name']} (${u['email']})',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w800,
+                      return SelectionContainer.disabled(
+                        child: Draggable<String>(
+                          data: dragToken,
+                          feedback: Material(
+                            elevation: 8,
+                            borderRadius: BorderRadius.circular(9),
+                            color: AppTheme.accentTeal,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.person_add_alt_1_rounded,
+                                    size: 15,
                                     color: Colors.white,
                                   ),
-                                ),
-                              ],
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Arrastrar Usuario: ${u['full_name']} (${u['email']})',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
+                          childWhenDragging: Opacity(opacity: 0.45, child: card),
+                          child: card,
                         ),
-                        childWhenDragging: Opacity(opacity: 0.45, child: card),
-                        child: card,
                       );
                     },
                   ),

@@ -704,7 +704,7 @@ class _LocationsViewState extends State<LocationsView> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Locations — Mapa de Centros de Datos',
+                        'Sedes y centros de datos',
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
@@ -713,7 +713,7 @@ class _LocationsViewState extends State<LocationsView> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'PBX  >  Locations${selected != null ? '  >  ${selected.code} (${selected.name})' : ''}',
+                        'Infraestructura${selected != null ? '  >  ${selected.code} (${selected.name})' : ''}',
                         style: const TextStyle(
                           fontSize: 12,
                           color: AppPalette.slate500,
@@ -755,7 +755,7 @@ class _LocationsViewState extends State<LocationsView> {
                   FilledButton.icon(
                     onPressed: () => _showLocationFormDialog(),
                     icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add location'),
+                    label: const Text('Añadir sede'),
                     style: FilledButton.styleFrom(
                       backgroundColor: AppPalette.blue900,
                       foregroundColor: Colors.white,
@@ -929,12 +929,17 @@ class _LocationsViewState extends State<LocationsView> {
                       ],
                     ),
                     clipBehavior: Clip.antiAlias,
-                    child: _mapViewMode == 'custom_plan'
-                        ? _buildCustomImageWithDraggableDatacenters(
-                            customMapUrl: customMapUrl,
-                            selected: selected,
-                          )
-                        : _buildGeographicOpenStreetMap(selected, centerLatLng),
+                    child: SelectionContainer.disabled(
+                      child: _mapViewMode == 'custom_plan'
+                          ? _buildCustomImageWithDraggableDatacenters(
+                              customMapUrl: customMapUrl,
+                              selected: selected,
+                            )
+                          : _buildGeographicOpenStreetMap(
+                              selected,
+                              centerLatLng,
+                            ),
+                    ),
                   ),
 
                   const SizedBox(height: 22),

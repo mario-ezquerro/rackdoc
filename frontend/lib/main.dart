@@ -41,7 +41,9 @@ class RackDocApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const RackDocShell(),
+      home: const SelectionArea(
+        child: RackDocShell(),
+      ),
     );
   }
 }
@@ -1242,31 +1244,31 @@ class _RackDocShellState extends State<RackDocShell> {
 
                 _SidebarItem(
                   icon: Icons.location_on_outlined,
-                  label: '1. Locations (Mapa)',
+                  label: 'Sedes y mapa',
                   active: _activeNav == 'locations',
                   onTap: () => setState(() => _activeNav = 'locations'),
                 ),
                 _SidebarItem(
                   icon: Icons.apartment_rounded,
-                  label: '2. Datacenter (Plantas)',
+                  label: 'Plantas',
                   active: _activeNav == 'datacenter',
                   onTap: () => setState(() => _activeNav = 'datacenter'),
                 ),
                 _SidebarItem(
                   icon: Icons.developer_board_outlined,
-                  label: '3. Rack Editor (42U)',
+                  label: 'Racks',
                   active: _activeNav == 'rack_editor',
                   onTap: () => setState(() => _activeNav = 'rack_editor'),
                 ),
                 _SidebarItem(
                   icon: Icons.account_tree_rounded,
-                  label: '4. Red & Host',
+                  label: 'Red y monitorización',
                   active: _activeNav == 'network_hosts',
                   onTap: () => setState(() => _activeNav = 'network_hosts'),
                 ),
                 _SidebarItem(
                   icon: Icons.dashboard_outlined,
-                  label: '5. Dashboard & Excel',
+                  label: 'Informes',
                   active: _activeNav == 'dashboard',
                   onTap: () {
                     setState(() => _activeNav = 'dashboard');
@@ -1275,25 +1277,25 @@ class _RackDocShellState extends State<RackDocShell> {
                 ),
                 _SidebarItem(
                   icon: Icons.hub_rounded,
-                  label: '6. CMDB & Control IPs',
+                  label: 'CMDB e IPAM',
                   active: _activeNav == 'cmdb',
                   onTap: () => setState(() => _activeNav = 'cmdb'),
                 ),
                 _SidebarItem(
                   icon: Icons.verified_user_rounded,
-                  label: '7. CertScope (SSL/TLS)',
+                  label: 'Certificados TLS',
                   active: _activeNav == 'certscope',
                   onTap: () => setState(() => _activeNav = 'certscope'),
                 ),
                 _SidebarItem(
                   icon: Icons.notifications_active_rounded,
-                  label: '8. Alarmas SRE',
+                  label: 'Alarmas',
                   active: _activeNav == 'sre_alarms',
                   onTap: () => _openSreAlarms(tabIndex: 0),
                 ),
                 _SidebarItem(
                   icon: Icons.settings_rounded,
-                  label: '9. Configuración (Usuarios/AD)',
+                  label: 'Administración',
                   active: _activeNav == 'admin',
                   onTap: () => setState(() => _activeNav = 'admin'),
                 ),
@@ -1311,7 +1313,7 @@ class _RackDocShellState extends State<RackDocShell> {
                     children: [
                       const Expanded(
                         child: Text(
-                          'DATACENTERS & RACKS',
+                          'INFRAESTRUCTURA',
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w700,

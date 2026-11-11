@@ -783,7 +783,7 @@ class _CmdbViewState extends State<CmdbView> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'CMDB & Control de Direccionamiento Multi-IP (Físicos, VMs, Clusters & Cloud)',
+                      'CMDB e IPAM',
                       style: TextStyle(
                         fontSize: 16.5,
                         fontWeight: FontWeight.w900,
@@ -792,7 +792,7 @@ class _CmdbViewState extends State<CmdbView> {
                     ),
                     SizedBox(height: 2),
                     Text(
-                      'Gestión unificada de servidores físicos, máquinas virtuales, contenedores y VIPs con separación de IP de Gestión (Heartbeat/Manager) e IPs de Operación/Servicio + Verificador Manual Anti-Conflictos.',
+                      'Inventario de activos, direcciones IP, subredes y relaciones de alojamiento.',
                       style: TextStyle(
                         fontSize: 11.5,
                         color: AppPalette.slate600,
@@ -824,7 +824,7 @@ class _CmdbViewState extends State<CmdbView> {
                 ),
                 icon: const Icon(Icons.menu_book_rounded, size: 17),
                 label: const Text(
-                  'Ir a Documentación & API (8. Alarmas SRE)',
+                  'Guía y API',
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
                 ),
               ),
@@ -844,14 +844,14 @@ class _CmdbViewState extends State<CmdbView> {
                 ),
                 icon: const Icon(Icons.radar_rounded, size: 17),
                 label: const Text(
-                  'Verificar IP Libre (Ping + TCP + ARP)',
+                  'Comprobar IP',
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
                 ),
               ),
               const SizedBox(width: 8),
               DiagramExportMenuButton(
                 buttonLabel:
-                    'Exportar CMDB (.xlsx / .csv / .json / .dia / .pdf)',
+                    'Exportar',
                 onExportExcel: widget.onExportExcel,
                 documentBuilder: _buildCmdbExportDocument,
               ),
@@ -868,7 +868,7 @@ class _CmdbViewState extends State<CmdbView> {
                   ),
                   icon: const Icon(Icons.add_circle_outline_rounded, size: 17),
                   label: const Text(
-                    'Nueva Máquina / VM / CI',
+                    'Añadir activo',
                     style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
                   ),
                 ),
@@ -973,22 +973,22 @@ class _CmdbViewState extends State<CmdbView> {
       (
         'inventory',
         Icons.view_list_rounded,
-        '1. Inventario CMDB & Multi-IP (Físicos, VMs, Clusters, Cloud)',
+        'Inventario',
       ),
       (
         'verifier',
         Icons.radar_rounded,
-        '2. Verificador Manual de IPs Libres (Control Anti-Conflictos)',
+        'Comprobar IPs',
       ),
       (
         'subnets_ipam',
         Icons.grid_on_rounded,
-        '3. Subredes, VLANs & Mapa IPAM (.1 a .254)',
+        'Subredes y mapa IP',
       ),
       (
         'hypervisor_tree',
         Icons.account_tree_outlined,
-        '4. Topología Hipervisores Físicos ➔ VMs & Servicios',
+        'Hosts y máquinas virtuales',
       ),
     ];
 
@@ -1975,7 +1975,7 @@ class _CmdbViewState extends State<CmdbView> {
               _buildExcelSortableHeaderCell(
                 'Acciones',
                 null,
-                width: widget.canEdit ? 174 : 84,
+                width: widget.canEdit ? 78 : 82,
               ),
             ],
           ),
@@ -2072,6 +2072,129 @@ class _CmdbViewState extends State<CmdbView> {
       return SizedBox(width: width, child: cell);
     }
     return Expanded(flex: flex ?? 10, child: cell);
+  }
+
+  Widget _buildInventoryActions(
+    Map<String, dynamic> asset, {
+    required bool heartbeatEnabled,
+    required bool expanded,
+  }) {
+    final assetId = asset['id'] as int;
+    final rawConfig = (asset['custom_fields'] is Map)
+        ? (asset['custom_fields'] as Map)['certscope_config']
+        : null;
+    final certScopeEnabled = rawConfig is Map
+        ? rawConfig['enabled'] == true
+        : (asset['monitor_method'] ?? '').toString().toLowerCase() == 'https';
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          tooltip: 'Comprobar conexión ahora',
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+          onPressed: _runningHeartbeatAssetId == assetId
+              ? null
+              : () => _triggerAssetHeartbeat(asset),
+          icon: _runningHeartbeatAssetId == assetId
+              ? const SizedBox(
+                  width: 13,
+                  height: 13,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.network_ping_rounded, size: 16),
+        ),
+        if (widget.canEdit)
+          PopupMenuButton<String>(
+            tooltip: 'Más acciones',
+            icon: const Icon(Icons.more_horiz_rounded, size: 19),
+            padding: EdgeInsets.zero,
+            onSelected: (action) {
+              switch (action) {
+                case 'heartbeat':
+                  _toggleAssetHeartbeatMonitoring(asset);
+                  break;
+                case 'certscope':
+                  _toggleInventoryCertScope(asset, !certScopeEnabled);
+                  break;
+                case 'add_ip':
+                  _openAddSingleIpDialog(asset);
+                  break;
+                case 'edit':
+                  _openAssetEditorDialog(existing: asset);
+                  break;
+                case 'delete':
+                  _confirmDeleteAsset(asset);
+                  break;
+                case 'details':
+                  setState(() => _expandedAssetId = expanded ? null : assetId);
+                  break;
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'heartbeat',
+                child: Text(heartbeatEnabled
+                    ? 'Desactivar monitorización'
+                    : 'Activar monitorización'),
+              ),
+              PopupMenuItem(
+                value: 'certscope',
+                child: Text(certScopeEnabled
+                    ? 'Desactivar análisis TLS'
+                    : 'Analizar certificado TLS'),
+              ),
+              const PopupMenuItem(
+                value: 'add_ip',
+                child: Text('Añadir dirección IP'),
+              ),
+              const PopupMenuItem(value: 'edit', child: Text('Editar activo')),
+              PopupMenuItem(
+                value: 'details',
+                child: Text(expanded ? 'Ocultar detalles' : 'Ver detalles e IPs'),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem(value: 'delete', child: Text('Eliminar activo')),
+            ],
+          )
+        else
+          IconButton(
+            tooltip: expanded ? 'Ocultar detalles' : 'Ver detalles e IPs',
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+            onPressed: () => setState(
+              () => _expandedAssetId = expanded ? null : assetId,
+            ),
+            icon: Icon(expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _toggleInventoryCertScope(
+    Map<String, dynamic> asset,
+    bool enabled,
+  ) async {
+    final assetId = asset['id'] as int;
+    try {
+      await widget.api.updateCmdbAsset(assetId, {
+        'certscope_enabled': enabled,
+        'certscope_port': 443,
+      });
+      await _loadOverview(silent: true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).aviso(
+        enabled
+            ? 'Análisis HTTPS activado para ${asset['code']}.'
+            : 'Análisis HTTPS desactivado para ${asset['code']}.',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).avisoError('$e');
+    }
   }
 
   Widget _buildExcelAssetRow(Map<String, dynamic> asset, int rowIndex) {
@@ -2674,186 +2797,12 @@ class _CmdbViewState extends State<CmdbView> {
                     flex: 12,
                   ),
                   _buildExcelBodyCell(
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          tooltip: 'Comprobar Heartbeat ahora',
-                          visualDensity: VisualDensity.compact,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(
-                            minWidth: 26,
-                            minHeight: 26,
-                          ),
-                          onPressed: _runningHeartbeatAssetId == assetId
-                              ? null
-                              : () => _triggerAssetHeartbeat(asset),
-                          icon: _runningHeartbeatAssetId == assetId
-                              ? const SizedBox(
-                                  width: 13,
-                                  height: 13,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(
-                                  Icons.network_ping_rounded,
-                                  size: 16,
-                                  color: AppPalette.sky600,
-                                ),
-                        ),
-                        if (widget.canEdit) ...[
-                          IconButton(
-                            tooltip: hbEnabled
-                                ? 'Heartbeat Activo (Clic para desactivar)'
-                                : 'Heartbeat Desactivado (Clic para activar)',
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(
-                              minWidth: 26,
-                              minHeight: 26,
-                            ),
-                            onPressed: () =>
-                                _toggleAssetHeartbeatMonitoring(asset),
-                            icon: Icon(
-                              hbEnabled
-                                  ? Icons.favorite_rounded
-                                  : Icons.heart_broken_outlined,
-                              size: 15,
-                              color: hbEnabled
-                                  ? AppPalette.green600
-                                  : AppPalette.slate400,
-                            ),
-                          ),
-                          Builder(
-                            builder: (_) {
-                              final rawCs = (asset['custom_fields'] is Map)
-                                  ? (asset['custom_fields']
-                                        as Map)['certscope_config']
-                                  : null;
-                              final csOn = rawCs is Map
-                                  ? rawCs['enabled'] == true
-                                  : ((asset['monitor_method'] ?? '')
-                                            .toString()
-                                            .toLowerCase() ==
-                                        'https');
-                              final csDays = rawCs is Map
-                                  ? rawCs['days_remaining']
-                                  : null;
-                              return IconButton(
-                                tooltip: csOn
-                                    ? '3. CertScope HTTPS Activo${csDays != null ? ' ($csDays días)' : ''} (Clic para desactivar)'
-                                    : '3. CertScope HTTPS Desactivado (Clic para activar y analizar certificado HTTPS)',
-                                visualDensity: VisualDensity.compact,
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(
-                                  minWidth: 26,
-                                  minHeight: 26,
-                                ),
-                                onPressed: () async {
-                                  final nextVal = !csOn;
-                                  try {
-                                    await widget.api.updateCmdbAsset(assetId, {
-                                      'certscope_enabled': nextVal,
-                                      'certscope_port': 443,
-                                    });
-                                    await _loadOverview(silent: true);
-                                    if (!mounted) return;
-                                    ScaffoldMessenger.of(context).aviso(
-                                      nextVal
-                                          ? 'CertScope HTTPS activado y analizado para ${asset['code']} (ver en 7. CertScope).'
-                                          : 'CertScope HTTPS desactivado para ${asset['code']}.',
-                                    );
-                                  } catch (e) {
-                                    if (!mounted) return;
-                                    ScaffoldMessenger.of(
-                                      context,
-                                    ).avisoError('$e');
-                                  }
-                                },
-                                icon: Icon(
-                                  csOn
-                                      ? Icons.verified_user_rounded
-                                      : Icons.shield_outlined,
-                                  size: 15,
-                                  color: csOn
-                                      ? AppPalette.violet600
-                                      : AppPalette.slate400,
-                                ),
-                              );
-                            },
-                          ),
-                          IconButton(
-                            tooltip: 'Añadir otra IP a este equipo',
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(
-                              minWidth: 26,
-                              minHeight: 26,
-                            ),
-                            onPressed: () => _openAddSingleIpDialog(asset),
-                            icon: const Icon(
-                              Icons.add_link_rounded,
-                              size: 16,
-                              color: AppPalette.green700,
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: 'Editar equipo, IPs, Máscara, Sede y Heartbeat',
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(
-                              minWidth: 26,
-                              minHeight: 26,
-                            ),
-                            onPressed: () =>
-                                _openAssetEditorDialog(existing: asset),
-                            icon: const Icon(
-                              Icons.edit_outlined,
-                              size: 16,
-                              color: AppPalette.blue900,
-                            ),
-                          ),
-                          IconButton(
-                            tooltip:
-                                'Eliminar equipo de la CMDB y dejar su IP libre (no ocupada)',
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(
-                              minWidth: 26,
-                              minHeight: 26,
-                            ),
-                            onPressed: () => _confirmDeleteAsset(asset),
-                            icon: const Icon(
-                              Icons.delete_outline_rounded,
-                              size: 16,
-                              color: AppPalette.red600,
-                            ),
-                          ),
-                        ],
-                        IconButton(
-                          tooltip: isExpanded
-                              ? 'Ocultar desglose de interfaces IP'
-                              : 'Desplegar todas las IPs y detalles',
-                          visualDensity: VisualDensity.compact,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(
-                            minWidth: 26,
-                            minHeight: 26,
-                          ),
-                          onPressed: () => setState(
-                            () => _expandedAssetId = isExpanded ? null : assetId,
-                          ),
-                          icon: Icon(
-                            isExpanded
-                                ? Icons.expand_less_rounded
-                                : Icons.expand_more_rounded,
-                            size: 17,
-                          ),
-                        ),
-                      ],
+                    _buildInventoryActions(
+                      asset,
+                      heartbeatEnabled: hbEnabled,
+                      expanded: isExpanded,
                     ),
-                    width: widget.canEdit ? 174 : 84,
+                    width: widget.canEdit ? 78 : 82,
                   ),
                 ],
               ),

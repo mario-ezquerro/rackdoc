@@ -4393,13 +4393,16 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                 children: [
                   // COLUMNA IZQUIERDA: DEVICES LIBRARY
                   if (_showLeftLibrary && !widget.isKioskMode)
-                    _buildLeftDevicesLibraryPanel(floor),
+                    SelectionContainer.disabled(
+                      child: _buildLeftDevicesLibraryPanel(floor),
+                    ),
 
                   // COLUMNA CENTRAL: LIENZO INTERACTIVO DE PLANTA 2D CON DRAG TARGET Y CABLEADO
                   Expanded(
-                    child: Padding(
-                      padding: EdgeInsets.all(widget.isKioskMode ? 6 : 12),
-                      child: Container(
+                    child: SelectionContainer.disabled(
+                      child: Padding(
+                        padding: EdgeInsets.all(widget.isKioskMode ? 6 : 12),
+                        child: Container(
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(10),
@@ -5351,6 +5354,7 @@ class _DatacenterFloorViewState extends State<DatacenterFloorView> {
                           },
                         ),
                       ),
+                    ),
                     ),
                   ),
 
