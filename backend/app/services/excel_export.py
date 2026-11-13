@@ -3,9 +3,10 @@ Servicio de informes e inventario consolidado (`5. Dashboard & Excel`): generaci
 """
 
 from io import BytesIO
+import ipaddress
 import json
 import re
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -21,8 +22,13 @@ from ..models import (
     Connection,
     Port,
     FloorDevice,
+    CmdbAsset,
+    CmdbSubnet,
+    LogicalTopologyLink,
 )
+from ..rack_sync import _sync_rack_floor_devices_box
 from ..seed import create_ports_from_template, ensure_rack_external_outlets
+from .cmdb_service import sync_physical_devices_to_cmdb
 from ..logging_setup import get_logger
 
 logger = get_logger(__name__)
@@ -1417,7 +1423,78 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
     racks_updated = 0
     devices_created = 0
     devices_updated = 0
+    connections_created = 0
+    subnets_created = 0
     warnings = []
+
+    # 0. Procesar hoja opcional de Subredes IPAM ('4_Subredes_IPAM' o 'Subredes IPAM')
+    subnet_sheet = None
+    for s_name in ("4_Subredes_IPAM", "Subredes IPAM"):
+        if s_name in wb.sheetnames:
+            subnet_sheet = wb[s_name]
+            break
+    if subnet_sheet is not None:
+        s_rows = list(subnet_sheet.iter_rows(values_only=True))
+        if len(s_rows) > 1:
+            s_headers = [str(h or "").strip().lower() for h in s_rows[0]]
+
+            def sub_val(row_tuple, *candidates) -> str:
+                for c in candidates:
+                    for idx, h in enumerate(s_headers):
+                        if c == h or c in h:
+                            if idx < len(row_tuple):
+                                v = row_tuple[idx]
+                                return "" if v is None else str(v).strip()
+                return ""
+
+            for row in s_rows[1:]:
+                cidr_raw = sub_val(row, "cidr", "subred")
+                if not cidr_raw:
+                    continue
+                try:
+                    net_obj = ipaddress.ip_network(cidr_raw, strict=False)
+                    cidr_norm = str(net_obj)
+                    inferred_mask = str(net_obj.netmask)
+                except ValueError:
+                    continue
+                sub_name = sub_val(row, "nombre subred", "nombre") or f"Red {cidr_norm}"
+                vlan_raw = sub_val(row, "vlan")
+                vlan_val = int(float(vlan_raw)) if vlan_raw.replace(".", "", 1).isdigit() else None
+                gw_val = sub_val(row, "gateway", "puerta")
+                mask_val = sub_val(row, "máscara", "mascara") or inferred_mask
+                dns_val = sub_val(row, "dns")
+                env_val = (sub_val(row, "entorno") or "production").lower()
+                loc_code_sub = sub_val(row, "sede")
+                notes_sub = sub_val(row, "notas")
+                loc_sub = db.query(Location).filter(Location.code == loc_code_sub).first() if loc_code_sub else None
+
+                existing_sub = db.query(CmdbSubnet).filter(CmdbSubnet.cidr == cidr_norm).first()
+                if not existing_sub:
+                    db.add(
+                        CmdbSubnet(
+                            cidr=cidr_norm,
+                            name=sub_name,
+                            vlan_id=vlan_val,
+                            gateway=gw_val,
+                            subnet_mask=mask_val,
+                            dns_servers=dns_val,
+                            environment=env_val,
+                            location_id=loc_sub.id if loc_sub else None,
+                            notes=notes_sub,
+                        )
+                    )
+                    db.flush()
+                    subnets_created += 1
+                else:
+                    existing_sub.name = sub_name or existing_sub.name
+                    if vlan_val is not None:
+                        existing_sub.vlan_id = vlan_val
+                    if gw_val:
+                        existing_sub.gateway = gw_val
+                    if mask_val:
+                        existing_sub.subnet_mask = mask_val
+                    if notes_sub:
+                        existing_sub.notes = notes_sub
 
     # 1. Procesar hoja de Racks si existe ('1_Racks_y_Sedes' o 'Racks y Pasillos')
     rack_sheet = None
@@ -1524,6 +1601,7 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
                     db.add(rk)
                     db.flush()
                     ensure_rack_external_outlets(db, rk)
+                    _sync_rack_floor_devices_box(db, rk)
                     racks_created += 1
                 else:
                     rk.name = rack_name or rk.name
@@ -1537,6 +1615,27 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
                     if notes:
                         rk.notes = notes
                     racks_updated += 1
+
+    # Si '4_Subredes_IPAM' se procesó antes de crear una Sede nueva en '1_Racks_y_Sedes', enlazar location_id
+    if subnet_sheet is not None:
+        s_rows_relink = list(subnet_sheet.iter_rows(values_only=True))
+        if len(s_rows_relink) > 1:
+            s_hdrs = [str(h or "").strip().lower() for h in s_rows_relink[0]]
+            cidr_idx = next((i for i, h in enumerate(s_hdrs) if "cidr" in h or "subred" in h), None)
+            loc_idx = next((i for i, h in enumerate(s_hdrs) if "sede" in h), None)
+            if cidr_idx is not None and loc_idx is not None:
+                for row in s_rows_relink[1:]:
+                    c_raw = str(row[cidr_idx] or "").strip() if cidr_idx < len(row) else ""
+                    l_raw = str(row[loc_idx] or "").strip() if loc_idx < len(row) else ""
+                    if c_raw and l_raw:
+                        try:
+                            c_norm = str(ipaddress.ip_network(c_raw, strict=False))
+                        except ValueError:
+                            continue
+                        sub_obj = db.query(CmdbSubnet).filter(CmdbSubnet.cidr == c_norm).first()
+                        loc_obj = db.query(Location).filter(Location.code == l_raw).first()
+                        if sub_obj and loc_obj and sub_obj.location_id is None:
+                            sub_obj.location_id = loc_obj.id
 
     # 2. Procesar hoja de Equipos ('2_Equipos_y_Hosts' o 'Hardware y Red')
     dev_sheet = None
@@ -1585,6 +1684,7 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
                     db.add(rk)
                     db.flush()
                     ensure_rack_external_outlets(db, rk)
+                    _sync_rack_floor_devices_box(db, rk)
                     racks_created += 1
 
                 start_u = _parse_start_u(d_val(row, "unidad u inicial", "unidad u", "start_u"))
@@ -1629,40 +1729,32 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
                         is_full_depth=(cat in ("server", "switch", "ups", "firewall")),
                         default_color="#1E293B" if cat == "server" else "#F8FAFC",
                         layout_spec={
-                            "port_groups": [
+                            "front": [
                                 {
                                     "port_type": "rj45",
                                     "prefix": "GE",
-                                    "count": 4,
-                                    "rows": 1,
-                                    "start_x": 0.55,
+                                    "count": 24 if cat == "switch" else 4,
+                                    "rows": 2 if cat == "switch" else 1,
+                                    "start_x": 0.35 if cat == "switch" else 0.55,
                                     "end_x": 0.78,
                                 },
                                 {
-                                    "port_type": "power_c13",
+                                    "port_type": "sfp_plus",
+                                    "prefix": "SFP",
+                                    "count": 4 if cat == "switch" else 2,
+                                    "rows": 2 if cat == "switch" else 1,
+                                    "start_x": 0.82,
+                                    "end_x": 0.92,
+                                },
+                            ],
+                            "back": [
+                                {
+                                    "port_type": "power_c14",
                                     "prefix": "PSU",
                                     "count": 2,
                                     "rows": 1,
-                                    "start_x": 0.84,
-                                    "end_x": 0.94,
-                                },
-                            ],
-                            "back_port_groups": [
-                                {
-                                    "port_type": "rj45",
-                                    "prefix": "ETH",
-                                    "count": 4,
-                                    "rows": 1,
-                                    "start_x": 0.45,
-                                    "end_x": 0.70,
-                                },
-                                {
-                                    "port_type": "power_c13",
-                                    "prefix": "PSU-B",
-                                    "count": 2,
-                                    "rows": 1,
-                                    "start_x": 0.80,
-                                    "end_x": 0.94,
+                                    "start_x": 0.15,
+                                    "end_x": 0.30,
                                 },
                             ],
                         },
@@ -1680,6 +1772,43 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
                 serial = d_val(row, "nº serie", "serie")
                 notes = d_val(row, "notas")
 
+                # Auto-registrar la subred CIDR en IPAM si la IP + máscara (ej. /23 = 255.255.254.0) no está aún registrada
+                if ip_addr:
+                    try:
+                        iface = ipaddress.ip_interface(f"{ip_addr}/{mask}")
+                        inferred_cidr = str(iface.network)
+                        has_covering_subnet = False
+                        for sub_cand in db.query(CmdbSubnet).all():
+                            try:
+                                if iface.ip in ipaddress.ip_network(sub_cand.cidr, strict=False):
+                                    has_covering_subnet = True
+                                    break
+                            except ValueError:
+                                continue
+                        if not has_covering_subnet:
+                            rk_loc_id = (
+                                rk.room.floor.location_id
+                                if (rk.room and rk.room.floor)
+                                else None
+                            )
+                            vlan_tag = f"VLAN {vlan_mgmt} - " if vlan_mgmt is not None else ""
+                            db.add(
+                                CmdbSubnet(
+                                    cidr=inferred_cidr,
+                                    name=f"{vlan_tag}Red {inferred_cidr}",
+                                    vlan_id=vlan_mgmt,
+                                    gateway=gw or str(iface.network.network_address + 1),
+                                    subnet_mask=str(iface.network.netmask),
+                                    environment="production",
+                                    location_id=rk_loc_id,
+                                    notes="Subred auto-registrada desde importación Excel.",
+                                )
+                            )
+                            db.flush()
+                            subnets_created += 1
+                    except ValueError:
+                        pass
+
                 hb_active_raw = d_val(row, "heartbeat activo", "estado ping").upper()
                 hb_enabled = hb_active_raw in ("SI", "SÍ", "YES", "TRUE", "1", "ONLINE", "OFFLINE")
                 hb_method = (d_val(row, "método heartbeat", "metodo heartbeat") or "icmp").lower()
@@ -1695,16 +1824,43 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
                     .filter(RackDevice.rack_id == rk.id, RackDevice.code == dev_code)
                     .first()
                 )
+                target_host = ip_addr or fqdn
+                scheme_hb = "https" if hb_method == "https" or hb_port == 443 else "http"
+                check_key = "http" if hb_method in ("http", "https") else hb_method
                 hb_cfg = {
-                    "url": hb_url or "/",
-                    "path": hb_url or "/",
-                    "expected_status": 200,
-                    "ssh_user": ssh_user,
-                    "ssh_extra_args": "-o StrictHostKeyChecking=no",
-                    "snmp_community": "public",
-                    "snmp_oid": "1.3.6.1.2.1.1.1.0",
-                    "secondary_methods": [],
-                    "simulate_offline": False,
+                    "enabled_checks": [check_key],
+                    "checks": {
+                        "icmp": {"target_type": "ip"},
+                        "ssh": {"target_type": "ip", "port": 22, "username": ssh_user},
+                        "http": {
+                            "target_type": "ip",
+                            "scheme": scheme_hb,
+                            "port": hb_port if hb_method in ("http", "https") else 443,
+                            "url": (
+                                f"{scheme_hb}://{target_host}:{hb_port}{hb_url or '/'}"
+                                if target_host
+                                else ""
+                            ),
+                            "path": hb_url or "/",
+                            "expected_status": 200,
+                        },
+                        "tcp": {"target_type": "ip", "port": hb_port},
+                        "udp": {"target_type": "ip", "port": 161},
+                        "snmp": {
+                            "target_type": "ip",
+                            "port": 161,
+                            "version": "2c",
+                            "community": "public",
+                            "oid": "1.3.6.1.2.1.1.1.0",
+                        },
+                    },
+                }
+                conn_cfg = {
+                    "enabled": False,
+                    "protocols": ["ssh", "https"],
+                    "ssh": {"host": target_host, "port": 22, "username": ssh_user},
+                    "http": {"url": f"http://{target_host}:80/" if target_host else ""},
+                    "https": {"url": f"https://{target_host}:443/" if target_host else ""},
                 }
 
                 if existing_dev:
@@ -1721,18 +1877,23 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
                     existing_dev.monitoring_enabled = hb_enabled
                     existing_dev.monitor_method = hb_method
                     existing_dev.monitor_port = hb_port
-                    if hb_enabled and existing_dev.status == "unknown":
-                        existing_dev.status = "online"
+                    existing_dev.status = "online" if hb_enabled else "unmonitored"
                     existing_dev.serial_number = serial or existing_dev.serial_number
                     existing_dev.notes = notes or existing_dev.notes
                     cf = dict(existing_dev.custom_fields or {})
                     cf["heartbeat_config"] = hb_cfg
+                    cf["connect_config"] = conn_cfg
+                    cf["heartbeat_v4_default_off"] = True
                     if u_height != tpl.u_height:
                         cf["u_height_override"] = u_height
                     existing_dev.custom_fields = cf
                     devices_updated += 1
                 else:
-                    init_cf: Dict[str, Any] = {"heartbeat_config": hb_cfg}
+                    init_cf: Dict[str, Any] = {
+                        "heartbeat_config": hb_cfg,
+                        "connect_config": conn_cfg,
+                        "heartbeat_v4_default_off": True,
+                    }
                     if u_height != tpl.u_height:
                         init_cf["u_height_override"] = u_height
                     new_dev = RackDevice(
@@ -1755,7 +1916,7 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
                         monitoring_enabled=hb_enabled,
                         monitor_method=hb_method,
                         monitor_port=hb_port,
-                        status="online" if hb_enabled else "unknown",
+                        status="online" if hb_enabled else "unmonitored",
                         last_ping_ms=1.2 if hb_enabled else None,
                         serial_number=serial,
                         custom_fields=init_cf,
@@ -1767,6 +1928,7 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
                     devices_created += 1
 
     # 3. Procesar hoja de Conexiones si existe ('3_Conexiones_y_Fibras')
+    imported_conn_pairs: List[Tuple[int, int, str, str, str, Optional[int]]] = []
     conn_sheet = wb["3_Conexiones_y_Fibras"] if "3_Conexiones_y_Fibras" in wb.sheetnames else None
     if conn_sheet is not None:
         c_rows = list(conn_sheet.iter_rows(values_only=True))
@@ -1852,12 +2014,63 @@ def import_datacenter_excel(db: Session, file_bytes: bytes) -> Dict[str, Any]:
                         length_m=len_val,
                     )
                 )
+                connections_created += 1
+                imported_conn_pairs.append(
+                    (s_dev.id, t_dev.id, sp.port_number, tp.port_number, label, vlan_val)
+                )
 
     db.commit()
+
+    # Sincronizar equipos físicos con la CMDB (IPAM /23, /24...) y enlazar topología lógica
+    sync_physical_devices_to_cmdb(db)
+    if imported_conn_pairs:
+        asset_by_rdev = {
+            a.rack_device_id: a
+            for a in db.query(CmdbAsset).filter(CmdbAsset.rack_device_id.isnot(None)).all()
+        }
+        for s_dev_id, t_dev_id, s_pnum, t_pnum, lbl, vlan_v in imported_conn_pairs:
+            s_ast = asset_by_rdev.get(s_dev_id)
+            t_ast = asset_by_rdev.get(t_dev_id)
+            if not s_ast or not t_ast or s_ast.id == t_ast.id:
+                continue
+            exists_link = (
+                db.query(LogicalTopologyLink)
+                .filter(
+                    (
+                        (LogicalTopologyLink.source_asset_id == s_ast.id)
+                        & (LogicalTopologyLink.target_asset_id == t_ast.id)
+                    )
+                    | (
+                        (LogicalTopologyLink.source_asset_id == t_ast.id)
+                        & (LogicalTopologyLink.target_asset_id == s_ast.id)
+                    )
+                )
+                .first()
+            )
+            if not exists_link:
+                db.add(
+                    LogicalTopologyLink(
+                        source_asset_id=s_ast.id,
+                        target_asset_id=t_ast.id,
+                        link_type="switch_uplink",
+                        source_interface=s_pnum,
+                        target_interface=t_pnum,
+                        protocol_label=lbl[:80],
+                        vlan_id=vlan_v,
+                        bandwidth_mbps=10000.0 if "SFP" in f"{s_pnum}{t_pnum}".upper() else 1000.0,
+                        status="UP",
+                        auto_discovered=True,
+                        notes="Enlace sincronizado desde matriz física Excel.",
+                    )
+                )
+        db.commit()
+
     return {
         "racks_created": racks_created,
         "racks_updated": racks_updated,
         "devices_created": devices_created,
         "devices_updated": devices_updated,
+        "connections_created": connections_created,
+        "subnets_created": subnets_created,
         "warnings": warnings,
     }

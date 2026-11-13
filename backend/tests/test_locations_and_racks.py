@@ -131,3 +131,46 @@ def test_rack_detail_tolerates_null_columns_and_cmdb_ip_release(
     assert loaded_dev["ip_address"] == ""
     assert loaded_dev["hostname"] == ""
     assert loaded_dev["notes"] == ""
+
+
+def test_excel_import_demo_3_racks_22_switches_subnet_23(
+    client: TestClient, admin_headers: Dict[str, str]
+) -> None:
+    """
+    Verifica la importación completa del libro Excel de demostración
+    (`examples/Demo_3_Racks_22_Switches_Red_23.xlsx`): 3 Racks, 22 Switches
+    (2x 48p + 20x 24p), 59 conexiones físicas y subred `10.200.0.0/23` en CMDB.
+    """
+    from pathlib import Path
+
+    demo_xlsx = (
+        Path(__file__).resolve().parents[2]
+        / "examples"
+        / "Demo_3_Racks_22_Switches_Red_23.xlsx"
+    )
+    assert demo_xlsx.exists()
+
+    with demo_xlsx.open("rb") as fh:
+        imp_resp = client.post(
+            "/api/v1/reports/excel/import",
+            headers=admin_headers,
+            files={
+                "file": (
+                    demo_xlsx.name,
+                    fh,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+    assert imp_resp.status_code == 200, imp_resp.text
+    data = imp_resp.json()
+    assert data["racks_created"] == 3
+    assert data["devices_created"] == 22
+    assert data["connections_created"] == 59
+    assert data["subnets_created"] == 1
+    assert data["warnings"] == []
+
+    cmdb_resp = client.get("/api/v1/cmdb/overview", headers=admin_headers)
+    assert cmdb_resp.status_code == 200
+    subnets = cmdb_resp.json()["subnets"]
+    assert any(s["cidr"] == "10.200.0.0/23" for s in subnets)
