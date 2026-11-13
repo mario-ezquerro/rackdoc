@@ -9,6 +9,8 @@ import '../../core/image_file_picker.dart';
 import '../../models/datacenter_models.dart';
 import '../../shared/widgets/diagram_exporter.dart';
 
+/// Vista de **`1. Locations (Mapa)`**: posicionamiento interactivo de Sedes / CPDs
+/// sobre OpenStreetMap o planos personalizados con estado Heartbeat agregado.
 class LocationsView extends StatefulWidget {
   final RackDocApiClient api;
   final List<LocationNode> locations;

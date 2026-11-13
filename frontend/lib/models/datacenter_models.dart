@@ -1,3 +1,4 @@
+/// Pasillo frío, caliente o estándar dentro de una sala técnica del CPD.
 class AisleNode {
   final int id;
   final String code;
@@ -21,6 +22,7 @@ class AisleNode {
   }
 }
 
+/// Resumen compacto de un bastidor Rack con ocupación U, coordenadas 2D y contadores Heartbeat.
 class RackSummary {
   final int id;
   final String code;
@@ -116,6 +118,7 @@ class RackSummary {
   }
 }
 
+/// Sala técnica o cuarto de comunicaciones perteneciente a una planta (`FloorNode`).
 class RoomNode {
   final int id;
   final String name;
@@ -152,6 +155,7 @@ class RoomNode {
   }
 }
 
+/// Dispositivo o sensor posicionado sobre el plano 2D de una planta (cámara, AP, SAI, roseta).
 class FloorDeviceNode {
   final int id;
   final int floorId;
@@ -267,6 +271,7 @@ class FloorDeviceNode {
   }
 }
 
+/// Planta arquitectónica de una sede con sus salas, dispositivos de planta y plano 2D.
 class FloorNode {
   final int id;
   final String name;
@@ -323,6 +328,7 @@ class FloorNode {
   }
 }
 
+/// Sede geográfica o Datacenter con coordenadas GPS/plano y contadores globales.
 class LocationNode {
   final int id;
   final String code;
@@ -405,6 +411,7 @@ class LocationNode {
   }
 }
 
+/// Plantilla de catálogo hardware (altura U, profundidad y especificación Front/Back).
 class DeviceTemplateModel {
   final int id;
   final String category;
@@ -476,6 +483,7 @@ class DeviceTemplateModel {
       };
 }
 
+/// Puerto físico individual (RJ45, SFP+, fibra o alimentación) de un equipo montado en rack.
 class PortModel {
   final int id;
   final int rackDeviceId;
@@ -517,6 +525,7 @@ class PortModel {
   }
 }
 
+/// Equipo físico o toma exterior instalado en un armario Rack con red y telemetría.
 class RackDeviceModel {
   final int id;
   final int rackId;
@@ -678,6 +687,7 @@ class RackDeviceModel {
   }
 }
 
+/// Extremo origen o destino serializado de un latiguillo (`ConnectionModel`).
 class ConnectionEndpointInfoModel {
   final int portId;
   final String portNumber;
@@ -722,6 +732,7 @@ class ConnectionEndpointInfoModel {
   }
 }
 
+/// Conexión física punto a punto entre dos bocas del mismo rack o entre racks distintos.
 class ConnectionModel {
   final int id;
   final int sourcePortId;
@@ -784,6 +795,7 @@ class ConnectionModel {
   }
 }
 
+/// Detalle completo de un bastidor Rack con migas de pan, dispositivos montados y cableado.
 class RackDetailModel {
   final int id;
   final String code;
@@ -852,6 +864,7 @@ class RackDetailModel {
   }
 }
 
+/// Usuario autenticado de RackDoc (local o Active Directory) y sus permisos RBAC.
 class UserModel {
   final int id;
   final String username;
@@ -912,6 +925,7 @@ class UserModel {
   }
 }
 
+/// Configuración de servidor Active Directory / LDAP para autenticación y búsqueda.
 class ADServerModel {
   final int id;
   final String name;

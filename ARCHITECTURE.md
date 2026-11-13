@@ -1,314 +1,97 @@
-# RackDoc — Arquitectura y Plan de Implementación
+# RackDoc8 (`v1.3.1`) — Arquitectura Técnica y Diseño Modular
 
-**RackDoc** es una plataforma visual de gestión, monitorización y documentación de centros de datos (DCIM) inspirada en herramientas modernas como PATCHBOX, diseñada para ejecutarse mediante **Docker** tanto en un equipo local como en un servidor multiusuario.
+**RackDoc8** es una plataforma unificada de **DCIM visual**, **CMDB Multi-IP**, **Auditoría SSL/TLS (`CertScope`)**, **Monitorización Multiprotocolo (`Nagios + SNMP + Prometheus + OpenTelemetry`)** y **Gestión de Alarmas SRE**, orquestada en 3 contenedores Docker ligeros.
 
 ---
 
-## 1. Arquitectura del Sistema y Contenedores Docker
-
-El sistema se divide en dos servicios orquestados con `docker-compose.yml` (con opción de empaquetarse en un único contenedor para despliegues ultraligeros):
+## 1. Topología de Contenedores y Flujo de Datos
 
 ```mermaid
 flowchart LR
-    subgraph Client["Navegador / App Nativa"]
-        UI["Flutter Web / Desktop\n(Canvas Rack + Mapa + Lanzador SSH/Web)"]
+    subgraph Browser["Navegador Web"]
+        UI["Flutter Web SPA\n(SelectionArea Global + Lienzos CAD 2D)"]
     end
 
-    subgraph DockerHost["Docker Host (PC Local o Servidor)"]
-        Nginx["Contenedor Frontend\n(Nginx + Flutter Web Build)"]
-        API["Contenedor Backend\n(Python 3.12 + FastAPI + SQLAlchemy)"]
-        Monitor["Monitor Service\n(Ping / TCP Check Worker)"]
-        Exporter["Motor de Informes\n(OpenPyXL -> Excel .xlsx / CSV)"]
-        DB[("Volumen Persistente\n./data/rackdoc.db (SQLite WAL)")]
+    subgraph Docker["Docker Compose Stack"]
+        Nginx["rackdoc-frontend (:8181)\nNginx Alpine + Build Web"]
+        API["rackdoc-backend (:8180)\nPython 3.12 + FastAPI + Alembic"]
+        Prom["rackdoc-prometheus (:9090)\nPrometheus TSDB (15s scrape)"]
+        DB[("Volumen Persistente ./data\nrackdoc.db (SQLite WAL)\n+ uploads + targets_dynamic.json")]
     end
 
-    subgraph CPD["Red del Centro de Datos"]
-        HW["Switches / Routers / Servidores / iDRAC / PDU"]
+    subgraph Infra["Infraestructura Real del CPD"]
+        AD["Active Directory / LDAP\n(ldap:// :389 | ldaps:// :636)"]
+        SMTP["Servidor SMTP Corporativo\n(Alertas SRE & CertScope)"]
+        Nodes["Racks / Servidores / Switches / Exporters\n(ICMP, TCP, UDP, SSH, HTTPS/TLS, SNMP)"]
     end
 
-    UI <-->|"HTTP / REST JSON (JWT)"| API
-    Nginx -.->|"Sirve estáticos Web"| UI
+    UI <-->|"REST JSON /api/v1 (JWT RBAC)"| Nginx
+    Nginx <-->|"Proxy /api y /docs"| API
     API <-->|"SQLAlchemy 2.0"| DB
-    API --- Monitor
-    API --- Exporter
-    Monitor -.->|"ICMP Ping / TCP Port Check"| HW
-    UI -.->|"Abre ssh://, telnet://, https://"| HW
-```
-
-> [!TIP]
-> **Escalabilidad SQL sin fricción:** Configuraremos SQLite en modo `WAL` (*Write-Ahead Logging*), lo que permite lecturas y escrituras concurrentes del monitor de pings y de varios técnicos trabajando a la vez. Gracias a **SQLAlchemy**, si en el futuro se desea migrar a **PostgreSQL**, bastará con cambiar la variable de entorno `DATABASE_URL` en el `docker-compose.yml` sin tocar el código.
-
----
-
-## 2. Capacidades Clave del Sistema
-
-### 2.1. Jerarquía Completa del Datacenter (con Pasillos de Racks)
-La organización física sigue la estructura real de un CPD:
-`Sede (Location) ➔ Planta (Floor) ➔ Sala Técnica (Room) ➔ Pasillo / Fila (Aisle: Pasillo Frío / Caliente) ➔ Rack (Front & Back)`.
-
-### 2.2. Caras `Front` y `Back` en Racks, Dispositivos y Cables
-1. **Montaje en `front`, `back` y `full_depth`:**
-   - **Poca profundidad (`is_full_depth = false`):** Ej. un Switch en el `front` (U37) permite montar en esa misma U37 por detrás (`back`) una regleta PDU o pasacables trasero sin colisión.
-   - **Profundidad completa (`is_full_depth = true`):** Ej. un Servidor 2U o un SAI (UPS) ocupa las unidades U tanto en el frontal como en la trasera.
-2. **Puertos por Cara (`face: 'front' | 'back'`):**
-   - Cada plantilla define qué puertos van delante y cuáles detrás (ej. servidor con bahías en `front` y fuentes C14 + puertos IPMI/RJ45/SFP+ en `back`; patch panel con bocas RJ45 en `front` y regletas punch-down en `back`).
-3. **Trazado de Cableado (`Front ↔ Front`, `Back ↔ Back`, `Front ↔ Back` y `Outbound`):**
-   - Trazado ortogonal automático por las canaletas laterales izquierda y derecha.
-   - Indicadores **`PASS-THROUGH (FRONT/BACK)`** cuando un cable cruza de la cara delantera a la trasera del mismo rack.
-   - Indicador **`OUTBOUND`** cuando el cable viaja a otro rack del mismo pasillo o sala.
-
-### 2.3. Gestión de Red, Acceso Remoto (SSH / Telnet / Web) y Variables Personalizadas
-Cada dispositivo montado en el rack almacena su configuración de red e inventario completo:
-- **Red:** `Hostname`, `FQDN` (ej. `sw-core-01.cpd1.empresa.local`), `IP Address`, `Subnet Mask` (ej. `255.255.255.0` / `/24`), `Gateway`, `VLAN de Gestión`, `MAC Address` e `IP IPMI/iLO/iDRAC`.
-- **Lanzador de Conexión Directa:** Configurables por dispositivo (`SSH`, `Telnet`, `HTTPS/Web UI`, `HTTP`, `SNMP`, `RDP`) con su puerto específico:
-  - Desde el panel derecho del dispositivo en Flutter tendrás botones de **1 clic (`Abrir SSH`, `Abrir Web UI`, `Abrir Telnet`, `Abrir iDRAC`)** que disparan el protocolo nativo (`ssh://usuario@ip:puerto`, `telnet://ip:puerto`, `https://ip:puerto`) o copian el comando listo para terminal.
-- **Variables Extensibles (`custom_fields` JSON):** Permite añadir cualquier variable adicional (contrato de mantenimiento, versión de firmware, consumo en vatios, credenciales de referencia, etc.) sin limitaciones de esquema.
-
-### 2.4. Monitorización de Estado (Ping / Check de Puertos)
-- El contenedor Backend incluye una tarea programable (y botón de **"Test Ping Ahora"** en la interfaz) que comprueba desde el servidor si el equipo responde por **ICMP Ping** o **TCP (puerto 22/80/443)**.
-- Registra el estado (`online`, `offline`, `warning`, `unmonitored`), la **latencia en milisegundos (`last_ping_ms`)** y la fecha del último chequeo.
-- En el dibujo del rack, cada dispositivo muestra un **LED indicador de estado en vivo** (verde si responde al ping, rojo si está caído, gris si no se monitoriza).
-
-### 2.5. Generación y Exportación de Informes Excel (`.xlsx`) y CSV
-El backend genera informes descargables en formato **Excel (`.xlsx` multicapa con estilos)** y **CSV**, filtrables por Sede, Planta, Sala, Pasillo o Rack:
-1. **Hoja 1 - Ubicaciones y Racks:** Sede, Planta, Sala, Pasillo, Código de Rack, Unidades U totales/ocupadas/libres, Responsable.
-2. **Hoja 2 - Inventario de Hardware y Red:** Ubicación, Rack, Unidad U, Cara (`Front`/`Back`), Nombre, FQDN, IP, Máscara, Gateway, Fabricante, Modelo, Nº Serie, Protocolos activos, Estado Ping y Latencia (ms), más los campos personalizados.
-3. **Hoja 3 - Mapa de Cableado (Patching Schedule):** Rack/Equipo/Cara/Puerto Origen ➔ Rack/Equipo/Cara/Puerto Destino, Tipo de cable (Red Cobre, Fibra, Electricidad), Etiqueta/VLAN, Longitud y Notas.
-
----
-
-## 3. Modelo de Base de Datos SQL
-
-```mermaid
-erDiagram
-    USERS {
-        int id PK
-        string email UK
-        string full_name
-        string password_hash
-        string role "admin | tech | viewer"
-    }
-
-    LOCATIONS {
-        int id PK
-        string code "Ej: HQ"
-        string name "Ej: Headquarter"
-        float latitude
-        float longitude
-        string address
-    }
-
-    FLOORS {
-        int id PK
-        int location_id FK
-        string name "Ej: Planta 2"
-        int level_number
-    }
-
-    ROOMS {
-        int id PK
-        int floor_id FK
-        string name "Ej: Sala CPD 28"
-        float width_m
-        float depth_m
-    }
-
-    AISLES {
-        int id PK
-        int room_id FK
-        string code "Ej: PASILLO-A"
-        string name "Ej: Pasillo Frío A"
-        string aisle_type "cold | hot | standard"
-    }
-
-    RACKS {
-        int id PK
-        int room_id FK
-        int aisle_id FK
-        string code "Ej: RK001_M"
-        string name "Ej: M_Rack001"
-        int total_units "Ej: 42"
-        string manufacturer "Ej: Rittal"
-        string model_name
-        string serial_number
-        string responsible_person
-        date purchase_date
-        date operation_start
-        float pos_x "Posición en plano de sala"
-        float pos_y
-        string notes
-    }
-
-    DEVICE_TEMPLATES {
-        int id PK
-        string category "switch | router | server | patch_panel | pdu | ups | cable_manager | firewall | tray"
-        string manufacturer
-        string model_name
-        int u_height "1U, 2U, 4U..."
-        boolean is_full_depth "Ocupa Front y Back"
-        json layout_spec "Definición visual de caras front/back"
-    }
-
-    RACK_DEVICES {
-        int id PK
-        int rack_id FK
-        int template_id FK
-        string code "Ej: SW01, PBX01"
-        string name "Nombre descriptivo"
-        string hostname "Ej: sw-core-01"
-        string fqdn "Ej: sw-core-01.hq.local"
-        int start_u "Unidad U inferior (1..42)"
-        string mounted_face "front | back"
-        string ip_address "Ej: 10.20.1.10"
-        string subnet_mask "Ej: 255.255.255.0"
-        string gateway "Ej: 10.20.1.1"
-        string mac_address
-        int vlan_mgmt
-        json management_links "SSH:22, HTTPS:443, Telnet:23, iDRAC..."
-        boolean monitoring_enabled
-        string monitor_method "icmp | tcp_22 | tcp_443"
-        string status "online | offline | warning | unknown"
-        float last_ping_ms
-        datetime last_checked_at
-        string serial_number
-        json custom_fields "Variables extra dinámicas clave/valor"
-        string notes
-    }
-
-    PORTS {
-        int id PK
-        int rack_device_id FK
-        string port_number "Ej: 1..24, SFP1, PSU1"
-        string label
-        string face "front | back"
-        string port_type "rj45 | fiber_lc | fiber_sc | sfp_plus | power_c13 | power_c14 | power_schuko"
-        string mac_or_ip "Opcional por puerto/interfaz"
-        int vlan
-        float rel_x "Coordenada X relativa (0.0 a 1.0)"
-        float rel_y "Coordenada Y relativa (0.0 a 1.0)"
-    }
-
-    CONNECTIONS {
-        int id PK
-        int source_port_id FK
-        int target_port_id FK
-        string cable_type "utp_cat6 | utp_cat6a | fiber_om4 | fiber_os2 | power_ac"
-        string color_hex "Ej: #2563EB (Red), #F59E0B (Fibra), #DC2626 (Power)"
-        string routing_channel "left | right | auto"
-        string label "Ej: Trunk VLAN 10-50 / Circuito Eléctrico A"
-        float length_m
-        string notes
-    }
-
-    LOCATIONS ||--o{ FLOORS : contains
-    FLOORS ||--o{ ROOMS : contains
-    ROOMS ||--o{ AISLES : contains
-    ROOMS ||--o{ RACKS : contains
-    AISLES ||--o{ RACKS : groups
-    DEVICE_TEMPLATES ||--o{ RACK_DEVICES : instantiates
-    RACKS ||--o{ RACK_DEVICES : mounts
-    RACK_DEVICES ||--o{ PORTS : has
-    PORTS ||--o| CONNECTIONS : connects_source
-    PORTS ||--o| CONNECTIONS : connects_target
+    Prom -->|"Scrape /api/v1/metrics + File SD"| API
+    Prom -.->|"Scrape :9100 / :9182"| Nodes
+    API <-->|"Bind LDAP/LDAPS (ldap3)"| AD
+    API -->|"Avisos de Guardia"| SMTP
+    API <-->|"Sondas en Vivo & TLS Handshake"| Nodes
 ```
 
 ---
 
-## 4. Estructura de Carpetas del Proyecto
+## 2. Arquitectura del Backend (`backend/`)
 
-```text
-rackdoc/
-├── docker-compose.yml           # Orquestación lista para PC o Servidor
-├── .env.example                 # Variables de entorno (JWT_SECRET, PORT, DB_PATH, PING_INTERVAL)
-├── data/                        # Volumen persistente para SQLite y backups/exportaciones
-│
-├── backend/                     # API en Python (FastAPI)
-│   ├── Dockerfile
-│   ├── requirements.txt         # fastapi, sqlalchemy, openpyxl, icmplib/ping, uvicorn...
-│   └── app/
-│       ├── main.py              # Punto de entrada FastAPI + CORS + Worker de Pings
-│       ├── database.py          # Configuración SQLAlchemy + SQLite WAL
-│       ├── models/              # Tablas SQL (locations, floors, rooms, aisles, racks, devices, cables)
-│       ├── schemas/             # Modelos Pydantic (validación entrada/salida)
-│       ├── services/
-│       │   ├── monitor.py       # Chequeos de Ping ICMP / TCP a dispositivos del CPD
-│       │   └── excel_export.py  # Generador de informes Excel (.xlsx) con OpenPyXL
-│       ├── routers/             # Endpoints REST (/locations, /racks, /devices, /connections, /reports)
-│       └── seed.py              # Datos iniciales completos de demostración
-│
-└── frontend/                    # Aplicación Flutter (Web & Desktop)
-    ├── Dockerfile               # Build multi-stage (Flutter SDK -> Nginx Alpine)
-    ├── nginx.conf
-    ├── pubspec.yaml
-    └── lib/
-        ├── main.dart
-        ├── core/                # Tema visual (estilo limpio Patchbox), cliente HTTP API
-        ├── models/              # Clases de dominio Dart
-        ├── state/               # Gestión de estado
-        └── features/
-            ├── shell/           # Menú lateral izquierdo (Dashboard, Locations, Networks, Reports...)
-            ├── locations/       # Mapa (flutter_map) + navegación Sedes -> Plantas -> Salas -> Pasillos -> Racks
-            ├── rack_editor/     # Editor interactivo del Rack:
-            │   ├── widgets/
-            │   │   ├── device_catalog_panel.dart   # Panel izquierdo Draggable (Switch, Router, Server, Tray...)
-            │   │   ├── rack_canvas.dart            # Lienzo central 42U con toggle [Front | Back] y Zoom
-            │   │   ├── device_unit_widget.dart     # Equipo con sus puertos + LED de Ping en tiempo real
-            │   │   ├── cable_painter.dart          # CustomPainter ortogonal (Red, Fibra, Electricidad)
-            │   │   └── properties_panel.dart       # Panel derecho: Red (IP/FQDN/Mask/GW), botones SSH/Web/Telnet, Ping, Custom Fields
-            │   └── routing/
-            │       └── orthogonal_router.dart      # Cálculo de rutas de cables sin solapamientos
-            └── reports/         # Vista y descarga de informes Excel (.xlsx) / CSV
-```
+El backend sigue una arquitectura limpia en **4 estratos** bajo Python 3.12 y FastAPI:
+
+1. **Ensamblaje y Seguridad Transversal (`app/main.py`, `app/security.py`, `app/routers/_common.py`)**:
+   - Cuatro routers raíz con garantías explícitas de seguridad:
+     - `public_router`: `/health`, `/auth/login` e imágenes de planos/chasis.
+     - `api_router`: exige token `Bearer` JWT válido y evalúa automáticamente el rol mínimo según el método HTTP y ruta (`viewer` $\le$ `operator` $\le$ `editor` $\le$ `admin`).
+     - `automation_router`: autenticado mediante cabecera `X-API-Key` para playbooks Ansible y scrape de Prometheus.
+     - `agent_or_session_router`: acepta indistintamente `X-API-Key` o sesión JWT.
+   - Contraseñas locales protegidas con `SHA-256 + bcrypt` (evitando el truncado de 72 bytes de bcrypt puro) y autenticación corporativa real con `ldap3` (incluyendo **Auto-Provisioning JIT** y mapeo de `memberOf` a roles RBAC).
+
+2. **Routers por Dominio (`app/routers/`)**:
+   - `auth.py`: login híbrido Local/AD, gestión de usuarios, servidores LDAP/LDAPS y prueba de bind en vivo.
+   - `locations.py`: jerarquía geográfica `Location -> Floor -> Room -> Aisle` y dispositivos de planta (`FloorDevice`).
+   - `racks.py`: armarios 42U–48U, validación de colisiones `U`, tomas exteriores, cableado estructurado y alineación con CMDB.
+   - `device_templates.py`: catálogo hardware Front/Back e importación/exportación JSON.
+   - `cmdb.py`: activos Multi-IP, subredes IPAM, *Deep IP Probe*, barridos CIDR y resolución de colisiones IP.
+   - `network_hosts.py`: Stacks Tecnológicos 2D, topología lógica, chequeos Nagios, conectores SNMP, grupos de guardia SRE (5 columnas) y ventanas de mantenimiento.
+   - `certscope.py`: inventario y sondas TLS/STARTTLS en vivo o PEM manual de certificados X.509.
+   - `automation.py`: exposición Prometheus (`/api/v1/metrics`), webhooks Ansible y manifiesto JSON para agentes IA.
+   - `reports.py` y `system.py`: inventario consolidado, Excel `.xlsx` multicapa y motor Heartbeat en background.
+
+3. **Capa de Servicios (`app/services/`)**:
+   - `cmdb_service.py`: sincronización bidireccional `RackDevice / FloorDevice <-> CmdbAsset` y detección de colisiones IP.
+   - `network_host_service.py`: máquina de estados Nagios (`SOFT`/`HARD`), enrutamiento SMTP de alarmas SRE, cálculo de antigüedad de alarma, generación de `targets_dynamic.json` para Prometheus e ingesta OTLP.
+   - `certscope_service.py`: negociación SSL/TLS y STARTTLS, parseo X.509 y alertas de vencimiento.
+   - `monitor.py`: sondas reales `ICMP`, `TCP`, `UDP`, `SSH`, `HTTP/HTTPS` y `SNMP` (codificación ASN.1/BER nativa).
+   - `excel_export.py`: generación e importación de libros `.xlsx` con `openpyxl`.
+
+4. **Persistencia y Migraciones (`app/models.py`, `app/db_migrations.py`, `alembic/`)**:
+   - **31 tablas relacionales** gobernadas por **Alembic** en cada arranque (`run_migrations()`), sobre SQLite en modo `WAL` (`PRAGMA foreign_keys=ON`) o PostgreSQL vía `DATABASE_URL`.
+   - Verificación estática de integridad de atributos ORM mediante `backend/tools/escaneo_atributos_orm.py` e integración continua con `pytest` en `backend/tests/`.
 
 ---
 
-## 5. Configuración Docker (`docker-compose.yml`)
+## 3. Arquitectura del Frontend (`frontend/`)
 
-Diseñado para funcionar en cualquier ordenador con Docker o servidor Linux ejecutando un único comando (`docker compose up --build -d`):
+La interfaz está construida en **Flutter Web** con dos principios arquitectónicos clave:
 
-```yaml
-services:
-  backend:
-    build: ./backend
-    container_name: rackdoc-backend
-    restart: unless-stopped
-    volumes:
-      - ./data:/app/data
-    environment:
-      - DATABASE_URL=sqlite:////app/data/rackdoc.db
-      - JWT_SECRET=${JWT_SECRET:-rackdoc-secret-key-change-in-prod}
-      - PING_INTERVAL_SECONDS=60
-    ports:
-      - "8180:8000"
+### 3.1. Selección Global de Texto Compatible con Lienzos CAD 2D
+- `RackDocShell` está envuelto en un `SelectionArea` global (`lib/main.dart`), permitiendo seleccionar y copiar cualquier texto de tablas, cabeceras, fichas técnicas, logs y diálogos.
+- Todos los lienzos interactivos de arrastre 2D (Mapa, Planta Datacenter, Bastidores 42U, Stack Tecnológico 2D y tarjetas `Draggable` de catálogos y matriz de 5 columnas) están aislados con `SelectionContainer.disabled`, evitando conflictos en la arena de gestos del ratón.
 
-  frontend:
-    build: ./frontend
-    container_name: rackdoc-frontend
-    restart: unless-stopped
-    depends_on:
-      - backend
-    ports:
-      - "8181:80"
-```
+### 3.2. Modularización por Dominio y Submódulos (`part` / `part of`)
+Para evitar archivos monolíticos manteniendo cohesión de estado y `0` avisos en `flutter analyze`, las vistas complejas dividen su `State` en extensiones temáticas documentadas:
 
----
-
-## 6. Fases de Desarrollo
-
-### Fase 1: Base Backend + Docker + Monitor Ping + Exportador Excel + Semilla de Datos
-- Crear `backend/` con **FastAPI + SQLAlchemy + SQLite**.
-- Implementar el esquema SQL completo (`Locations ➔ Floors ➔ Rooms ➔ Aisles ➔ Racks (Front/Back) ➔ Devices (IP/FQDN/Mask/GW/SSH/Custom) ➔ Ports ➔ Connections`).
-- Implementar el servicio de **Monitorización (Ping / TCP check)** y el **Generador de Informes Excel (`.xlsx`)** con `openpyxl`.
-- Crear `seed.py` con sedes, plantas, pasillos, librería de dispositivos y el rack `M_Rack001` cableado en `Front` y `Back`.
-
-### Fase 2: Estructura Flutter + Vista de Mapa (`Locations`) y Jerarquía de Pasillos
-- Inicializar el proyecto Flutter en `frontend/` con el menú principal y barra de navegación por migas de pan (`Locations > HQ > Floor 2 > Room 28 > Pasillo A > RK001_M`).
-- Implementar el mapa interactivo (`flutter_map`) con tarjetas de sedes, plantas, salas y pasillos de racks.
-
-### Fase 3: Editor Visual del Rack (`Front` y `Back`) + Drag & Drop
-- Construir el lienzo de 42U con controles de Zoom, Pan y el conmutador **`[Front | Back]`**.
-- Implementar el arrastrar y soltar (`Draggable` / `DragTarget`) desde el catálogo de equipos hacia las unidades `U`, con LED de estado de Ping y renderizado de bocas (`RJ45`, `Fibra`, `Electricidad`).
-
-### Fase 4: Dibujo de Cables + Panel de Red/SSH/Telnet/Web + Exportación Excel
-- Implementar el `CablePainter` ortogonal interactivo (crear, seleccionar, iluminar cables y ver cruces `Front ↔ Back` y `OUTBOUND`).
-- Completar el **Panel Derecho de Propiedades** con edición de `FQDN`, `IP`, `Máscara`, `Gateway`, lanzadores rápidos **`SSH` / `Telnet` / `Web UI`**, botón de **Test Ping** en vivo, campos personalizados dinámicos y botón de **Exportar a Excel (`.xlsx`)**.
+| Módulo UI | Punto de entrada | Submódulos (`part`) |
+| :--- | :--- | :--- |
+| **Shell & 5. Dashboard** | `lib/main.dart` | `features/dashboard/dashboard_overview_section.dart`, `features/shell/shell_widgets.dart` |
+| **1. Locations** | `features/locations/locations_view.dart` | Vista autocontenida (OpenStreetMap + Planos) |
+| **2. Datacenter** | `features/datacenter/datacenter_floor_view.dart` | `sections/datacenter_actions_and_dialogs.dart`, `sections/datacenter_canvas_2d_section.dart`, `sections/datacenter_inspector_panel.dart`, `widgets/datacenter_floor_painters.dart` |
+| **3. Rack Editor** | `features/rack_editor/rack_editor_view.dart` | `sections/rack_editor_actions_and_dialogs.dart`, `sections/rack_editor_canvas_section.dart`, `sections/rack_editor_devices_and_outlets.dart`, `widgets/rack_technical_port_painter.dart` + widgets independientes (`device_catalog_panel.dart`, `properties_panel.dart`, `cable_painter.dart`) |
+| **4. Red & Host** | `features/network_hosts/network_hosts_view.dart` | `tabs/tech_stack_2d_tab.dart`, `tabs/logical_topology_tab.dart`, `tabs/nagios_snmp_prometheus_tabs.dart`, `dialogs/network_hosts_crud_dialogs.dart`, `widgets/datacenter_style_host_config_panel.dart`, `widgets/network_hosts_painters.dart` |
+| **6. CMDB & IPs** | `features/cmdb/cmdb_view.dart` | `tabs/cmdb_inventory_tab.dart`, `tabs/cmdb_ip_verifier_tab.dart`, `tabs/cmdb_subnets_ipam_tab.dart`, `tabs/cmdb_hypervisor_and_dialogs.dart` |
+| **7. CertScope** | `features/certscope/certscope_view.dart` | Vista autocontenida de auditoría TLS/X.509 |
+| **8. Alarmas SRE** | `features/sre_alarms/sre_alarms_view.dart` | `network_hosts/sre_alarms/sre_alarms_live_tab.dart`, `sre_alerts_routing_and_slo_tabs.dart`, `sre_ansible_and_ai_docs_tab.dart` |
+| **9. Administración** | `features/admin/admin_view.dart` | Usuarios locales, servidores AD/LDAP y roles RBAC |

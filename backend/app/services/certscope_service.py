@@ -1,3 +1,7 @@
+"""
+Servicio de auditoría SSL/TLS (`7. CertScope`): sondas TLS/STARTTLS en vivo, parseo X.509 PEM y avisos de caducidad.
+"""
+
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 import re
@@ -39,6 +43,7 @@ def clean_host_and_port(raw_host: str, default_port: int = 443) -> Tuple[str, in
 
 
 def _parse_openssl_date(date_str: str) -> Optional[datetime]:
+    """Convierte cadenas de fecha ASN.1/OpenSSL a objetos `datetime` en UTC."""
     raw = (date_str or "").strip()
     if not raw:
         return None
@@ -60,6 +65,7 @@ def _parse_openssl_date(date_str: str) -> Optional[datetime]:
 
 
 def parse_date_flexible(date_val: Optional[str]) -> Optional[datetime]:
+    """Normaliza fechas ISO-8601 o formatos habituales de entrada manual a `datetime` UTC."""
     if not date_val:
         return None
     raw = str(date_val).strip()
@@ -82,6 +88,7 @@ def parse_date_flexible(date_val: Optional[str]) -> Optional[datetime]:
 
 def _extract_dn_field(dn_text: str, key: str) -> str:
     # Matches CN=foo or CN = foo in RFC2253 or slash-separated subject/issuer
+    """Extrae un atributo concreto (p. ej. `CN` u `O`) de una tupla Distinguished Name X.509."""
     pattern = rf"(?:^|[,/]\s*){re.escape(key)}\s*=\s*([^,/]+)"
     m = re.search(pattern, dn_text or "", flags=re.IGNORECASE)
     if m:
@@ -96,6 +103,7 @@ def compute_cert_status_and_days(
     check_mode: str = "https_live",
     probe_error: str = "",
 ) -> Tuple[str, Optional[int]]:
+    """Calcula el estado operativo (`valid`, `expiring`, `critical`, `expired`, `error`) y días restantes."""
     if valid_until is None:
         if check_mode == "manual":
             return "manual_unverified", None
@@ -260,6 +268,7 @@ SERVICE_LABEL_BY_PORT: Dict[int, str] = {
 
 
 def _is_ip_literal(val: str) -> bool:
+    """Indica si la cadena corresponde a una dirección IPv4/IPv6 literal (para omitirla como SNI)."""
     import ipaddress
     try:
         ipaddress.ip_address((val or "").strip())
@@ -388,12 +397,12 @@ def probe_tls_certificate(
                 if use_legacy_ciphers:
                     try:
                         ctx.minimum_version = ssl.TLSVersion.MINIMUM_SUPPORTED
-                    except Exception:
-                        pass
+                    except (AttributeError, ValueError, ssl.SSLError) as exc:
+                        logger.debug("No se pudo ajustar TLSVersion.MINIMUM_SUPPORTED: %s", exc)
                     try:
                         ctx.set_ciphers("ALL:@SECLEVEL=0")
-                    except Exception:
-                        pass
+                    except ssl.SSLError as exc:
+                        logger.debug("OpenSSL rechazó SECLEVEL=0: %s", exc)
                 with socket.create_connection((host, clean_port), timeout=timeout_sec) as raw_sock:
                     with ctx.wrap_socket(
                         raw_sock,
@@ -479,8 +488,8 @@ def scan_host_tls_ports(
             p = int(ep)
             if 1 <= p <= 65535 and p not in candidate_ports:
                 candidate_ports.append(p)
-        except Exception:
-            pass
+        except (TypeError, ValueError) as exc:
+            logger.debug("Puerto TLS adicional inválido ignorado (%r): %s", ep, exc)
 
     def _check_single_port(p: int) -> Optional[Dict[str, Any]]:
         # Primero comprobar rápidamente si el socket TCP abre antes de negociar TLS
@@ -617,6 +626,7 @@ def serialize_certificate(
     groups_by_id: Dict[int, models.AlertContactGroup],
     stack_by_asset_id: Dict[int, List[Dict[str, Any]]],
 ) -> Dict[str, Any]:
+    """Serializa un registro `TlsCertificate` enriquecido con enlaces cruzados a CMDB, Rack y Planta."""
     status, days_remaining = compute_cert_status_and_days(
         cert.valid_until,
         cert.warn_days_before or 30,
@@ -1549,6 +1559,7 @@ def send_certificate_expiry_notification(
 
 
 def build_certscope_overview(db: Session) -> Dict[str, Any]:
+    """Construye el resumen global, KPIs y listado completo de certificados para `7. CertScope`."""
     auto_discover_https_devices_into_certscope(db, probe_all_active_ips=False)
     certs = db.query(models.TlsCertificate).order_by(models.TlsCertificate.id.asc()).all()
     contacts = db.query(models.AlertContact).order_by(models.AlertContact.full_name.asc()).all()

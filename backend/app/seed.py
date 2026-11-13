@@ -1,3 +1,7 @@
+"""
+Inicialización idempotente del catálogo hardware, usuario administrador inicial y tomas exteriores de rack.
+"""
+
 from __future__ import annotations
 import os
 from sqlalchemy.orm import Session
@@ -102,6 +106,7 @@ def create_ports_from_template(db: Session, device: RackDevice, template: Device
 
 
 def seed_initial_data(db: Session):
+    """Crea el usuario administrador inicial y la jerarquía base si la base de datos arranca vacía."""
     if db.query(Location).count() > 0:
         return
 
@@ -436,6 +441,7 @@ def seed_initial_data(db: Session):
 
 
 def get_or_create_external_feed_template(db: Session) -> DeviceTemplate:
+    """Obtiene o registra la plantilla de sistema para tomas eléctricas Schuko o cajas de fibra exteriores."""
     tpl = (
         db.query(DeviceTemplate)
         .filter(DeviceTemplate.category == "external_power_feed")
@@ -458,6 +464,7 @@ def get_or_create_external_feed_template(db: Session) -> DeviceTemplate:
 
 
 def sync_external_outlet_ports(db: Session, device: RackDevice, socket_count: int):
+    """Sincroniza el número y geometría de bocas de una toma exterior de rack."""
     cf = dict(device.custom_fields or {})
     feed_type = str(cf.get("feed_type") or "power").lower()
     is_fiber = feed_type == "fiber"
@@ -511,6 +518,7 @@ def sync_external_outlet_ports(db: Session, device: RackDevice, socket_count: in
 
 
 def ensure_rack_external_outlets(db: Session, rack: Rack):
+    """Garantiza que el bastidor disponga de sus regletas/cajas de acometida exterior por defecto."""
     ext_devices = [d for d in rack.devices if d.mounted_face == "external"]
     tpl = get_or_create_external_feed_template(db)
 

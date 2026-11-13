@@ -1,3 +1,7 @@
+"""
+Motor multiprotocolo de sondas de red en tiempo real (`ICMP`, `TCP`, `UDP`, `SSH`, `HTTP/HTTPS` y `SNMP` ASN.1/BER).
+"""
+
 from __future__ import annotations
 import platform
 import re
@@ -14,6 +18,7 @@ from ..time_utils import utcnow
 
 
 def _encode_ber_length(length: int) -> bytes:
+    """Codifica la longitud de un campo TLV conforme a las reglas ASN.1 BER."""
     if length < 0x80:
         return bytes([length])
     octets: list[int] = []
@@ -25,6 +30,7 @@ def _encode_ber_length(length: int) -> bytes:
 
 
 def _encode_oid(oid_str: str) -> bytes:
+    """Codifica un identificador de objeto SNMP (OID punteado) en octetos ASN.1 BER."""
     cleaned = oid_str.strip().lstrip(".")
     parts = [int(p) for p in cleaned.split(".") if p.strip().isdigit()]
     if len(parts) < 2:
@@ -73,6 +79,7 @@ def _resolve_target_host(
     use_target: str = "auto",
     override_host: str = "",
 ) -> str:
+    """Obtiene el destino sondeable (IP o hostname) priorizando `ip_address`, `fqdn` o `hostname`."""
     if override_host.strip():
         return override_host.strip()
     ip = (device_ip or "").strip()
@@ -331,6 +338,7 @@ def check_single_device(
     db: Session,
     device: Union[RackDevice, FloorDevice],
 ) -> Dict[str, Any]:
+    """Ejecuta la sonda configurada sobre un `RackDevice` y actualiza su estado y latencia."""
     if not getattr(device, "monitoring_enabled", False):
         device.status = "unmonitored"
         device.last_ping_ms = None
@@ -512,6 +520,7 @@ def check_all_monitored_devices(
     floor_id: int | None = None,
 ) -> list[Dict[str, Any]]:
     # Asegurar que los equipos con Heartbeat desactivado figuren en gris (unmonitored)
+    """Recorre y sondea en paralelo todos los equipos de rack con monitorización activa."""
     unmon_racks = (
         db.query(RackDevice)
         .filter(

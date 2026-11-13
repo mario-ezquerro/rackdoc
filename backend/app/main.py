@@ -102,12 +102,10 @@ OPENAPI_TAGS_METADATA = [
     {
         "name": "Auth, Users & Active Directory (RBAC)",
         "description": (
-            "Autenticación local con bcrypt + JWT y control de acceso basado en 4 roles "
-            "(admin, editor, operator, viewer) aplicado a todas las rutas de /api/v1. "
-            "NO IMPLEMENTADO: la autenticación contra Active Directory. No hay cliente LDAP en el backend; "
-            "las rutas /ad-servers almacenan configuración, la búsqueda de usuarios devuelve un catálogo de "
-            "ejemplo y las cuentas importadas como AD no pueden iniciar sesión. "
-            "Ver 'Estado de implementación' en el README."
+            "Autenticación híbrida local (bcrypt + JWT) y corporativa contra Active Directory / LDAP "
+            "(bind real LDAP/LDAPS mediante ldap3, prueba de conexión en vivo, búsqueda en directorio "
+            "y Auto-Provisioning Just-In-Time con mapeo de grupos memberOf) bajo 4 roles RBAC "
+            "(admin, editor, operator, viewer) aplicados a todas las rutas de /api/v1."
         ),
     },
 ]
@@ -187,12 +185,13 @@ app = FastAPI(
     description=(
         "Especificación **OpenAPI 3.1.0** de **RackDoc DCIM**.\n\n"
         "- **Prefijo canónico versionado**: `/api/v1` (con soporte retrocompatible en `/api`).\n"
-        "- **Módulo 4 Red & Host**: Topología Lógica en 5 Capas, estados Nagios (`UP/DOWN/UNREACHABLE/MAINTENANCE`, `SOFT/HARD`), comprobación SNMP de switches, Conectores de Infraestructura, Matriz de Avisos y Series Temporales en **Prometheus**.\n"
-        "- **⚠️ Funciones no implementadas**: el recorrido de bocas `IF-MIB`/`LLDP-MIB`, la sincronización de los conectores que no son `snmp_switch` ni exporters, y la autenticación contra Active Directory. Cada endpoint afectado lo indica en su descripción.\n"
+        "- **Módulos 4 y 8 (Red & Host + Alarmas SRE)**: Stacks Tecnológicos 2D, Topología Lógica en 5 Capas, estados Nagios (`UP/DOWN/UNREACHABLE/MAINTENANCE`, `SOFT/HARD`), comprobación SNMP de switches, Matriz SRE de 5 columnas, alertas SMTP y Series Temporales en **Prometheus**.\n"
+        "- **Autenticación Local y Active Directory / LDAP**: JWT + bcrypt local y Bind LDAP/LDAPS real (`ldap3`) con Auto-Provisioning JIT y 4 roles RBAC.\n"
+        "- **⚠️ Funciones parciales/pendientes**: el recorrido automático de bocas `IF-MIB`/`LLDP-MIB` y la sincronización remota de conectores distintos de `snmp_switch` o exporters de Prometheus.\n"
         "- **Webhooks de Automatización Ansible & Agentes IA**: `/api/v1/automation/webhook/*` y `/api/v1/automation/ai-context`.\n"
         "- **Documentación interactiva**: Swagger UI (`/docs` y `/api/v1/docs`) y ReDoc (`/redoc`)."
     ),
-    version="1.3.0",
+    version="1.3.1",
     openapi_tags=OPENAPI_TAGS_METADATA,
     contact={
         "name": "RackDoc DCIM Project",

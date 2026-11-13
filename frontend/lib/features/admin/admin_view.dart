@@ -5,6 +5,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_client.dart';
 import '../../models/datacenter_models.dart';
 
+/// Vista de **`9. Administración`**: gestión de usuarios locales, servidores Active Directory / LDAP
+/// (prueba de conexión en vivo, búsqueda e importación), roles RBAC y motor Heartbeat.
 class AdminView extends StatefulWidget {
   final RackDocApiClient api;
   final UserModel currentUser;
@@ -2247,6 +2249,7 @@ class _AdminViewState extends State<AdminView> {
   }
 }
 
+/// Tarjeta descriptiva de un nivel de privilegio dentro de la matriz RBAC de 4 roles.
 class _RoleInfoCard extends StatelessWidget {
   final String roleCode;
   final String title;

@@ -4,6 +4,7 @@ import '../../core/api_client.dart';
 import '../../core/theme.dart';
 import '../../core/widgets/avisos.dart';
 
+/// Muestra el asistente interactivo con ejemplos listos para copiar de alta vía API (`cURL`, `Ansible` y `Puppet`).
 Future<void> showApiOnboardingGuideDialog(
   BuildContext context, {
   required RackDocApiClient api,

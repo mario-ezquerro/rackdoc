@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme.dart';
 import '../../../models/datacenter_models.dart';
 
+/// Ruta ortogonal calculada para dibujar e interceptar clics sobre un latiguillo.
 class ComputedCableRoute {
   final ConnectionModel connection;
   final Path path;
@@ -25,6 +26,7 @@ class ComputedCableRoute {
   });
 }
 
+/// Generador geométrico de trazados ortogonales por canaletas laterales e inter-cara.
 class CableGeometryBuilder {
   static Color parseHexColor(String hex, {Color fallback = AppPalette.blue600}) {
     final cleaned = hex.replaceAll('#', '').trim();
@@ -340,6 +342,7 @@ class CableGeometryBuilder {
   }
 }
 
+/// `CustomPainter` que renderiza latiguillos de cobre, fibra y energía sobre el bastidor.
 class RackCablePainter extends CustomPainter {
   final List<ComputedCableRoute> routes;
   final int? selectedConnectionId;

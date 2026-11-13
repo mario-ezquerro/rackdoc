@@ -1,3 +1,7 @@
+"""
+Servicio de informes e inventario consolidado (`5. Dashboard & Excel`): generación de plantillas, exportación e importación `.xlsx`.
+"""
+
 from io import BytesIO
 import json
 import re
@@ -115,6 +119,7 @@ def _category_display_info(cat: str, dev_name: str = "", dev_code: str = "") -> 
 
 
 def _extract_slot_number(port_number: str) -> Optional[int]:
+    """Extrae el índice numérico de una etiqueta de puerto para ordenación natural (`1..48`)."""
     if not port_number:
         return None
     m = re.search(r"(\d+)$", str(port_number).strip())
@@ -805,6 +810,7 @@ def build_dashboard_inventory_data(
 
 
 def _style_worksheet(ws):
+    """Aplica cabeceras corporativas, bordes y autoajuste de ancho de columnas a una hoja OpenPyXL."""
     header_fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
     header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
     cell_font = Font(name="Calibri", size=10, color="1E293B")
@@ -1390,6 +1396,7 @@ def generate_excel_import_template() -> BytesIO:
 
 
 def _parse_start_u(val: Any) -> int:
+    """Extrae la unidad `U` inicial entera a partir de una celda Excel (ej. `'U12'` o `'12-13'`)."""
     if val is None:
         return 1
     if isinstance(val, (int, float)):

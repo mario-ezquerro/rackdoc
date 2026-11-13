@@ -7,6 +7,8 @@ import '../../../core/api_client.dart';
 import '../../../models/datacenter_models.dart';
 import '../../../shared/widgets/cmdb_asset_explorer_dialog.dart';
 
+/// Inspector lateral derecho del **`3. Rack Editor`**: edición de red, lanzadores SSH/Web,
+/// vinculación CMDB, fotografía de chasis, puertos y latiguillos seleccionados.
 class PropertiesPanel extends StatefulWidget {
   final RackDocApiClient api;
   final RackDetailModel rack;

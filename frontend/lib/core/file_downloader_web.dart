@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:web/web.dart' as web;
 
+/// Implementación Web (DOM `HTMLAnchorElement`) de descarga directa en navegador.
 Future<void> downloadBytesAsFileImpl({
   required Uint8List bytes,
   required String filename,

@@ -3,6 +3,7 @@ import 'dart:js_interop';
 import 'package:web/web.dart' as web;
 import 'image_file_picker.dart';
 
+/// Implementación Web de selección de archivos mediante `HTMLInputElement`.
 Future<PickedImageFile?> pickPlanImageFileImpl() =>
     _pickWebFile('.jpg,.jpeg,.png,.gif,.webp,image/jpeg,image/png,image/gif,image/webp');
 

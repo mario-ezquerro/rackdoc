@@ -1,9 +1,14 @@
+"""
+Esquemas Pydantic v2 de validación de entrada y serialización de salida para la API `/api/v1`.
+"""
+
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, ConfigDict
 
 
 class ManagementLinkSchema(BaseModel):
+    """Esquema serializado de transferencia (`ManagementLinkSchema`)."""
     protocol: str  # ssh | telnet | https | http | rdp | ipmi
     port: int = 22
     username: str = "admin"
@@ -12,6 +17,7 @@ class ManagementLinkSchema(BaseModel):
 
 
 class PortSchema(BaseModel):
+    """Esquema serializado de transferencia (`PortSchema`)."""
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -29,6 +35,7 @@ class PortSchema(BaseModel):
 
 
 class DeviceTemplateSchema(BaseModel):
+    """Esquema serializado de transferencia (`DeviceTemplateSchema`)."""
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -43,6 +50,7 @@ class DeviceTemplateSchema(BaseModel):
 
 
 class DeviceTemplateCreate(BaseModel):
+    """Payload de creación para `DeviceTemplate`."""
     library_group: str = "Network"
     category: str
     manufacturer: str = "Generic"
@@ -54,6 +62,7 @@ class DeviceTemplateCreate(BaseModel):
 
 
 class DeviceTemplateUpdate(BaseModel):
+    """Payload de actualización parcial para `DeviceTemplate`."""
     library_group: Optional[str] = None
     category: Optional[str] = None
     manufacturer: Optional[str] = None
@@ -66,11 +75,13 @@ class DeviceTemplateUpdate(BaseModel):
 
 
 class DeviceLibraryImportRequest(BaseModel):
+    """Petición de operación (`DeviceLibraryImportRequest`)."""
     library_group: Optional[str] = None
     templates: List[Dict[str, Any]] = []
 
 
 class ExternalOutletCreate(BaseModel):
+    """Payload de creación para `ExternalOutlet`."""
     code: str = "FEED-C"
     name: str = "Línea Eléctrica C (Schuko)"
     feed_type: str = "power"  # "power" | "fiber"
@@ -80,6 +91,7 @@ class ExternalOutletCreate(BaseModel):
 
 
 class ExternalOutletUpdate(BaseModel):
+    """Payload de actualización parcial para `ExternalOutlet`."""
     code: Optional[str] = None
     name: Optional[str] = None
     feed_type: Optional[str] = None
@@ -89,12 +101,14 @@ class ExternalOutletUpdate(BaseModel):
 
 
 class LoginRequest(BaseModel):
+    """Petición de operación (`LoginRequest`)."""
     username: str
     password: str
     ad_server_id: Optional[int] = None
 
 
 class UserSchema(BaseModel):
+    """Esquema serializado de transferencia (`UserSchema`)."""
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -109,6 +123,7 @@ class UserSchema(BaseModel):
 
 
 class UserCreate(BaseModel):
+    """Payload de creación para `User`."""
     username: str
     password: str
     email: str = ""
@@ -121,6 +136,7 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
+    """Payload de actualización parcial para `User`."""
     username: Optional[str] = None
     password: Optional[str] = None
     email: Optional[str] = None
@@ -131,6 +147,7 @@ class UserUpdate(BaseModel):
 
 
 class ADServerSchema(BaseModel):
+    """Esquema serializado de transferencia (`ADServerSchema`)."""
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -146,6 +163,7 @@ class ADServerSchema(BaseModel):
 
 
 class ADServerCreate(BaseModel):
+    """Payload de creación para `ADServer`."""
     name: str
     ldap_url: str
     domain: str = ""
@@ -159,6 +177,7 @@ class ADServerCreate(BaseModel):
 
 
 class ADServerUpdate(BaseModel):
+    """Payload de actualización parcial para `ADServer`."""
     name: Optional[str] = None
     ldap_url: Optional[str] = None
     domain: Optional[str] = None
@@ -172,10 +191,12 @@ class ADServerUpdate(BaseModel):
 
 
 class ADUserSearchRequest(BaseModel):
+    """Petición de operación (`ADUserSearchRequest`)."""
     query: str = ""
 
 
 class ADUserImportItem(BaseModel):
+    """Esquema serializado de transferencia (`ADUserImportItem`)."""
     username: str
     full_name: str = ""
     email: str = ""
@@ -185,10 +206,12 @@ class ADUserImportItem(BaseModel):
 
 
 class ADUserImportRequest(BaseModel):
+    """Petición de operación (`ADUserImportRequest`)."""
     users: List[ADUserImportItem]
 
 
 class RackDeviceSchema(BaseModel):
+    """Esquema serializado de transferencia (`RackDeviceSchema`)."""
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -220,6 +243,7 @@ class RackDeviceSchema(BaseModel):
 
 
 class RackDeviceCreate(BaseModel):
+    """Payload de creación para `RackDevice`."""
     template_id: int
     code: str
     name: str
@@ -246,6 +270,7 @@ class RackDeviceCreate(BaseModel):
 
 
 class RackDeviceUpdate(BaseModel):
+    """Payload de actualización parcial para `RackDevice`."""
     code: Optional[str] = None
     name: Optional[str] = None
     hostname: Optional[str] = None
@@ -271,6 +296,7 @@ class RackDeviceUpdate(BaseModel):
 
 
 class ConnectionEndpointInfo(BaseModel):
+    """Esquema serializado de transferencia (`ConnectionEndpointInfo`)."""
     port_id: int
     port_number: str
     port_type: str
@@ -285,6 +311,7 @@ class ConnectionEndpointInfo(BaseModel):
 
 
 class ConnectionSchema(BaseModel):
+    """Esquema serializado de transferencia (`ConnectionSchema`)."""
     id: int
     source_port_id: int
     target_port_id: int
@@ -300,6 +327,7 @@ class ConnectionSchema(BaseModel):
 
 
 class ConnectionCreate(BaseModel):
+    """Payload de creación para `Connection`."""
     source_port_id: int
     target_port_id: int
     cable_type: str = "utp_cat6"
@@ -312,6 +340,7 @@ class ConnectionCreate(BaseModel):
 
 
 class ConnectionUpdate(BaseModel):
+    """Payload de actualización parcial para `Connection`."""
     cable_type: Optional[str] = None
     color_hex: Optional[str] = None
     routing_channel: Optional[str] = None
@@ -322,6 +351,7 @@ class ConnectionUpdate(BaseModel):
 
 
 class RackUpdate(BaseModel):
+    """Payload de actualización parcial para `Rack`."""
     code: Optional[str] = None
     name: Optional[str] = None
     total_units: Optional[int] = None
@@ -341,6 +371,7 @@ class RackUpdate(BaseModel):
 
 
 class LocationUpdate(BaseModel):
+    """Payload de actualización parcial para `Location`."""
     code: Optional[str] = None
     name: Optional[str] = None
     latitude: Optional[float] = None
@@ -354,12 +385,14 @@ class LocationUpdate(BaseModel):
 
 
 class FloorUpdate(BaseModel):
+    """Payload de actualización parcial para `Floor`."""
     name: Optional[str] = None
     level_number: Optional[int] = None
     map_scale: Optional[float] = None
 
 
 class RackCreate(BaseModel):
+    """Payload de creación para `Rack`."""
     room_id: int
     aisle_id: Optional[int] = None
     code: str
@@ -375,6 +408,7 @@ class RackCreate(BaseModel):
 
 
 class LocationCreate(BaseModel):
+    """Payload de creación para `Location`."""
     code: str
     name: str
     latitude: float
@@ -384,12 +418,14 @@ class LocationCreate(BaseModel):
 
 
 class FloorCreate(BaseModel):
+    """Payload de creación para `Floor`."""
     location_id: int
     name: str
     level_number: int = 1
 
 
 class RoomCreate(BaseModel):
+    """Payload de creación para `Room`."""
     floor_id: int
     name: str
     width_m: float = 12.0
@@ -398,6 +434,7 @@ class RoomCreate(BaseModel):
 
 
 class AisleCreate(BaseModel):
+    """Payload de creación para `Aisle`."""
     room_id: int
     code: str
     name: str
@@ -405,6 +442,7 @@ class AisleCreate(BaseModel):
 
 
 class FloorDeviceCreate(BaseModel):
+    """Payload de creación para `FloorDevice`."""
     room_id: Optional[int] = None
     room_code: str = "GOA"
     device_type: str  # camera | access_control | access_point | desktop | laptop | phone | printer | 3d_printer | isp_uplink | microphone | ndi_box | screen | speaker | telecom_outlet
@@ -440,6 +478,7 @@ class FloorDeviceCreate(BaseModel):
 
 
 class FloorDeviceUpdate(BaseModel):
+    """Payload de actualización parcial para `FloorDevice`."""
     room_id: Optional[int] = None
     room_code: Optional[str] = None
     device_type: Optional[str] = None
@@ -475,6 +514,7 @@ class FloorDeviceUpdate(BaseModel):
 
 
 class FloorDeviceCustomTypeCreate(BaseModel):
+    """Payload de creación para `FloorDeviceCustomType`."""
     category_key: Optional[str] = None
     group_name: str = "Industrial / A Medida"
     label: str
@@ -486,12 +526,14 @@ class FloorDeviceCustomTypeCreate(BaseModel):
 
 
 class MonitoringSettingsUpdate(BaseModel):
+    """Payload de actualización parcial para `MonitoringSettings`."""
     interval_seconds: Optional[int] = None
     interval_minutes: Optional[int] = None
     background_enabled: Optional[bool] = None
 
 
 class CmdbSubnetCreate(BaseModel):
+    """Payload de creación para `CmdbSubnet`."""
     cidr: str
     name: str
     vlan_id: Optional[int] = None
@@ -504,6 +546,7 @@ class CmdbSubnetCreate(BaseModel):
 
 
 class CmdbSubnetUpdate(BaseModel):
+    """Payload de actualización parcial para `CmdbSubnet`."""
     cidr: Optional[str] = None
     name: Optional[str] = None
     vlan_id: Optional[int] = None
@@ -516,6 +559,7 @@ class CmdbSubnetUpdate(BaseModel):
 
 
 class CmdbIpAddressInput(BaseModel):
+    """Datos de entrada validados para `CmdbIpAddress`."""
     id: Optional[int] = None
     subnet_id: Optional[int] = None
     ip_address: str
@@ -532,6 +576,7 @@ class CmdbIpAddressInput(BaseModel):
 
 
 class CmdbAssetCreate(BaseModel):
+    """Payload de creación para `CmdbAsset`."""
     code: str
     name: str
     hostname: str = ""
@@ -569,6 +614,7 @@ class CmdbAssetCreate(BaseModel):
 
 
 class CmdbAssetUpdate(BaseModel):
+    """Payload de actualización parcial para `CmdbAsset`."""
     code: Optional[str] = None
     name: Optional[str] = None
     hostname: Optional[str] = None
@@ -606,6 +652,7 @@ class CmdbAssetUpdate(BaseModel):
 
 
 class CmdbVerifyIpRequest(BaseModel):
+    """Petición de operación (`CmdbVerifyIpRequest`)."""
     target_ip: str = ""
     subnet_id: Optional[int] = None
     ports: List[int] = [22, 80, 443, 3389, 445, 8006, 902, 161]
@@ -615,6 +662,7 @@ class CmdbVerifyIpRequest(BaseModel):
 
 
 class CmdbDiscoveredHostItem(BaseModel):
+    """Esquema serializado de transferencia (`CmdbDiscoveredHostItem`)."""
     ip_address: str
     subnet_mask: str = ""
     hostname: str = ""
@@ -628,6 +676,7 @@ class CmdbDiscoveredHostItem(BaseModel):
 
 
 class CmdbImportDiscoveredRequest(BaseModel):
+    """Petición de operación (`CmdbImportDiscoveredRequest`)."""
     register_subnet_cidr: Optional[str] = None
     subnet_name: Optional[str] = None
     vlan_id: Optional[int] = None
@@ -640,6 +689,7 @@ class CmdbImportDiscoveredRequest(BaseModel):
 # ==============================================================================
 
 class HostGroupInput(BaseModel):
+    """Datos de entrada validados para `HostGroup`."""
     code: str
     name: str
     category: str = "infrastructure"
@@ -650,6 +700,7 @@ class HostGroupInput(BaseModel):
 
 
 class ServiceCheckInput(BaseModel):
+    """Datos de entrada validados para `ServiceCheck`."""
     asset_id: int
     service_name: str
     check_type: str = "https"  # icmp | http | https | tcp | udp | ssh | dns | snmp | apache | nginx | haproxy | docker | proxmox | vmware | postgres | mysql | redis | node_exporter | windows_exporter
@@ -664,6 +715,7 @@ class ServiceCheckInput(BaseModel):
 
 
 class LogicalLinkInput(BaseModel):
+    """Datos de entrada validados para `LogicalLink`."""
     source_asset_id: int
     target_asset_id: int
     link_type: str = "custom_logical"
@@ -676,6 +728,7 @@ class LogicalLinkInput(BaseModel):
 
 
 class InfraConnectorInput(BaseModel):
+    """Datos de entrada validados para `InfraConnector`."""
     name: str
     connector_type: str  # snmp_switch | proxmox_ve | vmware_vsphere | hyperv | kvm_libvirt | xcpng | docker_engine | portainer | kubernetes | apache_status | nginx_status | haproxy_stats | postgresql | mysql_mariadb | redis | node_exporter | windows_exporter
     endpoint_host: str
@@ -689,6 +742,7 @@ class InfraConnectorInput(BaseModel):
 
 
 class SnmpWalkDiscoveryRequest(BaseModel):
+    """Petición de operación (`SnmpWalkDiscoveryRequest`)."""
     target_ip: str
     community: str = "public"
     snmp_version: str = "v2c"
@@ -699,6 +753,7 @@ class SnmpWalkDiscoveryRequest(BaseModel):
 
 
 class AlertContactInput(BaseModel):
+    """Datos de entrada validados para `AlertContact`."""
     code: str
     full_name: str
     role_title: str = "Ingeniero de Sistemas"
@@ -716,6 +771,7 @@ class AlertContactInput(BaseModel):
 
 
 class AlertContactGroupInput(BaseModel):
+    """Datos de entrada validados para `AlertContactGroup`."""
     code: str
     name: str
     description: str = ""
@@ -725,6 +781,7 @@ class AlertContactGroupInput(BaseModel):
 
 
 class NotificationRoutingRuleInput(BaseModel):
+    """Datos de entrada validados para `NotificationRoutingRule`."""
     name: str
     description: str = ""
     enabled: bool = True
@@ -741,6 +798,7 @@ class NotificationRoutingRuleInput(BaseModel):
 
 
 class MaintenanceWindowInput(BaseModel):
+    """Datos de entrada validados para `MaintenanceWindow`."""
     title: str
     reason: str = "Mantenimiento programado"
     created_by: str = "admin"
@@ -753,6 +811,7 @@ class MaintenanceWindowInput(BaseModel):
 
 
 class SmtpAlertConfigInput(BaseModel):
+    """Datos de entrada validados para `SmtpAlertConfig`."""
     smtp_host: str = "smtp.empresa.local"
     smtp_port: int = 587
     use_tls: bool = True
@@ -765,6 +824,7 @@ class SmtpAlertConfigInput(BaseModel):
 
 # Webhooks Idempotentes para Ansible y Agentes IA (y Alta/Edición Avanzada Web de Hosts y VMs)
 class AnsibleHostUpsertWebhook(BaseModel):
+    """Payload de webhook de automatización (`AnsibleHostUpsertWebhook`)."""
     asset_id: Optional[int] = None
     code: Optional[str] = None
     name: Optional[str] = None
@@ -828,6 +888,7 @@ class AnsibleHostUpsertWebhook(BaseModel):
 
 
 class AnsibleHostDecommissionWebhook(BaseModel):
+    """Payload de webhook de automatización (`AnsibleHostDecommissionWebhook`)."""
     code: Optional[str] = None
     hostname: Optional[str] = None
     ip_address: Optional[str] = None
@@ -836,6 +897,7 @@ class AnsibleHostDecommissionWebhook(BaseModel):
 
 
 class AnsibleMaintenanceWebhook(BaseModel):
+    """Payload de webhook de automatización (`AnsibleMaintenanceWebhook`)."""
     action: str = "start"  # start | stop
     title: str = "Mantenimiento Automático Ansible"
     reason: str = "Despliegue / Parcheo automatizado con Ansible"
@@ -846,6 +908,7 @@ class AnsibleMaintenanceWebhook(BaseModel):
 
 
 class AnsibleContactsRoutingWebhook(BaseModel):
+    """Payload de webhook de automatización (`AnsibleContactsRoutingWebhook`)."""
     contacts: List[AlertContactInput] = []
     contact_groups: List[Dict[str, Any]] = []
     host_groups: List[Dict[str, Any]] = []
@@ -853,6 +916,7 @@ class AnsibleContactsRoutingWebhook(BaseModel):
 
 
 class TechStackDiagramInput(BaseModel):
+    """Datos de entrada validados para `TechStackDiagram`."""
     code: str
     name: str
     description: str = ""
@@ -865,6 +929,7 @@ class TechStackDiagramInput(BaseModel):
 
 
 class TechStackDiagramUpdateInput(BaseModel):
+    """Payload de actualización parcial para `TechStackDiagram`."""
     name: Optional[str] = None
     description: Optional[str] = None
     business_service: Optional[str] = None
@@ -876,6 +941,7 @@ class TechStackDiagramUpdateInput(BaseModel):
 
 
 class TechStackNodeInput(BaseModel):
+    """Datos de entrada validados para `TechStackNode`."""
     stack_id: int
     asset_id: int
     role_layer: str = "general"
@@ -890,6 +956,7 @@ class TechStackNodeInput(BaseModel):
 
 
 class TechStackNodeMoveInput(BaseModel):
+    """Datos de entrada validados para `TechStackNodeMove`."""
     pos_x: Optional[float] = None
     pos_y: Optional[float] = None
     width_px: Optional[float] = None
@@ -902,6 +969,7 @@ class TechStackNodeMoveInput(BaseModel):
 
 
 class TechStackEdgeInput(BaseModel):
+    """Datos de entrada validados para `TechStackEdge`."""
     stack_id: int
     source_node_id: int
     target_node_id: int
@@ -911,12 +979,14 @@ class TechStackEdgeInput(BaseModel):
 
 
 class TechStackEdgeUpdateInput(BaseModel):
+    """Payload de actualización parcial para `TechStackEdge`."""
     protocol_label: Optional[str] = None
     port: Optional[int] = None
     notes: Optional[str] = None
 
 
 class HostSshCommandInput(BaseModel):
+    """Datos de entrada validados para `HostSshCommand`."""
     asset_id: int
     command: str = "uptime && df -h / && free -m"
     ssh_user: str = "root"
@@ -928,6 +998,7 @@ class HostSshCommandInput(BaseModel):
 # ==============================================================================
 
 class TlsCertificateProbeRequest(BaseModel):
+    """Petición de operación (`TlsCertificateProbeRequest`)."""
     target_host: str = ""
     port: int = 443
     sni_hostname: str = ""
@@ -936,6 +1007,7 @@ class TlsCertificateProbeRequest(BaseModel):
 
 
 class TlsCertificateCreate(BaseModel):
+    """Payload de creación para `TlsCertificate`."""
     code: Optional[str] = None
     name: str
     check_mode: str = "https_live"  # https_live | manual
@@ -974,6 +1046,7 @@ class TlsCertificateCreate(BaseModel):
 
 
 class TlsCertificateUpdate(BaseModel):
+    """Payload de actualización parcial para `TlsCertificate`."""
     code: Optional[str] = None
     name: Optional[str] = None
     check_mode: Optional[str] = None
@@ -1009,6 +1082,7 @@ class TlsCertificateUpdate(BaseModel):
 
 
 class TlsCertificateNotifyRequest(BaseModel):
+    """Petición de operación (`TlsCertificateNotifyRequest`)."""
     custom_message: str = ""
     force_send: bool = True
 

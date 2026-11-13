@@ -5,6 +5,8 @@ import '../../core/widgets/avisos.dart';
 import '../../shared/widgets/diagram_exporter.dart';
 import '../cmdb/api_onboarding_dialog.dart';
 
+/// Vista de **`7. CertScope (SSL/TLS)`**: auditoría centralizada de certificados X.509
+/// mediante sondas TLS/STARTTLS en vivo o carga PEM manual, con alertas y saltos cruzados.
 class CertScopeView extends StatefulWidget {
   final RackDocApiClient api;
   final bool canEdit;

@@ -1,3 +1,10 @@
+"""
+Modelos ORM SQLAlchemy 2.0 de RackDoc DCIM (31 tablas relacionales).
+
+Cubre autenticación/AD, jerarquía geográfica (Location -> Floor -> Room -> Aisle -> Rack),
+catálogo hardware, cableado punto a punto, CMDB Multi-IP, Stacks 2D, Nagios/SNMP, Alarmas SRE y CertScope.
+"""
+
 from sqlalchemy import (
     Column,
     Integer,
@@ -15,6 +22,7 @@ from .time_utils import utcnow
 
 
 class ADServer(Base):
+    """Configuración de controlador de dominio Active Directory / LDAP para bind y búsqueda."""
     __tablename__ = "ad_servers"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -34,6 +42,7 @@ class ADServer(Base):
 
 
 class User(Base):
+    """Cuenta de usuario de RackDoc (local bcrypt o aprovisionada vía Active Directory) con rol RBAC."""
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -57,6 +66,7 @@ class User(Base):
 
 
 class Location(Base):
+    """Sede geográfica o centro de datos (CPD) posicionable sobre OpenStreetMap o plano."""
     __tablename__ = "locations"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -77,6 +87,7 @@ class Location(Base):
 
 
 class Floor(Base):
+    """Planta arquitectónica de una sede con plano 2D opcional y escala."""
     __tablename__ = "floors"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -92,6 +103,7 @@ class Floor(Base):
 
 
 class Room(Base):
+    """Sala técnica o cuarto de comunicaciones dentro de una planta."""
     __tablename__ = "rooms"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -108,6 +120,7 @@ class Room(Base):
 
 
 class Aisle(Base):
+    """Pasillo frío, caliente o estándar que agrupa armarios Rack dentro de una sala."""
     __tablename__ = "aisles"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -121,6 +134,7 @@ class Aisle(Base):
 
 
 class Rack(Base):
+    """Bastidor de 19 pulgadas (42U–48U) con coordenadas 2D en planta, rotación y metadatos."""
     __tablename__ = "racks"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -148,6 +162,7 @@ class Rack(Base):
 
 
 class DeviceTemplate(Base):
+    """Plantilla de catálogo hardware con altura en U, profundidad y geometría de puertos Front/Back."""
     __tablename__ = "device_templates"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -167,6 +182,7 @@ class DeviceTemplate(Base):
 
 
 class RackDevice(Base):
+    """Equipo físico o toma exterior montado en un Rack con su red, estado Heartbeat y campos extra."""
     __tablename__ = "rack_devices"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -209,6 +225,7 @@ class RackDevice(Base):
 
 
 class Port(Base):
+    """Boca física (RJ45, SFP+, fibra LC/SC o toma eléctrica) perteneciente a un equipo enracado."""
     __tablename__ = "ports"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -229,6 +246,7 @@ class Port(Base):
 
 
 class Connection(Base):
+    """Latiguillo o acometida punto a punto entre dos puertos físicos (intra-rack o inter-rack)."""
     __tablename__ = "connections"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -249,6 +267,7 @@ class Connection(Base):
 
 
 class FloorDevice(Base):
+    """Dispositivo o sensor situado en el plano 2D de planta (cámara, AP Wi-Fi, SAI, roseta, sonda)."""
     __tablename__ = "floor_devices"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -293,6 +312,7 @@ class FloorDevice(Base):
 
 
 class FloorDeviceCustomType(Base):
+    """Tipo personalizado de dispositivo de planta definido por el usuario."""
     __tablename__ = "floor_device_custom_types"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -307,6 +327,7 @@ class FloorDeviceCustomType(Base):
 
 
 class CmdbSubnet(Base):
+    """Subred CIDR / VLAN registrada en el módulo IPAM de la CMDB y vinculable a una sede."""
     __tablename__ = "cmdb_subnets"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -325,6 +346,7 @@ class CmdbSubnet(Base):
 
 
 class CmdbAsset(Base):
+    """Elemento de configuración (CI) maestro en la CMDB (físico, VM, contenedor, VIP o servicio cloud)."""
     __tablename__ = "cmdb_assets"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -391,6 +413,7 @@ class CmdbAsset(Base):
 
 
 class CmdbIpAddress(Base):
+    """Dirección IP asociada a una interfaz de un activo CMDB con su rol operativo y máscara."""
     __tablename__ = "cmdb_ip_addresses"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -429,6 +452,7 @@ class CmdbIpAddress(Base):
 # ==============================================================================
 
 class HostGroup(Base):
+    """Agrupación lógica de activos para monitorización y enrutamiento de avisos SRE."""
     __tablename__ = "network_host_groups"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -443,6 +467,7 @@ class HostGroup(Base):
 
 
 class MonitoredServiceCheck(Base):
+    """Chequeo de servicio estilo Nagios Core (ICMP/TCP/UDP/SSH/HTTP/SNMP) con estados SOFT/HARD."""
     __tablename__ = "network_service_checks"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -479,6 +504,7 @@ class MonitoredServiceCheck(Base):
 
 
 class SwitchSnmpPort(Base):
+    """Registro de boca de switch descubierta por SNMP (IF-MIB / LLDP-MIB)."""
     __tablename__ = "network_switch_snmp_ports"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -511,6 +537,7 @@ class SwitchSnmpPort(Base):
 
 
 class LogicalTopologyLink(Base):
+    """Enlace lógico documentado entre dos activos dentro del mapa de 5 capas de Red & Host."""
     __tablename__ = "network_logical_links"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -533,6 +560,7 @@ class LogicalTopologyLink(Base):
 
 
 class InfraConnector(Base):
+    """Conector de integración con switches SNMP, hipervisores o exporters de Prometheus."""
     __tablename__ = "network_infra_connectors"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -563,6 +591,7 @@ class InfraConnector(Base):
 
 
 class AlertContact(Base):
+    """Contacto destinatario de avisos de guardia SRE y caducidad de certificados."""
     __tablename__ = "network_alert_contacts"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -583,6 +612,7 @@ class AlertContact(Base):
 
 
 class AlertContactGroup(Base):
+    """Grupo o turno de guardia que agrupa múltiples contactos SRE y canal de aviso."""
     __tablename__ = "network_alert_contact_groups"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -595,6 +625,7 @@ class AlertContactGroup(Base):
 
 
 class NotificationRoutingRule(Base):
+    """Regla de enrutamiento que vincula grupos de hosts con grupos/contactos según severidad."""
     __tablename__ = "network_notification_rules"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -619,6 +650,7 @@ class NotificationRoutingRule(Base):
 
 
 class MaintenanceWindow(Base):
+    """Ventana de mantenimiento programada que silencia el disparo de alertas sobre activos afectados."""
     __tablename__ = "network_maintenance_windows"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -637,6 +669,7 @@ class MaintenanceWindow(Base):
 
 
 class AlertNotificationLog(Base):
+    """Registro histórico auditable de cada alerta evaluada o enviada por SMTP/webhook."""
     __tablename__ = "network_alert_logs"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -657,6 +690,7 @@ class AlertNotificationLog(Base):
 
 
 class SmtpAlertConfig(Base):
+    """Configuración global del servidor de correo SMTP y webhook para despacho de alarmas."""
     __tablename__ = "network_smtp_config"
 
     id = Column(Integer, primary_key=True, index=True)

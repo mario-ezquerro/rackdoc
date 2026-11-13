@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme.dart';
 import '../../../models/datacenter_models.dart';
 
+/// Catálogo lateral izquierdo de librerías hardware arrastrables (`Draggable`) del Rack Editor.
 class DeviceCatalogPanel extends StatefulWidget {
   final List<DeviceTemplateModel> templates;
   final DeviceTemplateModel? selectedTemplateForClickMount;

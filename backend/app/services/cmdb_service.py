@@ -1,3 +1,7 @@
+"""
+Servicio de `6. CMDB & Control IPs`: sincronización bidireccional con Rack/Planta, Deep IP Probe, barridos CIDR y anti-colisiones.
+"""
+
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -61,6 +65,7 @@ IP_ROLE_LABELS: Dict[str, str] = {
 
 
 def _match_subnet_for_ip(ip_str: str, subnets: List[CmdbSubnet]) -> Optional[CmdbSubnet]:
+    """Localiza la subred `CmdbSubnet` cuyo bloque CIDR contiene la dirección IP dada."""
     cleaned = (ip_str or "").strip().split("/")[0].strip()
     if not cleaned:
         return None
@@ -79,6 +84,7 @@ def _match_subnet_for_ip(ip_str: str, subnets: List[CmdbSubnet]) -> Optional[Cmd
 
 
 def _infer_asset_class_from_rack_device(dev: RackDevice) -> str:
+    """Deduce la clase CI de la CMDB a partir de la categoría de plantilla del equipo enracado."""
     cat = (dev.template.category if dev.template else "").lower().strip()
     if cat == "server":
         return "physical_server"
@@ -456,8 +462,8 @@ def _probe_single_tcp_port(target_ip: str, port: int, timeout_sec: float = 0.65)
     finally:
         try:
             sock.close()
-        except Exception:
-            pass
+        except OSError as exc:
+            logger.debug("Error cerrando socket TCP (%s:%s): %s", target_ip, port, exc)
 
 
 def _lookup_arp_mac(target_ip: str) -> Optional[str]:
@@ -575,6 +581,7 @@ def _assemble_ip_verification_result(
     matched_sub: Optional[CmdbSubnet],
     now_dt: datetime,
 ) -> Dict[str, Any]:
+    """Consolida los resultados de ping ICMP, puertos TCP, tabla ARP, PTR DNS y propietario CMDB."""
     ip_clean = probe_data["ip_clean"]
     icmp_alive = probe_data["icmp_alive"]
     icmp_ms = probe_data["icmp_ms"]
@@ -707,6 +714,7 @@ def verify_single_ip_manual(
     ports: Optional[List[int]] = None,
     timeout_sec: float = 0.8,
 ) -> Dict[str, Any]:
+    """Ejecuta una sonda profunda (*Deep IP Probe*) sobre una única IPv4 para determinar si está libre."""
     res = verify_ip_target_or_find_free(
         db=db,
         target_ip=target_ip,
@@ -1257,6 +1265,7 @@ def serialize_cmdb_asset(
     stack_nodes_by_asset_id: Optional[Dict[int, List[TechStackNode]]] = None,
     stack_diagrams_by_id: Optional[Dict[int, TechStackDiagram]] = None,
 ) -> Dict[str, Any]:
+    """Serializa un `CmdbAsset` con todas sus IPs, posición en Rack/Planta y pertenencia a Stacks."""
     ips_serialized = []
     heartbeat_ip = ""
     primary_subnet_mask = ""

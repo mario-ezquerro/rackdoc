@@ -1,6 +1,7 @@
 import 'package:file_picker/file_picker.dart';
 import 'image_file_picker.dart';
 
+/// Implementación IO de selección de imagen mediante `file_picker`.
 Future<PickedImageFile?> pickPlanImageFileImpl() async {
   final files = await FilePicker.pickFiles(
     type: FileType.custom,

@@ -11,7 +11,10 @@ from ldap3.utils.conv import escape_filter_chars
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..logging_setup import get_logger
 from ..models import ADServer, AlertContact, User
+
+logger = get_logger(__name__)
 from ..routers._common import VALID_ROLES, api_router, public_router
 from ..schemas import (
     ADServerCreate,
@@ -240,8 +243,12 @@ def _ldap_authenticate_and_fetch_profile(
                             )
                             if hasattr(entry, "memberOf") and entry.memberOf.values:
                                 member_of = [str(x) for x in entry.memberOf.values]
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug(
+                            "Lectura suplementaria de perfil LDAP omitida para '%s': %s",
+                            username,
+                            exc,
+                        )
 
                 role = _resolve_role_from_ad_groups(srv, member_of)
                 return {

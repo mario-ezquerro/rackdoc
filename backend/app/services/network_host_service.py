@@ -1,3 +1,7 @@
+"""
+Servicio central de `4. Red & Host` y `8. Alarmas SRE`: Stacks 2D, máquina Nagios, SNMP, Prometheus File SD, OTLP y alertas SMTP.
+"""
+
 from __future__ import annotations
 
 import json
