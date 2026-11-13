@@ -1,10 +1,14 @@
+"""Configuración del motor SQLAlchemy, modo WAL en SQLite y sesión por petición."""
+
 import os
 from pathlib import Path
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 _candidate_docker_data = Path("/app/data")
-if _candidate_docker_data.exists() or os.getenv("DATABASE_URL", "").startswith("sqlite:////app/data"):
+if os.getenv("RACKDOC_DATA_DIR"):
+    DATA_DIR = Path(os.environ["RACKDOC_DATA_DIR"])
+elif _candidate_docker_data.exists() or os.getenv("DATABASE_URL", "").startswith("sqlite:////app/data"):
     DATA_DIR = _candidate_docker_data
 else:
     DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"

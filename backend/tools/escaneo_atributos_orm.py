@@ -28,8 +28,10 @@ Devuelve 1 si encuentra algo, para poder colgarlo de un hook o de CI.
 import ast
 import os
 import sys
+from pathlib import Path
 
-RAIZ = "app"
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+RAIZ = str(BACKEND_DIR / "app")
 MODELOS = os.path.join(RAIZ, "models.py")
 DESCONOCIDO = ("?", None)
 

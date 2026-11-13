@@ -1776,7 +1776,8 @@ class _CertScopeViewState extends State<CertScopeView> {
                             children: [
                               Expanded(
                                 child: DropdownButtonFormField<int?>(
-                                  value: assetsList.any((a) => a['id'] == selectedAssetId)
+                                  key: ValueKey('asset_$selectedAssetId'),
+                                  initialValue: assetsList.any((a) => a['id'] == selectedAssetId)
                                       ? selectedAssetId
                                       : null,
                                   isExpanded: true,
@@ -1831,7 +1832,8 @@ class _CertScopeViewState extends State<CertScopeView> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: DropdownButtonFormField<int?>(
-                                  value: rackDevsList.any((r) => r['id'] == selectedRackDeviceId)
+                                  key: ValueKey('rack_dev_$selectedRackDeviceId'),
+                                  initialValue: rackDevsList.any((r) => r['id'] == selectedRackDeviceId)
                                       ? selectedRackDeviceId
                                       : null,
                                   isExpanded: true,
@@ -1881,7 +1883,8 @@ class _CertScopeViewState extends State<CertScopeView> {
                             children: [
                               Expanded(
                                 child: DropdownButtonFormField<int?>(
-                                  value: floorDevsList.any((f) => f['id'] == selectedFloorDeviceId)
+                                  key: ValueKey('floor_dev_$selectedFloorDeviceId'),
+                                  initialValue: floorDevsList.any((f) => f['id'] == selectedFloorDeviceId)
                                       ? selectedFloorDeviceId
                                       : null,
                                   isExpanded: true,
@@ -1927,7 +1930,8 @@ class _CertScopeViewState extends State<CertScopeView> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: DropdownButtonFormField<int?>(
-                                  value: locationsList.any((l) => l['id'] == selectedLocationId)
+                                  key: ValueKey('loc_$selectedLocationId'),
+                                  initialValue: locationsList.any((l) => l['id'] == selectedLocationId)
                                       ? selectedLocationId
                                       : null,
                                   isExpanded: true,
@@ -2307,7 +2311,8 @@ class _CertScopeViewState extends State<CertScopeView> {
                               Expanded(
                                 flex: 2,
                                 child: DropdownButtonFormField<String>(
-                                  value: renewalType,
+                                  key: ValueKey('renewal_$renewalType'),
+                                  initialValue: renewalType,
                                   decoration: const InputDecoration(
                                     labelText: 'Tipo de Renovación',
                                     border: OutlineInputBorder(),
