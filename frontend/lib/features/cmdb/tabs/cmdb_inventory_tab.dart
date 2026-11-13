@@ -1054,6 +1054,20 @@ extension _CmdbInventoryTabExt on _CmdbViewState {
                 case 'certscope':
                   _toggleInventoryCertScope(asset, !certScopeEnabled);
                   break;
+                case 'provision_ansible':
+                  final targetHost =
+                      '${asset['heartbeat_ip'] ?? asset['primary_ip'] ?? asset['hostname'] ?? ''}'
+                          .trim();
+                  if (targetHost.isNotEmpty) {
+                    ProvisioningWorkspaceView.showQuickProvisionDialog(
+                      context,
+                      api: widget.api,
+                      initialTargets: [targetHost],
+                      canEdit: widget.canEdit,
+                      onCompleted: _loadOverview,
+                    );
+                  }
+                  break;
                 case 'add_ip':
                   _openAddSingleIpDialog(asset);
                   break;
@@ -1080,6 +1094,10 @@ extension _CmdbInventoryTabExt on _CmdbViewState {
                 child: Text(certScopeEnabled
                     ? 'Desactivar análisis TLS'
                     : 'Analizar certificado TLS'),
+              ),
+              const PopupMenuItem(
+                value: 'provision_ansible',
+                child: Text('Verificar Exporter / Desplegar Ansible & OTel'),
               ),
               const PopupMenuItem(
                 value: 'add_ip',
@@ -2114,6 +2132,27 @@ extension _CmdbInventoryTabExt on _CmdbViewState {
                     ),
                   ),
                 if (widget.canEdit) ...[
+                  IconButton(
+                    tooltip:
+                        'Verificar Exporter de serie / Desplegar con Ansible u OpenTelemetry',
+                    onPressed: () {
+                      final targetHost =
+                          '${asset['heartbeat_ip'] ?? asset['primary_ip'] ?? asset['hostname'] ?? ''}'
+                              .trim();
+                      ProvisioningWorkspaceView.showQuickProvisionDialog(
+                        context,
+                        api: widget.api,
+                        initialTargets: targetHost.isEmpty ? [] : [targetHost],
+                        canEdit: widget.canEdit,
+                        onCompleted: _loadOverview,
+                      );
+                    },
+                    icon: const Icon(
+                      Icons.rocket_launch_outlined,
+                      size: 18,
+                      color: AppPalette.indigo600,
+                    ),
+                  ),
                   IconButton(
                     tooltip: 'Añadir otra IP a esta máquina',
                     onPressed: () => _openAddSingleIpDialog(asset),

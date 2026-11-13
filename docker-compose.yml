@@ -22,6 +22,7 @@ services:
       - PROMETHEUS_URL=${PROMETHEUS_URL:-http://rackdoc-prometheus:9090}
       - PROMETHEUS_PUBLIC_URL=${PROMETHEUS_PUBLIC_URL:-http://localhost:9090}
       - AUTOMATION_API_KEY=${AUTOMATION_API_KEY:-}
+      - ANSIBLE_VAULT_SECRET=${ANSIBLE_VAULT_SECRET:-}
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@rackdoc.local}
@@ -39,6 +40,7 @@ services:
       - "--storage.tsdb.path=/etc/prometheus/dynamic/tsdb"
       - "--storage.tsdb.retention.time=30d"
       - "--web.enable-lifecycle"
+      - "--web.enable-otlp-receiver"
     volumes:
       - ./data/prometheus:/etc/prometheus/dynamic
     depends_on:

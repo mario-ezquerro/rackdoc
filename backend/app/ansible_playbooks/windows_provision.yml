@@ -1,0 +1,177 @@
+---
+- name: "RackDoc — Verificación Previa, Auditoría Hardware CMDB y Aprovisionamiento Windows (WinRM)"
+  hosts: all
+  gather_facts: false
+  vars:
+    rackdoc_action_profile: "verify_and_propose"
+    rackdoc_windows_exporter_version: "0.29.2"
+    rackdoc_otelcol_version: "0.114.0"
+    rackdoc_otel_endpoint: ""
+    rackdoc_otel_api_key: ""
+    rackdoc_results_dir: "/tmp"
+
+  tasks:
+    - name: "1. Inspeccionar hardware WMI/CIM, agentes de serie y aplicar acción condicional en Windows"
+      ansible.windows.win_powershell:
+        script: |
+          $ErrorActionPreference = 'Stop'
+          $action = '{{ rackdoc_action_profile }}'
+          $weVer = '{{ rackdoc_windows_exporter_version }}'
+          $otelVer = '{{ rackdoc_otelcol_version }}'
+          $otelEndpoint = '{{ rackdoc_otel_endpoint }}'
+          $otelKey = '{{ rackdoc_otel_api_key }}'
+
+          $cs = Get-CimInstance Win32_ComputerSystem
+          $os = Get-CimInstance Win32_OperatingSystem
+          $bios = Get-CimInstance Win32_BIOS
+          $disks = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3"
+          $totalDiskGb = 0
+          foreach ($d in $disks) {
+            if ($d.Size) { $totalDiskGb += [math]::Round($d.Size / 1GB, 1) }
+          }
+
+          $nics = Get-CimInstance Win32_NetworkAdapterConfiguration -Filter "IPEnabled=True"
+          $primaryIp = ''
+          $primaryMac = ''
+          $allIps = @()
+          foreach ($n in $nics) {
+            if ($n.IPAddress) {
+              foreach ($ip in $n.IPAddress) {
+                if ($ip -match '^\d+\.\d+\.\d+\.\d+$' -and $ip -ne '127.0.0.1') {
+                  $allIps += $ip
+                  if (-not $primaryIp) {
+                    $primaryIp = $ip
+                    $primaryMac = [string]$n.MACAddress
+                  }
+                }
+              }
+            }
+          }
+
+          function Get-AgentState {
+            $nativeStatus = 'missing'
+            $nativeSvcName = ''
+            $nativeVersion = ''
+            foreach ($sName in @('windows_exporter', 'wmi_exporter')) {
+              $svc = Get-Service -Name $sName -ErrorAction SilentlyContinue
+              if ($svc) {
+                $nativeSvcName = $sName
+                $nativeStatus = if ($svc.Status -eq 'Running') { 'active' } else { 'stopped' }
+                break
+              }
+            }
+            try {
+              $resp = Invoke-WebRequest -Uri 'http://127.0.0.1:9182/metrics' -UseBasicParsing -TimeoutSec 2
+              if ($resp.StatusCode -eq 200) {
+                $nativeStatus = 'active'
+                if ($resp.Content -match 'windows_exporter_build_info\{[^}]*version="([^"]+)"') {
+                  $nativeVersion = $Matches[1]
+                }
+              }
+            } catch {}
+
+            $otelStatus = 'missing'
+            $otelSvc = Get-Service -Name 'otelcol*' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($otelSvc) {
+              $otelStatus = if ($otelSvc.Status -eq 'Running') { 'active' } else { 'stopped' }
+            }
+            return @{
+              native_status = $nativeStatus
+              native_unit = $nativeSvcName
+              native_version = $nativeVersion
+              native_port = 9182
+              otel_status = $otelStatus
+            }
+          }
+
+          $pre = Get-AgentState
+
+          if ($action -in @('ensure_native_exporter', 'ensure_both')) {
+            if ($pre.native_status -eq 'stopped' -and $pre.native_unit) {
+              Set-Service -Name $pre.native_unit -StartupType Automatic
+              Start-Service -Name $pre.native_unit
+            } elseif ($pre.native_status -eq 'missing') {
+              $msiPath = "$env:TEMP\windows_exporter.msi"
+              $msiUrl = "https://github.com/prometheus-community/windows_exporter/releases/download/v$weVer/windows_exporter-$weVer-amd64.msi"
+              [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+              Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath -UseBasicParsing
+              $proc = Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" ENABLED_COLLECTORS=cpu,cs,logical_disk,net,os,service,system LISTEN_PORT=9182 /qn /norestart" -Wait -PassThru
+              if ($proc.ExitCode -ne 0) {
+                throw "msiexec windows_exporter devolvió código $($proc.ExitCode)"
+              }
+              Remove-Item $msiPath -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          if ($action -in @('ensure_otel_collector', 'ensure_both') -and $otelEndpoint) {
+            if ($pre.otel_status -eq 'stopped') {
+              $svc = Get-Service -Name 'otelcol*' | Select-Object -First 1
+              Set-Service -Name $svc.Name -StartupType Automatic
+              Start-Service -Name $svc.Name
+            } elseif ($pre.otel_status -eq 'missing') {
+              $otelDir = 'C:\Program Files\OpenTelemetry Collector'
+              New-Item -ItemType Directory -Force -Path $otelDir | Out-Null
+              $zipPath = "$env:TEMP\otelcol-contrib.tar.gz"
+              $otelUrl = "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v$otelVer/otelcol-contrib_${otelVer}_windows_amd64.tar.gz"
+              [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+              Invoke-WebRequest -Uri $otelUrl -OutFile $zipPath -UseBasicParsing
+              tar.exe -xzf $zipPath -C $otelDir
+              $cfgPath = "$otelDir\config.yaml"
+              @"
+receivers:
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu: {}
+      memory: {}
+      disk: {}
+      filesystem: {}
+      network: {}
+      processes: {}
+processors:
+  batch: {}
+  resourcedetection:
+    detectors: [env, system]
+exporters:
+  otlphttp:
+    metrics_endpoint: "$otelEndpoint"
+    headers:
+      X-API-Key: "$otelKey"
+service:
+  pipelines:
+    metrics:
+      receivers: [hostmetrics]
+      processors: [resourcedetection, batch]
+      exporters: [otlphttp]
+"@ | Set-Content -Path $cfgPath -Encoding UTF8
+              sc.exe create otelcol-contrib binPath= "`"$otelDir\otelcol-contrib.exe`" --config=`"$cfgPath`"" start= auto | Out-Null
+              Start-Service -Name 'otelcol-contrib'
+            }
+          }
+
+          $post = Get-AgentState
+          $payload = @{
+            target = '{{ inventory_hostname }}'
+            hostname = $env:COMPUTERNAME
+            fqdn = if ($cs.Domain -and $cs.Domain -ne 'WORKGROUP') { "$($env:COMPUTERNAME).$($cs.Domain)" } else { $env:COMPUTERNAME }
+            os_family = 'windows'
+            os_or_firmware = "$($os.Caption) ($($os.Version))"
+            cpu_cores = [int]$cs.NumberOfLogicalProcessors
+            ram_mb = [int][math]::Round($cs.TotalPhysicalMemory / 1MB)
+            storage_gb = $totalDiskGb
+            serial_or_uuid = [string]$bios.SerialNumber
+            product_name = "$($cs.Manufacturer) $($cs.Model)".Trim()
+            default_ipv4 = @{ address = $primaryIp; macaddress = $primaryMac }
+            all_ipv4_addresses = $allIps
+            pre_agent = $pre
+            post_agent = $post
+          }
+          $Ansible.Result = ($payload | ConvertTo-Json -Depth 6 -Compress)
+      register: win_res
+
+    - name: "2. Persistir resultado estructurado de Windows para CMDB / Prometheus"
+      ansible.builtin.copy:
+        dest: "{{ rackdoc_results_dir }}/{{ inventory_hostname }}.json"
+        mode: "0600"
+        content: "{{ win_res.result }}"
+      delegate_to: localhost

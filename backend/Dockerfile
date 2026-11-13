@@ -2,13 +2,17 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Instalar ping del sistema para chequeos ICMP en contenedores sin privilegios extra
+# Instalar ping, cliente SSH y sshpass para chequeos ICMP y aprovisionamiento Ansible sin privilegios extra
 RUN apt-get update && apt-get install -y --no-install-recommends \
     iputils-ping \
+    openssh-client \
+    sshpass \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && ansible-galaxy collection install ansible.windows community.windows
 
 COPY ./app ./app
 COPY alembic.ini .

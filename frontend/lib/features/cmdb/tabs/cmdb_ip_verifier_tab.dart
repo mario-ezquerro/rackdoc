@@ -763,6 +763,29 @@ extension _CmdbIpVerifierTabExt on _CmdbViewState {
                               ),
                             ),
                           ),
+                          OutlinedButton.icon(
+                            onPressed: _selectedDiscoveredIps.isEmpty
+                                ? null
+                                : () => ProvisioningWorkspaceView.showQuickProvisionDialog(
+                                    context,
+                                    api: widget.api,
+                                    initialTargets: _selectedDiscoveredIps
+                                        .toList(),
+                                    canEdit: widget.canEdit,
+                                    onCompleted: _loadOverview,
+                                  ),
+                            icon: const Icon(
+                              Icons.rocket_launch_rounded,
+                              size: 15,
+                            ),
+                            label: Text(
+                              'Verificar / Desplegar Ansible (${_selectedDiscoveredIps.length})',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     ),

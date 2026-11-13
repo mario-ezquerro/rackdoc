@@ -4,6 +4,7 @@ import '../../core/theme.dart';
 import 'package:flutter/services.dart';
 import '../../core/api_client.dart';
 import '../../shared/widgets/diagram_exporter.dart';
+import '../../shared/widgets/provisioning_workspace_view.dart';
 import 'api_onboarding_dialog.dart';
 
 part 'tabs/cmdb_inventory_tab.dart';

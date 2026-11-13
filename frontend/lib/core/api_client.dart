@@ -1033,4 +1033,77 @@ class RackDocApiClient {
   ) async {
     return Map<String, dynamic>.from(await _post('/certscope/certificates/$certId/notify', payload) as Map);
   }
+
+  // ===========================================================================
+  // 8. APROVISIONAMIENTO ANSIBLE, EXPORTERS NATIVOS Y OPENTELEMETRY
+  // ===========================================================================
+  Future<Map<String, dynamic>> getProvisioningOverview() async {
+    return Map<String, dynamic>.from(await _get('/provisioning/overview') as Map);
+  }
+
+  Future<Map<String, dynamic>> runProvisioningPrecheck(
+    List<String> targets, {
+    double timeoutSec = 1.8,
+  }) async {
+    return Map<String, dynamic>.from(
+      await _post('/provisioning/precheck', {
+            'targets': targets,
+            'timeout_sec': timeoutSec,
+          })
+          as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> createProvisioningCredential(
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _post('/provisioning/credentials', payload) as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> updateProvisioningCredential(
+    int credentialId,
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _put('/provisioning/credentials/$credentialId', payload) as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> deleteProvisioningCredential(
+    int credentialId,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _delete('/provisioning/credentials/$credentialId') as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> launchProvisioningJob(
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _post('/provisioning/jobs/launch', payload) as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> getProvisioningJobDetail(int jobId) async {
+    return Map<String, dynamic>.from(
+      await _get('/provisioning/jobs/$jobId') as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> createProvisioningToken(
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _post('/provisioning/tokens', payload) as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> revokeProvisioningToken(int tokenId) async {
+    return Map<String, dynamic>.from(
+      await _delete('/provisioning/tokens/$tokenId') as Map,
+    );
+  }
 }

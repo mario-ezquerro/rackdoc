@@ -1118,6 +1118,95 @@ class TlsCertificateNotifyRequest(BaseModel):
     force_send: bool = True
 
 
+# ==============================================================================
+# ESQUEMAS DE APROVISIONAMIENTO ANSIBLE, EXPORTERS NATIVOS Y OPENTELEMETRY
+# ==============================================================================
+
+
+class ProvisioningCredentialInput(BaseModel):
+    """Creación o actualización de una credencial SSH / WinRM en el baúl cifrado."""
+    name: str
+    credential_type: str = "ssh_key"  # ssh_key | ssh_password | winrm
+    os_family: str = "linux"  # linux | windows
+    username: str = "root"
+    port: int = 22
+    secret: str = ""  # Clave privada PEM/OpenSSH o contraseña (write-only)
+    passphrase: str = ""
+    become_password: str = ""
+    winrm_transport: str = "ntlm"  # ntlm | basic
+    winrm_use_ssl: bool = False
+    winrm_validate_certs: bool = False
+    notes: str = ""
+
+
+class EphemeralCredentialInput(BaseModel):
+    """Credencial puntual en memoria (nunca se persiste en base de datos)."""
+    credential_type: str = "ssh_password"  # ssh_key | ssh_password | winrm
+    username: str = "root"
+    port: int = 22
+    secret: str
+    passphrase: str = ""
+    become_password: str = ""
+    winrm_transport: str = "ntlm"
+    winrm_use_ssl: bool = False
+    winrm_validate_certs: bool = False
+
+
+class ProvisioningPrecheckRequest(BaseModel):
+    """Sondeo instantáneo previo de puertos y exporters existentes sin credenciales."""
+    targets: List[str]
+    timeout_sec: float = 1.8
+
+
+class ProvisioningJobLaunchInput(BaseModel):
+    """Solicitud de ejecución asíncrona de verificación/despliegue Ansible."""
+    title: str = ""
+    os_family: str = "linux"  # linux | windows
+    # verify_and_propose | ensure_native_exporter | ensure_otel_collector | ensure_both
+    action_profile: str = "verify_and_propose"
+    targets: List[str]
+    credential_id: Optional[int] = None
+    ephemeral_credential: Optional[EphemeralCredentialInput] = None
+    target_location_id: Optional[int] = None
+    host_groups: List[str] = []
+    otel_endpoint_url: str = ""
+    use_local_cache: bool = True
+
+
+class ProvisioningTokenCreateInput(BaseModel):
+    """Generación de token acotado para scripts one-liner (.sh / .ps1) y OTLP."""
+    name: str
+    os_family: str = "any"  # linux | windows | any
+    action_profile: str = "ensure_native_exporter"
+    target_location_id: Optional[int] = None
+    host_groups: List[str] = []
+    reusable: bool = True
+    max_uses: int = 0
+    ttl_hours: int = 24  # 0 = sin caducidad temporal
+    notes: str = ""
+
+
+class BootstrapAgentRegisterPayload(BaseModel):
+    """Auto-registro enviado por `bootstrap.sh` o `bootstrap.ps1` usando un token válido."""
+    hostname: str
+    fqdn: str = ""
+    os_family: str = "linux"
+    os_or_firmware: str = ""
+    cpu_cores: int = 1
+    ram_gb: float = 1.0
+    storage_gb: float = 10.0
+    serial_or_uuid: str = ""
+    hypervisor_or_platform: str = ""
+    primary_ip: str
+    primary_mac_address: str = ""
+    additional_ips: List[Dict[str, Any]] = []
+    native_exporter_status: str = "missing"  # active | stopped | missing
+    native_exporter_port: int = 9100
+    native_exporter_version: str = ""
+    otel_collector_status: str = "missing"  # active | stopped | missing
+    notes: str = ""
+
+
 
 
 

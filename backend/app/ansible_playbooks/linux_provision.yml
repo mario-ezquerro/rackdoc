@@ -1,0 +1,305 @@
+---
+- name: "RackDoc — Verificación Previa, Auditoría Hardware CMDB y Aprovisionamiento Linux"
+  hosts: all
+  gather_facts: true
+  become: "{{ rackdoc_become | default(true) | bool }}"
+  vars:
+    rackdoc_action_profile: "verify_and_propose"
+    rackdoc_node_exporter_version: "1.8.2"
+    rackdoc_otelcol_version: "0.114.0"
+    rackdoc_otel_endpoint: ""
+    rackdoc_otel_api_key: ""
+    rackdoc_agent_cache_dir: ""
+    rackdoc_results_dir: "/tmp"
+
+  tasks:
+    - name: "1. Inspeccionar agentes instalados de serie (node_exporter / prometheus-node-exporter / otelcol)"
+      ansible.builtin.shell: |
+        set -u
+        NATIVE_STATUS="missing"
+        NATIVE_UNIT=""
+        NATIVE_VER=""
+        NATIVE_PORT=9100
+
+        for unit in node_exporter prometheus-node-exporter; do
+          if systemctl list-unit-files "${unit}.service" >/dev/null 2>&1 || [ -f "/etc/systemd/system/${unit}.service" ] || [ -f "/lib/systemd/system/${unit}.service" ]; then
+            NATIVE_UNIT="${unit}"
+            if systemctl is-active --quiet "${unit}"; then
+              NATIVE_STATUS="active"
+            else
+              NATIVE_STATUS="stopped"
+            fi
+            break
+          fi
+        done
+
+        METRICS_OUT=""
+        if command -v curl >/dev/null 2>&1; then
+          METRICS_OUT="$(curl -fsS -m 2 http://127.0.0.1:9100/metrics 2>/dev/null || true)"
+        elif command -v wget >/dev/null 2>&1; then
+          METRICS_OUT="$(wget -qO- -T 2 http://127.0.0.1:9100/metrics 2>/dev/null || true)"
+        fi
+        if [ -n "${METRICS_OUT}" ]; then
+          NATIVE_STATUS="active"
+          NATIVE_VER="$(printf '%s\n' "${METRICS_OUT}" | grep -m1 '^node_exporter_build_info' | sed -n 's/.*version="\([^"]*\)".*/\1/p')"
+        fi
+
+        OTEL_STATUS="missing"
+        OTEL_UNIT=""
+        for ounit in otelcol-contrib otelcol; do
+          if systemctl list-unit-files "${ounit}.service" >/dev/null 2>&1 || [ -f "/etc/systemd/system/${ounit}.service" ] || [ -f "/lib/systemd/system/${ounit}.service" ]; then
+            OTEL_UNIT="${ounit}"
+            if systemctl is-active --quiet "${ounit}"; then
+              OTEL_STATUS="active"
+            else
+              OTEL_STATUS="stopped"
+            fi
+            break
+          fi
+        done
+
+        printf '{"native_status":"%s","native_unit":"%s","native_version":"%s","native_port":%d,"otel_status":"%s","otel_unit":"%s"}\n' \
+          "${NATIVE_STATUS}" "${NATIVE_UNIT}" "${NATIVE_VER}" "${NATIVE_PORT}" "${OTEL_STATUS}" "${OTEL_UNIT}"
+      args:
+        executable: /bin/bash
+      register: pre_probe
+      changed_when: false
+
+    - name: "Parsear estado inicial de agentes"
+      ansible.builtin.set_fact:
+        rackdoc_pre_agent: "{{ pre_probe.stdout | trim | from_json }}"
+        rackdoc_arch: "{{ 'arm64' if ansible_architecture in ['aarch64', 'arm64'] else 'amd64' }}"
+
+    - name: "2a. Arrancar servicio node_exporter existente de serie si estaba detenido"
+      ansible.builtin.systemd:
+        name: "{{ rackdoc_pre_agent.native_unit }}"
+        state: started
+        enabled: true
+      when:
+        - rackdoc_action_profile in ['ensure_native_exporter', 'ensure_both']
+        - rackdoc_pre_agent.native_status == 'stopped'
+        - rackdoc_pre_agent.native_unit | length > 0
+
+    - name: "2b. Comprobar si existe binario cacheado de node_exporter en RackDoc"
+      ansible.builtin.stat:
+        path: "{{ rackdoc_agent_cache_dir }}/node_exporter-{{ rackdoc_node_exporter_version }}.linux-{{ rackdoc_arch }}.tar.gz"
+      delegate_to: localhost
+      become: false
+      register: cached_ne_tar
+      when:
+        - rackdoc_action_profile in ['ensure_native_exporter', 'ensure_both']
+        - rackdoc_pre_agent.native_status == 'missing'
+        - rackdoc_agent_cache_dir | length > 0
+
+    - name: "2c. Copiar binario cacheado de node_exporter cuando está disponible en local"
+      ansible.builtin.copy:
+        src: "{{ rackdoc_agent_cache_dir }}/node_exporter-{{ rackdoc_node_exporter_version }}.linux-{{ rackdoc_arch }}.tar.gz"
+        dest: "/tmp/node_exporter.tar.gz"
+        mode: "0644"
+      when:
+        - rackdoc_action_profile in ['ensure_native_exporter', 'ensure_both']
+        - rackdoc_pre_agent.native_status == 'missing'
+        - cached_ne_tar is defined
+        - cached_ne_tar.stat is defined
+        - cached_ne_tar.stat.exists
+
+    - name: "2d. Instalar node_exporter solo cuando NO existe de serie en la máquina"
+      ansible.builtin.shell: |
+        set -eu
+        if [ ! -f /tmp/node_exporter.tar.gz ]; then
+          URL="https://github.com/prometheus/node_exporter/releases/download/v{{ rackdoc_node_exporter_version }}/node_exporter-{{ rackdoc_node_exporter_version }}.linux-{{ rackdoc_arch }}.tar.gz"
+          if command -v curl >/dev/null 2>&1; then
+            curl -fsSL -o /tmp/node_exporter.tar.gz "${URL}" || true
+          elif command -v wget >/dev/null 2>&1; then
+            wget -qO /tmp/node_exporter.tar.gz "${URL}" || true
+          fi
+        fi
+
+        if [ -s /tmp/node_exporter.tar.gz ]; then
+          tar -xzf /tmp/node_exporter.tar.gz -C /tmp
+          cp /tmp/node_exporter-{{ rackdoc_node_exporter_version }}.linux-{{ rackdoc_arch }}/node_exporter /usr/local/bin/node_exporter
+          chmod 0755 /usr/local/bin/node_exporter
+          id -u node_exporter >/dev/null 2>&1 || useradd --no-create-home --shell /usr/sbin/nologin node_exporter || true
+          cat >/etc/systemd/system/node_exporter.service <<'EOF'
+        [Unit]
+        Description=Prometheus Node Exporter (Gestionado por RackDoc)
+        After=network-online.target
+        Wants=network-online.target
+
+        [Service]
+        User=node_exporter
+        Group=node_exporter
+        Type=simple
+        ExecStart=/usr/local/bin/node_exporter --web.listen-address=:9100
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+          rm -rf /tmp/node_exporter.tar.gz /tmp/node_exporter-{{ rackdoc_node_exporter_version }}.linux-{{ rackdoc_arch }}
+          systemctl daemon-reload
+          systemctl enable --now node_exporter
+        elif command -v apt-get >/dev/null 2>&1; then
+          DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq prometheus-node-exporter
+          systemctl enable --now prometheus-node-exporter
+        elif command -v dnf >/dev/null 2>&1; then
+          dnf install -y -q golang-github-prometheus-node-exporter || dnf install -y -q node_exporter
+          systemctl enable --now node_exporter || systemctl enable --now prometheus-node-exporter
+        else
+          echo "No se pudo descargar node_exporter ni instalar por gestor de paquetes" >&2
+          exit 1
+        fi
+      args:
+        executable: /bin/bash
+      when:
+        - rackdoc_action_profile in ['ensure_native_exporter', 'ensure_both']
+        - rackdoc_pre_agent.native_status == 'missing'
+
+    - name: "3. Instalar/asegurar OpenTelemetry Collector (otelcol-contrib) cuando se solicita"
+      ansible.builtin.shell: |
+        set -eu
+        if [ "{{ rackdoc_pre_agent.otel_status }}" = "stopped" ] && [ -n "{{ rackdoc_pre_agent.otel_unit }}" ]; then
+          systemctl enable --now "{{ rackdoc_pre_agent.otel_unit }}"
+          exit 0
+        fi
+        if [ "{{ rackdoc_pre_agent.otel_status }}" = "active" ]; then
+          exit 0
+        fi
+
+        TAR="/tmp/otelcol-contrib.tar.gz"
+        URL="https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v{{ rackdoc_otelcol_version }}/otelcol-contrib_{{ rackdoc_otelcol_version }}_linux_{{ rackdoc_arch }}.tar.gz"
+        if command -v curl >/dev/null 2>&1; then
+          curl -fsSL -o "${TAR}" "${URL}"
+        else
+          wget -qO "${TAR}" "${URL}"
+        fi
+        mkdir -p /tmp/otelcol_extract /etc/otelcol-contrib
+        tar -xzf "${TAR}" -C /tmp/otelcol_extract
+        cp /tmp/otelcol_extract/otelcol-contrib /usr/local/bin/otelcol-contrib
+        chmod 0755 /usr/local/bin/otelcol-contrib
+        rm -rf "${TAR}" /tmp/otelcol_extract
+
+        cat >/etc/otelcol-contrib/config.yaml <<EOF
+        receivers:
+          hostmetrics:
+            collection_interval: 30s
+            scrapers:
+              cpu: {}
+              memory: {}
+              disk: {}
+              filesystem: {}
+              load: {}
+              network: {}
+              processes: {}
+          otlp:
+            protocols:
+              grpc:
+                endpoint: 127.0.0.1:4317
+              http:
+                endpoint: 127.0.0.1:4318
+
+        processors:
+          batch: {}
+          resourcedetection:
+            detectors: [env, system]
+
+        exporters:
+          otlphttp:
+            metrics_endpoint: "{{ rackdoc_otel_endpoint }}"
+            headers:
+              X-API-Key: "{{ rackdoc_otel_api_key }}"
+
+        service:
+          pipelines:
+            metrics:
+              receivers: [hostmetrics, otlp]
+              processors: [resourcedetection, batch]
+              exporters: [otlphttp]
+        EOF
+
+        cat >/etc/systemd/system/otelcol-contrib.service <<'EOF'
+        [Unit]
+        Description=OpenTelemetry Collector Contrib (Gestionado por RackDoc)
+        After=network-online.target
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        ExecStart=/usr/local/bin/otelcol-contrib --config=/etc/otelcol-contrib/config.yaml
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+        systemctl daemon-reload
+        systemctl enable --now otelcol-contrib
+      args:
+        executable: /bin/bash
+      when:
+        - rackdoc_action_profile in ['ensure_otel_collector', 'ensure_both']
+        - rackdoc_otel_endpoint | length > 0
+
+    - name: "4. Verificar estado final tras inspección o despliegue"
+      ansible.builtin.shell: |
+        set -u
+        NATIVE_STATUS="missing"
+        NATIVE_VER=""
+        for unit in node_exporter prometheus-node-exporter; do
+          if systemctl is-active --quiet "${unit}" 2>/dev/null; then
+            NATIVE_STATUS="active"
+            break
+          elif systemctl list-unit-files "${unit}.service" >/dev/null 2>&1; then
+            NATIVE_STATUS="stopped"
+          fi
+        done
+        if command -v curl >/dev/null 2>&1; then
+          M="$(curl -fsS -m 2 http://127.0.0.1:9100/metrics 2>/dev/null || true)"
+          if [ -n "${M}" ]; then
+            NATIVE_STATUS="active"
+            NATIVE_VER="$(printf '%s\n' "${M}" | grep -m1 '^node_exporter_build_info' | sed -n 's/.*version="\([^"]*\)".*/\1/p')"
+          fi
+        fi
+        OTEL_STATUS="missing"
+        for ounit in otelcol-contrib otelcol; do
+          if systemctl is-active --quiet "${ounit}" 2>/dev/null; then
+            OTEL_STATUS="active"
+            break
+          elif systemctl list-unit-files "${ounit}.service" >/dev/null 2>&1; then
+            OTEL_STATUS="stopped"
+          fi
+        done
+        printf '{"native_status":"%s","native_version":"%s","otel_status":"%s"}\n' "${NATIVE_STATUS}" "${NATIVE_VER}" "${OTEL_STATUS}"
+      args:
+        executable: /bin/bash
+      register: post_probe
+      changed_when: false
+
+    - name: "5. Persistir resultado estructurado de hardware y agentes para CMDB / Prometheus"
+      ansible.builtin.copy:
+        dest: "{{ rackdoc_results_dir }}/{{ inventory_hostname }}.json"
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'target': inventory_hostname,
+              'hostname': ansible_hostname | default(inventory_hostname),
+              'fqdn': ansible_fqdn | default(''),
+              'os_family': 'linux',
+              'os_or_firmware': (ansible_distribution | default('Linux')) ~ ' ' ~ (ansible_distribution_version | default('')) ~ ' (' ~ (ansible_kernel | default('')) ~ ')',
+              'cpu_cores': ansible_processor_vcpus | default(ansible_processor_count | default(1)) | int,
+              'ram_mb': ansible_memtotal_mb | default(1024) | int,
+              'mounts': ansible_mounts | default([]),
+              'serial_or_uuid': ansible_product_serial | default(ansible_product_uuid | default('')),
+              'product_name': ansible_product_name | default(''),
+              'virtualization_type': ansible_virtualization_type | default(''),
+              'virtualization_role': ansible_virtualization_role | default(''),
+              'default_ipv4': ansible_default_ipv4 | default({}),
+              'all_ipv4_addresses': ansible_all_ipv4_addresses | default([]),
+              'pre_agent': rackdoc_pre_agent,
+              'post_agent': post_probe.stdout | trim | from_json
+            } | to_json
+          }}
+      delegate_to: localhost
+      become: false

@@ -42,6 +42,50 @@ JWT_SECRET_IS_EPHEMERAL = not _env_secret
 JWT_SECRET = _env_secret or secrets.token_urlsafe(48)
 
 AUTOMATION_API_KEY = (os.getenv("AUTOMATION_API_KEY", "") or "").strip()
+_ANSIBLE_VAULT_ENV = (os.getenv("ANSIBLE_VAULT_SECRET", "") or "").strip()
+
+
+def _derive_vault_fernet_key() -> bytes:
+    """
+    Deriva una clave Fernet de 32 bytes separada por dominio criptográfico a partir
+    de `ANSIBLE_VAULT_SECRET` (o `JWT_SECRET` si no se definió una clave dedicada).
+    """
+    seed = (_ANSIBLE_VAULT_ENV or JWT_SECRET).encode("utf-8")
+    dk = hashlib.pbkdf2_hmac(
+        "sha256",
+        seed,
+        b"rackdoc-ansible-vault-v1",
+        iterations=120_000,
+        dklen=32,
+    )
+    return base64.urlsafe_b64encode(dk)
+
+
+def encrypt_vault_secret(plain: Optional[str]) -> str:
+    """Cifra en reposo una clave privada SSH o contraseña para el baúl de Ansible."""
+    text = (plain or "").strip()
+    if not text:
+        return ""
+    from cryptography.fernet import Fernet
+
+    f = Fernet(_derive_vault_fernet_key())
+    return f.encrypt(text.encode("utf-8")).decode("utf-8")
+
+
+def decrypt_vault_secret(ciphertext: Optional[str]) -> str:
+    """Descifra en memoria un secreto del baúl de Ansible para un trabajo en curso."""
+    token = (ciphertext or "").strip()
+    if not token:
+        return ""
+    from cryptography.fernet import Fernet, InvalidToken
+
+    f = Fernet(_derive_vault_fernet_key())
+    try:
+        return f.decrypt(token.encode("utf-8")).decode("utf-8")
+    except InvalidToken as exc:
+        raise ValueError(
+            "No se pudo descifrar la credencial del baúl (¿cambió ANSIBLE_VAULT_SECRET / JWT_SECRET?)."
+        ) from exc
 
 # ---------------------------------------------------------------------------
 # Contraseñas
@@ -191,6 +235,8 @@ _OPERATOR_ACTION_SUFFIXES = (
     "/verify",
     "/verify-all",
     "/notify",
+    "/precheck",
+    "/launch",
 )
 
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})

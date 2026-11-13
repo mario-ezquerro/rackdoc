@@ -9,6 +9,7 @@ import '../../core/api_client.dart';
 import '../../models/datacenter_models.dart';
 import '../../shared/widgets/cmdb_asset_explorer_dialog.dart';
 import '../../shared/widgets/diagram_exporter.dart';
+import '../../shared/widgets/provisioning_workspace_view.dart';
 
 part 'sre_alarms/sre_alarms_live_tab.dart';
 part 'sre_alarms/sre_alerts_routing_and_slo_tabs.dart';
@@ -174,7 +175,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
     super.initState();
     _selectedStackId = widget.initialStackId;
     _selectedStackNodeId = widget.initialStackNodeId;
-    final tabLen = widget.isSreAlarmsMode ? 4 : 5;
+    final tabLen = widget.isSreAlarmsMode ? 4 : 6;
     final initIdx = widget.isSreAlarmsMode
         ? widget.initialSreTabIndex.clamp(0, 3)
         : 0;
@@ -600,6 +601,11 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                     _buildNagiosServiceMonitorTab(),
                     _buildSnmpSwitchesAndConnectorsTab(),
                     _buildPrometheusChartsAndAgentsTab(),
+                    ProvisioningWorkspaceView(
+                      api: widget.api,
+                      canEdit: widget.canEdit,
+                      onHostProvisioned: _loadOverview,
+                    ),
                   ],
           ),
         ),
@@ -1011,6 +1017,11 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
                       icon: Icon(Icons.multiline_chart_rounded, size: 16),
                       text:
                           '5. Gráficas Prometheus TSDB & Telemetría en Tiempo Real',
+                    ),
+                    Tab(
+                      icon: Icon(Icons.rocket_launch_rounded, size: 16),
+                      text:
+                          '6. Aprovisionamiento Ansible & Agentes (Linux / Windows / OTel)',
                     ),
                   ],
           );

@@ -834,6 +834,123 @@ class TlsCertificate(Base):
     location = relationship("Location")
 
 
+class ProvisioningCredential(Base):
+    """
+    Credencial reutilizable cifrada en reposo (Fernet AES-128-CBC + HMAC-SHA256) para
+    aprovisionamiento Ansible sobre servidores Linux (SSH) y Windows (WinRM).
+    """
+    __tablename__ = "provisioning_credentials"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(160), unique=True, nullable=False)
+    # credential_type: 'ssh_key' | 'ssh_password' | 'winrm'
+    credential_type = Column(String(32), default="ssh_key", nullable=False)
+    # os_family: 'linux' | 'windows'
+    os_family = Column(String(24), default="linux", nullable=False)
+    username = Column(String(120), default="root", nullable=False)
+    port = Column(Integer, default=22)
+
+    # Secretos cifrados con Fernet (jamás se exponen en claro en endpoints GET)
+    secret_ciphertext = Column(Text, default="")
+    passphrase_ciphertext = Column(Text, default="")
+    become_password_ciphertext = Column(Text, default="")
+
+    # Ajustes específicos WinRM (Windows Server)
+    winrm_transport = Column(String(32), default="ntlm")  # ntlm | basic
+    winrm_use_ssl = Column(Boolean, default=False)
+    winrm_validate_certs = Column(Boolean, default=False)
+
+    # Metadatos no sensibles visibles en el baúl
+    key_fingerprint = Column(String(180), default="")
+    notes = Column(Text, default="")
+    created_by = Column(String(120), default="admin")
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class ProvisioningJob(Base):
+    """
+    Trabajo asíncrono de verificación previa, auditoría hardware CMDB y despliegue
+    condicional de Exporters nativos (`node_exporter` / `windows_exporter`) y/o
+    OpenTelemetry Collector (`otelcol`) mediante Ansible.
+    """
+    __tablename__ = "provisioning_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_code = Column(String(64), unique=True, index=True, nullable=False)
+    title = Column(String(200), nullable=False)
+    # os_family: 'linux' | 'windows'
+    os_family = Column(String(24), default="linux", nullable=False)
+    # action_profile: 'verify_and_propose' | 'ensure_native_exporter' | 'ensure_otel_collector' | 'ensure_both'
+    action_profile = Column(String(48), default="verify_and_propose", nullable=False)
+    targets = Column(JSON, default=list)  # Lista de IPs o FQDNs objetivo
+
+    credential_id = Column(
+        Integer,
+        ForeignKey("provisioning_credentials.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    credential_mode = Column(String(24), default="vault")  # vault | ephemeral
+    target_location_id = Column(
+        Integer,
+        ForeignKey("locations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    host_groups = Column(JSON, default=list)
+    otel_endpoint_url = Column(String(255), default="")
+    use_local_cache = Column(Boolean, default=True)
+
+    # status: 'queued' | 'running' | 'completed' | 'partial' | 'failed'
+    status = Column(String(32), default="queued", index=True)
+    host_results = Column(JSON, default=dict)
+    console_log = Column(Text, default="")
+    created_by = Column(String(120), default="admin")
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+    credential = relationship("ProvisioningCredential")
+    target_location = relationship("Location")
+
+
+class ProvisioningToken(Base):
+    """
+    Token acotado de auto-alta sin SSH/WinRM entrante para scripts one-liner
+    (`.sh` en Linux / cloud-init y `.ps1` en Windows / GPO) y reenvío OTLP en DMZ.
+    """
+    __tablename__ = "provisioning_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(160), nullable=False)
+    token_hash = Column(String(128), unique=True, index=True, nullable=False)
+    token_prefix = Column(String(24), default="")
+    # os_family: 'linux' | 'windows' | 'any'
+    os_family = Column(String(24), default="any")
+    # action_profile: 'verify_and_propose' | 'ensure_native_exporter' | 'ensure_otel_collector' | 'ensure_both'
+    action_profile = Column(String(48), default="ensure_native_exporter")
+    target_location_id = Column(
+        Integer,
+        ForeignKey("locations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    host_groups = Column(JSON, default=list)
+    reusable = Column(Boolean, default=True)
+    uses_count = Column(Integer, default=0)
+    max_uses = Column(Integer, default=0)  # 0 = ilimitado mientras no expire o se revoque
+    expires_at = Column(DateTime, nullable=True)
+    revoked = Column(Boolean, default=False)
+    created_by = Column(String(120), default="admin")
+    last_used_at = Column(DateTime, nullable=True)
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=utcnow)
+
+    target_location = relationship("Location")
+
+
+
 
 
 
