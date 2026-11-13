@@ -318,6 +318,23 @@ class RackDocApiClient {
     return RackDetailModel.fromJson(Map<String, dynamic>.from(data));
   }
 
+  /// Obtiene en una sola consulta el alzado frontal multi-rack y todas sus conexiones.
+  Future<Map<String, dynamic>> getRacksElevationOverview({
+    int? locationId,
+    int? floorId,
+    int? roomId,
+  }) async {
+    final query = <String, String>{};
+    if (locationId != null) query['location_id'] = '$locationId';
+    if (floorId != null) query['floor_id'] = '$floorId';
+    if (roomId != null) query['room_id'] = '$roomId';
+    final uri = Uri.parse('$baseUrl/racks/elevation-overview').replace(
+      queryParameters: query.isEmpty ? null : query,
+    );
+    final data = await _enviar('GET', uri) as Map;
+    return Map<String, dynamic>.from(data);
+  }
+
   Future<void> updateRack(int rackId, Map<String, dynamic> payload) async {
     await _put('/racks/$rackId', payload);
   }

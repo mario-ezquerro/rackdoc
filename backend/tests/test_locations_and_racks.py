@@ -174,3 +174,33 @@ def test_excel_import_demo_3_racks_22_switches_subnet_23(
     assert cmdb_resp.status_code == 200
     subnets = cmdb_resp.json()["subnets"]
     assert any(s["cidr"] == "10.200.0.0/23" for s in subnets)
+
+    # Verifica también el endpoint de Alzado Frontal Multi-Rack sobre esta sede DEMO-SW
+    elev_all = client.get("/api/v1/racks/elevation-overview", headers=admin_headers)
+    assert elev_all.status_code == 200, elev_all.text
+    elev_data = elev_all.json()
+    demo_loc = next(
+        loc for loc in elev_data["locations"] if loc["code"] == "DEMO-SW"
+    )
+    assert demo_loc["racks_count"] == 3
+
+    elev_demo = client.get(
+        f"/api/v1/racks/elevation-overview?location_id={demo_loc['id']}",
+        headers=admin_headers,
+    )
+    assert elev_demo.status_code == 200, elev_demo.text
+    demo_payload = elev_demo.json()
+    assert len(demo_payload["racks"]) == 3
+    assert len(demo_payload["connections"]) == 59
+    inter_conns = [
+        c
+        for c in demo_payload["connections"]
+        if c["source_info"]["rack_id"] != c["target_info"]["rack_id"]
+    ]
+    intra_conns = [
+        c
+        for c in demo_payload["connections"]
+        if c["source_info"]["rack_id"] == c["target_info"]["rack_id"]
+    ]
+    assert len(inter_conns) == 28
+    assert len(intra_conns) == 31

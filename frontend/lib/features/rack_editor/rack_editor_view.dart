@@ -31,6 +31,7 @@ class RackEditorView extends StatefulWidget {
   final int? initialHighlightDeviceId;
   final List<DeviceTemplateModel> templates;
   final VoidCallback onBackToLocations;
+  final VoidCallback? onOpenElevationOverview;
   final ValueChanged<int> onSwitchRack;
   final void Function(int rackId, int? deviceId)? onJumpToRackAndDevice;
   final VoidCallback onTemplatesChanged;
@@ -45,6 +46,7 @@ class RackEditorView extends StatefulWidget {
     this.initialHighlightDeviceId,
     required this.templates,
     required this.onBackToLocations,
+    this.onOpenElevationOverview,
     required this.onSwitchRack,
     this.onJumpToRackAndDevice,
     required this.onTemplatesChanged,

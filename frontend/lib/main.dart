@@ -13,6 +13,7 @@ import 'features/datacenter/datacenter_floor_view.dart';
 import 'features/locations/locations_view.dart';
 import 'features/network_hosts/network_hosts_view.dart';
 import 'features/rack_editor/rack_editor_view.dart';
+import 'features/rack_editor/rack_elevation_overview_view.dart';
 import 'models/datacenter_models.dart';
 import 'shared/widgets/diagram_exporter.dart';
 
@@ -71,6 +72,7 @@ class _RackDocShellState extends State<RackDocShell> {
   int? _activeFloorId;
   int? _highlightedFloorDeviceId;
   int _activeRackId = 1;
+  bool _showRackElevationOverview = true;
   int? _highlightedDeviceId;
   int? _highlightedStackId;
   int? _highlightedStackNodeId;
@@ -323,6 +325,7 @@ class _RackDocShellState extends State<RackDocShell> {
     setState(() {
       _activeRackId = rackId;
       _highlightedDeviceId = highlightDeviceId;
+      _showRackElevationOverview = false;
       _activeNav = 'rack_editor';
     });
   }
@@ -1265,7 +1268,10 @@ class _RackDocShellState extends State<RackDocShell> {
                   icon: Icons.developer_board_outlined,
                   label: 'Racks',
                   active: _activeNav == 'rack_editor',
-                  onTap: () => setState(() => _activeNav = 'rack_editor'),
+                  onTap: () => setState(() {
+                    _activeNav = 'rack_editor';
+                    _showRackElevationOverview = true;
+                  }),
                 ),
                 _SidebarItem(
                   icon: Icons.account_tree_rounded,
@@ -1704,6 +1710,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                                       ),
                                                       selected: _activeNav ==
                                                               'rack_editor' &&
+                                                          !_showRackElevationOverview &&
                                                           _activeRackId ==
                                                               rk.id,
                                                       selectedTileColor:
@@ -1720,6 +1727,7 @@ class _RackDocShellState extends State<RackDocShell> {
                                                               )
                                                             : ((_activeNav ==
                                                                         'rack_editor' &&
+                                                                    !_showRackElevationOverview &&
                                                                     _activeRackId ==
                                                                         rk.id)
                                                                 ? const Color(
@@ -1738,12 +1746,14 @@ class _RackDocShellState extends State<RackDocShell> {
                                                           fontSize: 11,
                                                           fontWeight: (_activeNav ==
                                                                       'rack_editor' &&
+                                                                  !_showRackElevationOverview &&
                                                                   _activeRackId ==
                                                                       rk.id)
                                                               ? FontWeight.w700
                                                               : FontWeight.w500,
                                                           color: (_activeNav ==
                                                                       'rack_editor' &&
+                                                                  !_showRackElevationOverview &&
                                                                   _activeRackId ==
                                                                       rk.id)
                                                               ? const Color(
@@ -1985,7 +1995,12 @@ class _RackDocShellState extends State<RackDocShell> {
     final active = _activeNav == navKey;
     return InkWell(
       onTap: () {
-        setState(() => _activeNav = navKey);
+        setState(() {
+          _activeNav = navKey;
+          if (navKey == 'rack_editor') {
+            _showRackElevationOverview = true;
+          }
+        });
         if (navKey == 'dashboard') {
           _refreshDataSilently();
         }
@@ -2321,7 +2336,20 @@ class _RackDocShellState extends State<RackDocShell> {
       );
     }
 
+    if (_showRackElevationOverview) {
+      return RackElevationOverviewView(
+        api: _api,
+        activeLocationId: _activeLocationId,
+        onOpenRack: _openRack,
+        isKioskMode: _isKioskMode,
+        onToggleKioskMode: _toggleKioskMode,
+      );
+    }
+
     return RackEditorView(
+      key: ValueKey(
+        'rack_editor_${_activeRackId}_${_highlightedDeviceId ?? 0}',
+      ),
       api: _api,
       rackId: _activeRackId,
       initialHighlightDeviceId: _highlightedDeviceId,
@@ -2329,6 +2357,13 @@ class _RackDocShellState extends State<RackDocShell> {
       onBackToLocations: () {
         _refreshDataSilently();
         setState(() => _activeNav = 'datacenter');
+      },
+      onOpenElevationOverview: () {
+        _refreshDataSilently();
+        setState(() {
+          _highlightedDeviceId = null;
+          _showRackElevationOverview = true;
+        });
       },
       onSwitchRack: (rId) => _openRack(rId),
       onJumpToRackAndDevice: (rId, devId) =>

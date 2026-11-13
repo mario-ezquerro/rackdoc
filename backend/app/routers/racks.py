@@ -1,11 +1,13 @@
 """Racks, equipos montados, tomas exteriores y cableado."""
 
+from typing import Optional
+
 from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..database import get_db
 from ..logging_setup import get_logger
-from ..models import CmdbAsset, Connection, DeviceTemplate, Floor, FloorDevice, Port, Rack, RackDevice, Room, TlsCertificate
+from ..models import CmdbAsset, Connection, DeviceTemplate, Floor, FloorDevice, Location, Port, Rack, RackDevice, Room, TlsCertificate
 from ..rack_sync import _extract_floor_device_id_from_port, _sync_rack_floor_devices_box
 from ..schemas import ConnectionCreate, ConnectionSchema, ConnectionUpdate, ExternalOutletCreate, ExternalOutletUpdate, RackCreate, RackDeviceCreate, RackDeviceSchema, RackDeviceUpdate, RackUpdate
 from ..seed import create_ports_from_template, ensure_rack_external_outlets, get_or_create_external_feed_template, sync_external_outlet_ports
@@ -71,6 +73,143 @@ def list_all_racks(db: Session = Depends(get_db)):
             }
         )
     return out
+
+
+@api_router.get(
+    "/racks/elevation-overview",
+    tags=["Racks & Rack Devices", "Cabling & Connections"],
+    summary="Alzado frontal consolidado de múltiples Racks y sus conexiones Intra/Inter-Rack",
+    description=(
+        "Devuelve en una sola consulta los armarios Rack filtrados opcionalmente por Sede, Planta o Sala, "
+        "con todos sus equipos montados, puertos y la matriz global deduplicada de conexiones físicas."
+    ),
+)
+def get_racks_elevation_overview(
+    location_id: Optional[int] = None,
+    floor_id: Optional[int] = None,
+    room_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    """Construye el payload consolidado del previo de alzado frontal multi-rack."""
+    all_locations = db.query(Location).order_by(Location.id.asc()).all()
+    all_racks = (
+        db.query(Rack)
+        .options(
+            joinedload(Rack.room).joinedload(Room.floor).joinedload(Floor.location),
+            joinedload(Rack.room).selectinload(Room.aisles),
+            joinedload(Rack.aisle),
+            selectinload(Rack.devices).joinedload(RackDevice.template),
+            selectinload(Rack.devices).selectinload(RackDevice.ports),
+        )
+        .all()
+    )
+
+    racks_per_loc: dict[int, int] = {}
+    filtered_racks: list[Rack] = []
+    for rk in all_racks:
+        rm = rk.room
+        fl = rm.floor if rm else None
+        loc = fl.location if fl else None
+        if loc:
+            racks_per_loc[loc.id] = racks_per_loc.get(loc.id, 0) + 1
+        if location_id is not None and (not loc or loc.id != location_id):
+            continue
+        if floor_id is not None and (not fl or fl.id != floor_id):
+            continue
+        if room_id is not None and (not rm or rm.id != room_id):
+            continue
+        filtered_racks.append(rk)
+
+    filtered_racks.sort(
+        key=lambda rk: (
+            rk.room.floor.location.id if (rk.room and rk.room.floor and rk.room.floor.location) else 0,
+            rk.room.floor.level_number if (rk.room and rk.room.floor) else 0,
+            rk.room.id if rk.room else 0,
+            rk.code or "",
+        )
+    )
+
+    port_ids = [p.id for rk in filtered_racks for d in rk.devices for p in d.ports]
+    connections_serialized = []
+    if port_ids:
+        conns = (
+            db.query(Connection)
+            .options(
+                joinedload(Connection.source_port).joinedload(Port.device).joinedload(RackDevice.rack),
+                joinedload(Connection.target_port).joinedload(Port.device).joinedload(RackDevice.rack),
+            )
+            .filter(
+                (Connection.source_port_id.in_(port_ids))
+                | (Connection.target_port_id.in_(port_ids))
+            )
+            .order_by(Connection.id.asc())
+            .all()
+        )
+        seen_conn_ids: set[int] = set()
+        for c in conns:
+            if c.id in seen_conn_ids:
+                continue
+            seen_conn_ids.add(c.id)
+            connections_serialized.append(_serialize_connection(c).model_dump())
+
+    racks_serialized = []
+    for rk in filtered_racks:
+        room = rk.room
+        floor = room.floor if room else None
+        loc = floor.location if floor else None
+        devs_serialized = [
+            RackDeviceSchema.model_validate(d).model_dump()
+            for d in sorted(rk.devices, key=lambda x: x.start_u, reverse=True)
+        ]
+        racks_serialized.append(
+            {
+                "id": rk.id,
+                "code": rk.code or "",
+                "name": rk.name or "",
+                "total_units": rk.total_units,
+                "manufacturer": rk.manufacturer or "",
+                "model_name": rk.model_name or "",
+                "serial_number": rk.serial_number or "",
+                "responsible_person": rk.responsible_person or "",
+                "purchase_date": rk.purchase_date or "",
+                "operation_start": rk.operation_start or "",
+                "notes": rk.notes or "",
+                "room_id": rk.room_id,
+                "aisle_id": rk.aisle_id,
+                "breadcrumb": {
+                    "location_id": loc.id if loc else None,
+                    "location_code": loc.code if loc else "HQ",
+                    "location_name": loc.name if loc else "Headquarter",
+                    "floor_id": floor.id if floor else None,
+                    "floor_name": floor.name if floor else "Floor 1",
+                    "room_id": room.id if room else None,
+                    "room_name": room.name if room else "Room",
+                    "aisle_id": rk.aisle.id if rk.aisle else None,
+                    "aisle_code": rk.aisle.code if rk.aisle else "",
+                    "aisle_name": rk.aisle.name if rk.aisle else "Sin pasillo",
+                },
+                "available_aisles": [
+                    {"id": a.id, "code": a.code, "name": a.name, "aisle_type": a.aisle_type}
+                    for a in (room.aisles if room else [])
+                ],
+                "devices": devs_serialized,
+                "connections": [],
+            }
+        )
+
+    return {
+        "locations": [
+            {
+                "id": l.id,
+                "code": l.code,
+                "name": l.name,
+                "racks_count": racks_per_loc.get(l.id, 0),
+            }
+            for l in all_locations
+        ],
+        "racks": racks_serialized,
+        "connections": connections_serialized,
+    }
 
 
 @api_router.get(

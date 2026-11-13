@@ -1509,7 +1509,35 @@ extension _RackEditorCanvasSectionExt on _RackEditorViewState {
                 icon: const Icon(Icons.arrow_back_rounded, size: 20),
                 tooltip: 'Volver al Mapa de Sedes y Pasillos',
               ),
-            const SizedBox(width: 6),
+              if (widget.onOpenElevationOverview != null) ...[
+                const SizedBox(width: 4),
+                Tooltip(
+                  message:
+                      'Volver al Alzado Frontal de todos los Racks y sus conexiones',
+                  child: OutlinedButton.icon(
+                    onPressed: widget.onOpenElevationOverview,
+                    icon: const Icon(Icons.view_column_rounded, size: 16),
+                    label: const Text(
+                      'Alzado de Racks',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppPalette.blue700,
+                      backgroundColor: AppPalette.blue50,
+                      side: const BorderSide(color: AppPalette.blue300),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                ),
+              ],
+            const SizedBox(width: 8),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
