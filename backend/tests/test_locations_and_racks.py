@@ -96,3 +96,38 @@ def test_locations_racks_mount_and_u_collision(
         },
     )
     assert collision_resp.status_code == 409
+
+
+def test_rack_detail_tolerates_null_columns_and_cmdb_ip_release(
+    client: TestClient, admin_headers: Dict[str, str]
+) -> None:
+    """
+    Garantiza que liberar la IP/activo de un `RackDevice` desde CMDB o tener columnas
+    `NULL` heredadas en SQLite jamás provoca un `500 ValidationError` al cargar `/racks/{id}`.
+    """
+    from app.database import SessionLocal
+    from app.models import RackDevice
+
+    racks = client.get("/api/v1/racks", headers=admin_headers).json()
+    assert len(racks) >= 1
+    rack_id = racks[0]["id"]
+
+    # 1. Forzar NULL directo en SQLite sobre un equipo enracado y verificar GET /racks/{id}
+    db = SessionLocal()
+    try:
+        dev = db.query(RackDevice).filter(RackDevice.rack_id == rack_id).first()
+        assert dev is not None
+        dev.ip_address = None
+        dev.hostname = None
+        dev.notes = None
+        db.commit()
+        dev_id = dev.id
+    finally:
+        db.close()
+
+    detail_resp = client.get(f"/api/v1/racks/{rack_id}", headers=admin_headers)
+    assert detail_resp.status_code == 200, detail_resp.text
+    loaded_dev = next(d for d in detail_resp.json()["devices"] if d["id"] == dev_id)
+    assert loaded_dev["ip_address"] == ""
+    assert loaded_dev["hostname"] == ""
+    assert loaded_dev["notes"] == ""

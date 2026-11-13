@@ -4,7 +4,43 @@ Esquemas Pydantic v2 de validación de entrada y serialización de salida para l
 
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic_core import PydanticUndefined
+
+
+class _ORMBaseSchema(BaseModel):
+    """Clase base para esquemas ORM (`from_attributes=True`) tolerante a columnas `NULL` en SQLite."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_null_orm_fields(cls, data: Any) -> Any:
+        if data is None:
+            return data
+        out: Dict[str, Any] = {}
+        is_mapping = isinstance(data, dict)
+        for name, field in cls.model_fields.items():
+            val = (
+                data.get(name, PydanticUndefined)
+                if is_mapping
+                else getattr(data, name, PydanticUndefined)
+            )
+            if val is PydanticUndefined:
+                continue
+            if val is None and not field.is_required():
+                if field.default is not None and field.default is not PydanticUndefined:
+                    default_val = field.default
+                    if isinstance(default_val, list):
+                        val = list(default_val)
+                    elif isinstance(default_val, dict):
+                        val = dict(default_val)
+                    else:
+                        val = default_val
+                elif field.default_factory is not None:
+                    val = field.default_factory()
+            out[name] = val
+        return out
 
 
 class ManagementLinkSchema(BaseModel):
@@ -16,37 +52,35 @@ class ManagementLinkSchema(BaseModel):
     path: str = ""
 
 
-class PortSchema(BaseModel):
+class PortSchema(_ORMBaseSchema):
     """Esquema serializado de transferencia (`PortSchema`)."""
-    model_config = ConfigDict(from_attributes=True)
 
     id: int
     rack_device_id: int
-    port_number: str
-    label: str
-    face: str
-    port_type: str
-    row_index: int
-    col_index: int
-    rel_x: float
-    rel_y: float
+    port_number: str = ""
+    label: str = ""
+    face: str = "front"
+    port_type: str = "rj45"
+    row_index: int = 0
+    col_index: int = 0
+    rel_x: float = 0.5
+    rel_y: float = 0.5
     mac_or_ip: str = ""
     vlan: Optional[int] = None
 
 
-class DeviceTemplateSchema(BaseModel):
+class DeviceTemplateSchema(_ORMBaseSchema):
     """Esquema serializado de transferencia (`DeviceTemplateSchema`)."""
-    model_config = ConfigDict(from_attributes=True)
 
     id: int
     library_group: str = "Network"
-    category: str
-    manufacturer: str
-    model_name: str
-    u_height: int
-    is_full_depth: bool
-    default_color: str
-    layout_spec: Dict[str, Any]
+    category: str = "server"
+    manufacturer: str = "Generic"
+    model_name: str = ""
+    u_height: int = 1
+    is_full_depth: bool = False
+    default_color: str = "#F8FAFC"
+    layout_spec: Dict[str, Any] = {}
 
 
 class DeviceTemplateCreate(BaseModel):
@@ -107,15 +141,14 @@ class LoginRequest(BaseModel):
     ad_server_id: Optional[int] = None
 
 
-class UserSchema(BaseModel):
+class UserSchema(_ORMBaseSchema):
     """Esquema serializado de transferencia (`UserSchema`)."""
-    model_config = ConfigDict(from_attributes=True)
 
     id: int
     username: str
     email: str = ""
     full_name: str = ""
-    role: str  # admin | editor | operator | viewer
+    role: str = "viewer"  # admin | editor | operator | viewer
     auth_source: str = "local"
     ad_server_id: Optional[int] = None
     ad_dn: str = ""
@@ -146,20 +179,19 @@ class UserUpdate(BaseModel):
     ad_server_id: Optional[int] = None
 
 
-class ADServerSchema(BaseModel):
+class ADServerSchema(_ORMBaseSchema):
     """Esquema serializado de transferencia (`ADServerSchema`)."""
-    model_config = ConfigDict(from_attributes=True)
 
     id: int
-    name: str
-    ldap_url: str
-    domain: str
-    base_dn: str
-    bind_dn: str
-    user_filter: str
-    default_role: str
+    name: str = ""
+    ldap_url: str = ""
+    domain: str = ""
+    base_dn: str = ""
+    bind_dn: str = ""
+    user_filter: str = "(&(objectClass=user)(sAMAccountName={username}))"
+    default_role: str = "viewer"
     group_role_mapping: List[Dict[str, Any]] = []
-    enabled: bool
+    enabled: bool = True
 
 
 class ADServerCreate(BaseModel):
@@ -210,34 +242,33 @@ class ADUserImportRequest(BaseModel):
     users: List[ADUserImportItem]
 
 
-class RackDeviceSchema(BaseModel):
+class RackDeviceSchema(_ORMBaseSchema):
     """Esquema serializado de transferencia (`RackDeviceSchema`)."""
-    model_config = ConfigDict(from_attributes=True)
 
     id: int
     rack_id: int
     template_id: int
-    code: str
-    name: str
-    hostname: str
-    fqdn: str
-    start_u: int
-    mounted_face: str
-    ip_address: str
-    subnet_mask: str
-    gateway: str
-    mac_address: str
+    code: str = ""
+    name: str = ""
+    hostname: str = ""
+    fqdn: str = ""
+    start_u: int = 1
+    mounted_face: str = "front"
+    ip_address: str = ""
+    subnet_mask: str = "255.255.255.0"
+    gateway: str = ""
+    mac_address: str = ""
     vlan_mgmt: Optional[int] = None
     management_links: List[Dict[str, Any]] = []
-    monitoring_enabled: bool
-    monitor_method: str
-    monitor_port: int
-    status: str
+    monitoring_enabled: bool = False
+    monitor_method: str = "icmp"
+    monitor_port: int = 22
+    status: str = "unmonitored"
     last_ping_ms: Optional[float] = None
     last_checked_at: Optional[datetime] = None
-    serial_number: str
+    serial_number: str = ""
     custom_fields: Dict[str, Any] = {}
-    notes: str
+    notes: str = ""
     template: DeviceTemplateSchema
     ports: List[PortSchema] = []
 

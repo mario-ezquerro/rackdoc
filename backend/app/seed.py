@@ -2481,9 +2481,25 @@ def sync_system_defaults(db: Session):
             dev.status = "unmonitored"
             dev.last_ping_ms = None
 
+        for str_attr in (
+            "ip_address",
+            "hostname",
+            "fqdn",
+            "subnet_mask",
+            "gateway",
+            "mac_address",
+            "serial_number",
+            "notes",
+        ):
+            if getattr(dev, str_attr, None) is None:
+                setattr(dev, str_attr, "255.255.255.0" if str_attr == "subnet_mask" else "")
+
         dev.custom_fields = cf
 
     for fd in db.query(FloorDevice).all():
+        for str_attr in ("ip_address", "fqdn", "mac_address", "notes"):
+            if getattr(fd, str_attr, None) is None:
+                setattr(fd, str_attr, "")
         cf = dict(fd.custom_fields or {})
         ip_val = (fd.ip_address or "").strip()
         fqdn_val = (getattr(fd, "fqdn", "") or "").strip()

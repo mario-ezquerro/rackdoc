@@ -2038,11 +2038,11 @@ def resolve_cmdb_ip_collision(
         if other_ast.rack_device_id:
             rdev = db.query(RackDevice).filter(RackDevice.id == other_ast.rack_device_id).first()
             if rdev and (rdev.ip_address or "").strip() == ip_clean:
-                rdev.ip_address = new_ip_clean or None
+                rdev.ip_address = new_ip_clean or ""
         if other_ast.floor_device_id:
             fdev = db.query(FloorDevice).filter(FloorDevice.id == other_ast.floor_device_id).first()
             if fdev and (fdev.ip_address or "").strip() == ip_clean:
-                fdev.ip_address = new_ip_clean or None
+                fdev.ip_address = new_ip_clean or ""
         db.commit()
         return build_cmdb_overview(db)
 
@@ -2050,11 +2050,11 @@ def resolve_cmdb_ip_collision(
         if other_ast.rack_device_id:
             rdev = db.query(RackDevice).filter(RackDevice.id == other_ast.rack_device_id).first()
             if rdev and (rdev.ip_address or "").strip() == ip_clean:
-                rdev.ip_address = None
+                rdev.ip_address = ""
         if other_ast.floor_device_id:
             fdev = db.query(FloorDevice).filter(FloorDevice.id == other_ast.floor_device_id).first()
             if fdev and (fdev.ip_address or "").strip() == ip_clean:
-                fdev.ip_address = None
+                fdev.ip_address = ""
         db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.asset_id == other_ast.id).delete()
         db.query(SwitchSnmpPort).filter(SwitchSnmpPort.asset_id == other_ast.id).delete()
         db.query(LogicalTopologyLink).filter(

@@ -413,11 +413,11 @@ def delete_cmdb_asset_endpoint(asset_id: int, db: Session = Depends(get_db)):
     if asset.rack_device_id:
         rdev = db.query(RackDevice).filter(RackDevice.id == asset.rack_device_id).first()
         if rdev:
-            rdev.ip_address = None
+            rdev.ip_address = ""
     if asset.floor_device_id:
         fdev = db.query(FloorDevice).filter(FloorDevice.id == asset.floor_device_id).first()
         if fdev:
-            fdev.ip_address = None
+            fdev.ip_address = ""
 
     # Limpiar referencias en monitorización, topología, stack y CertScope
     db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.asset_id == asset.id).delete()
@@ -525,11 +525,11 @@ def delete_cmdb_ip_endpoint(ip_id: int, db: Session = Depends(get_db)):
         if ast.rack_device_id and ip_rec.is_heartbeat_ip:
             rdev = db.query(RackDevice).filter(RackDevice.id == ast.rack_device_id).first()
             if rdev and rdev.ip_address == ip_rec.ip_address:
-                rdev.ip_address = None
+                rdev.ip_address = ""
         if ast.floor_device_id and ip_rec.is_heartbeat_ip:
             fdev = db.query(FloorDevice).filter(FloorDevice.id == ast.floor_device_id).first()
             if fdev and fdev.ip_address == ip_rec.ip_address:
-                fdev.ip_address = None
+                fdev.ip_address = ""
     db.delete(ip_rec)
     db.commit()
     sync_prometheus_targets_file(db)
