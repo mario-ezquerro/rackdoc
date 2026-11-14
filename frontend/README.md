@@ -23,6 +23,6 @@ flutter analyze
 # Suite de tests unitarios y de widgets
 flutter test
 
-# Compilación de producción para el contenedor Nginx
-flutter build web --release --pwa-strategy=none
+# Compilación de producción WebAssembly (dart2wasm + skwasm con fallback JS) para Nginx
+flutter build web --release --wasm --pwa-strategy=none
 ```
