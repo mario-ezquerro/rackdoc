@@ -1,0 +1,143 @@
+---
+- name: "RackDoc Fase 2 — Auditoría Pasiva 100% Solo-Lectura Linux (Cero Escritura Remota)"
+  hosts: all
+  gather_facts: true
+  become: false
+  vars:
+    rackdoc_results_dir: "/tmp"
+
+  tasks:
+    - name: "1. Inspeccionar en memoria sockets en escucha, conexiones TCP establecidas, servicios y contenedores (RO)"
+      ansible.builtin.shell: |
+        python3 - <<'PYEOF'
+        import json, os, re, shutil, subprocess
+
+        def run_ro(cmd):
+            try:
+                p = subprocess.run(cmd, capture_output=True, text=True, timeout=6)
+                return p.stdout or ""
+            except Exception:
+                return ""
+
+        listening = []
+        seen_listen = set()
+        ss_listen = run_ro(["ss", "-tulnpH"])
+        for line in ss_listen.splitlines():
+            parts = line.split()
+            if len(parts) < 5:
+                continue
+            proto = parts[0].lower()
+            local_addr = parts[4]
+            if ":" not in local_addr:
+                continue
+            bind_ip, _, port_str = local_addr.rpartition(":")
+            bind_ip = bind_ip.strip("[]")
+            if not port_str.isdigit():
+                continue
+            port_num = int(port_str)
+            proc_match = re.search(r'users:\(\("([^"]+)"', line)
+            proc_name = proc_match.group(1) if proc_match else ""
+            key = (proto, port_num, proc_name)
+            if key not in seen_listen:
+                seen_listen.add(key)
+                listening.append({
+                    "proto": proto,
+                    "port": port_num,
+                    "bind": bind_ip,
+                    "process": proc_name,
+                })
+
+        peers = []
+        seen_peers = set()
+        ss_est = run_ro(["ss", "-tnpH", "state", "established"])
+        for line in ss_est.splitlines():
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            # Formato con -H sin columna Netid: Recv-Q Send-Q Local Peer [Process]
+            local_col = parts[2] if ":" in parts[2] else (parts[3] if len(parts) > 3 else "")
+            peer_col = parts[3] if ":" in parts[2] else (parts[4] if len(parts) > 4 else "")
+            if ":" not in peer_col:
+                continue
+            rem_ip, _, rem_port_s = peer_col.rpartition(":")
+            rem_ip = rem_ip.strip("[]").replace("::ffff:", "")
+            if not rem_port_s.isdigit() or rem_ip in ("127.0.0.1", "::1", ""):
+                continue
+            rem_port = int(rem_port_s)
+            # Evitar contar la propia sesión SSH entrante de Ansible si el puerto local es 22
+            _, _, loc_port_s = local_col.rpartition(":")
+            if loc_port_s == "22":
+                continue
+            proc_match = re.search(r'users:\(\("([^"]+)"', line)
+            proc_name = proc_match.group(1) if proc_match else ""
+            pkey = (rem_ip, rem_port, proc_name)
+            if pkey not in seen_peers:
+                seen_peers.add(pkey)
+                peers.append({
+                    "remote_ip": rem_ip,
+                    "remote_port": rem_port,
+                    "process": proc_name,
+                })
+
+        services = []
+        if shutil.which("systemctl"):
+            out_svc = run_ro(["systemctl", "list-units", "--type=service", "--state=running", "--no-pager", "--no-legend"])
+            for sline in out_svc.splitlines()[:50]:
+                sp = sline.split()
+                if sp:
+                    services.append(sp[0].replace(".service", ""))
+
+        containers = []
+        for runtime in ("docker", "podman"):
+            if shutil.which(runtime):
+                out_ct = run_ro([runtime, "ps", "--format", "{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}"])
+                for cline in out_ct.splitlines()[:40]:
+                    cparts = cline.split("|")
+                    if len(cparts) >= 3:
+                        containers.append({
+                            "runtime": runtime,
+                            "name": cparts[0],
+                            "image": cparts[1],
+                            "status": cparts[2],
+                            "ports": cparts[3] if len(cparts) > 3 else "",
+                        })
+
+        vhosts_and_dbs = []
+        for conf_dir in ("/etc/nginx/sites-enabled", "/etc/nginx/conf.d", "/etc/apache2/sites-enabled", "/etc/httpd/conf.d"):
+            if os.path.isdir(conf_dir):
+                try:
+                    for fname in sorted(os.listdir(conf_dir))[:20]:
+                        vhosts_and_dbs.append(f"{conf_dir}/{fname}")
+                except Exception:
+                    pass
+
+        print(json.dumps({
+            "listening_ports": sorted(listening, key=lambda x: x["port"])[:60],
+            "peer_connections": peers[:60],
+            "running_services": services[:50],
+            "containers": containers[:40],
+            "web_vhosts_or_dbs": vhosts_and_dbs[:30],
+        }))
+        PYEOF
+      args:
+        executable: /bin/bash
+      register: ro_probe
+      changed_when: false
+
+    - name: "2. Guardar instantánea JSON localmente en el controlador RackDoc (cero trazas en servidor remoto)"
+      ansible.builtin.copy:
+        dest: "{{ rackdoc_results_dir }}/{{ inventory_hostname }}.json"
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'target': inventory_hostname,
+              'hostname': ansible_hostname | default(inventory_hostname),
+              'fqdn': ansible_fqdn | default(''),
+              'os_or_sysdescr': (ansible_distribution | default('Linux')) ~ ' ' ~ (ansible_distribution_version | default('')) ~ ' (' ~ (ansible_kernel | default('')) ~ ')',
+              'probe': (ro_probe.stdout | trim | from_json)
+            } | to_nice_json
+          }}
+      delegate_to: localhost
+      become: false
+      changed_when: false

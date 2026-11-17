@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
     && ansible-galaxy collection install ansible.windows community.windows
 
 COPY ./app ./app
+COPY ./mcp_server ./mcp_server
 COPY alembic.ini .
 COPY ./alembic ./alembic
 COPY ./tools ./tools

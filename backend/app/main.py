@@ -26,12 +26,14 @@ from .seed import seed_initial_data, sync_system_defaults
 from .uploads_store import _sanitize_missing_upload_urls
 from .routers._common import (
     agent_or_session_router,
+    ai_readonly_router,
     api_router,
     automation_router,
     public_router,
 )
 from .services.cmdb_service import ensure_cmdb_seed_data
 from .services.network_host_service import ensure_network_hosts_seeded
+from .services.ai_agent_service import background_ai_auto_audit_loop
 
 # Importar cada router registra sus endpoints en los objetos APIRouter de _common.
 from .routers import (  # noqa: F401
@@ -46,6 +48,7 @@ from .routers import (  # noqa: F401
     automation,
     certscope,
     provisioning,
+    ai_agent,
 )
 
 OPENAPI_TAGS_METADATA = [
@@ -172,12 +175,16 @@ async def lifespan(app: FastAPI):
     worker_task = asyncio.create_task(
         _background_heartbeat_loop(stop_event, wakeup_event)
     )
+    ai_audit_task = asyncio.create_task(
+        background_ai_auto_audit_loop(stop_event)
+    )
     try:
         yield
     finally:
         stop_event.set()
         despertar_monitorizacion()
         worker_task.cancel()
+        ai_audit_task.cancel()
 
 
 app = FastAPI(
@@ -235,7 +242,7 @@ app.add_middleware(
     allow_origins=CORS_ALLOW_ORIGINS,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "X-API-Key"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-API-Key", "X-AI-Readonly-Key"],
 )
 
 
@@ -245,6 +252,7 @@ for _prefijo, _en_esquema in (("/api/v1", True), ("/api", False)):
     app.include_router(public_router, prefix=_prefijo, include_in_schema=_en_esquema)
     app.include_router(automation_router, prefix=_prefijo, include_in_schema=_en_esquema)
     app.include_router(agent_or_session_router, prefix=_prefijo, include_in_schema=_en_esquema)
+    app.include_router(ai_readonly_router, prefix=_prefijo, include_in_schema=_en_esquema)
     app.include_router(api_router, prefix=_prefijo, include_in_schema=_en_esquema)
 
 

@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'core/api_client.dart';
 import 'core/image_file_picker.dart';
 import 'features/admin/admin_view.dart';
+import 'features/ai_agent/ai_agent_view.dart';
 import 'features/certscope/certscope_view.dart';
 import 'features/cmdb/cmdb_view.dart';
 import 'features/datacenter/datacenter_floor_view.dart';
@@ -1307,6 +1308,12 @@ class _RackDocShellState extends State<RackDocShell> {
                   onTap: () => _openSreAlarms(tabIndex: 0),
                 ),
                 _SidebarItem(
+                  icon: Icons.auto_awesome_rounded,
+                  label: 'Agente IA (RO)',
+                  active: _activeNav == 'ai_agent',
+                  onTap: () => setState(() => _activeNav = 'ai_agent'),
+                ),
+                _SidebarItem(
                   icon: Icons.settings_rounded,
                   label: 'Administración',
                   active: _activeNav == 'admin',
@@ -2312,6 +2319,26 @@ class _RackDocShellState extends State<RackDocShell> {
         },
         onNavigateToCmdb: () {
           setState(() => _activeNav = 'cmdb');
+        },
+      );
+    }
+
+    if (_activeNav == 'ai_agent') {
+      return AiAgentView(
+        key: const ValueKey('ai_agent_view'),
+        api: _api,
+        canEdit: _currentUser.canEdit,
+        canGenerateDocs: _currentUser.canConnectRemote,
+        isAdmin: _currentUser.isAdmin,
+        onOpenAdminAiSettings: () => setState(() => _activeNav = 'admin'),
+        onNavigateToRack: (rackId, deviceId) =>
+            _openRack(rackId, highlightDeviceId: deviceId),
+        onNavigateToTechStack: (stackId) {
+          setState(() {
+            _highlightedStackId = stackId;
+            _highlightedStackNodeId = null;
+            _activeNav = 'network_hosts';
+          });
         },
       );
     }

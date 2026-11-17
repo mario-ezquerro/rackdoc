@@ -1106,4 +1106,162 @@ class RackDocApiClient {
       await _delete('/provisioning/tokens/$tokenId') as Map,
     );
   }
+
+  // ===========================================================================
+  // 10. AGENTE IA SOLO-LECTURA Y DOCUMENTADOR AUTOMÁTICO (OLLAMA LOCAL / CLOUD + MCP)
+  // ===========================================================================
+  Future<Map<String, dynamic>> getAiAgentSettings() async {
+    return Map<String, dynamic>.from(await _get('/ai-agent/settings') as Map);
+  }
+
+  Future<Map<String, dynamic>> updateAiAgentSettings(
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _put('/ai-agent/settings', payload) as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> testAiAgentProvider() async {
+    return Map<String, dynamic>.from(
+      await _post('/ai-agent/settings/test', const <String, dynamic>{}) as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> pullOllamaModel(String modelName) async {
+    return Map<String, dynamic>.from(
+      await _post('/ai-agent/settings/ollama/pull', {'model_name': modelName})
+          as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> rotateMcpReadonlyToken() async {
+    return Map<String, dynamic>.from(
+      await _post(
+            '/ai-agent/settings/mcp-token/rotate',
+            const <String, dynamic>{},
+          )
+          as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> getAiAgentOverview() async {
+    return Map<String, dynamic>.from(await _get('/ai-agent/overview') as Map);
+  }
+
+  Future<Map<String, dynamic>> generateAiDocument(
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _post('/ai-agent/documents/generate', payload) as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> getAiDocumentDetail(int docId) async {
+    return Map<String, dynamic>.from(
+      await _get('/ai-agent/documents/$docId') as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> deleteAiDocument(int docId) async {
+    return Map<String, dynamic>.from(
+      await _delete('/ai-agent/documents/$docId') as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> sendAiReadonlyChat(
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _post('/ai-agent/chat', payload) as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> scanCmdbSuggestions() async {
+    return Map<String, dynamic>.from(
+      await _post('/ai-agent/suggestions/scan', const <String, dynamic>{})
+          as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> applyCmdbSuggestion(int suggestionId) async {
+    return Map<String, dynamic>.from(
+      await _post(
+            '/ai-agent/suggestions/$suggestionId/apply',
+            const <String, dynamic>{},
+          )
+          as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> dismissCmdbSuggestion(int suggestionId) async {
+    return Map<String, dynamic>.from(
+      await _post(
+            '/ai-agent/suggestions/$suggestionId/dismiss',
+            const <String, dynamic>{},
+          )
+          as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> getPassiveDiscoveryOverview() async {
+    return Map<String, dynamic>.from(
+      await _get('/ai-agent/passive-discovery') as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> runPassiveHostAudit(
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _post('/ai-agent/passive-discovery/audit-hosts', payload) as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> runPassiveSnmpWalk(
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _post('/ai-agent/passive-discovery/snmp-walk', payload) as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> applyPassiveSnapshotTopology(
+    int snapshotId,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _post(
+            '/ai-agent/passive-discovery/$snapshotId/apply-topology',
+            const <String, dynamic>{},
+          )
+          as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> deletePassiveSnapshot(int snapshotId) async {
+    return Map<String, dynamic>.from(
+      await _delete('/ai-agent/passive-discovery/$snapshotId') as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> getAiAnalyzedNetworkSchema({
+    String scopeType = 'global_cpd',
+    int? scopeTargetId,
+  }) async {
+    final params = <String, dynamic>{'scope_type': scopeType};
+    if (scopeTargetId != null) {
+      params['scope_target_id'] = scopeTargetId;
+    }
+    return Map<String, dynamic>.from(
+      await _get('/ai-agent/network-schema', params) as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> publishAiNetworkSchemaToStack(
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _post('/ai-agent/network-schema/publish-stack', payload) as Map,
+    );
+  }
 }

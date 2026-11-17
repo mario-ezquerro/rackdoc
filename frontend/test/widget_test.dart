@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rackdoc_frontend/features/ai_agent/widgets/mermaid_visual_viewer.dart';
 import 'package:rackdoc_frontend/main.dart';
 import 'package:rackdoc_frontend/models/datacenter_models.dart';
 
@@ -71,6 +72,25 @@ void main() {
       expect(ldapsServer.useSsl, isTrue);
       expect(ldapsServer.port, 636);
       expect(ldapsServer.isActive, isTrue);
+    });
+
+    test('parseAndLayoutMermaid parses nodes, labels and dashed edges cleanly', () {
+      const sample = '''
+```mermaid
+flowchart TD
+    ROOT["CPD Completo"]
+    R_01["Rack RACK-01 (12/42U)"]
+    ROOT --> R_01
+    R_01 -.-> A_VM01["VM-WEB-01 10.20.1.10"]
+    A_VM01 -->|"PostgreSQL :5432"| A_DB01["DB-PG-01 10.20.1.50"]
+```
+''';
+      final layout = parseAndLayoutMermaid(sample);
+      expect(layout.direction, 'TD');
+      expect(layout.nodes.length, 4);
+      expect(layout.edges.length, 3);
+      expect(layout.edges.any((e) => e.dashed), isTrue);
+      expect(layout.edges.any((e) => e.label == 'PostgreSQL :5432'), isTrue);
     });
   });
 }

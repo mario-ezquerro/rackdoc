@@ -1,0 +1,73 @@
+---
+- name: "RackDoc Fase 2 — Auditoría Pasiva 100% Solo-Lectura Windows (WinRM RO, Cero Escritura Remota)"
+  hosts: all
+  gather_facts: false
+  vars:
+    rackdoc_results_dir: "/tmp"
+
+  tasks:
+    - name: "1. Consultar puertos, conexiones TCP establecidas, servicios e IIS en modo solo-lectura"
+      ansible.windows.win_powershell:
+        script: |
+          $Ansible.Changed = $false
+          $ErrorActionPreference = 'SilentlyContinue'
+          $os = Get-CimInstance Win32_OperatingSystem
+          $cs = Get-CimInstance Win32_ComputerSystem
+
+          $procMap = @{}
+          Get-Process | ForEach-Object { $procMap[$_.Id] = $_.ProcessName }
+
+          $listening = @()
+          Get-NetTCPConnection -State Listen | Select-Object -First 60 | ForEach-Object {
+            $pName = if ($procMap.ContainsKey([int]$_.OwningProcess)) { $procMap[[int]$_.OwningProcess] } else { '' }
+            $listening += @{
+              proto = 'tcp'
+              port = [int]$_.LocalPort
+              bind = [string]$_.LocalAddress
+              process = [string]$pName
+            }
+          }
+
+          $peers = @()
+          Get-NetTCPConnection -State Established | Where-Object {
+            $_.RemoteAddress -notin @('127.0.0.1', '::1', '0.0.0.0') -and $_.LocalPort -notin @(5985, 5986)
+          } | Select-Object -First 60 | ForEach-Object {
+            $pName = if ($procMap.ContainsKey([int]$_.OwningProcess)) { $procMap[[int]$_.OwningProcess] } else { '' }
+            $peers += @{
+              remote_ip = [string]$_.RemoteAddress
+              remote_port = [int]$_.RemotePort
+              process = [string]$pName
+            }
+          }
+
+          $services = @(Get-Service | Where-Object { $_.Status -eq 'Running' } | Select-Object -First 50 -ExpandProperty Name)
+
+          $vhosts = @()
+          if (Get-Command Get-Website -ErrorAction SilentlyContinue) {
+            Get-Website | ForEach-Object { $vhosts += "IIS:$($_.Name) ($($_.State))" }
+          }
+
+          $out = @{
+            target = '{{ inventory_hostname }}'
+            hostname = [string]$cs.Name
+            fqdn = "$($cs.Name).$($cs.Domain)"
+            os_or_sysdescr = [string]$os.Caption
+            probe = @{
+              listening_ports = $listening
+              peer_connections = $peers
+              running_services = $services
+              containers = @()
+              web_vhosts_or_dbs = $vhosts
+            }
+          }
+          $Ansible.Result = ($out | ConvertTo-Json -Depth 6 -Compress)
+      register: win_ro_probe
+      changed_when: false
+
+    - name: "2. Guardar instantánea JSON localmente en el controlador RackDoc"
+      ansible.builtin.copy:
+        dest: "{{ rackdoc_results_dir }}/{{ inventory_hostname }}.json"
+        mode: "0600"
+        content: "{{ win_ro_probe.result }}"
+      delegate_to: localhost
+      changed_when: false

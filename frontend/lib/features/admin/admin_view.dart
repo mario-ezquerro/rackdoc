@@ -4,6 +4,7 @@ import '../../core/theme.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_client.dart';
 import '../../models/datacenter_models.dart';
+import '../ai_agent/widgets/ai_engine_admin_card.dart';
 
 /// Vista de **`9. Administración`**: gestión de usuarios locales, servidores Active Directory / LDAP
 /// (prueba de conexión en vivo, búsqueda e importación), roles RBAC y motor Heartbeat.
@@ -1244,6 +1245,8 @@ class _AdminViewState extends State<AdminView> {
           ),
 
           const SizedBox(height: 18),
+
+          if (widget.currentUser.isAdmin) AiEngineAdminCard(api: widget.api),
 
           // TARJETA DE CONFIGURACIÓN DEL MOTOR DE HEARTBEAT EN BACKGROUND
           Container(

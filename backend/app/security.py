@@ -25,7 +25,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from .database import get_db
-from .models import User
+from .models import AiAgentSettings, User
 
 # ---------------------------------------------------------------------------
 # Configuración
@@ -42,6 +42,7 @@ JWT_SECRET_IS_EPHEMERAL = not _env_secret
 JWT_SECRET = _env_secret or secrets.token_urlsafe(48)
 
 AUTOMATION_API_KEY = (os.getenv("AUTOMATION_API_KEY", "") or "").strip()
+AI_READONLY_API_KEY = (os.getenv("AI_READONLY_API_KEY", "") or "").strip()
 _ANSIBLE_VAULT_ENV = (os.getenv("ANSIBLE_VAULT_SECRET", "") or "").strip()
 
 
@@ -215,10 +216,17 @@ _ADMIN_PREFIXES = (
     "/users",
     "/ad-servers",
     "/settings/monitoring",
+    "/ai-agent/settings",
 )
 
+# Consultas conversacionales 100% solo-lectura que usan POST para enviar el cuerpo JSON
+# pero jamás alteran la base de datos ni lanzan sondas intrusivas contra equipos.
+_VIEWER_POST_PATHS = frozenset({
+    "/ai-agent/chat",
+})
+
 # Acciones de interacción que un 'operator' puede lanzar aunque usen POST,
-# porque consultan o contactan equipos sin modificar el inventario.
+# porque consultan o contactan equipos o generan informes IA sin modificar el inventario.
 _OPERATOR_ACTION_SUFFIXES = (
     "/ping",
     "/ping-all",
@@ -237,6 +245,10 @@ _OPERATOR_ACTION_SUFFIXES = (
     "/notify",
     "/precheck",
     "/launch",
+    "/documents/generate",
+    "/suggestions/scan",
+    "/audit-hosts",
+    "/snmp-walk",
 )
 
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -261,6 +273,9 @@ def minimum_role_for(method: str, path: str) -> str:
         return "admin"
 
     if method in _SAFE_METHODS:
+        return "viewer"
+
+    if method == "POST" and route in _VIEWER_POST_PATHS:
         return "viewer"
 
     if route.endswith(_OPERATOR_ACTION_SUFFIXES):
@@ -384,6 +399,70 @@ def require_automation_key_or_session(
         detail=(
             "Se requiere una sesión válida ('Authorization: Bearer <JWT>') o la "
             "clave de automatización ('X-API-Key')."
+        ),
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def require_ai_readonly_key_or_session(
+    request: Request,
+    x_ai_readonly_key: Optional[str] = Header(default=None),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> None:
+    """
+    Guardia estricta de SOLO LECTURA para el Servidor MCP (`rackdoc-mcp`) y agentes IA:
+    1. Bloquea en seco cualquier método distinto de GET/HEAD/OPTIONS salvo el único
+       endpoint aislado de guardado de informes IA (`POST /ai-readonly/documents`).
+    2. Acepta `X-AI-Readonly-Key` (contra `AI_READONLY_API_KEY` en `.env` o el token
+       rotado en `AiAgentSettings.mcp_token_hash`) o un JWT de sesión activo.
+    """
+    method = (request.method or "GET").upper()
+    route = strip_api_prefix(request.url.path).rstrip("/") or "/"
+    if method not in _SAFE_METHODS and not (
+        method == "POST" and route == "/ai-readonly/documents"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Modo Solo-Lectura estricto: los agentes IA y clientes MCP no pueden "
+                "ejecutar operaciones de escritura sobre la infraestructura ni la CMDB."
+            ),
+        )
+
+    provided_key = (x_ai_readonly_key or "").strip()
+    bearer = ((credentials.credentials if credentials else None) or "").strip()
+
+    for candidate in (provided_key, bearer):
+        if not candidate:
+            continue
+        if AI_READONLY_API_KEY and secrets.compare_digest(candidate, AI_READONLY_API_KEY):
+            return
+        ai_cfg = db.query(AiAgentSettings).order_by(AiAgentSettings.id.asc()).first()
+        if ai_cfg and ai_cfg.mcp_token_hash:
+            cand_hash = hashlib.sha256(candidate.encode("utf-8")).hexdigest()
+            if secrets.compare_digest(cand_hash, ai_cfg.mcp_token_hash):
+                return
+
+    if bearer:
+        try:
+            payload = jwt.decode(
+                bearer,
+                JWT_SECRET,
+                algorithms=[JWT_ALGORITHM],
+                options={"require": ["exp", "sub"]},
+            )
+            usuario = db.query(User).filter(User.id == int(payload.get("sub") or 0)).first()
+            if usuario and usuario.is_active:
+                return
+        except (jwt.PyJWTError, TypeError, ValueError):
+            pass
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=(
+            "Se requiere cabecera 'X-AI-Readonly-Key' válida (configura AI_READONLY_API_KEY "
+            "o genera un token MCP en 9. Administración) o sesión JWT activa."
         ),
         headers={"WWW-Authenticate": "Bearer"},
     )

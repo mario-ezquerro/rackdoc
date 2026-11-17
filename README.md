@@ -1,16 +1,16 @@
 # 🗄️ RackDoc8 — Visual Datacenter, 42U Rack Editor, CMDB Multi-IP, CertScope & SRE Telemetry (DCIM)
 
-**RackDoc8 (`v1.3.1`)** es una plataforma integral de gestión visual de centros de datos (**DCIM**), **CMDB Multi-IP con control anti-colisiones**, **Auditoría de Certificados X.509 (`CertScope`)**, **Topología Lógica / Stack Tecnológico 2D**, **Centro de Operaciones y Alarmas SRE** y **Telemetría Real (Heartbeat + Nagios + SNMP + Prometheus + OpenTelemetry)** desarrollada con **Flutter Web** (Canvas 2D interactivo estilo CAD + selección global de texto), **FastAPI (Python 3.12)**, **SQLAlchemy 2.0 + Alembic**, **SQLite WAL**, **Active Directory / LDAP (`ldap3`)**, **Prometheus TSDB** y **Docker Compose**.
+**RackDoc8 (`v1.4.0`)** es una plataforma integral de gestión visual de centros de datos (**DCIM**), **CMDB Multi-IP con control anti-colisiones**, **Auditoría de Certificados X.509 (`CertScope`)**, **Topología Lógica / Stack Tecnológico 2D**, **Centro de Operaciones y Alarmas SRE**, **Agente IA Analista y Autodocumentador Solo-Lectura (`Ollama Local` + `MCP`)** y **Telemetría Real (Heartbeat + Nagios + SNMP + Prometheus + OpenTelemetry)** desarrollada con **Flutter Web** (Canvas 2D interactivo estilo CAD + selección global de texto), **FastAPI (Python 3.12)**, **SQLAlchemy 2.0 + Alembic**, **SQLite WAL**, **Active Directory / LDAP (`ldap3`)**, **Prometheus TSDB**, **Ollama** y **Docker Compose**.
 
-Diseñada para operar sobre **infraestructura real**: las sondas de red, los chequeos de servicio, la negociación TLS, la autenticación LDAP/AD, la exposición Prometheus y el inventario parten siempre de una medida o de un dato introducido, nunca de valores inventados.
+Diseñada para operar sobre **infraestructura real**: las sondas de red, los chequeos de servicio, el descubrimiento pasivo solo-lectura (`SSH`/`WinRM` + `SNMP IF-MIB/LLDP-MIB`), la negociación TLS, la autenticación LDAP/AD, la exposición Prometheus y el inventario parten siempre de una medida o de un dato introducido, nunca de valores inventados.
 
-> **Antes de nada, revisa [⚠️ Estado de implementación](#️-estado-de-implementación).** Dos capacidades que aparecen en la interfaz están **a medias o sin implementar**: el *walk* SNMP de bocas (`IF-MIB` / `LLDP-MIB`) y la sincronización remota de los conectores que no son SNMP ni exporters de Prometheus (además del envío por webhook en `8. Alarmas SRE`, donde hoy opera SMTP real). Se documentan ahí con exactitud.
+> **Antes de nada, revisa [⚠️ Estado de implementación](#️-estado-de-implementación).** La sincronización remota de conectores propietarios distintos de SNMP/Prometheus (`proxmox_ve`, `vmware_vsphere`, `kubernetes`) y el despacho por webhook en `8. Alarmas SRE` (donde hoy opera SMTP real) son parciales y se documentan ahí con exactitud.
 
 ---
 
-## 🧭 Los 9 Módulos Principales de RackDoc8
+## 🧭 Los 10 Módulos Principales de RackDoc8
 
-La barra lateral izquierda estructura el flujo completo de extremo a extremo en **9 módulos** más el conmutador unificado de **`Modo Kiosco (Monitor)`**, manteniendo **todos los textos e inspectores seleccionables y copiables (`Ctrl+C` / `Cmd+C`)** sin interferir con el arrastre en los lienzos 2D:
+La barra lateral izquierda estructura el flujo completo de extremo a extremo en **10 módulos** más el conmutador unificado de **`Modo Kiosco (Monitor)`**, manteniendo **todos los textos e inspectores seleccionables y copiables (`Ctrl+C` / `Cmd+C`)** sin interferir con el arrastre en los lienzos 2D:
 
 ### 1. 📍 `1. Locations (Mapa)` — Mapa Geográfico OpenStreetMap y Planos Personalizados
 - Visualización interactiva sobre **OpenStreetMap** sin necesidad de API Keys (*OSM Estándar*, *OSM Claro* y *Topográfico*) con buscador mundial de direcciones y coordenadas (**Nominatim**).
@@ -109,13 +109,23 @@ Cabecera adaptativa de ancho completo y **4 pestañas especializadas**:
 
 ---
 
+### 10. ✨ `10. Agente IA (Solo-Lectura)` — Autodocumentación, Esquemas 2D, SPOFs, FinOps, Descubrimiento Pasivo RO y MCP
+Opera bajo un **Triple Candado Solo-Lectura** (`Zero-Touch` hacia la red + sanitizador de secretos + `Human-in-the-Loop` sobre la CMDB), apoyado por defecto en **`rackdoc-ollama` (`qwen2.5:7b` local On-Premise)** o conmutable desde `9. Administración` a proveedores externos cifrados con Fernet (`OpenAI-compatible`, `Gemini`, `Anthropic`):
+1. **`1. Autodocumentación & Runbooks`**: genera dossiers técnicos en Markdown (`.md` descargable) + diagramas `Mermaid` por CPD, Sede, Rack, Stack o Host.
+2. **`2. Esquemas de Red 2D (IA)`**: lienzo CAD interactivo en **5 capas** que combina cableado físico, virtualización, enlaces lógicos y flujos descubiertos pasivamente en modo RO, con exportación directa a **`.DRAWIO` (Visio)**, **`.DIA`**, **`.PNG` (2x)**, **`.PDF` (A4)**, **`.SVG`**, **`.CSV`** y publicación en 1 clic hacia **`4. Red & Host`**.
+3. **`3. SPOFs, SRE & FinOps`**: detección determinista de puntos únicos de fallo (hipervisor, bastidor, energía), activos críticos sin guardia SRE, certificados por caducar y análisis de capacidad/sobredimensionamiento contra **Prometheus TSDB**.
+4. **`4. Copiloto Solo-Lectura`** y **`5. Borradores CMDB`** aplicables con 1 clic.
+5. **`6. Descubrimiento Pasivo RO`**: auditoría en memoria sin escritura remota por **SSH Linux / WinRM Windows** (puertos escuchando, conexiones TCP entre máquinas y contenedores Docker) + **Walk SNMP `IF-MIB` + `LLDP-MIB`** sobre switches, además del **Servidor MCP Oficial (`backend/mcp_server/rackdoc_mcp.py`)**.
+
+---
+
 ## ⚠️ Estado de implementación
 
-RackDoc no inventa medidas: las sondas, los chequeos de servicio, la autenticación LDAP/AD y las métricas que publica salen siempre de una comprobación real o de un dato introducido a mano. Quedan dos áreas parciales/pendientes que conviene conocer:
+RackDoc no inventa medidas: las sondas, los chequeos de servicio, la autenticación LDAP/AD y las métricas que publica salen siempre de una comprobación real o de un dato introducido a mano. Detalle de alcance actual:
 
-### 1. Inventario de bocas por SNMP (`IF-MIB` / `LLDP-MIB`) — sin implementar
-- **Qué sí hace**: `POST /api/v1/network-hosts/snmp-discover` envía un `GetRequest` SNMP real (ASN.1/BER v1/v2c/v3) al puerto `161/UDP` (`sysDescr`), dando de alta o actualizando el switch en la CMDB.
-- **Qué no hace**: no recorre `IF-MIB` ni `LLDP-MIB`; la tabla `switch_snmp_ports` permanece vacía hasta que se implemente el `GetNextRequest`/`GetBulkRequest` iterativo.
+### 1. Inventario de bocas por SNMP (`IF-MIB` / `LLDP-MIB`)
+- **En `10. Agente IA (RO) -> 6. Descubrimiento Pasivo RO` (`POST /api/v1/ai-agent/passive-discovery/snmp-walk`)**: recorre **`IF-MIB` y `LLDP-MIB`** en modo lectura (`GetNextRequest` ASN.1/BER nativo) y vuelca bocas, velocidades, MACs y vecinos LLDP a `switch_snmp_ports` y `network_logical_links` tras aprobación humana (`editor`/`admin`).
+- **En `4. Red & Host` (`POST /api/v1/network-hosts/snmp-discover`)**: realiza la comprobación rápida de un único OID (`sysDescr`) para dar de alta el switch en la CMDB sin recorrer aún las tablas de bocas desde esa pestaña.
 
 ### 2. Sincronización de Conectores de Infraestructura y Webhooks en Alarmas SRE — parcial
 - **`snmp_switch`** y exporters de **Prometheus (`node_exporter`, `windows_exporter`, `haproxy_stats`)**: operativos y raspados cada 15 s por `rackdoc-prometheus`.
@@ -124,7 +134,8 @@ RackDoc no inventa medidas: las sondas, los chequeos de servicio, la autenticaci
 
 ---
 
-## 🤖 Guías de Automatización (`cURL`, `Ansible`, `Puppet` y `Prometheus`)
+## 🤖 Guías de Automatización (`cURL`, `Ansible`, `Puppet`, `Prometheus`, `Ollama` y `MCP`)
+- 👉 **[Guía del Agente IA Solo-Lectura, Esquemas 2D, Descubrimiento Pasivo y Servidor MCP — `docs/AI_READONLY_AGENT_OLLAMA_MCP.md`](docs/AI_READONLY_AGENT_OLLAMA_MCP.md)**
 - 👉 **[Guía de Alta Automática vía API REST (`cURL`, `Ansible` y `Puppet`) — `docs/API_ONBOARDING_CURL_ANSIBLE_PUPPET.md`](docs/API_ONBOARDING_CURL_ANSIBLE_PUPPET.md)**
 - 👉 **[Guía Maestra de Monitorización Prometheus, Webhooks Ansible y Agentes IA — `docs/AUTOMATION_ANSIBLE_PROMETHEUS_AGENTS.md`](docs/AUTOMATION_ANSIBLE_PROMETHEUS_AGENTS.md)**
 - 👉 **[Arquitectura Técnica y Estructura Modular — `ARCHITECTURE.md`](ARCHITECTURE.md)**
@@ -136,6 +147,8 @@ RackDoc no inventa medidas: las sondas, los chequeos de servicio, la autenticaci
 ```bash
 cp .env.example .env
 docker compose up -d --build
+# Opcional: descargar el modelo LLM local por defecto (también disponible con 1 clic en 9. Administración)
+docker exec rackdoc-ollama ollama pull qwen2.5:7b
 ```
 
 | Servicio / Contenedor | URL Local | Descripción |
@@ -143,6 +156,7 @@ docker compose up -d --build
 | **`rackdoc-frontend`** | [http://localhost:8181](http://localhost:8181) | Interfaz gráfica interactiva **RackDoc8** (Flutter Web + Nginx). |
 | **`rackdoc-backend`** | [http://localhost:8180/docs](http://localhost:8180/docs) | API REST **FastAPI (`/api/v1`)**, Swagger UI, ReDoc (`/redoc`) y receptor OTLP. |
 | **`rackdoc-prometheus`** | [http://localhost:9090](http://localhost:9090) | Servidor **Prometheus TSDB** integrado con scrape automático cada 15 s. |
+| **`rackdoc-ollama`** | [http://localhost:11434](http://localhost:11434) | Motor **Ollama Local LLM** On-Premise (`qwen2.5:7b` persistido en `./data/ollama`). |
 
 ---
 

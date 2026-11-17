@@ -1207,6 +1207,95 @@ class BootstrapAgentRegisterPayload(BaseModel):
     notes: str = ""
 
 
+# ==============================================================================
+# MÓDULO 10: AGENTE IA SOLO-LECTURA Y DOCUMENTADOR AUTOMÁTICO
+# ==============================================================================
+
+
+class AiAgentSettingsUpdateInput(BaseModel):
+    """Configuración del proveedor LLM (Ollama local por defecto o proveedor externo)."""
+    provider_type: str = "ollama_local"  # ollama_local | openai_compatible | gemini | anthropic
+    base_url: str = "http://rackdoc-ollama:11434"
+    model_name: str = "qwen2.5:7b"
+    api_key: Optional[str] = None  # Si es None o "", conserva la clave cifrada actual salvo clear_api_key=True
+    clear_api_key: bool = False
+    temperature: float = 0.2
+    max_tokens: int = 2048
+    timeout_seconds: int = 90
+    language: str = "es"
+    custom_system_instructions: str = ""
+    passive_discovery_enabled: bool = False
+    auto_audit_enabled: bool = False
+    auto_audit_interval_hours: int = 24
+
+
+class AiOllamaPullInput(BaseModel):
+    """Solicitud para descargar un modelo en el contenedor local `rackdoc-ollama`."""
+    model_name: str = "qwen2.5:7b"
+
+
+class AiGenerateDocumentInput(BaseModel):
+    """Solicitud de generación de Dossier Técnico, Diagrama Mermaid o Auditoría SPOF."""
+    # global_cpd | location | rack | logical_stack | host | spof_risk_audit
+    scope_type: str = "global_cpd"
+    scope_target_id: Optional[int] = None
+    custom_focus: str = ""
+    auto_propose_cmdb_suggestions: bool = True
+
+
+class AiChatMessageItem(BaseModel):
+    role: str  # user | assistant
+    content: str
+
+
+class AiReadonlyChatInput(BaseModel):
+    """Consulta conversacional 100% solo-lectura sobre el inventario y estado real del CPD."""
+    question: str
+    scope_type: str = "global_cpd"
+    scope_target_id: Optional[int] = None
+    history: List[AiChatMessageItem] = []
+
+
+class AiMcpSaveDocumentInput(BaseModel):
+    """Guardado seguro de un informe Markdown redactado desde un cliente MCP externo."""
+    title: str
+    scope_type: str = "global_cpd"
+    scope_target_id: Optional[int] = None
+    scope_label: str = "Informe MCP Externo"
+    markdown_content: str
+    mermaid_diagram: str = ""
+    structured_findings: List[Dict[str, Any]] = []
+
+
+class AiPassiveHostAuditInput(BaseModel):
+    """Solicitud de auditoría profunda 100% Solo-Lectura vía SSH (Linux) o WinRM (Windows)."""
+    os_family: str = "linux"  # linux | windows
+    targets: List[str]
+    credential_id: Optional[int] = None
+    ephemeral_credential: Optional[EphemeralCredentialInput] = None
+
+
+class AiPassiveSnmpWalkInput(BaseModel):
+    """Solicitud de recorrido SNMP Solo-Lectura (`IF-MIB` + `LLDP-MIB`) sobre Switches/Routers."""
+    target_host: str
+    port: int = 161
+    community: str = "public"
+    version: str = "v2c"  # v1 | v2c
+    timeout_sec: float = 2.0
+    max_oids_per_table: int = 128
+
+
+class AiPublishNetworkSchemaInput(BaseModel):
+    """Solicitud `Human-in-the-Loop` para publicar un esquema de red analizado como Stack 2D en `4. Red & Host`."""
+    scope_type: str = "global_cpd"
+    scope_target_id: Optional[int] = None
+    stack_name: str = ""
+    include_passive_ro_edges: bool = True
+
+
+
+
+
 
 
 

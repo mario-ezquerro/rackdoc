@@ -8,6 +8,7 @@ from ..models import Connection, DeviceTemplate, Port, Rack, RackDevice
 from ..schemas import ConnectionEndpointInfo, ConnectionSchema
 from ..security import (
     enforce_rbac,
+    require_ai_readonly_key_or_session,
     require_automation_key,
     require_automation_key_or_session,
 )
@@ -32,6 +33,13 @@ automation_router = APIRouter(dependencies=[Depends(require_automation_key)])
 # necesita evita que un 401 de clave de automatización tumbe la sesión del usuario.
 agent_or_session_router = APIRouter(
     dependencies=[Depends(require_automation_key_or_session)]
+)
+
+
+# Rutas estrictas de SOLO LECTURA para el Servidor MCP (`rackdoc-mcp`) y Agentes IA:
+# valen `X-AI-Readonly-Key` o sesión JWT, y bloquean en seco cualquier mutación de inventario.
+ai_readonly_router = APIRouter(
+    dependencies=[Depends(require_ai_readonly_key_or_session)]
 )
 
 

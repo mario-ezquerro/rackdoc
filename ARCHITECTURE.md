@@ -1,6 +1,6 @@
-# RackDoc8 (`v1.3.1`) — Arquitectura Técnica y Diseño Modular
+# RackDoc8 (`v1.4.0`) — Arquitectura Técnica y Diseño Modular
 
-**RackDoc8** es una plataforma unificada de **DCIM visual**, **CMDB Multi-IP**, **Auditoría SSL/TLS (`CertScope`)**, **Monitorización Multiprotocolo (`Nagios + SNMP + Prometheus + OpenTelemetry`)** y **Gestión de Alarmas SRE**, orquestada en 3 contenedores Docker ligeros.
+**RackDoc8** es una plataforma unificada de **DCIM visual**, **CMDB Multi-IP**, **Auditoría SSL/TLS (`CertScope`)**, **Monitorización Multiprotocolo (`Nagios + SNMP + Prometheus + OpenTelemetry`)**, **Gestión de Alarmas SRE** y **Agente IA Analista y Autodocumentador Solo-Lectura (`Ollama Local + MCP`)**, orquestada en 4 contenedores Docker ligeros.
 
 ---
 
@@ -16,7 +16,8 @@ flowchart LR
         Nginx["rackdoc-frontend (:8181)\nNginx Alpine + Build Web"]
         API["rackdoc-backend (:8180)\nPython 3.12 + FastAPI + Alembic"]
         Prom["rackdoc-prometheus (:9090)\nPrometheus TSDB (15s scrape)"]
-        DB[("Volumen Persistente ./data\nrackdoc.db (SQLite WAL)\n+ uploads + targets_dynamic.json")]
+        Ollama["rackdoc-ollama (:11434)\nOllama Local LLM (qwen2.5:7b)"]
+        DB[("Volumen Persistente ./data\nrackdoc.db (SQLite WAL)\n+ uploads + ollama + targets_dynamic.json")]
     end
 
     subgraph Infra["Infraestructura Real del CPD"]
@@ -28,6 +29,7 @@ flowchart LR
     UI <-->|"REST JSON /api/v1 (JWT RBAC)"| Nginx
     Nginx <-->|"Proxy /api y /docs"| API
     API <-->|"SQLAlchemy 2.0"| DB
+    API -->|"Chat / Dossiers Solo-Lectura"| Ollama
     Prom -->|"Scrape /api/v1/metrics + File SD"| API
     Prom -.->|"Scrape :9100 / :9182"| Nodes
     API <-->|"Bind LDAP/LDAPS (ldap3)"| AD
@@ -94,4 +96,5 @@ Para evitar archivos monolíticos manteniendo cohesión de estado y `0` avisos e
 | **6. CMDB & IPs** | `features/cmdb/cmdb_view.dart` | `tabs/cmdb_inventory_tab.dart`, `tabs/cmdb_ip_verifier_tab.dart`, `tabs/cmdb_subnets_ipam_tab.dart`, `tabs/cmdb_hypervisor_and_dialogs.dart` |
 | **7. CertScope** | `features/certscope/certscope_view.dart` | Vista autocontenida de auditoría TLS/X.509 |
 | **8. Alarmas SRE** | `features/sre_alarms/sre_alarms_view.dart` | `network_hosts/sre_alarms/sre_alarms_live_tab.dart`, `sre_alerts_routing_and_slo_tabs.dart`, `sre_ansible_and_ai_docs_tab.dart` |
-| **9. Administración** | `features/admin/admin_view.dart` | Usuarios locales, servidores AD/LDAP y roles RBAC |
+| **9. Administración** | `features/admin/admin_view.dart` | Usuarios locales, servidores AD/LDAP, roles RBAC y tarjeta `ai_agent/widgets/ai_engine_admin_card.dart` |
+| **10. Agente IA (RO)** | `features/ai_agent/ai_agent_view.dart` | Autodocumentación Markdown/Mermaid, Auditoría SPOF, Copiloto Solo-Lectura y Borradores CMDB (+ `backend/mcp_server/rackdoc_mcp.py`) |

@@ -950,6 +950,157 @@ class ProvisioningToken(Base):
     target_location = relationship("Location")
 
 
+# ==============================================================================
+# MÓDULO 10: AGENTE IA SOLO-LECTURA Y DOCUMENTADOR AUTOMÁTICO (OLLAMA LOCAL / CLOUD + MCP)
+# ==============================================================================
+
+
+class AiAgentSettings(Base):
+    """
+    Configuración global del Motor IA de Análisis y Autodocumentación Solo-Lectura.
+    Por defecto apunta al contenedor local `rackdoc-ollama` (:11434) y permite
+    conmutar a un proveedor externo (OpenAI-compatible, Gemini, Anthropic) con
+    API Key cifrada en reposo mediante Fernet.
+    """
+    __tablename__ = "ai_agent_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # provider_type: 'ollama_local' | 'openai_compatible' | 'gemini' | 'anthropic'
+    provider_type = Column(String(40), default="ollama_local", nullable=False)
+    base_url = Column(String(255), default="http://rackdoc-ollama:11434", nullable=False)
+    model_name = Column(String(120), default="qwen2.5:7b", nullable=False)
+    api_key_ciphertext = Column(Text, default="")
+    temperature = Column(Float, default=0.2)
+    max_tokens = Column(Integer, default=2048)
+    timeout_seconds = Column(Integer, default=90)
+    language = Column(String(16), default="es")
+    custom_system_instructions = Column(Text, default="")
+
+    # Token opcional generado desde UI para el servidor MCP solo-lectura (complementa AI_READONLY_API_KEY)
+    mcp_token_hash = Column(String(128), default="")
+    mcp_token_prefix = Column(String(24), default="")
+
+    # Gancho preparado para Fase 2 (Descubrimiento Pasivo SSH/WinRM/SNMP RO)
+    passive_discovery_enabled = Column(Boolean, default=False)
+
+    # Auditoría periódica desatendida en modo Solo-Lectura (regenera Dossier Global + Borradores CMDB)
+    auto_audit_enabled = Column(Boolean, default=False)
+    auto_audit_interval_hours = Column(Integer, default=24)
+    last_auto_audit_at = Column(DateTime, nullable=True)
+
+    updated_by = Column(String(120), default="system")
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class AiGeneratedDocument(Base):
+    """
+    Biblioteca aislada de Dossiers Técnicos, Diagramas Mermaid, Auditorías de SPOF
+    y Manuales de Recuperación (DRP) generados en modo Solo-Lectura por el Agente IA.
+    """
+    __tablename__ = "ai_generated_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    doc_code = Column(String(64), unique=True, index=True, nullable=False)
+    title = Column(String(220), nullable=False)
+    # scope_type: 'global_cpd' | 'location' | 'rack' | 'logical_stack' | 'host' | 'spof_risk_audit'
+    scope_type = Column(String(40), default="global_cpd", index=True)
+    scope_target_id = Column(Integer, nullable=True)
+    scope_label = Column(String(180), default="CPD Completo")
+
+    markdown_content = Column(Text, default="")
+    mermaid_diagram = Column(Text, default="")
+    structured_findings = Column(JSON, default=list)
+
+    provider_used = Column(String(80), default="ollama_local")
+    model_used = Column(String(120), default="qwen2.5:7b")
+    # generation_mode: 'llm' | 'deterministic_fallback' | 'mcp_external'
+    generation_mode = Column(String(32), default="llm")
+
+    created_by = Column(String(120), default="admin")
+    created_at = Column(DateTime, default=utcnow, index=True)
+
+
+class AiCmdbSuggestion(Base):
+    """
+    Borrador de enriquecimiento documental (`Human-in-the-Loop`) sobre un activo de la CMDB.
+    Jamás modifica `cmdb_assets` automáticamente; requiere aprobación explícita de un `editor`/`admin`.
+    """
+    __tablename__ = "ai_cmdb_suggestions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_id = Column(
+        Integer,
+        ForeignKey("cmdb_assets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # field_name: 'notes' | 'criticality' | 'owner_team' | 'os_or_firmware'
+    field_name = Column(String(64), nullable=False)
+    current_value = Column(Text, default="")
+    proposed_value = Column(Text, nullable=False)
+    rationale = Column(Text, default="")
+    confidence = Column(Float, default=0.85)
+    # status: 'pending' | 'applied' | 'dismissed'
+    status = Column(String(24), default="pending", index=True)
+    source_doc_id = Column(
+        Integer,
+        ForeignKey("ai_generated_documents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    reviewed_by = Column(String(120), default="")
+    reviewed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+    asset = relationship("CmdbAsset")
+    source_doc = relationship("AiGeneratedDocument")
+
+
+class AiPassiveDiscoverySnapshot(Base):
+    """
+    Fase 2 — Radiografía de Descubrimiento Pasivo 100% Solo-Lectura sobre servidores
+    Linux (SSH sin escritura remota), Windows (WinRM RO) y Switches de Red (Walk SNMP
+    `IF-MIB` + `LLDP-MIB`). No modifica `cmdb_assets`, `network_logical_links` ni
+    `network_switch_snmp_ports` hasta aprobación humana (`Human-in-the-Loop`).
+    """
+    __tablename__ = "ai_passive_discovery_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_code = Column(String(64), index=True, nullable=False)
+    # collector_type: 'ssh_linux_ro' | 'winrm_windows_ro' | 'snmp_if_lldp_ro'
+    collector_type = Column(String(40), nullable=False, index=True)
+    target_host = Column(String(255), nullable=False, index=True)
+    asset_id = Column(
+        Integer,
+        ForeignKey("cmdb_assets.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # status: 'completed' | 'failed'
+    status = Column(String(24), default="completed", index=True)
+    hostname_detected = Column(String(180), default="")
+    os_or_sysdescr = Column(String(255), default="")
+
+    listening_ports = Column(JSON, default=list)
+    peer_connections = Column(JSON, default=list)
+    running_services = Column(JSON, default=list)
+    containers = Column(JSON, default=list)
+    web_vhosts_or_dbs = Column(JSON, default=list)
+    snmp_interfaces = Column(JSON, default=list)
+    inferred_dependencies = Column(JSON, default=list)
+
+    topology_applied = Column(Boolean, default=False)
+    applied_by = Column(String(120), default="")
+    applied_at = Column(DateTime, nullable=True)
+
+    error_detail = Column(Text, default="")
+    collected_by = Column(String(120), default="operator")
+    collected_at = Column(DateTime, default=utcnow, index=True)
+
+    asset = relationship("CmdbAsset")
+
+
+
+
 
 
 
