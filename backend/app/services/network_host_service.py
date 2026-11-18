@@ -15,7 +15,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -27,6 +27,8 @@ from ..models import (
     AlertContact,
     AlertContactGroup,
     AlertNotificationLog,
+    AssetCustomChart,
+    AssetTelemetryTarget,
     CmdbAsset,
     CmdbIpAddress,
     CmdbSubnet,
@@ -49,7 +51,16 @@ from ..models import (
     TechStackDiagram,
     TechStackEdge,
     TechStackNode,
+    TelemetryProfile,
     User,
+)
+from .telemetry_profiles_service import (
+    EXPORTER_PRESETS,
+    build_rich_telemetry_payload_for_asset,
+    ensure_telemetry_profiles_seeded,
+    serialize_telemetry_profile,
+    serialize_telemetry_target,
+    upsert_telemetry_target_for_asset,
 )
 from .cmdb_service import (
     ASSET_CLASS_LABELS,
@@ -59,6 +70,7 @@ from .cmdb_service import (
     sync_physical_devices_to_cmdb,
 )
 from .monitor import check_host_connectivity
+from ..database import DATA_DIR
 from ..logging_setup import get_logger
 from ..time_utils import utcnow
 
@@ -66,7 +78,7 @@ logger = get_logger(__name__)
 
 PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://rackdoc-prometheus:9090").rstrip("/")
 PROMETHEUS_PUBLIC_URL = os.getenv("PROMETHEUS_PUBLIC_URL", "http://localhost:9090").rstrip("/")
-PROMETHEUS_DYNAMIC_DIR = Path(os.getenv("PROMETHEUS_DYNAMIC_DIR", "/app/data/prometheus"))
+PROMETHEUS_DYNAMIC_DIR = Path(os.getenv("PROMETHEUS_DYNAMIC_DIR") or (DATA_DIR / "prometheus"))
 # Fichero de File Service Discovery que Prometheus relee cada 15s.
 PROMETHEUS_DYNAMIC_TARGETS_PATH = PROMETHEUS_DYNAMIC_DIR / "targets_dynamic.json"
 # Sin valor por defecto: si no está configurada, los endpoints de automatización
@@ -78,7 +90,16 @@ AUTOMATION_API_KEY = (os.getenv("AUTOMATION_API_KEY", "") or "").strip()
 # ellos "sincronizar" sí deja algo hecho, aunque sea Prometheus quien los raspe.
 # El resto de tipos (Proxmox, VMware, Docker, Apache, Nginx, BBDD...) no se
 # contactan desde ningún punto del código.
-TIPOS_PUBLICADOS_A_PROMETHEUS = ("node_exporter", "windows_exporter", "haproxy_stats")
+TIPOS_PUBLICADOS_A_PROMETHEUS = (
+    "node_exporter",
+    "windows_exporter",
+    "haproxy_stats",
+    "oratui_oracle",
+    "otel_collector",
+    "postgres_exporter",
+    "nginx_exporter",
+    "custom_prometheus",
+)
 
 CONNECTOR_TYPE_LABELS: Dict[str, str] = {
     "snmp_switch": "Switch / Router / Firewall SNMP (comprobación de respuesta)",
@@ -100,6 +121,11 @@ CONNECTOR_TYPE_LABELS: Dict[str, str] = {
     "mongodb": "Base de Datos MongoDB (:27017)",
     "node_exporter": "Agente Linux Prometheus Node Exporter (:9100)",
     "windows_exporter": "Agente Windows Prometheus Exporter (:9182)",
+    "oratui_oracle": "Agente ORA-TUI Oracle DB, RAC & Linux SAN (:9161)",
+    "otel_collector": "Agente OpenTelemetry Collector (:8889)",
+    "postgres_exporter": "Exporter Prometheus PostgreSQL (:9187)",
+    "nginx_exporter": "Exporter Prometheus Nginx (:9113)",
+    "custom_prometheus": "Exporter Prometheus / OpenMetrics Personalizado",
 }
 
 LOGICAL_LAYER_ORDER: Dict[str, int] = {
@@ -150,39 +176,58 @@ def sync_prometheus_targets_file(db: Session) -> Dict[str, Any]:
                 key_file.chmod(0o600)
 
         prom_yml = PROMETHEUS_DYNAMIC_DIR / "prometheus.yml"
+        prom_yml_template = (
+            "global:\n"
+            "  scrape_interval: 15s\n"
+            "  evaluation_interval: 15s\n"
+            "  external_labels:\n"
+            "    monitor: 'rackdoc-dcim-cmdb'\n\n"
+            "scrape_configs:\n"
+            "  - job_name: 'rackdoc_backend_collector'\n"
+            "    scrape_interval: 15s\n"
+            "    metrics_path: '/api/v1/metrics'\n"
+            "    authorization:\n"
+            "      credentials_file: '/etc/prometheus/dynamic/automation_api_key'\n"
+            "    static_configs:\n"
+            "      - targets: ['rackdoc-backend:8000']\n"
+            "        labels:\n"
+            "          collector: 'rackdoc-background-engine'\n\n"
+            "  - job_name: 'rackdoc_dynamic_host_exporters'\n"
+            "    tls_config:\n"
+            "      insecure_skip_verify: true\n"
+            "    file_sd_configs:\n"
+            "      - files:\n"
+            "          - '/etc/prometheus/dynamic/targets_*.json'\n"
+            "        refresh_interval: 15s\n"
+        )
+        reload_prom_cfg = False
         if not prom_yml.exists():
-            prom_yml.write_text(
-                "global:\n"
-                "  scrape_interval: 15s\n"
-                "  evaluation_interval: 15s\n"
-                "  external_labels:\n"
-                "    monitor: 'rackdoc-dcim-cmdb'\n\n"
-                "scrape_configs:\n"
-                "  - job_name: 'rackdoc_backend_collector'\n"
-                "    scrape_interval: 15s\n"
-                "    metrics_path: '/api/v1/metrics'\n"
-                "    authorization:\n"
-                "      credentials_file: '/etc/prometheus/dynamic/automation_api_key'\n"
-                "    static_configs:\n"
-                "      - targets: ['rackdoc-backend:8000']\n"
-                "        labels:\n"
-                "          collector: 'rackdoc-background-engine'\n\n"
-                "  - job_name: 'rackdoc_dynamic_host_exporters'\n"
-                "    file_sd_configs:\n"
-                "      - files:\n"
-                "          - '/etc/prometheus/dynamic/targets_*.json'\n"
-                "        refresh_interval: 15s\n",
-                encoding="utf-8",
-            )
+            prom_yml.write_text(prom_yml_template, encoding="utf-8")
+            reload_prom_cfg = True
+        else:
+            cur_yml = prom_yml.read_text(encoding="utf-8", errors="ignore")
+            if "rackdoc_dynamic_host_exporters" in cur_yml and "insecure_skip_verify" not in cur_yml:
+                prom_yml.write_text(prom_yml_template, encoding="utf-8")
+                reload_prom_cfg = True
 
         assets = db.query(CmdbAsset).options(joinedload(CmdbAsset.ip_addresses)).all()
         assets_by_id = {a.id: a for a in assets}
+        telemetry_targets = (
+            db.query(AssetTelemetryTarget)
+            .filter(AssetTelemetryTarget.enabled == True, AssetTelemetryTarget.mode == "pull")  # noqa: E712
+            .all()
+        )
         checks = db.query(MonitoredServiceCheck).filter(MonitoredServiceCheck.enabled == True).all()  # noqa: E712
         connectors = db.query(InfraConnector).filter(InfraConnector.enabled == True).all()  # noqa: E712
 
         exporter_check_types = {
             "node_exporter": 9100,
             "windows_exporter": 9182,
+            "oratui_oracle": 9161,
+            "otel_collector": 8889,
+            "custom_prometheus": 9100,
+            "postgres_exporter": 9187,
+            "nginx_exporter": 9113,
             "apache": 9117,
             "nginx": 9113,
             "haproxy": 8404,
@@ -196,27 +241,89 @@ def sync_prometheus_targets_file(db: Session) -> Dict[str, Any]:
         sd_entries: List[Dict[str, Any]] = []
         seen_targets = set()
 
+        # 1. Targets explícitos multipuerto / multiprotocolo (AssetTelemetryTarget)
+        for tt in telemetry_targets:
+            ast = assets_by_id.get(tt.asset_id)
+            if not ast:
+                continue
+            host_ip = (tt.target_host or "").strip()
+            if not host_ip and ast.ip_addresses:
+                host_ip = next(
+                    (ip.ip_address for ip in ast.ip_addresses if ip.is_heartbeat_ip),
+                    ast.ip_addresses[0].ip_address,
+                )
+            if "://" in host_ip:
+                parsed = urllib.parse.urlparse(host_ip)
+                host_ip = parsed.hostname or host_ip
+            if not host_ip:
+                continue
+            port = int(tt.port or 9100)
+            path_str = (tt.metrics_path or "/metrics").strip()
+            if not path_str.startswith("/"):
+                path_str = f"/{path_str}"
+            scheme_str = (tt.scheme or "http").lower().strip()
+            if scheme_str not in ("http", "https"):
+                scheme_str = "http"
+
+            target_str = f"{host_ip}:{port}"
+            dedup_key = f"{scheme_str}://{target_str}{path_str}"
+            if dedup_key in seen_targets:
+                continue
+            seen_targets.add(dedup_key)
+            if path_str == "/metrics" and scheme_str == "http":
+                seen_targets.add(target_str)
+
+            lbls: Dict[str, str] = {
+                "__scheme__": scheme_str,
+                "__metrics_path__": path_str,
+                "__scrape_interval__": tt.scrape_interval or "15s",
+                "asset_code": ast.code,
+                "hostname": ast.hostname or ast.code.lower(),
+                "asset_class": ast.asset_class,
+                "environment": ast.environment,
+                "exporter_type": tt.exporter_type,
+                "managed_by": "rackdoc_file_sd",
+            }
+            for ek, ev in (tt.extra_labels or {}).items():
+                if ek and not str(ek).startswith("__"):
+                    lbls[str(ek)] = str(ev)
+
+            sd_entries.append({"targets": [target_str], "labels": lbls})
+
+        # 2. Chequeos de exporter clásicos (retrocompatibilidad automática)
         for chk in checks:
             if chk.check_type not in exporter_check_types:
+                continue
+            raw_target = (chk.target_ip_or_url or "").strip()
+            if "/nginx_status" in raw_target or "/server-status" in raw_target:
                 continue
             ast = assets_by_id.get(chk.asset_id)
             if not ast:
                 continue
-            host_ip = chk.target_ip_or_url.strip()
+            host_ip = raw_target
+            scheme_str = "http"
+            path_str = "/metrics"
             if not host_ip and ast.ip_addresses:
                 host_ip = ast.ip_addresses[0].ip_address
             if "://" in host_ip:
                 parsed = urllib.parse.urlparse(host_ip)
+                scheme_str = parsed.scheme if parsed.scheme in ("http", "https") else "http"
+                if parsed.path and parsed.path != "/":
+                    path_str = parsed.path
                 host_ip = parsed.hostname or host_ip
             port = chk.port or exporter_check_types[chk.check_type]
             target_str = f"{host_ip}:{port}"
-            if not host_ip or target_str in seen_targets:
+            dedup_key = f"{scheme_str}://{target_str}{path_str}"
+            if not host_ip or target_str in seen_targets or dedup_key in seen_targets:
                 continue
             seen_targets.add(target_str)
+            seen_targets.add(dedup_key)
             sd_entries.append(
                 {
                     "targets": [target_str],
                     "labels": {
+                        "__scheme__": scheme_str,
+                        "__metrics_path__": path_str,
                         "asset_code": ast.code,
                         "hostname": ast.hostname or ast.code.lower(),
                         "asset_class": ast.asset_class,
@@ -234,10 +341,19 @@ def sync_prometheus_targets_file(db: Session) -> Dict[str, Any]:
                     continue
                 seen_targets.add(target_str)
                 ast = assets_by_id.get(conn.linked_asset_id) if conn.linked_asset_id else None
+                extra = dict(conn.extra_settings or {})
+                path_str = str(extra.get("metrics_path") or "/metrics")
+                if not path_str.startswith("/"):
+                    path_str = f"/{path_str}"
+                scheme_str = str(extra.get("scheme") or "http").lower()
+                if scheme_str not in ("http", "https"):
+                    scheme_str = "http"
                 sd_entries.append(
                     {
                         "targets": [target_str],
                         "labels": {
+                            "__scheme__": scheme_str,
+                            "__metrics_path__": path_str,
                             "asset_code": ast.code if ast else conn.name,
                             "hostname": (ast.hostname if ast else conn.endpoint_host),
                             "exporter_type": conn.connector_type,
@@ -248,6 +364,14 @@ def sync_prometheus_targets_file(db: Session) -> Dict[str, Any]:
 
         targets_file = PROMETHEUS_DYNAMIC_TARGETS_PATH
         targets_file.write_text(json.dumps(sd_entries, indent=2), encoding="utf-8")
+
+        if reload_prom_cfg:
+            try:
+                req = urllib.request.Request(f"{PROMETHEUS_URL}/-/reload", method="POST")
+                urllib.request.urlopen(req, timeout=1.2).close()
+            except Exception:
+                pass
+
         return {"targets_count": len(sd_entries), "file": str(targets_file)}
     except Exception as exc:
         return {"targets_count": 0, "error": str(exc)}
@@ -661,8 +785,34 @@ def run_single_service_check(
             new_state = "CRITICAL"
             chk.latency_ms = None
             chk.status_output = f"{ctype.upper()} CRITICAL - {det}"
-    elif ctype in ("apache", "nginx", "haproxy", "docker", "proxmox", "vmware", "postgres", "mysql", "redis", "node_exporter", "windows_exporter"):
-        eff_port = port or (9100 if ctype == "node_exporter" else (9182 if ctype == "windows_exporter" else 80))
+    elif ctype in (
+        "apache",
+        "nginx",
+        "haproxy",
+        "docker",
+        "proxmox",
+        "vmware",
+        "postgres",
+        "mysql",
+        "redis",
+        "node_exporter",
+        "windows_exporter",
+        "oratui_oracle",
+        "otel_collector",
+        "postgres_exporter",
+        "nginx_exporter",
+        "custom_prometheus",
+    ):
+        default_exp_ports = {
+            "node_exporter": 9100,
+            "windows_exporter": 9182,
+            "oratui_oracle": 9161,
+            "otel_collector": 8889,
+            "postgres_exporter": 9187,
+            "nginx_exporter": 9113,
+            "custom_prometheus": 9100,
+        }
+        eff_port = port or default_exp_ports.get(ctype, 80)
         st, lat, det = check_host_connectivity(
             host=host_only,
             method="tcp",
@@ -1113,7 +1263,7 @@ def get_asset_telemetry_timeseries(
     series_points: List[Dict[str, Any]] = []
     if all_ts:
         for t in all_ts:
-            dt_label = datetime.utcfromtimestamp(t).strftime("%H:%M")
+            dt_label = datetime.fromtimestamp(t, timezone.utc).strftime("%H:%M")
             series_points.append(
                 {
                     "timestamp": t,
@@ -1132,7 +1282,7 @@ def get_asset_telemetry_timeseries(
         cur_lat = round(float(asset.last_ping_ms or 0.0), 2)
         for i in range(points_count):
             t = start_ts + (i * step_sec)
-            dt_label = datetime.utcfromtimestamp(t).strftime("%H:%M")
+            dt_label = datetime.fromtimestamp(t, timezone.utc).strftime("%H:%M")
             series_points.append(
                 {
                     "timestamp": t,
@@ -1147,6 +1297,15 @@ def get_asset_telemetry_timeseries(
                 }
             )
 
+    rich_prom_ok, rich_payload = build_rich_telemetry_payload_for_asset(
+        db=db,
+        asset=asset,
+        start_ts=start_ts,
+        end_ts=now_ts,
+        step_sec=step_sec,
+        points_count=points_count,
+    )
+
     return {
         "asset_id": asset.id,
         "asset_code": asset.code,
@@ -1154,7 +1313,7 @@ def get_asset_telemetry_timeseries(
         "hostname": asset.hostname,
         "asset_class": asset.asset_class,
         "range_hours": range_hours,
-        "prometheus_connected": prometheus_reachable,
+        "prometheus_connected": prometheus_reachable or rich_prom_ok,
         "prometheus_url": PROMETHEUS_PUBLIC_URL,
         "scraped_points_in_tsdb": len(all_ts),
         "promql_examples": {
@@ -1164,6 +1323,7 @@ def get_asset_telemetry_timeseries(
             "switch_traffic": f'rackdoc_switch_port_rx_mbps{{switch_code="{asset.code}"}}',
         },
         "points": series_points,
+        **rich_payload,
     }
 
 
@@ -1180,6 +1340,7 @@ def build_network_hosts_overview(db: Session, sync_access_control: bool = False)
     - Estado de Prometheus y guía de instalación de agentes por sistema
     """
     ensure_network_hosts_seeded(db)
+    ensure_telemetry_profiles_seeded(db)
 
     now = utcnow()
     locations = {loc.id: loc for loc in db.query(Location).all()}
@@ -1190,6 +1351,11 @@ def build_network_hosts_overview(db: Session, sync_access_control: bool = False)
     rack_devs = {d.id: d for d in db.query(RackDevice).options(joinedload(RackDevice.template)).all()}
     assets = db.query(CmdbAsset).options(joinedload(CmdbAsset.ip_addresses)).order_by(CmdbAsset.id).all()
     assets_by_id = {a.id: a for a in assets}
+
+    all_telemetry_targets = db.query(AssetTelemetryTarget).order_by(AssetTelemetryTarget.id).all()
+    targets_by_asset: Dict[int, List[AssetTelemetryTarget]] = {}
+    for tt in all_telemetry_targets:
+        targets_by_asset.setdefault(tt.asset_id, []).append(tt)
 
     host_groups = db.query(HostGroup).order_by(HostGroup.id).all()
     hg_by_id = {hg.id: hg for hg in host_groups}
@@ -1516,6 +1682,11 @@ def build_network_hosts_overview(db: Session, sync_access_control: bool = False)
                 },
                 "host_groups": member_group_codes,
                 "service_checks": serialized_checks,
+                "telemetry_targets": [
+                    serialize_telemetry_target(tt, ast)
+                    for tt in targets_by_asset.get(ast.id, [])
+                ],
+                "telemetry_targets_count": len(targets_by_asset.get(ast.id, [])),
                 "snmp_ports": serialized_ports,
                 "snmp_ports_count": len(serialized_ports),
                 "stack_links": [],
@@ -2058,6 +2229,11 @@ def build_network_hosts_overview(db: Session, sync_access_control: bool = False)
             "global_webhook_url": smtp_cfg.global_webhook_url if smtp_cfg else "",
             "enabled": smtp_cfg.enabled if smtp_cfg else True,
         },
+        "telemetry_profiles": [
+            serialize_telemetry_profile(tp)
+            for tp in db.query(TelemetryProfile).order_by(TelemetryProfile.id).all()
+        ],
+        "exporter_presets": EXPORTER_PRESETS,
     }
 
 
@@ -2390,19 +2566,35 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
                 )
             )
 
-        # 2. Registrar Exporters (node_exporter :9100, windows_exporter :9182, nginx, apache, docker o personalizados)
+        # 2. Registrar Exporters (node_exporter :9100, windows_exporter :9182, oratui_oracle :9161, otel, o puertos/paths custom)
+        existing_tt = {
+            (tt.port, tt.metrics_path or "/metrics"): tt
+            for tt in db.query(AssetTelemetryTarget).filter(AssetTelemetryTarget.asset_id == asset.id).all()
+        }
+        default_ports_map = {
+            "windows_exporter": 9182,
+            "oratui_oracle": 9161,
+            "otel_collector": 8889,
+            "postgres_exporter": 9187,
+            "nginx_exporter": 9113,
+            "haproxy_stats": 8404,
+            "docker": 9323,
+            "docker_engine": 9323,
+            "otlp_push": 4318,
+        }
         for exp in (payload.get("exporters") or []):
-            etype = str(exp.get("type") or "node_exporter").strip().lower()
-            eport = int(exp.get("port") or (9182 if etype == "windows_exporter" else 9100))
+            etype = str(exp.get("type") or exp.get("exporter_type") or "node_exporter").strip().lower()
+            eport = int(exp.get("port") or default_ports_map.get(etype, 9100))
             custom_exp_name = str(exp.get("name") or "").strip()
             sname = custom_exp_name or f"Exporter Prometheus ({etype} :{eport})"
-            if sname not in existing_checks:
+            raw_url = str(exp.get("url") or "").strip()
+            if sname not in existing_checks and etype != "otlp_push":
                 db.add(
                     MonitoredServiceCheck(
                         asset_id=asset.id,
                         service_name=sname,
                         check_type=etype,
-                        target_ip_or_url=str(exp.get("url") or primary_ip),
+                        target_ip_or_url=raw_url or primary_ip,
                         port=eport,
                         nagios_state="PENDING",
                         state_type="SOFT",
@@ -2411,6 +2603,39 @@ def handle_ansible_host_upsert_webhook(db: Session, payload: Dict[str, Any]) -> 
                         last_checked_at=utcnow(),
                     )
                 )
+
+            # Si es un exporter Prometheus / OpenTelemetry real (no stub_status HTML de Apache/Nginx), sincronizar AssetTelemetryTarget
+            if "/nginx_status" not in raw_url and "/server-status" not in raw_url and etype not in ("apache", "nginx"):
+                exp_scheme = str(exp.get("scheme") or "http").strip().lower()
+                exp_path = str(exp.get("metrics_path") or "/metrics").strip()
+                exp_host = str(exp.get("target_host") or "").strip()
+                if "://" in raw_url:
+                    parsed_u = urllib.parse.urlparse(raw_url)
+                    if parsed_u.scheme in ("http", "https"):
+                        exp_scheme = parsed_u.scheme
+                    if parsed_u.path and parsed_u.path != "/":
+                        exp_path = parsed_u.path
+                    if parsed_u.hostname and parsed_u.hostname != primary_ip:
+                        exp_host = parsed_u.hostname
+                if not exp_path.startswith("/"):
+                    exp_path = f"/{exp_path}"
+                exp_mode = str(exp.get("mode") or ("push_otlp" if etype == "otlp_push" else "pull")).strip().lower()
+                if (eport, exp_path) not in existing_tt:
+                    new_tt = AssetTelemetryTarget(
+                        asset_id=asset.id,
+                        name=sname,
+                        exporter_type="docker_engine" if etype == "docker" else etype,
+                        mode=exp_mode if exp_mode in ("pull", "push_otlp") else "pull",
+                        target_host=exp_host,
+                        port=eport,
+                        metrics_path=exp_path,
+                        scheme=exp_scheme if exp_scheme in ("http", "https") else "http",
+                        scrape_interval=str(exp.get("scrape_interval") or "15s"),
+                        extra_labels=dict(exp.get("extra_labels") or {}),
+                        enabled=True,
+                    )
+                    db.add(new_tt)
+                    existing_tt[(eport, exp_path)] = new_tt
 
         # 3. Registrar Heartbeats y Servicios (HTTP, HTTPS, TCP, UDP, SNMP, SSH, BBDD o cualquier servicio personalizado)
         for hb in (payload.get("heartbeats") or []):

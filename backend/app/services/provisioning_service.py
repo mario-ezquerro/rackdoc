@@ -1181,13 +1181,37 @@ def register_bootstrapped_host(
 
 
 async def forward_otlp_metrics_to_prometheus(
-    raw_body: bytes, content_type: str
+    raw_body: bytes,
+    content_type: str,
+    asset_code: str = "",
 ) -> Tuple[int, bytes, str]:
-    """Reenvía cargas OTLP HTTP autenticadas hacia `rackdoc-prometheus` (`--web.enable-otlp-receiver`)."""
+    """
+    Reenvía cargas OTLP HTTP autenticadas hacia `rackdoc-prometheus` (`--web.enable-otlp-receiver`).
+    Si la carga es OTLP JSON (`application/json`) y se indica `asset_code`, inyecta el atributo
+    de recurso `asset_code` para unificar las consultas PromQL con File SD.
+    """
+    body_to_send = raw_body
+    ct_lower = (content_type or "").lower()
+    clean_code = (asset_code or "").strip()
+    if clean_code and "json" in ct_lower and raw_body:
+        try:
+            doc = json.loads(raw_body.decode("utf-8"))
+            if isinstance(doc, dict) and isinstance(doc.get("resourceMetrics"), list):
+                for rm in doc["resourceMetrics"]:
+                    res_obj = rm.setdefault("resource", {})
+                    attrs = res_obj.setdefault("attributes", [])
+                    if isinstance(attrs, list) and not any(
+                        isinstance(a, dict) and a.get("key") == "asset_code" for a in attrs
+                    ):
+                        attrs.append({"key": "asset_code", "value": {"stringValue": clean_code}})
+                body_to_send = json.dumps(doc).encode("utf-8")
+        except Exception:
+            body_to_send = raw_body
+
     target_url = f"{PROMETHEUS_INTERNAL_URL}/api/v1/otlp/v1/metrics"
     headers = {"Content-Type": content_type or "application/x-protobuf"}
     async with httpx.AsyncClient(timeout=8.0) as client:
-        resp = await client.post(target_url, content=raw_body, headers=headers)
+        resp = await client.post(target_url, content=body_to_send, headers=headers)
         return (
             resp.status_code,
             resp.content,

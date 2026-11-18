@@ -290,8 +290,10 @@ def bootstrap_register_host_endpoint(
 )
 async def otlp_metrics_gateway_endpoint(
     request: Request,
+    asset_code: Optional[str] = None,
     x_api_key: Optional[str] = Header(default=None),
     x_rackdoc_token: Optional[str] = Header(default=None),
+    x_rackdoc_asset: Optional[str] = Header(default=None),
     db: Session = Depends(get_db),
 ):
     authorized = False
@@ -313,10 +315,12 @@ async def otlp_metrics_gateway_endpoint(
 
     raw_body = await request.body()
     content_type = request.headers.get("content-type") or "application/x-protobuf"
+    eff_asset_code = (asset_code or x_rackdoc_asset or "").strip()
     try:
         status_code, resp_body, resp_ct = await forward_otlp_metrics_to_prometheus(
             raw_body=raw_body,
             content_type=content_type,
+            asset_code=eff_asset_code,
         )
         return Response(content=resp_body, status_code=status_code, media_type=resp_ct)
     except Exception as exc:

@@ -1099,6 +1099,112 @@ class AiPassiveDiscoverySnapshot(Base):
     asset = relationship("CmdbAsset")
 
 
+# ==============================================================================
+# GESTIÓN FLEXIBLE DE TARGETS PROMETHEUS / OPENTELEMETRY Y PERFILES DE GRÁFICAS
+# ==============================================================================
+
+class AssetTelemetryTarget(Base):
+    """
+    Endpoint dinámico de métricas Prometheus / OpenTelemetry por servidor o equipo.
+    Permite puertos no estándar (ej. ORA-TUI en :9161 o :9261), rutas personalizadas
+    (/metrics, /otel/metrics), esquema HTTP/HTTPS, token Bearer opcional y modo Push OTLP.
+    """
+    __tablename__ = "telemetry_scrape_targets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_id = Column(
+        Integer,
+        ForeignKey("cmdb_assets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name = Column(String(160), nullable=False)
+    # exporter_type:
+    # oratui_oracle | node_exporter | windows_exporter | otel_collector |
+    # postgres_exporter | nginx_exporter | apache_exporter | haproxy_stats |
+    # docker_engine | custom_prometheus | otlp_push
+    exporter_type = Column(String(48), default="node_exporter", nullable=False, index=True)
+    # mode: 'pull' (Prometheus raspa host:port/metrics_path) | 'push_otlp' (agente envía OTLP)
+    mode = Column(String(16), default="pull", nullable=False)
+    target_host = Column(String(255), default="")  # Vacío = usa IP heartbeat/primaria del activo
+    port = Column(Integer, default=9100, nullable=False)
+    metrics_path = Column(String(160), default="/metrics", nullable=False)
+    scheme = Column(String(12), default="http", nullable=False)  # http | https
+    scrape_interval = Column(String(16), default="15s", nullable=False)
+    bearer_token_encrypted = Column(Text, default="")
+    extra_labels = Column(JSON, default=dict)
+    enabled = Column(Boolean, default=True)
+
+    last_probe_status = Column(String(24), default="never")  # ok | error | never
+    last_probe_at = Column(DateTime, nullable=True)
+    last_probe_summary = Column(Text, default="")
+    detected_metric_families_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=utcnow)
+
+    asset = relationship("CmdbAsset")
+
+
+class TelemetryProfile(Base):
+    """
+    Plantilla reutilizable de paneles y KPIs de Prometheus (ej. Sistema Base,
+    Oracle RAC & Linux SAN con ORA-TUI, OpenTelemetry Collector o plantillas a medida)
+    asignable automáticamente por tipo de exporter o manualmente a activos y HostGroups.
+    """
+    __tablename__ = "telemetry_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(64), unique=True, index=True, nullable=False)
+    name = Column(String(160), nullable=False)
+    description = Column(Text, default="")
+    icon_key = Column(String(40), default="analytics")
+    is_builtin = Column(Boolean, default=False)
+
+    auto_match_exporter_types = Column(JSON, default=list)
+    assigned_asset_ids = Column(JSON, default=list)
+    assigned_host_group_ids = Column(JSON, default=list)
+
+    kpi_badges = Column(JSON, default=list)
+    panels = Column(JSON, default=list)
+
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow)
+
+
+class AssetCustomChart(Base):
+    """
+    Gráfica PromQL exclusiva de un servidor/activo individual (con opción de
+    promoverse a una plantilla reutilizable TelemetryProfile).
+    """
+    __tablename__ = "telemetry_asset_custom_charts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_id = Column(
+        Integer,
+        ForeignKey("cmdb_assets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title = Column(String(160), nullable=False)
+    unit = Column(String(24), default="")
+    # chart_type: 'line' | 'multi_line'
+    chart_type = Column(String(24), default="line")
+    promql_a = Column(Text, nullable=False)
+    label_a = Column(String(80), default="Serie A")
+    color_a = Column(String(16), default="#3B82F6")
+    promql_b = Column(Text, default="")
+    label_b = Column(String(80), default="")
+    color_b = Column(String(16), default="#A855F7")
+    legend_label = Column(String(64), default="")
+    warn_threshold = Column(Float, nullable=True)
+    crit_threshold = Column(Float, nullable=True)
+    sort_order = Column(Integer, default=0)
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=utcnow)
+
+    asset = relationship("CmdbAsset")
+
+
+
 
 
 

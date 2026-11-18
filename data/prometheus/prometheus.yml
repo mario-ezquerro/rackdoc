@@ -2,27 +2,23 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
-    monitor: "rackdoc-dcim-cmdb"
+    monitor: 'rackdoc-dcim-cmdb'
 
 scrape_configs:
-  # 1. Métricas nativas agregadas por el motor Background de RackDoc (Heartbeats HTTP/HTTPS/ICMP/TCP/SNMP,
-  #    Estados Nagios SOFT/HARD, Bocas de Switch IF-MIB/LLDP, Proxmox, VMware, Docker, Apache, Nginx y BBDD)
-  - job_name: "rackdoc_backend_collector"
+  - job_name: 'rackdoc_backend_collector'
     scrape_interval: 15s
-    metrics_path: "/api/v1/metrics"
-    # /api/v1/metrics exige la clave de automatización (X-API-Key o Bearer).
-    # La clave se guarda fuera de este fichero porque este sí se versiona.
+    metrics_path: '/api/v1/metrics'
     authorization:
-      credentials_file: "/etc/prometheus/dynamic/automation_api_key"
+      credentials_file: '/etc/prometheus/dynamic/automation_api_key'
     static_configs:
-      - targets: ["rackdoc-backend:8000"]
+      - targets: ['rackdoc-backend:8000']
         labels:
-          collector: "rackdoc-background-engine"
+          collector: 'rackdoc-background-engine'
 
-  # 2. Descubrimiento Dinámico en Caliente (File Service Discovery) generado automáticamente por RackDoc
-  #    al dar de alta o editar un Host por la interfaz web o vía Playbook de Ansible
-  - job_name: "rackdoc_dynamic_host_exporters"
+  - job_name: 'rackdoc_dynamic_host_exporters'
+    tls_config:
+      insecure_skip_verify: true
     file_sd_configs:
       - files:
-          - "/etc/prometheus/dynamic/targets_*.json"
+          - '/etc/prometheus/dynamic/targets_*.json'
         refresh_interval: 15s

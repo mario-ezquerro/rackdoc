@@ -1,14 +1,69 @@
 """Red y Host: topología lógica, chequeos Nagios, SNMP, avisos y tech-stacks."""
 
+import re
+import time
 from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from typing import Optional
 
 from ..database import get_db
-from ..models import AlertContact, AlertContactGroup, CmdbAsset, HostGroup, InfraConnector, LogicalTopologyLink, MaintenanceWindow, MonitoredServiceCheck, NotificationRoutingRule, SmtpAlertConfig, TechStackDiagram, TechStackEdge, TechStackNode
-from ..schemas import AlertContactGroupInput, AlertContactInput, AnsibleHostUpsertWebhook, HostGroupInput, HostSshCommandInput, InfraConnectorInput, LogicalLinkInput, MaintenanceWindowInput, NotificationRoutingRuleInput, ServiceCheckInput, SmtpAlertConfigInput, SnmpWalkDiscoveryRequest, TechStackDiagramInput, TechStackDiagramUpdateInput, TechStackEdgeInput, TechStackEdgeUpdateInput, TechStackNodeInput, TechStackNodeMoveInput
+from ..models import (
+    AlertContact,
+    AlertContactGroup,
+    AssetCustomChart,
+    AssetTelemetryTarget,
+    CmdbAsset,
+    HostGroup,
+    InfraConnector,
+    LogicalTopologyLink,
+    MaintenanceWindow,
+    MonitoredServiceCheck,
+    NotificationRoutingRule,
+    SmtpAlertConfig,
+    TechStackDiagram,
+    TechStackEdge,
+    TechStackNode,
+    TelemetryProfile,
+)
+from ..schemas import (
+    AlertContactGroupInput,
+    AlertContactInput,
+    AnsibleHostUpsertWebhook,
+    AssetCustomChartInput,
+    HostGroupInput,
+    HostSshCommandInput,
+    InfraConnectorInput,
+    LogicalLinkInput,
+    MaintenanceWindowInput,
+    NotificationRoutingRuleInput,
+    PromoteCustomChartInput,
+    ServiceCheckInput,
+    SmtpAlertConfigInput,
+    SnmpWalkDiscoveryRequest,
+    TechStackDiagramInput,
+    TechStackDiagramUpdateInput,
+    TechStackEdgeInput,
+    TechStackEdgeUpdateInput,
+    TechStackNodeInput,
+    TechStackNodeMoveInput,
+    TelemetryPreviewQueryInput,
+    TelemetryProfileInput,
+    TelemetryTargetInput,
+    TelemetryTargetProbeInput,
+)
 from ..routers._common import api_router
 from ..services.network_host_service import TIPOS_PUBLICADOS_A_PROMETHEUS, _dispatch_alert_notification, build_network_hosts_overview, ensure_network_hosts_seeded, evaluate_all_network_service_checks, execute_host_ssh_diagnostic, get_asset_telemetry_timeseries, handle_ansible_host_upsert_webhook, run_single_service_check, run_snmp_switch_discovery, sync_prometheus_targets_file
+from ..services.telemetry_profiles_service import (
+    EXPORTER_PRESETS,
+    ensure_telemetry_profiles_seeded,
+    evaluate_panel_definition,
+    list_asset_available_metrics,
+    probe_telemetry_endpoint,
+    serialize_custom_chart,
+    serialize_telemetry_profile,
+    serialize_telemetry_target,
+    upsert_telemetry_target_for_asset,
+)
 from ..time_utils import utcnow
 
 @api_router.get(
@@ -894,3 +949,574 @@ def execute_host_ssh_console_endpoint(payload: HostSshCommandInput, db: Session 
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+# ==============================================================================
+# TARGETS PROMETHEUS / OPENTELEMETRY MULTIPUERTO Y PERFILES / GRÁFICAS CUSTOM
+# ==============================================================================
+
+@api_router.get(
+    "/network-hosts/assets/{asset_id}/telemetry-targets",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Listar los endpoints Prometheus / OpenTelemetry configurados en un servidor",
+)
+def list_asset_telemetry_targets_endpoint(asset_id: int, db: Session = Depends(get_db)):
+    asset = (
+        db.query(CmdbAsset)
+        .options(joinedload(CmdbAsset.ip_addresses))
+        .filter(CmdbAsset.id == asset_id)
+        .first()
+    )
+    if not asset:
+        raise HTTPException(status_code=404, detail="Activo no encontrado.")
+    targets = (
+        db.query(AssetTelemetryTarget)
+        .filter(AssetTelemetryTarget.asset_id == asset.id)
+        .order_by(AssetTelemetryTarget.id)
+        .all()
+    )
+    return {
+        "asset_id": asset.id,
+        "asset_code": asset.code,
+        "presets": EXPORTER_PRESETS,
+        "targets": [serialize_telemetry_target(t, asset) for t in targets],
+    }
+
+
+@api_router.post(
+    "/network-hosts/assets/{asset_id}/telemetry-targets",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Añadir un endpoint Prometheus / OpenTelemetry (cualquier puerto, path, HTTP/HTTPS o Push OTLP)",
+)
+def create_asset_telemetry_target_endpoint(
+    asset_id: int,
+    payload: TelemetryTargetInput,
+    db: Session = Depends(get_db),
+):
+    asset = (
+        db.query(CmdbAsset)
+        .options(joinedload(CmdbAsset.ip_addresses))
+        .filter(CmdbAsset.id == asset_id)
+        .first()
+    )
+    if not asset:
+        raise HTTPException(status_code=404, detail="Activo no encontrado.")
+    try:
+        tgt = upsert_telemetry_target_for_asset(
+            db=db,
+            asset=asset,
+            data=payload.model_dump(),
+        )
+        probe_res = None
+        if payload.auto_probe and tgt.mode == "pull":
+            probe_res = probe_telemetry_endpoint(
+                db=db,
+                target_id=tgt.id,
+                asset_id=asset.id,
+                bearer_token=payload.bearer_token,
+            )
+            if probe_res.get("ok") and probe_res.get("detected_exporter_type"):
+                det_type = probe_res["detected_exporter_type"]
+                if tgt.exporter_type == "custom_prometheus" and det_type != "custom_prometheus":
+                    tgt.exporter_type = det_type
+                    db.commit()
+                    db.refresh(tgt)
+        sd_sync = sync_prometheus_targets_file(db)
+        return {
+            "target": serialize_telemetry_target(tgt, asset),
+            "probe": probe_res,
+            "prometheus_sd": sd_sync,
+            "telemetry": get_asset_telemetry_timeseries(db=db, asset_id=asset.id),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@api_router.put(
+    "/network-hosts/telemetry-targets/{target_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Editar puerto, ruta, esquema o estado de un endpoint Prometheus / OpenTelemetry",
+)
+def update_asset_telemetry_target_endpoint(
+    target_id: int,
+    payload: TelemetryTargetInput,
+    db: Session = Depends(get_db),
+):
+    existing = db.query(AssetTelemetryTarget).filter(AssetTelemetryTarget.id == target_id).first()
+    if not existing:
+        raise HTTPException(status_code=404, detail="Target de telemetría no encontrado.")
+    asset = (
+        db.query(CmdbAsset)
+        .options(joinedload(CmdbAsset.ip_addresses))
+        .filter(CmdbAsset.id == existing.asset_id)
+        .first()
+    )
+    if not asset:
+        raise HTTPException(status_code=404, detail="Activo asociado no encontrado.")
+    try:
+        tgt = upsert_telemetry_target_for_asset(
+            db=db,
+            asset=asset,
+            data=payload.model_dump(),
+            target_id=target_id,
+        )
+        probe_res = None
+        if payload.auto_probe and tgt.mode == "pull":
+            probe_res = probe_telemetry_endpoint(
+                db=db,
+                target_id=tgt.id,
+                asset_id=asset.id,
+                bearer_token=payload.bearer_token,
+            )
+        sd_sync = sync_prometheus_targets_file(db)
+        return {
+            "target": serialize_telemetry_target(tgt, asset),
+            "probe": probe_res,
+            "prometheus_sd": sd_sync,
+            "telemetry": get_asset_telemetry_timeseries(db=db, asset_id=asset.id),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@api_router.delete(
+    "/network-hosts/telemetry-targets/{target_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Eliminar un endpoint Prometheus / OpenTelemetry y actualizar targets_dynamic.json",
+)
+def delete_asset_telemetry_target_endpoint(target_id: int, db: Session = Depends(get_db)):
+    tgt = db.query(AssetTelemetryTarget).filter(AssetTelemetryTarget.id == target_id).first()
+    if not tgt:
+        raise HTTPException(status_code=404, detail="Target de telemetría no encontrado.")
+    asset_id = tgt.asset_id
+    db.delete(tgt)
+    db.commit()
+    sd_sync = sync_prometheus_targets_file(db)
+    return {
+        "deleted_id": target_id,
+        "prometheus_sd": sd_sync,
+        "telemetry": get_asset_telemetry_timeseries(db=db, asset_id=asset_id),
+    }
+
+
+@api_router.post(
+    "/network-hosts/telemetry-targets/probe",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Probar en vivo un endpoint Prometheus / OpenTelemetry y autodetectar su firma (ORA-TUI, Node, OTel...)",
+)
+def probe_telemetry_target_endpoint(
+    payload: TelemetryTargetProbeInput,
+    db: Session = Depends(get_db),
+):
+    try:
+        return probe_telemetry_endpoint(
+            db=db,
+            target_host=payload.target_host,
+            port=payload.port,
+            metrics_path=payload.metrics_path,
+            scheme=payload.scheme,
+            bearer_token=payload.bearer_token,
+            asset_id=payload.asset_id,
+            target_id=payload.target_id,
+            timeout_sec=payload.timeout_sec,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@api_router.get(
+    "/network-hosts/telemetry/{asset_id}/available-metrics",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Listar métricas reales expuestas por el servidor en Prometheus para autocompletado PromQL",
+)
+def get_asset_available_metrics_endpoint(asset_id: int, db: Session = Depends(get_db)):
+    try:
+        return list_asset_available_metrics(db=db, asset_id=asset_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@api_router.post(
+    "/network-hosts/telemetry/{asset_id}/preview-query/run",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Previsualizar en vivo una consulta PromQL sobre un servidor sin modificar inventario",
+)
+def preview_asset_telemetry_query_endpoint(
+    asset_id: int,
+    payload: TelemetryPreviewQueryInput,
+    db: Session = Depends(get_db),
+):
+    asset = (
+        db.query(CmdbAsset)
+        .options(joinedload(CmdbAsset.ip_addresses))
+        .filter(CmdbAsset.id == asset_id)
+        .first()
+    )
+    if not asset:
+        raise HTTPException(status_code=404, detail="Activo no encontrado.")
+    if not payload.promql_a.strip():
+        raise HTTPException(status_code=400, detail="Indica al menos una expresión PromQL principal.")
+
+    now_ts = int(time.time())
+    points_count = 36
+    range_h = max(1, min(payload.range_hours, 720))
+    step_sec = max(60, int((range_h * 3600) / points_count))
+    start_ts = now_ts - (points_count * step_sec)
+
+    queries = [
+        {
+            "label": payload.label_a or "Serie A",
+            "promql": payload.promql_a.strip(),
+            "color_hex": payload.color_a or "#3B82F6",
+        }
+    ]
+    if payload.promql_b.strip():
+        queries.append(
+            {
+                "label": payload.label_b or "Serie B",
+                "promql": payload.promql_b.strip(),
+                "color_hex": payload.color_b or "#A855F7",
+            }
+        )
+    prom_ok, panel_eval = evaluate_panel_definition(
+        panel={
+            "id": "preview",
+            "title": "Previsualización PromQL",
+            "unit": payload.unit,
+            "chart_type": "multi_line" if payload.legend_label else "line",
+            "legend_label": payload.legend_label,
+            "queries": queries,
+        },
+        asset=asset,
+        start_ts=start_ts,
+        end_ts=now_ts,
+        step_sec=step_sec,
+        points_count=points_count,
+    )
+    return {"prometheus_ok": prom_ok, "panel": panel_eval}
+
+
+@api_router.get(
+    "/network-hosts/telemetry-profiles",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Listar catálogo de Plantillas Reutilizables de Gráficas y KPIs Prometheus",
+)
+def list_telemetry_profiles_endpoint(db: Session = Depends(get_db)):
+    ensure_telemetry_profiles_seeded(db)
+    profiles = db.query(TelemetryProfile).order_by(TelemetryProfile.id).all()
+    return {
+        "profiles": [serialize_telemetry_profile(p) for p in profiles],
+        "exporter_presets": EXPORTER_PRESETS,
+    }
+
+
+@api_router.post(
+    "/network-hosts/telemetry-profiles",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Crear una nueva Plantilla Reutilizable de Gráficas asignable a múltiples servidores o HostGroups",
+)
+def create_telemetry_profile_endpoint(payload: TelemetryProfileInput, db: Session = Depends(get_db)):
+    ensure_telemetry_profiles_seeded(db)
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="El nombre de la plantilla es obligatorio.")
+    raw_code = (payload.code or "").strip().lower()
+    if not raw_code:
+        raw_code = re.sub(r"[^a-z0-9_]+", "_", name.lower()).strip("_")[:48] or "custom_profile"
+    code = raw_code
+    suffix = 1
+    while db.query(TelemetryProfile).filter(TelemetryProfile.code == code).first() is not None:
+        suffix += 1
+        code = f"{raw_code[:42]}_{suffix}"
+
+    prof = TelemetryProfile(
+        code=code,
+        name=name,
+        description=payload.description.strip(),
+        icon_key=(payload.icon_key or "analytics").strip(),
+        is_builtin=False,
+        auto_match_exporter_types=[str(x).strip().lower() for x in payload.auto_match_exporter_types if str(x).strip()],
+        assigned_asset_ids=[int(x) for x in payload.assigned_asset_ids],
+        assigned_host_group_ids=[int(x) for x in payload.assigned_host_group_ids],
+        kpi_badges=list(payload.kpi_badges or []),
+        panels=list(payload.panels or []),
+    )
+    db.add(prof)
+    db.commit()
+    db.refresh(prof)
+    return {"profile": serialize_telemetry_profile(prof)}
+
+
+@api_router.put(
+    "/network-hosts/telemetry-profiles/{profile_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Actualizar paneles, KPIs o servidores/grupos asignados de una Plantilla de Gráficas",
+)
+def update_telemetry_profile_endpoint(
+    profile_id: int,
+    payload: TelemetryProfileInput,
+    db: Session = Depends(get_db),
+):
+    prof = db.query(TelemetryProfile).filter(TelemetryProfile.id == profile_id).first()
+    if not prof:
+        raise HTTPException(status_code=404, detail="Plantilla de telemetría no encontrada.")
+    if payload.name.strip():
+        prof.name = payload.name.strip()
+    prof.description = payload.description.strip()
+    prof.icon_key = (payload.icon_key or prof.icon_key or "analytics").strip()
+    prof.auto_match_exporter_types = [
+        str(x).strip().lower() for x in payload.auto_match_exporter_types if str(x).strip()
+    ]
+    prof.assigned_asset_ids = sorted({int(x) for x in payload.assigned_asset_ids})
+    prof.assigned_host_group_ids = sorted({int(x) for x in payload.assigned_host_group_ids})
+    prof.kpi_badges = list(payload.kpi_badges or [])
+    prof.panels = list(payload.panels or [])
+    prof.updated_at = utcnow()
+    db.commit()
+    db.refresh(prof)
+    return {"profile": serialize_telemetry_profile(prof)}
+
+
+@api_router.delete(
+    "/network-hosts/telemetry-profiles/{profile_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Eliminar una Plantilla de Gráficas personalizada",
+)
+def delete_telemetry_profile_endpoint(profile_id: int, db: Session = Depends(get_db)):
+    prof = db.query(TelemetryProfile).filter(TelemetryProfile.id == profile_id).first()
+    if not prof:
+        raise HTTPException(status_code=404, detail="Plantilla de telemetría no encontrada.")
+    if prof.is_builtin:
+        raise HTTPException(
+            status_code=400,
+            detail="Las plantillas base del sistema no se pueden borrar; puedes editarlas o desasignarlas.",
+        )
+    db.delete(prof)
+    db.commit()
+    return {"deleted_id": profile_id}
+
+
+@api_router.post(
+    "/network-hosts/assets/{asset_id}/telemetry-profiles/{profile_id}/toggle",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Asignar o desasignar una Plantilla Reutilizable de Gráficas a un servidor concreto",
+)
+def toggle_asset_telemetry_profile_endpoint(
+    asset_id: int,
+    profile_id: int,
+    db: Session = Depends(get_db),
+):
+    asset = db.query(CmdbAsset).filter(CmdbAsset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Activo no encontrado.")
+    prof = db.query(TelemetryProfile).filter(TelemetryProfile.id == profile_id).first()
+    if not prof:
+        raise HTTPException(status_code=404, detail="Plantilla de telemetría no encontrada.")
+
+    cur_ids = {int(x) for x in (prof.assigned_asset_ids or [])}
+    if asset.id in cur_ids:
+        cur_ids.remove(asset.id)
+        assigned = False
+    else:
+        cur_ids.add(asset.id)
+        assigned = True
+    prof.assigned_asset_ids = sorted(cur_ids)
+    prof.updated_at = utcnow()
+    db.commit()
+    return {
+        "assigned": assigned,
+        "profile": serialize_telemetry_profile(prof),
+        "telemetry": get_asset_telemetry_timeseries(db=db, asset_id=asset.id),
+    }
+
+
+@api_router.post(
+    "/network-hosts/assets/{asset_id}/custom-charts",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Crear una gráfica PromQL exclusiva para este servidor individual",
+)
+def create_asset_custom_chart_endpoint(
+    asset_id: int,
+    payload: AssetCustomChartInput,
+    db: Session = Depends(get_db),
+):
+    asset = db.query(CmdbAsset).filter(CmdbAsset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Activo no encontrado.")
+    if not payload.title.strip() or not payload.promql_a.strip():
+        raise HTTPException(status_code=400, detail="Título y expresión PromQL principal son obligatorios.")
+
+    chart = AssetCustomChart(
+        asset_id=asset.id,
+        title=payload.title.strip(),
+        unit=payload.unit.strip(),
+        chart_type=payload.chart_type if payload.chart_type in ("line", "multi_line") else "line",
+        promql_a=payload.promql_a.strip(),
+        label_a=(payload.label_a or "Serie A").strip(),
+        color_a=(payload.color_a or "#3B82F6").strip(),
+        promql_b=payload.promql_b.strip(),
+        label_b=payload.label_b.strip(),
+        color_b=(payload.color_b or "#A855F7").strip(),
+        legend_label=payload.legend_label.strip(),
+        warn_threshold=payload.warn_threshold,
+        crit_threshold=payload.crit_threshold,
+        sort_order=payload.sort_order,
+        enabled=payload.enabled,
+    )
+    db.add(chart)
+    db.commit()
+    db.refresh(chart)
+    return {
+        "custom_chart": serialize_custom_chart(chart),
+        "telemetry": get_asset_telemetry_timeseries(db=db, asset_id=asset.id),
+    }
+
+
+@api_router.put(
+    "/network-hosts/custom-charts/{chart_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Actualizar una gráfica PromQL individual de un servidor",
+)
+def update_asset_custom_chart_endpoint(
+    chart_id: int,
+    payload: AssetCustomChartInput,
+    db: Session = Depends(get_db),
+):
+    chart = db.query(AssetCustomChart).filter(AssetCustomChart.id == chart_id).first()
+    if not chart:
+        raise HTTPException(status_code=404, detail="Gráfica personalizada no encontrada.")
+    if not payload.title.strip() or not payload.promql_a.strip():
+        raise HTTPException(status_code=400, detail="Título y expresión PromQL principal son obligatorios.")
+
+    chart.title = payload.title.strip()
+    chart.unit = payload.unit.strip()
+    chart.chart_type = payload.chart_type if payload.chart_type in ("line", "multi_line") else "line"
+    chart.promql_a = payload.promql_a.strip()
+    chart.label_a = (payload.label_a or "Serie A").strip()
+    chart.color_a = (payload.color_a or "#3B82F6").strip()
+    chart.promql_b = payload.promql_b.strip()
+    chart.label_b = payload.label_b.strip()
+    chart.color_b = (payload.color_b or "#A855F7").strip()
+    chart.legend_label = payload.legend_label.strip()
+    chart.warn_threshold = payload.warn_threshold
+    chart.crit_threshold = payload.crit_threshold
+    chart.sort_order = payload.sort_order
+    chart.enabled = payload.enabled
+    db.commit()
+    db.refresh(chart)
+    return {
+        "custom_chart": serialize_custom_chart(chart),
+        "telemetry": get_asset_telemetry_timeseries(db=db, asset_id=chart.asset_id),
+    }
+
+
+@api_router.delete(
+    "/network-hosts/custom-charts/{chart_id}",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Eliminar una gráfica PromQL individual de un servidor",
+)
+def delete_asset_custom_chart_endpoint(chart_id: int, db: Session = Depends(get_db)):
+    chart = db.query(AssetCustomChart).filter(AssetCustomChart.id == chart_id).first()
+    if not chart:
+        raise HTTPException(status_code=404, detail="Gráfica personalizada no encontrada.")
+    asset_id = chart.asset_id
+    db.delete(chart)
+    db.commit()
+    return {
+        "deleted_id": chart_id,
+        "telemetry": get_asset_telemetry_timeseries(db=db, asset_id=asset_id),
+    }
+
+
+@api_router.post(
+    "/network-hosts/custom-charts/{chart_id}/promote-to-profile",
+    tags=["Red & Host (Topología Lógica, Nagios, SNMP & Prometheus)"],
+    summary="Promover una gráfica individual de un servidor a una Plantilla Reutilizable (existente o nueva)",
+)
+def promote_custom_chart_to_profile_endpoint(
+    chart_id: int,
+    payload: PromoteCustomChartInput,
+    db: Session = Depends(get_db),
+):
+    chart = db.query(AssetCustomChart).filter(AssetCustomChart.id == chart_id).first()
+    if not chart:
+        raise HTTPException(status_code=404, detail="Gráfica personalizada no encontrada.")
+    asset = db.query(CmdbAsset).filter(CmdbAsset.id == chart.asset_id).first()
+
+    # Generalizar literal del código del activo a {{asset_code}} al promover a plantilla reutilizable
+    def _generalize(expr: str) -> str:
+        if asset and asset.code and asset.code in expr:
+            return expr.replace(f'"{asset.code}"', '"{{asset_code}}"')
+        return expr
+
+    queries = [
+        {
+            "label": chart.label_a or "Serie A",
+            "promql": _generalize(chart.promql_a),
+            "color_hex": chart.color_a or "#3B82F6",
+        }
+    ]
+    if (chart.promql_b or "").strip():
+        queries.append(
+            {
+                "label": chart.label_b or "Serie B",
+                "promql": _generalize(chart.promql_b),
+                "color_hex": chart.color_b or "#A855F7",
+            }
+        )
+    panel_item = {
+        "id": f"promoted_{chart.id}_{int(time.time())}",
+        "title": chart.title,
+        "unit": chart.unit or "",
+        "chart_type": chart.chart_type or "line",
+        "warn_threshold": chart.warn_threshold,
+        "crit_threshold": chart.crit_threshold,
+        "legend_label": chart.legend_label or "",
+        "queries": queries,
+    }
+
+    if payload.target_profile_id:
+        prof = db.query(TelemetryProfile).filter(TelemetryProfile.id == payload.target_profile_id).first()
+        if not prof:
+            raise HTTPException(status_code=404, detail="Plantilla destino no encontrada.")
+        panels_copy = list(prof.panels or [])
+        panels_copy.append(panel_item)
+        prof.panels = panels_copy
+    else:
+        pname = payload.new_profile_name.strip() or f"Plantilla {asset.code if asset else 'Custom'}"
+        raw_code = (
+            payload.new_profile_code.strip().lower()
+            or re.sub(r"[^a-z0-9_]+", "_", pname.lower()).strip("_")[:42]
+            or "custom_profile"
+        )
+        code = raw_code
+        idx = 1
+        while db.query(TelemetryProfile).filter(TelemetryProfile.code == code).first() is not None:
+            idx += 1
+            code = f"{raw_code}_{idx}"
+        prof = TelemetryProfile(
+            code=code,
+            name=pname,
+            description=f"Plantilla creada a partir de gráfica personalizada de {asset.code if asset else 'servidor'}.",
+            icon_key="analytics",
+            is_builtin=False,
+            auto_match_exporter_types=[],
+            assigned_asset_ids=[chart.asset_id] if payload.assign_to_current_asset else [],
+            assigned_host_group_ids=[],
+            kpi_badges=[],
+            panels=[panel_item],
+        )
+        db.add(prof)
+
+    if payload.assign_to_current_asset:
+        cur_assigned = {int(x) for x in (prof.assigned_asset_ids or [])}
+        cur_assigned.add(chart.asset_id)
+        prof.assigned_asset_ids = sorted(cur_assigned)
+
+    prof.updated_at = utcnow()
+    db.commit()
+    db.refresh(prof)
+    return {
+        "profile": serialize_telemetry_profile(prof),
+        "telemetry": get_asset_telemetry_timeseries(db=db, asset_id=chart.asset_id),
+    }

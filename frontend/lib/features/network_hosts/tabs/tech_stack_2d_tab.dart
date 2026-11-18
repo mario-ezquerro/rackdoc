@@ -3862,6 +3862,7 @@ extension _NetworkHostsTechStack2dTabExt on _NetworkHostsViewState {
           }
         },
         onOpenSsh: () => _showSshWebConsoleDialog(selectedNode, host),
+        onManageTelemetryTargets: () => _showManageTelemetryTargetsDialog(host),
         onOpenFloatingCharts: () {
           _rebuildState(() {
             _showFloatingTechWindow = true;

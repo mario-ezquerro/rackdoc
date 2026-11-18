@@ -1184,6 +1184,11 @@ def build_federated_readonly_snapshot(
         assets=focused_assets,
         stacks=focused_stacks,
         logical_links=combined_mermaid_links,
+        cabling=focused_cabling,
+        subnets=[
+            {"id": s.id, "cidr": s.cidr, "name": s.name, "vlan_id": s.vlan_id, "gateway": s.gateway}
+            for s in subnets
+        ],
     )
 
     snapshot = {
@@ -1229,7 +1234,7 @@ def build_federated_readonly_snapshot(
             for s in subnets[:30]
         ],
         "tech_stacks": focused_stacks[:15],
-        "cabling_sample": focused_cabling[:40],
+        "cabling_sample": focused_cabling[:120],
         "certificates": cert_summaries[:30],
         "findings": findings[:40],
         "mermaid_diagram": mermaid,
@@ -1250,63 +1255,221 @@ def build_scope_mermaid_diagram(
     assets: List[Dict[str, Any]],
     stacks: List[Dict[str, Any]],
     logical_links: List[Dict[str, str]],
+    cabling: Optional[List[Dict[str, Any]]] = None,
+    subnets: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
-    """Genera un diagrama Mermaid válido y auto-contenido para el alcance seleccionado."""
+    """
+    Genera un diagrama Mermaid topológico real Norte -> Sur:
+    - Excluye tomas eléctricas (`TOMA-A/B`), cajas auxiliares (`PLANTA-DC`, `FIBRA-EXT-*`) y pasivos.
+    - Unifica cada `RackDevice` con su ficha `CmdbAsset` (`RK-DEMO-01-SW48-CORE-01` == `SW48-CORE-01`).
+    - Traza uplinks reales entre Switches Core y Acceso, pasarelas L3 hacia Subredes CIDR y cargas.
+    """
+    import ipaddress
+
     lines = ["flowchart TD"]
     root_lbl = _mermaid_safe_label(scope_label)
     lines.append(f'    ROOT["{root_lbl}"]')
 
     if scope_type == "logical_stack" and stacks:
         st = stacks[0]
-        for idx, n in enumerate(st.get("nodes", [])[:20]):
+        for idx, n in enumerate(st.get("nodes", [])[:25]):
             code = n.get("asset_code") or f"N{idx}"
             nid = re.sub(r"[^A-Za-z0-9_]", "_", code)
             rk_tag = f" ({n['rack_code']})" if n.get("rack_code") else ""
             lbl = _mermaid_safe_label(f"{code}: {n.get('label', '')}{rk_tag}")
             lines.append(f'    N_{nid}["{lbl}"]')
             lines.append(f"    ROOT --> N_{nid}")
-        for edge in st.get("edges", [])[:25]:
+        for edge in st.get("edges", [])[:35]:
             s_id = re.sub(r"[^A-Za-z0-9_]", "_", edge.get("from", ""))
             t_id = re.sub(r"[^A-Za-z0-9_]", "_", edge.get("to", ""))
             plbl = _mermaid_safe_label(edge.get("protocol", "TCP"))
-            if s_id and t_id:
+            if s_id and t_id and s_id != t_id:
                 lines.append(f'    N_{s_id} -->|"{plbl}"| N_{t_id}')
         return "\n".join(lines)
 
-    for rk in racks[:8]:
-        rk_id = re.sub(r"[^A-Za-z0-9_]", "_", rk["code"])
-        rk_lbl = _mermaid_safe_label(
-            f"Rack {rk['code']} ({rk['used_units']}/{rk['total_units']}U - {rk['occupancy_pct']}%)"
-        )
-        lines.append(f'    R_{rk_id}["{rk_lbl}"]')
-        lines.append(f"    ROOT --> R_{rk_id}")
-        for dv in rk.get("devices", [])[:8]:
-            dv_id = re.sub(r"[^A-Za-z0-9_]", "_", f"{rk['code']}_{dv['code']}")
-            dv_lbl = _mermaid_safe_label(f"{dv['u_range']} {dv['code']} - {dv['name']}")
-            lines.append(f'    D_{dv_id}["{dv_lbl}"]')
-            lines.append(f"    R_{rk_id} --> D_{dv_id}")
+    non_net_cats = {"cable_manager", "patch_panel", "patchbox", "rack_tray", "pdu", "schuko", "external_power_feed"}
+    aux_prefixes = ("PLANTA-DC", "FIBRA-EXT", "TOMA-A", "TOMA-B")
 
-    asset_codes_drawn = set()
-    for a in assets[:15]:
-        a_id = re.sub(r"[^A-Za-z0-9_]", "_", a["code"])
-        asset_codes_drawn.add(a["code"])
-        ip_txt = a["ips"][0] if a.get("ips") else "sin-IP"
-        a_lbl = _mermaid_safe_label(f"{a['code']} ({a['asset_class']}) {ip_txt}")
-        lines.append(f'    A_{a_id}["{a_lbl}"]')
-        if a.get("rack_code"):
-            rk_id = re.sub(r"[^A-Za-z0-9_]", "_", a["rack_code"])
-            lines.append(f"    R_{rk_id} -.-> A_{a_id}")
-        else:
-            lines.append(f"    ROOT -.-> A_{a_id}")
+    def _is_aux(code_s: str, cat_s: str) -> bool:
+        cu = (code_s or "").upper().strip()
+        if (cat_s or "").lower() in non_net_cats:
+            return True
+        return any(cu == p or cu.startswith(p + "-") or cu.endswith("-" + p) for p in aux_prefixes)
 
-    for lk in logical_links[:18]:
-        if lk["source"] in asset_codes_drawn and lk["target"] in asset_codes_drawn:
-            s_id = re.sub(r"[^A-Za-z0-9_]", "_", lk["source"])
-            t_id = re.sub(r"[^A-Za-z0-9_]", "_", lk["target"])
-            llbl = _mermaid_safe_label(lk["label"])
-            lines.append(f'    A_{s_id} -->|"{llbl}"| A_{t_id}')
+    # Mapa canónico de códigos (unificando `SW48-CORE-01` y `RK-DEMO-01-SW48-CORE-01`)
+    canonical_id_by_code: Dict[str, str] = {}
+    node_ips: Dict[str, List[str]] = {}
+    declared_nodes: Set[str] = set()
+
+    for rk in racks[:12]:
+        rk_code = str(rk["code"])
+        for dv in rk.get("devices", []):
+            dv_code = str(dv["code"])
+            cat = str(dv.get("category") or "")
+            if _is_aux(dv_code, cat):
+                continue
+            mid = "D_" + re.sub(r"[^A-Za-z0-9_]", "_", f"{rk_code}_{dv_code}")
+            ip_part = f" · {dv['ip_address']}" if dv.get("ip_address") else ""
+            lbl = _mermaid_safe_label(f"[{rk_code}] {dv_code} - {dv['name']}{ip_part}")
+            lines.append(f'    {mid}["{lbl}"]')
+            declared_nodes.add(mid)
+            canonical_id_by_code[dv_code] = mid
+            canonical_id_by_code[f"{rk_code}-{dv_code}"] = mid
+            if dv.get("ip_address"):
+                node_ips.setdefault(mid, []).append(str(dv["ip_address"]).strip())
+
+    drawn_ips = {ip for ips in node_ips.values() for ip in ips}
+
+    # Subredes IPAM para enrutamiento L3 en Mermaid
+    parsed_nets: List[Tuple[str, Dict[str, Any], Any]] = []
+    if scope_type in ("global_cpd", "location"):
+        for s in (subnets or [])[:8]:
+            try:
+                net_obj = ipaddress.ip_network(str(s.get("cidr") or "").strip(), strict=False)
+            except ValueError:
+                continue
+            sid = f"N_SUB_{s['id']}"
+            vlbl = f"VLAN {s['vlan_id']}" if s.get("vlan_id") else "LAN"
+            slbl = _mermaid_safe_label(f"{vlbl} · {s['cidr']} ({s.get('name') or ''})")
+            lines.append(f'    {sid}["{slbl}"]')
+            declared_nodes.add(sid)
+            parsed_nets.append((sid, s, net_obj))
+
+    # Activos no enracados (separando servidores/gateways de endpoints masivos DISC-*)
+    disc_count_by_subnet: Dict[str, int] = {}
+    gateway_ips = {str(s.get("gateway") or "").strip() for s in (subnets or []) if s.get("gateway")}
+
+    for a in assets:
+        acode = str(a["code"])
+        if acode in canonical_id_by_code:
+            for ip_s in a.get("ips", []):
+                if ip_s not in node_ips.setdefault(canonical_id_by_code[acode], []):
+                    node_ips[canonical_id_by_code[acode]].append(ip_s)
+            continue
+        a_ips = [str(x).strip() for x in (a.get("ips") or []) if str(x).strip()]
+        if acode.upper().startswith("DISC-") and a_ips and all(ip in drawn_ips for ip in a_ips):
+            continue
+
+        is_gw = any(ip in gateway_ips for ip in a_ips)
+        # Compactar si hay decenas de endpoints DISC-* genéricos en una misma subred
+        if acode.upper().startswith("DISC-") and not is_gw and len(assets) > 22:
+            matched_sid = None
+            for sid, _sdict, net_obj in parsed_nets:
+                if any(
+                    ipaddress.ip_address(ip) in net_obj
+                    for ip in a_ips
+                    if _valid_ipv4(ip)
+                ):
+                    matched_sid = sid
+                    break
+            if matched_sid:
+                disc_count_by_subnet[matched_sid] = disc_count_by_subnet.get(matched_sid, 0) + 1
+                if disc_count_by_subnet[matched_sid] > 4:
+                    continue
+
+        aid = "A_" + re.sub(r"[^A-Za-z0-9_]", "_", acode)
+        ip_txt = a_ips[0] if a_ips else "sin-IP"
+        albl = _mermaid_safe_label(f"{acode} - {a['name']} ({ip_txt})")
+        lines.append(f'    {aid}["{albl}"]')
+        declared_nodes.add(aid)
+        canonical_id_by_code[acode] = aid
+        node_ips[aid] = a_ips
+
+    for sid, total_disc in disc_count_by_subnet.items():
+        if total_disc > 4:
+            extra = total_disc - 4
+            pool_id = f"{sid}_POOL"
+            lines.append(f'    {pool_id}["+{extra} equipos IP activos adicionales en este segmento"]')
+            declared_nodes.add(pool_id)
+            lines.append(f"    {sid} -.-> {pool_id}")
+
+    # Agrupar aristas físicas + lógicas deduplicadas (orientando Core/Router arriba -> Acceso abajo)
+    edge_bundles: Dict[Tuple[str, str], List[str]] = {}
+    has_parent: Set[str] = set()
+
+    def _is_core_or_router(mid: str) -> int:
+        u = mid.upper()
+        if "ROU" in u or "FW" in u or "GATEWAY" in u:
+            return 0
+        if "CORE" in u or "DIST" in u:
+            return 1
+        if "SW" in u:
+            return 2
+        return 3
+
+    def _add_mmd_edge(u_id: Optional[str], v_id: Optional[str], lbl: str) -> None:
+        if not u_id or not v_id or u_id == v_id:
+            return
+        if u_id not in declared_nodes or v_id not in declared_nodes:
+            return
+        ru, rv = _is_core_or_router(u_id), _is_core_or_router(v_id)
+        src, dst = (u_id, v_id) if ru <= rv else (v_id, u_id)
+        if (dst, src) in edge_bundles:
+            src, dst = dst, src
+        lst = edge_bundles.setdefault((src, dst), [])
+        if lbl and lbl not in lst:
+            lst.append(lbl)
+        has_parent.add(dst)
+
+    for cab in (cabling or []):
+        ctype = str(cab.get("cable_type") or "")
+        if "power" in ctype:
+            continue
+        s_code = f"{cab.get('source_rack')}-{cab.get('source_device')}"
+        t_code = f"{cab.get('target_rack')}-{cab.get('target_device')}"
+        u_id = canonical_id_by_code.get(s_code) or canonical_id_by_code.get(str(cab.get("source_device") or ""))
+        v_id = canonical_id_by_code.get(t_code) or canonical_id_by_code.get(str(cab.get("target_device") or ""))
+        _add_mmd_edge(u_id, v_id, f"{cab.get('source_port')}⇄{cab.get('target_port')}")
+
+    for lk in logical_links:
+        u_id = canonical_id_by_code.get(lk["source"])
+        v_id = canonical_id_by_code.get(lk["target"])
+        short_l = lk["label"].split("(")[0].strip()[:22]
+        _add_mmd_edge(u_id, v_id, short_l)
+
+    for (src, dst), lbls in edge_bundles.items():
+        tag = _mermaid_safe_label(f"{len(lbls)}x ({lbls[0]})" if len(lbls) > 1 else (lbls[0] if lbls else "Link"))
+        lines.append(f'    {src} -->|"{tag}"| {dst}')
+
+    # Enlaces L3 Gateway -> Subred -> Nodos IP
+    for sid, sdict, net_obj in parsed_nets:
+        gw = str(sdict.get("gateway") or "").strip()
+        gw_linked = False
+        for mid, ips in node_ips.items():
+            if gw and gw in ips:
+                lines.append(f'    {mid} -->|"GW {gw}"| {sid}')
+                has_parent.add(sid)
+                gw_linked = True
+        if not gw_linked:
+            lines.append(f"    ROOT --> {sid}")
+            has_parent.add(sid)
+
+        for mid, ips in node_ips.items():
+            if mid in has_parent or mid == sid:
+                continue
+            if any(ipaddress.ip_address(ip) in net_obj for ip in ips if _valid_ipv4(ip)):
+                if _is_core_or_router(mid) <= 1:
+                    lines.append(f"    {sid} --> {mid}")
+                else:
+                    lines.append(f"    {sid} -.-> {mid}")
+                has_parent.add(mid)
+
+    # Anclar al nodo raíz únicamente las cabeceras de red que no tengan padre superior
+    for mid in sorted(declared_nodes):
+        if mid.endswith("_POOL") or mid.startswith("N_SUB_"):
+            continue
+        if mid not in has_parent:
+            lines.append(f"    ROOT --> {mid}")
 
     return "\n".join(lines)
+
+
+def _valid_ipv4(ip_str: str) -> bool:
+    import ipaddress
+    try:
+        return isinstance(ipaddress.ip_address(ip_str.strip()), ipaddress.IPv4Address)
+    except ValueError:
+        return False
 
 
 # ==============================================================================

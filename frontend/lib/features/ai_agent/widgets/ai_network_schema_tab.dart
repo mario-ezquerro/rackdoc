@@ -41,8 +41,9 @@ class _AiNetworkSchemaTabState extends State<AiNetworkSchemaTab> {
 
   String _scopeType = 'global_cpd';
   int? _scopeTargetId;
-  String _edgeFilter = 'all'; // all | physical_cabling | hosting_parent | logical_confirmed | passive_ro_discovered
+  String _edgeFilter = 'all';
   bool _onlyRisks = false;
+  bool _showAllEdgeLabels = false;
 
   Map<String, dynamic> _schema = const {};
   String? _selectedNodeId;
@@ -82,13 +83,9 @@ class _AiNetworkSchemaTabState extends State<AiNetworkSchemaTab> {
         scopeTargetId: _scopeTargetId,
       );
       if (!mounted) return;
-      final nodes = ((data['nodes'] ?? const []) as List)
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
       setState(() {
         _schema = data;
-        _selectedNodeId =
-            nodes.isNotEmpty ? (nodes.first['id'] ?? '').toString() : null;
+        _selectedNodeId = null;
         _loading = false;
       });
     } catch (e) {
@@ -351,6 +348,10 @@ class _AiNetworkSchemaTabState extends State<AiNetworkSchemaTab> {
                       child: Text('Lógicos Confirmados'),
                     ),
                     DropdownMenuItem(
+                      value: 'subnet_l3',
+                      child: Text('Enrutamiento Subredes L3'),
+                    ),
+                    DropdownMenuItem(
                       value: 'passive_ro_discovered',
                       child: Text('Descubiertos RO (TCP/LLDP)'),
                     ),
@@ -362,11 +363,19 @@ class _AiNetworkSchemaTabState extends State<AiNetworkSchemaTab> {
               ),
               FilterChip(
                 label: const Text(
-                  'Solo Nodos con Riesgo / SPOF',
+                  'Solo Riesgo / SPOF',
                   style: TextStyle(fontSize: 11.5),
                 ),
                 selected: _onlyRisks,
                 onSelected: (v) => setState(() => _onlyRisks = v),
+              ),
+              FilterChip(
+                label: const Text(
+                  'Todas las Etiquetas',
+                  style: TextStyle(fontSize: 11.5),
+                ),
+                selected: _showAllEdgeLabels,
+                onSelected: (v) => setState(() => _showAllEdgeLabels = v),
               ),
               IconButton(
                 tooltip: 'Centrar / Reset Zoom',
@@ -477,14 +486,20 @@ class _AiNetworkSchemaTabState extends State<AiNetworkSchemaTab> {
                     child: Stack(
                       clipBehavior: Clip.none,
                       children: [
-                        // 1. Bandas de Zonas y Líneas Curvas de Conexión
+                        // 1. Bandas de Zonas y Líneas Curvas de Conexión (clic en fondo limpia selección)
                         Positioned.fill(
-                          child: CustomPaint(
-                            painter: _AiNetworkTopologyPainter(
-                              zones: zones,
-                              nodes: nodes,
-                              edges: edges,
-                              selectedNodeId: _selectedNodeId,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTap: () =>
+                                setState(() => _selectedNodeId = null),
+                            child: CustomPaint(
+                              painter: _AiNetworkTopologyPainter(
+                                zones: zones,
+                                nodes: nodes,
+                                edges: edges,
+                                selectedNodeId: _selectedNodeId,
+                                showAllEdgeLabels: _showAllEdgeLabels,
+                              ),
                             ),
                           ),
                         ),
@@ -794,12 +809,14 @@ class _AiNetworkTopologyPainter extends CustomPainter {
   final List<Map<String, dynamic>> nodes;
   final List<Map<String, dynamic>> edges;
   final String? selectedNodeId;
+  final bool showAllEdgeLabels;
 
   _AiNetworkTopologyPainter({
     required this.zones,
     required this.nodes,
     required this.edges,
     required this.selectedNodeId,
+    required this.showAllEdgeLabels,
   });
 
   Color _hex(String raw, Color fallback) {
@@ -813,9 +830,10 @@ class _AiNetworkTopologyPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // 1. Pintar bandas de Zonas (5 capas)
+    // 1. Pintar bandas de Zonas (5 niveles Norte -> Sur)
     for (final z in zones) {
-      final col = _hex((z['color_hex'] ?? '#2563EB').toString(), AppPalette.blue600);
+      final col =
+          _hex((z['color_hex'] ?? '#2563EB').toString(), AppPalette.blue600);
       final rect = Rect.fromLTWH(
         ((z['x'] ?? 0) as num).toDouble(),
         ((z['y'] ?? 0) as num).toDouble(),
@@ -849,63 +867,155 @@ class _AiNetworkTopologyPainter extends CustomPainter {
       tp.paint(canvas, Offset(rect.left + 14, rect.top + 11));
     }
 
-    // 2. Pintar curvas Bézier de Enlaces
+    // 2. Pintar curvas Bézier ancladas a los bordes reales (Norte-Sur / Este-Oeste)
     final nodeMap = {
       for (final n in nodes) (n['id'] ?? '').toString(): n,
     };
+    final hasSelection = selectedNodeId != null;
 
-    for (final e in edges) {
+    // Dibujar primero las aristas no seleccionadas y al final las resaltadas (encima)
+    final sortedEdges = List<Map<String, dynamic>>.from(edges)
+      ..sort((a, b) {
+        final aSel = hasSelection &&
+            (a['source_id'] == selectedNodeId ||
+                a['target_id'] == selectedNodeId);
+        final bSel = hasSelection &&
+            (b['source_id'] == selectedNodeId ||
+                b['target_id'] == selectedNodeId);
+        if (aSel == bSel) return 0;
+        return aSel ? 1 : -1;
+      });
+
+    for (final e in sortedEdges) {
       final s = nodeMap[e['source_id']];
       final t = nodeMap[e['target_id']];
       if (s == null || t == null) continue;
 
-      final sx = ((s['x'] ?? 0) as num).toDouble() +
-          ((s['width'] ?? 236) as num).toDouble() / 2;
-      final sy = ((s['y'] ?? 0) as num).toDouble() +
-          ((s['height'] ?? 88) as num).toDouble() / 2;
-      final tx = ((t['x'] ?? 0) as num).toDouble() +
-          ((t['width'] ?? 236) as num).toDouble() / 2;
-      final ty = ((t['y'] ?? 0) as num).toDouble() +
-          ((t['height'] ?? 88) as num).toDouble() / 2;
+      final sLeft = ((s['x'] ?? 0) as num).toDouble();
+      final sTop = ((s['y'] ?? 0) as num).toDouble();
+      final sW = ((s['width'] ?? 232) as num).toDouble();
+      final sH = ((s['height'] ?? 84) as num).toDouble();
 
-      final isRelated = selectedNodeId != null &&
+      final tLeft = ((t['x'] ?? 0) as num).toDouble();
+      final tTop = ((t['y'] ?? 0) as num).toDouble();
+      final tW = ((t['width'] ?? 232) as num).toDouble();
+      final tH = ((t['height'] ?? 84) as num).toDouble();
+
+      final sCx = sLeft + sW / 2;
+      final sCy = sTop + sH / 2;
+      final tCx = tLeft + tW / 2;
+      final tCy = tTop + tH / 2;
+
+      late Offset p1;
+      late Offset p2;
+      late Offset c1;
+      late Offset c2;
+
+      if ((sCy - tCy).abs() <= 22.0) {
+        // Misma fila horizontal (ej. LACP Core A <-> Core B)
+        final leftToRight = sCx <= tCx;
+        if ((sCx - tCx).abs() <= sW + 50) {
+          p1 = Offset(leftToRight ? sLeft + sW : sLeft, sCy);
+          p2 = Offset(leftToRight ? tLeft : tLeft + tW, tCy);
+          c1 = Offset((p1.dx + p2.dx) / 2, p1.dy);
+          c2 = Offset((p1.dx + p2.dx) / 2, p2.dy);
+        } else {
+          // Arco limpio superior para no cruzar cajas intermedias de la fila
+          p1 = Offset(sCx, sTop);
+          p2 = Offset(tCx, tTop);
+          final archY = math.min(sTop, tTop) - 28.0;
+          c1 = Offset(sCx, archY);
+          c2 = Offset(tCx, archY);
+        }
+      } else if (tCy > sCy) {
+        // Flujo Norte -> Sur: borde inferior del padre al borde superior del hijo
+        p1 = Offset(sCx, sTop + sH);
+        p2 = Offset(tCx, tTop);
+        final midY = (p1.dy + p2.dy) / 2;
+        c1 = Offset(p1.dx, midY);
+        c2 = Offset(p2.dx, midY);
+      } else {
+        // Flujo Sur -> Norte
+        p1 = Offset(sCx, sTop);
+        p2 = Offset(tCx, tTop + tH);
+        final midY = (p1.dy + p2.dy) / 2;
+        c1 = Offset(p1.dx, midY);
+        c2 = Offset(p2.dx, midY);
+      }
+
+      final isRelated = hasSelection &&
           (e['source_id'] == selectedNodeId ||
               e['target_id'] == selectedNodeId);
-      final col =
+      final bundleCnt = ((e['bundle_count'] ?? 1) as num).toInt();
+      final baseCol =
           _hex((e['color_hex'] ?? '#2563EB').toString(), AppPalette.blue600);
+      final alpha = hasSelection ? (isRelated ? 0.98 : 0.16) : 0.72;
+      final drawCol = baseCol.withValues(alpha: alpha);
+
+      final strokeW = isRelated
+          ? 3.0
+          : (bundleCnt >= 2 ? 2.5 : (e['edge_kind'] == 'subnet_l3' ? 1.5 : 1.9));
       final paint = Paint()
-        ..color = isRelated ? col : col.withValues(alpha: 0.72)
+        ..color = drawCol
         ..style = PaintingStyle.stroke
-        ..strokeWidth = isRelated ? 2.8 : 1.9;
+        ..strokeWidth = strokeW;
 
       final path = Path()
-        ..moveTo(sx, sy)
-        ..cubicTo(sx, (sy + ty) / 2, tx, (sy + ty) / 2, tx, ty);
+        ..moveTo(p1.dx, p1.dy)
+        ..cubicTo(c1.dx, c1.dy, c2.dx, c2.dy, p2.dx, p2.dy);
 
       if (e['dashed'] == true) {
         for (final metric in path.computeMetrics()) {
           double dist = 0.0;
           while (dist < metric.length) {
-            final next = math.min(dist + 7.0, metric.length);
+            final next = math.min(dist + 6.5, metric.length);
             canvas.drawPath(metric.extractPath(dist, next), paint);
-            dist += 12.0;
+            dist += 11.5;
           }
         }
       } else {
         canvas.drawPath(path, paint);
       }
 
+      // Punta de flecha direccional en p2
+      final angle = math.atan2(p2.dy - c2.dy, p2.dx - c2.dx);
+      const arrowLen = 7.5;
+      final a1 = Offset(
+        p2.dx - arrowLen * math.cos(angle - 0.45),
+        p2.dy - arrowLen * math.sin(angle - 0.45),
+      );
+      final a2 = Offset(
+        p2.dx - arrowLen * math.cos(angle + 0.45),
+        p2.dy - arrowLen * math.sin(angle + 0.45),
+      );
+      final arrowPath = Path()
+        ..moveTo(p2.dx, p2.dy)
+        ..lineTo(a1.dx, a1.dy)
+        ..lineTo(a2.dx, a2.dy)
+        ..close();
+      canvas.drawPath(arrowPath, Paint()..color = drawCol);
+
+      // Mostrar etiquetas sin saturación visual: siempre si pocas aristas, si `showAllEdgeLabels`,
+      // si la arista pertenece al nodo seleccionado o si es un troncal agregado/gateway.
       final lbl = (e['label'] ?? '').toString();
-      if (lbl.isNotEmpty) {
-        final mx = (sx + tx) / 2;
-        final my = (sy + ty) / 2;
+      final shouldDrawLabel = lbl.isNotEmpty &&
+          (showAllEdgeLabels ||
+              edges.length <= 18 ||
+              isRelated ||
+              (!hasSelection &&
+                  (bundleCnt >= 2 && lbl.contains('LACP') ||
+                      lbl.startsWith('GW '))));
+
+      if (shouldDrawLabel) {
+        final mx = 0.125 * p1.dx + 0.375 * c1.dx + 0.375 * c2.dx + 0.125 * p2.dx;
+        final my = 0.125 * p1.dy + 0.375 * c1.dy + 0.375 * c2.dy + 0.125 * p2.dy;
         final tp = TextPainter(
           text: TextSpan(
             text: lbl,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 9.5,
               fontWeight: FontWeight.w700,
-              color: AppPalette.slate900,
+              color: isRelated ? AppPalette.slate900 : AppPalette.slate700,
             ),
           ),
           textDirection: TextDirection.ltr,
@@ -922,9 +1032,9 @@ class _AiNetworkTopologyPainter extends CustomPainter {
         canvas.drawRRect(
           pill,
           Paint()
-            ..color = col.withValues(alpha: 0.65)
+            ..color = baseCol.withValues(alpha: 0.75)
             ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.0,
+            ..strokeWidth = isRelated ? 1.4 : 1.0,
         );
         tp.paint(canvas, Offset(mx - tp.width / 2, my - tp.height / 2));
       }
@@ -935,7 +1045,8 @@ class _AiNetworkTopologyPainter extends CustomPainter {
   bool shouldRepaint(covariant _AiNetworkTopologyPainter oldDelegate) {
     return oldDelegate.nodes != nodes ||
         oldDelegate.edges != edges ||
-        oldDelegate.selectedNodeId != selectedNodeId;
+        oldDelegate.selectedNodeId != selectedNodeId ||
+        oldDelegate.showAllEdgeLabels != showAllEdgeLabels;
   }
 }
 

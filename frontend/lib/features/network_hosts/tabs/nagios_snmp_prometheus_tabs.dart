@@ -650,6 +650,38 @@ extension _NetworkHostsNagiosSnmpPrometheusExt on _NetworkHostsViewState {
     final checks = ((selectedHost['service_checks'] as List?) ?? [])
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
+    final activeProfiles =
+        ((_telemetryData?['active_profiles'] as List?) ?? const [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+    final customServerCharts =
+        ((_telemetryData?['custom_charts'] as List?) ?? const [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+    final telemetryTargets =
+        ((_telemetryData?['telemetry_targets'] as List?) ??
+                (selectedHost['telemetry_targets'] as List?) ??
+                const [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+
+    final availableTabKeys = <String>{
+      for (final p in activeProfiles) '${p['code']}',
+      '__custom_server__',
+    };
+    final effectiveTabKey = availableTabKeys.contains(_selectedTelemetryTabKey)
+        ? _selectedTelemetryTabKey
+        : (activeProfiles.any((p) => p['code'] == 'oratui_oracle')
+              ? 'oratui_oracle'
+              : (activeProfiles.isNotEmpty
+                    ? '${activeProfiles.first['code']}'
+                    : 'system_base'));
+    final currentProfileMap = activeProfiles.firstWhere(
+      (p) => '${p['code']}' == effectiveTabKey,
+      orElse: () => activeProfiles.isNotEmpty
+          ? activeProfiles.first
+          : <String, dynamic>{},
+    );
 
     // Filtrado y organización de la columna derecha de elementos
     final filteredRightHosts = allHosts.where((h) {
@@ -999,6 +1031,86 @@ extension _NetworkHostsNagiosSnmpPrometheusExt on _NetworkHostsViewState {
                                         }
                                       },
                                     ),
+                                  OutlinedButton.icon(
+                                    onPressed: () =>
+                                        _showManageTelemetryTargetsDialog(
+                                          selectedHost,
+                                        ),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: AppTheme.accentCyan,
+                                      side: const BorderSide(
+                                        color: AppTheme.accentCyan,
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 8,
+                                      ),
+                                    ),
+                                    icon: const Icon(
+                                      Icons.settings_input_antenna_rounded,
+                                      size: 15,
+                                    ),
+                                    label: Text(
+                                      'Targets / Puertos (${telemetryTargets.length})',
+                                      style: const TextStyle(
+                                        fontSize: 10.8,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  OutlinedButton.icon(
+                                    onPressed: () =>
+                                        _showManageProfilesCatalogDialog(
+                                          selectedHost,
+                                        ),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: AppTheme.accentPurple,
+                                      side: const BorderSide(
+                                        color: AppTheme.accentPurple,
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 8,
+                                      ),
+                                    ),
+                                    icon: const Icon(
+                                      Icons.dashboard_customize_rounded,
+                                      size: 15,
+                                    ),
+                                    label: const Text(
+                                      'Plantillas',
+                                      style: TextStyle(
+                                        fontSize: 10.8,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  if (widget.canEdit)
+                                    ElevatedButton.icon(
+                                      onPressed: () =>
+                                          _showCreateOrEditChartDialog(
+                                            selectedHost,
+                                          ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppTheme.accentTeal,
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 11,
+                                          vertical: 9,
+                                        ),
+                                      ),
+                                      icon: const Icon(
+                                        Icons.add_chart_rounded,
+                                        size: 15,
+                                      ),
+                                      label: const Text(
+                                        '+ Añadir Gráfica',
+                                        style: TextStyle(
+                                          fontSize: 10.8,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ),
                                   // BOTÓN DE ENLACE AL CENTRO DE DOCUMENTACIÓN EN 8. ALARMAS SRE
                                   ElevatedButton.icon(
                                     onPressed: () {
@@ -1025,9 +1137,9 @@ extension _NetworkHostsNagiosSnmpPrometheusExt on _NetworkHostsViewState {
                                       size: 16,
                                     ),
                                     label: const Text(
-                                      'Ir a Documentación Agentes (.md) en 8. Alarmas SRE',
+                                      'Guía Agentes (.md)',
                                       style: TextStyle(
-                                        fontSize: 11,
+                                        fontSize: 10.8,
                                         fontWeight: FontWeight.w800,
                                       ),
                                     ),
@@ -1037,7 +1149,7 @@ extension _NetworkHostsNagiosSnmpPrometheusExt on _NetworkHostsViewState {
                             ],
                           ),
                           const Divider(height: 18),
-                          // Píldoras de resumen técnico del elemento seleccionado
+                          // Píldoras de resumen técnico del elemento seleccionado + Targets activos
                           Wrap(
                             spacing: 8,
                             runSpacing: 6,
@@ -1067,19 +1179,86 @@ extension _NetworkHostsNagiosSnmpPrometheusExt on _NetworkHostsViewState {
                                 '${selectedHost['os_or_firmware'] ?? '-'}',
                                 AppTheme.accentCyan,
                               ),
-                              _buildTechMetricBadge(
-                                'Responsable / Equipo',
-                                '${selectedHost['owner_team'] ?? '-'}',
-                                AppTheme.textSecondary,
-                              ),
+                              for (final tt in telemetryTargets)
+                                _buildTechMetricBadge(
+                                  '${tt['exporter_type']}',
+                                  tt['mode'] == 'push_otlp'
+                                      ? 'OTLP Push'
+                                      : ':${tt['port']}${tt['metrics_path']}',
+                                  AppTheme.success,
+                                ),
                             ],
                           ),
+                          if (activeProfiles.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: [
+                                  for (final prof in activeProfiles)
+                                    Padding(
+                                      padding: const EdgeInsets.only(right: 8),
+                                      child: ChoiceChip(
+                                        avatar: Icon(
+                                          _profileIcon(
+                                            prof['icon_key']?.toString(),
+                                          ),
+                                          size: 15,
+                                          color:
+                                              effectiveTabKey ==
+                                                  '${prof['code']}'
+                                              ? Colors.white
+                                              : AppTheme.accentCyan,
+                                        ),
+                                        label: Text(
+                                          '${prof['name']} (${((prof['evaluated_panels'] as List?) ?? const []).length})',
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                        selected:
+                                            effectiveTabKey ==
+                                            '${prof['code']}',
+                                        onSelected: (_) => _rebuildState(
+                                          () => _selectedTelemetryTabKey =
+                                              '${prof['code']}',
+                                        ),
+                                      ),
+                                    ),
+                                  ChoiceChip(
+                                    avatar: Icon(
+                                      Icons.tune_rounded,
+                                      size: 15,
+                                      color:
+                                          effectiveTabKey == '__custom_server__'
+                                          ? Colors.white
+                                          : AppTheme.accentTeal,
+                                    ),
+                                    label: Text(
+                                      'Gráficas de este Servidor (${customServerCharts.length})',
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                    selected:
+                                        effectiveTabKey == '__custom_server__',
+                                    onSelected: (_) => _rebuildState(
+                                      () => _selectedTelemetryTabKey =
+                                          '__custom_server__',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
                     const SizedBox(height: 14),
 
-                    // 2. Cuadrícula 2x2 perfectamente alineada con las 4 Gráficas Prometheus del elemento
+                    // 2. Renderizado dinámico según Plantilla Seleccionada o Gráficas Exclusivas del Servidor
                     if (_loadingTelemetry)
                       const Center(
                         child: Padding(
@@ -1087,7 +1266,83 @@ extension _NetworkHostsNagiosSnmpPrometheusExt on _NetworkHostsViewState {
                           child: CircularProgressIndicator(),
                         ),
                       )
-                    else ...[
+                    else if (effectiveTabKey == '__custom_server__') ...[
+                      if (customServerCharts.isEmpty)
+                        Container(
+                          padding: const EdgeInsets.all(24),
+                          decoration: BoxDecoration(
+                            color: AppTheme.bgSecondary,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppTheme.border),
+                          ),
+                          child: Column(
+                            children: [
+                              const Icon(
+                                Icons.add_chart_rounded,
+                                size: 32,
+                                color: AppTheme.accentTeal,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Este servidor (${selectedHost['code']}) aún no tiene gráficas exclusivas.',
+                                style: const TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              const Text(
+                                'Puedes añadir gráficas PromQL específicas para esta máquina o promoverlas después a una Plantilla Reutilizable.',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: AppTheme.textSecondary,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                              if (widget.canEdit) ...[
+                                const SizedBox(height: 12),
+                                ElevatedButton.icon(
+                                  onPressed: () => _showCreateOrEditChartDialog(
+                                    selectedHost,
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppTheme.accentTeal,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  icon: const Icon(
+                                    Icons.add_chart_rounded,
+                                    size: 16,
+                                  ),
+                                  label: const Text(
+                                    '+ Crear Gráfica para este Servidor',
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        )
+                      else
+                        _buildEvaluatedPanelsGrid(
+                          panels: customServerCharts,
+                          host: selectedHost,
+                          isCustomServerChart: true,
+                        ),
+                    ] else if (currentProfileMap.isNotEmpty) ...[
+                      _buildEvaluatedKpiStrip(
+                        ((currentProfileMap['evaluated_kpis'] as List?) ??
+                                const [])
+                            .map((e) => Map<String, dynamic>.from(e as Map))
+                            .toList(),
+                      ),
+                      _buildEvaluatedPanelsGrid(
+                        panels:
+                            ((currentProfileMap['evaluated_panels'] as List?) ??
+                                    const [])
+                                .map((e) => Map<String, dynamic>.from(e as Map))
+                                .toList(),
+                        host: selectedHost,
+                      ),
+                    ] else ...[
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -1400,6 +1655,21 @@ prometheus-redis-exporter --redis.addr="redis://$ip:6379"
 
 # Docker Engine (/etc/docker/daemon.json -> puerto 9323):
 # { "metrics-addr": "0.0.0.0:9323", "experimental": true }
+```
+
+---
+
+## 7. Oracle DB, RAC & Linux SAN (`ORA-TUI`) y OpenTelemetry en Puertos Personalizados
+```bash
+# Arrancar el demonio OpenTelemetry/Prometheus de ORA-TUI (por defecto :9161 o cualquier puerto libre):
+sudo ora-tui --opentelemetry --daemon --otel-port=9161 --interval=15s
+
+# Verificar métricas Oracle, Clusterware, Tablespaces, ASM, RMAN y SAN:
+curl -s http://$ip:9161/metrics | head -n 30
+
+# En RackDoc -> 4. Red & Host -> Pestaña Prometheus -> botón "Targets / Puertos":
+# Añade el puerto exacto (ej. 9161 o 9261) y pulsa "Probar & Autodetectar Firma":
+# RackDoc activará automáticamente la pestaña de gráficas "Oracle DB, RAC & Linux SAN (ORA-TUI)".
 ```
 ''';
   }

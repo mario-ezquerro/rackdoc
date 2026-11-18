@@ -1293,6 +1293,92 @@ class AiPublishNetworkSchemaInput(BaseModel):
     include_passive_ro_edges: bool = True
 
 
+# ==============================================================================
+# TARGETS PROMETHEUS / OPENTELEMETRY MULTIPUERTO Y PERFILES / GRÁFICAS CUSTOM
+# ==============================================================================
+
+class TelemetryTargetInput(BaseModel):
+    """Alta o edición de un target de telemetría Prometheus / OpenTelemetry sobre un activo."""
+    name: str
+    exporter_type: str = "node_exporter"
+    mode: str = "pull"  # pull | push_otlp
+    target_host: str = ""  # Vacío = usa la IP primaria/heartbeat del activo
+    port: int = 9100
+    metrics_path: str = "/metrics"
+    scheme: str = "http"  # http | https
+    scrape_interval: str = "15s"
+    bearer_token: Optional[str] = None
+    clear_bearer_token: bool = False
+    extra_labels: Dict[str, str] = {}
+    enabled: bool = True
+    auto_probe: bool = False
+
+
+class TelemetryTargetProbeInput(BaseModel):
+    """Sondeo instantáneo y autodetección de firma de un endpoint Prometheus / OpenTelemetry."""
+    target_host: str = ""
+    asset_id: Optional[int] = None
+    target_id: Optional[int] = None
+    port: int = 9100
+    metrics_path: str = "/metrics"
+    scheme: str = "http"
+    bearer_token: Optional[str] = None
+    timeout_sec: float = 3.0
+
+
+class TelemetryProfileInput(BaseModel):
+    """Creación o edición de una plantilla reutilizable de gráficas y semáforos KPI."""
+    code: Optional[str] = None
+    name: str
+    description: str = ""
+    icon_key: str = "analytics"
+    auto_match_exporter_types: List[str] = []
+    assigned_asset_ids: List[int] = []
+    assigned_host_group_ids: List[int] = []
+    kpi_badges: List[Dict[str, Any]] = []
+    panels: List[Dict[str, Any]] = []
+
+
+class AssetCustomChartInput(BaseModel):
+    """Creación o edición de una gráfica PromQL exclusiva de un servidor individual."""
+    title: str
+    unit: str = ""
+    chart_type: str = "line"  # line | multi_line
+    promql_a: str
+    label_a: str = "Serie A"
+    color_a: str = "#3B82F6"
+    promql_b: str = ""
+    label_b: str = ""
+    color_b: str = "#A855F7"
+    legend_label: str = ""
+    warn_threshold: Optional[float] = None
+    crit_threshold: Optional[float] = None
+    sort_order: int = 0
+    enabled: bool = True
+
+
+class PromoteCustomChartInput(BaseModel):
+    """Promueve una gráfica individual de un servidor a una plantilla reutilizable (existente o nueva)."""
+    target_profile_id: Optional[int] = None
+    new_profile_name: str = ""
+    new_profile_code: str = ""
+    assign_to_current_asset: bool = True
+
+
+class TelemetryPreviewQueryInput(BaseModel):
+    """Previsualización de una expresión PromQL en vivo para un activo concreto."""
+    promql_a: str
+    label_a: str = "Serie A"
+    color_a: str = "#3B82F6"
+    promql_b: str = ""
+    label_b: str = ""
+    color_b: str = "#A855F7"
+    legend_label: str = ""
+    unit: str = ""
+    range_hours: int = 6
+
+
+
 
 
 

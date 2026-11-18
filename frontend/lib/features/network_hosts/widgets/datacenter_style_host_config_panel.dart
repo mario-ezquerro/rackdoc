@@ -23,6 +23,7 @@ class _DatacenterStyleHostConfigPanel extends StatefulWidget {
   final ValueChanged<int>? onDeleteEdge;
   final VoidCallback? onOpenSsh;
   final VoidCallback? onOpenFloatingCharts;
+  final VoidCallback? onManageTelemetryTargets;
   final Future<void> Function(Map<String, dynamic> payload) onSaveHostConfig;
 
   const _DatacenterStyleHostConfigPanel({
@@ -42,6 +43,7 @@ class _DatacenterStyleHostConfigPanel extends StatefulWidget {
     this.onDeleteEdge,
     this.onOpenSsh,
     this.onOpenFloatingCharts,
+    this.onManageTelemetryTargets,
     required this.onSaveHostConfig,
   });
 
@@ -81,12 +83,18 @@ class _DatacenterStyleHostConfigPanelState
 
   late bool _expNode;
   late bool _expWin;
+  late bool _expOraTui;
+  late bool _expOtel;
   late bool _expNginx;
   late bool _expApache;
   late bool _expDocker;
   late bool _expPostgres;
   late bool _expMysql;
   late bool _expRedis;
+
+  late final TextEditingController _expOraTuiPortCtrl;
+  late final TextEditingController _expOraTuiPathCtrl;
+  late final TextEditingController _expOtelPortCtrl;
 
   late final TextEditingController _hbSshPortCtrl;
   late final TextEditingController _hbHttpUrlCtrl;
@@ -246,14 +254,42 @@ class _DatacenterStyleHostConfigPanelState
     _hbUdp = hasChk('udp');
     _hbSnmp = hasChk('snmp');
 
+    final telTargets = ((h['telemetry_targets'] as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    Map<String, dynamic>? findTelTarget(String t) {
+      for (final tt in telTargets) {
+        if ((tt['exporter_type'] ?? '').toString().toLowerCase() == t) {
+          return tt;
+        }
+      }
+      return null;
+    }
+
     _expNode = widget.isNewElement ? true : hasChk('node_exporter');
     _expWin = hasChk('windows_exporter');
+    _expOraTui =
+        hasChk('oratui_oracle') || findTelTarget('oratui_oracle') != null;
+    _expOtel =
+        hasChk('otel_collector') || findTelTarget('otel_collector') != null;
     _expNginx = hasChk('nginx');
     _expApache = hasChk('apache');
     _expDocker = hasChk('docker');
     _expPostgres = hasChk('postgres');
     _expMysql = hasChk('mysql');
     _expRedis = hasChk('redis');
+
+    final oraTt = findTelTarget('oratui_oracle') ?? findChk('oratui_oracle');
+    final otelTt = findTelTarget('otel_collector') ?? findChk('otel_collector');
+    _expOraTuiPortCtrl = TextEditingController(
+      text: '${oraTt?['port'] ?? 9161}',
+    );
+    _expOraTuiPathCtrl = TextEditingController(
+      text: '${oraTt?['metrics_path'] ?? '/metrics'}',
+    );
+    _expOtelPortCtrl = TextEditingController(
+      text: '${otelTt?['port'] ?? 8889}',
+    );
 
     final httpChk = findChk('https') ?? findChk('http');
     _hbSshPortCtrl = TextEditingController(
@@ -288,6 +324,8 @@ class _DatacenterStyleHostConfigPanelState
       'snmp',
       'node_exporter',
       'windows_exporter',
+      'oratui_oracle',
+      'otel_collector',
       'nginx',
       'apache',
       'docker',
@@ -360,6 +398,27 @@ class _DatacenterStyleHostConfigPanelState
     if (_hbEnabled) {
       if (_expNode) exporters.add({'type': 'node_exporter', 'port': 9100});
       if (_expWin) exporters.add({'type': 'windows_exporter', 'port': 9182});
+      if (_expOraTui) {
+        final oraPort = int.tryParse(_expOraTuiPortCtrl.text.trim()) ?? 9161;
+        final oraPath = _expOraTuiPathCtrl.text.trim().isEmpty
+            ? '/metrics'
+            : _expOraTuiPathCtrl.text.trim();
+        exporters.add({
+          'type': 'oratui_oracle',
+          'name': 'ORA-TUI Oracle & SAN (:$oraPort)',
+          'port': oraPort,
+          'metrics_path': oraPath,
+        });
+      }
+      if (_expOtel) {
+        final otelPort = int.tryParse(_expOtelPortCtrl.text.trim()) ?? 8889;
+        exporters.add({
+          'type': 'otel_collector',
+          'name': 'OpenTelemetry Collector (:$otelPort)',
+          'port': otelPort,
+          'metrics_path': '/metrics',
+        });
+      }
       if (_expNginx) {
         exporters.add({
           'type': 'nginx',
@@ -1346,6 +1405,27 @@ class _DatacenterStyleHostConfigPanelState
                   FilterChip(
                     visualDensity: VisualDensity.compact,
                     label: const Text(
+                      'ORA-TUI Oracle',
+                      style: TextStyle(
+                        fontSize: 10.2,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    selected: _expOraTui,
+                    onSelected: (v) => setState(() => _expOraTui = v),
+                  ),
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
+                      'OpenTelemetry',
+                      style: TextStyle(fontSize: 10.2),
+                    ),
+                    selected: _expOtel,
+                    onSelected: (v) => setState(() => _expOtel = v),
+                  ),
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    label: const Text(
                       'Nginx',
                       style: TextStyle(fontSize: 10.2),
                     ),
@@ -1418,8 +1498,63 @@ class _DatacenterStyleHostConfigPanelState
                           !_showAddCustomCheckRow,
                     ),
                   ),
+                  if (!widget.isNewElement &&
+                      widget.onManageTelemetryTargets != null)
+                    ActionChip(
+                      visualDensity: VisualDensity.compact,
+                      avatar: const Icon(
+                        Icons.settings_input_antenna_rounded,
+                        size: 13,
+                        color: AppTheme.accentTeal,
+                      ),
+                      label: const Text(
+                        'Puertos / OTel',
+                        style: TextStyle(
+                          fontSize: 10.2,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.accentTeal,
+                        ),
+                      ),
+                      onPressed: widget.onManageTelemetryTargets,
+                    ),
                 ],
               ),
+              if (_expOraTui) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    SizedBox(
+                      width: 112,
+                      child: TextField(
+                        controller: _expOraTuiPortCtrl,
+                        keyboardType: TextInputType.number,
+                        style: const TextStyle(fontSize: 10.8),
+                        decoration: _compactDeco('Puerto ORA-TUI'),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: TextField(
+                        controller: _expOraTuiPathCtrl,
+                        style: const TextStyle(fontSize: 10.8),
+                        decoration: _compactDeco('Ruta Métricas (/metrics)'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (_expOtel) ...[
+                const SizedBox(height: 7),
+                SizedBox(
+                  width: 150,
+                  child: TextField(
+                    controller: _expOtelPortCtrl,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(fontSize: 10.8),
+                    decoration: _compactDeco('Puerto OTel (:8889)'),
+                  ),
+                ),
+              ],
               if (_hbHttp) ...[
                 const SizedBox(height: 8),
                 Row(

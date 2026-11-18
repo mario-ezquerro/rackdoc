@@ -1,15 +1,29 @@
 """
-Fase 3 — Motor de Esquemas Visuales de Red según Análisis IA (`AiNetworkSchema`),
+Motor Topológico v2 de Esquemas Visuales de Red según Análisis IA (`AiNetworkSchema`),
 Auditoría FinOps / Capacidad con Prometheus TSDB y Publicación `Human-in-the-Loop`
 hacia `4. Red & Host (Stacks Tecnológicos 2D)`.
+
+Mejoras clave de ingeniería topológica (v2):
+1. **Fusión canónica 1:1 (`RackDevice` ⇄ `CmdbAsset`)**: elimina duplicidades cuando un equipo
+   de rack (`SW48-CORE-01`) tiene además ficha sincronizada en CMDB (`RK-DEMO-01-SW48-CORE-01`)
+   o múltiples entradas descubiertas sobre el mismo `rack_device_id`.
+2. **Exclusión de elementos no-red**: filtra tomas eléctricas (`TOMA-A/B`, `schuko`), pasivos
+   y cajas auxiliares (`PLANTA-DC`, `FIBRA-EXT-*`), así como acometidas `power_ac`.
+3. **Jerarquía Norte -> Sur real en 5 niveles de red**:
+   `1. Perímetro, Gateways & Subredes L3` -> `2. Core / Distribución` ->
+   `3. Switching de Acceso (agrupado por Rack)` -> `4. Servidores, VMs & BBDD` ->
+   `5. Endpoints de Planta, Wi-Fi & Equipos IP`.
+4. **Agregación de enlaces paralelos (LACP / Dual-Homed)** y **enrutamiento automático L3 por CIDR**
+   (`ipaddress.ip_network`) para que ningún host ni subred quede huérfano en el plano.
 """
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import secrets
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import httpx
 from sqlalchemy.orm import Session, joinedload
@@ -34,6 +48,26 @@ from .ai_agent_service import ALLOWED_SCOPES, build_federated_readonly_snapshot,
 PROMETHEUS_INTERNAL_URL = (
     os.getenv("PROMETHEUS_URL", "http://rackdoc-prometheus:9090") or "http://rackdoc-prometheus:9090"
 ).rstrip("/")
+
+# Categorías y códigos sintéticos del editor de Rack que NO son nodos L2/L3 de topología IP
+NON_NETWORK_CATEGORIES = frozenset({
+    "cable_manager",
+    "patch_panel",
+    "patchbox",
+    "rack_tray",
+    "pdu",
+    "schuko",
+    "external_power_feed",
+})
+SYNTHETIC_RACK_CODES = ("PLANTA-DC", "FIBRA-EXT", "TOMA-A", "TOMA-B")
+
+
+def is_auxiliary_rack_item(code: str, category: str) -> bool:
+    cu = (code or "").upper().strip()
+    cat = (category or "").lower().strip()
+    if cat in NON_NETWORK_CATEGORIES:
+        return True
+    return any(cu == p or cu.startswith(p + "-") or cu.endswith("-" + p) for p in SYNTHETIC_RACK_CODES)
 
 
 # ==============================================================================
@@ -66,14 +100,8 @@ def _query_prom_metric_by_code(client: httpx.Client, metric_name: str) -> Dict[s
 
 
 def collect_finops_telemetry_and_findings(db: Session) -> Tuple[Dict[str, Dict[str, float]], List[Dict[str, Any]]]:
-    """
-    Cruza las métricas instantáneas de Prometheus y `MonitoredServiceCheck.metrics_snapshot`
-    con los recursos asignados en CMDB (`cpu_cores`, `ram_gb`, `storage_gb`) para detectar
-    saturación (>85%) o sobredimensionamiento FinOps (<10% en máquinas grandes).
-    """
     telemetry_by_code: Dict[str, Dict[str, float]] = {}
 
-    # 1. Fallback local desde snapshots de chequeos Nagios/Prometheus ya almacenados
     checks = db.query(MonitoredServiceCheck).all()
     assets = db.query(CmdbAsset).filter(CmdbAsset.lifecycle_status != "decommissioned").all()
     asset_by_id = {a.id: a for a in assets}
@@ -98,7 +126,6 @@ def collect_finops_telemetry_and_findings(db: Session) -> Tuple[Dict[str, Dict[s
                 except (TypeError, ValueError):
                     pass
 
-    # 2. Lectura en vivo no intrusiva contra Prometheus TSDB si está levantado
     try:
         with httpx.Client(timeout=2.2) as client:
             cpu_map = _query_prom_metric_by_code(client, "rackdoc_host_cpu_usage_percent")
@@ -159,58 +186,113 @@ def collect_finops_telemetry_and_findings(db: Session) -> Tuple[Dict[str, Dict[s
 
 
 # ==============================================================================
-# 2. GENERADOR DE ESQUEMA VISUAL 2D DE RED SEGÚN ANÁLISIS (5 CAPAS + ENLACES RO)
+# 2. GENERADOR DE ESQUEMA TOPOLÓGICO 2D (FUSIÓN 1:1 + 5 NIVELES NORTE-SUR)
 # ==============================================================================
 
 LAYER_DEFINITIONS: List[Tuple[str, str, str, str]] = [
     (
         "wan_perimetro",
-        "CAPA 1 • SUBREDES IPAM, GATEWAYS, FIREWALLS Y PERÍMETRO / VIPs",
-        "Perímetro, enrutamiento y balanceo de entrada",
+        "NIVEL 1 • PERÍMETRO, ROUTERS / GATEWAYS Y SEGMENTOS DE SUBRED L3 (IPAM)",
+        "Enrutamiento principal, cortafuegos y pasarelas VLAN",
         "#DC2626",
     ),
     (
-        "switching_racks",
-        "CAPA 2 • CONMUTACIÓN FÍSICA, BASTIDORES RACK Y TRONCALES SNMP / LLDP",
-        "Switches Core/ToR, Patching y distribución en sala",
+        "core_distribution",
+        "NIVEL 2 • CONMUTACIÓN CORE / AGREGACIÓN ALTA DISPONIBILIDAD (LACP / FIBRA)",
+        "Switches troncales de distribución entre bastidores",
         "#0284C7",
     ),
     (
-        "hipervisores_hierro",
-        "CAPA 3 • HIPERVISORES FÍSICOS (ESXi / PROXMOX / KVM) Y SERVIDORES BAREMETAL",
-        "Cómputo físico montado en Rack",
+        "access_switching",
+        "NIVEL 3 • CONMUTACIÓN DE ACCESO POR BASTIDOR RACK (ToR / ACCESO)",
+        "Switches de acceso ordenados por Rack físico",
         "#2563EB",
     ),
     (
-        "apps_vms_contenedores",
-        "CAPA 4 • MÁQUINAS VIRTUALES, PROXIES WEB Y CONTENEDORES DESCUBIERTOS",
-        "Carga de trabajo de aplicación y middleware",
+        "compute_and_services",
+        "NIVEL 4 • SERVIDORES, HIPERVISORES, MÁQUINAS VIRTUALES, APPS Y DATOS",
+        "Cómputo físico/virtual, contenedores, bases de datos y SAI gestionado",
         "#7C3AED",
     ),
     (
-        "datos_almacenamiento",
-        "CAPA 5 • BASES DE DATOS, CACHÉ Y ALMACENAMIENTO SAN / NAS",
-        "Persistencia crítica y backends de datos",
+        "endpoints_and_iot",
+        "NIVEL 5 • DISPOSITIVOS DE PLANTA, APs WI-FI, IMPRESORAS Y HOSTS DESCUBIERTOS",
+        "Equipos finales e IPs activas en subredes de usuario/planta",
         "#0D9488",
     ),
 ]
 
 
-def _classify_asset_layer(asset_data: Dict[str, Any], listening_ports: List[int]) -> str:
-    aclass = str(asset_data.get("asset_class") or "").lower()
-    name_low = f"{asset_data.get('code', '')} {asset_data.get('name', '')} {asset_data.get('os_or_firmware', '')}".lower()
+def _classify_canonical_layer(
+    code: str,
+    name: str,
+    asset_class: str,
+    rack_category: str,
+    ips: List[str],
+    gateway_ips: Set[str],
+    switch_peer_degree: int,
+    listening_ports: List[int],
+) -> str:
+    text = f"{code} {name}".lower()
+    aclass = (asset_class or "").lower()
+    rcat = (rack_category or "").lower()
 
-    if aclass == "cluster_vip" or any(k in name_low for k in ("firewall", "forti", "paloalto", "pfsense", "router", "wan", "vip", "haproxy")):
+    # SAIs / UPS nunca son Firewalls aunque su código empiece por FIR*
+    if rcat == "ups" or any(w in text for w in ("sai", "ups ", "ups/", "apc ")):
+        return "compute_and_services"
+
+    # Nivel 1: Routers, Gateways reales de subred, Firewalls y VIPs
+    if (
+        rcat in ("router", "firewall", "gateway")
+        or aclass == "cluster_vip"
+        or any(ip in gateway_ips for ip in ips)
+        or any(w in text for w in ("mikrotik", "router", "ccr", "forti", "paloalto", "pfsense", "wan", "haproxy"))
+    ):
         return "wan_perimetro"
-    if aclass == "network_security" or any(k in name_low for k in ("switch", "catalyst", "nexus", "aruba", "mikrotik", "tor")):
-        return "switching_racks"
-    if aclass == "storage_san_nas" or any(
-        k in name_low for k in ("postgres", "mysql", "mariadb", "oracle", "mssql", "sql", "redis", "mongo", "san", "nas", "truenas", "netapp")
-    ) or any(p in listening_ports for p in (5432, 3306, 1433, 6379, 27017, 2049)):
-        return "datos_almacenamiento"
-    if aclass == "physical_server" or any(k in name_low for k in ("esxi", "proxmox", "pve", "hypervisor", "hyper-v", "kvm", "poweredge", "proliant")):
-        return "hipervisores_hierro"
-    return "apps_vms_contenedores"
+
+    # Nivel 2 vs Nivel 3: Switches Core/Agregación frente a Switches de Acceso
+    is_switch = (
+        rcat == "switch"
+        or any(w in text for w in ("switch", "sw48", "sw24", "catalyst", "nexus", "aruba"))
+    )
+    if is_switch:
+        is_explicit_access = any(w in text for w in ("acc", "acceso", "tor"))
+        if not is_explicit_access and (
+            any(w in text for w in ("core", "agreg", "dist", "spine"))
+            or switch_peer_degree >= 6
+        ):
+            return "core_distribution"
+        return "access_switching"
+
+    # Nivel 5: Dispositivos finales de planta, APs, impresoras o nodos autodescubiertos DISC-*
+    is_auto_disc = code.upper().startswith("DISC-")
+    if (
+        aclass in ("floor_endpoint", "other_machine")
+        or any(
+            w in text
+            for w in (
+                "printer",
+                "impresora",
+                "iphone",
+                "android",
+                "pixel",
+                "samsung",
+                "ipad",
+                "tab-",
+                "google-home",
+                "u6-",
+                "unifi",
+                "desktop",
+                "macbook",
+                "mcbook",
+                "equipo detectado",
+            )
+        )
+        or (is_auto_disc and aclass == "virtual_machine" and not listening_ports)
+    ):
+        return "endpoints_and_iot"
+
+    return "compute_and_services"
 
 
 def build_analyzed_network_schema(
@@ -218,11 +300,6 @@ def build_analyzed_network_schema(
     scope_type: str = "global_cpd",
     scope_target_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """
-    Construye el grafo geométrico completo en 2D (`zones`, `nodes`, `edges`) a partir del
-    análisis combinado de Fase 1 (Racks, Cableado, CMDB, Topología, SPOFs, CertScope) y
-    Fase 2 (Descubrimiento Pasivo SSH/WinRM + SNMP IF-MIB/LLDP-MIB).
-    """
     if scope_type not in ALLOWED_SCOPES:
         scope_type = "global_cpd"
 
@@ -246,67 +323,264 @@ def build_analyzed_network_schema(
                 }
             )
 
-    # Mapear descubrimiento pasivo reciente por asset_code o target_host
+    # Cargar inventario completo desde SQLAlchemy (sin recortes [:40] que partan uplinks)
+    locations = db.query(Location).options(joinedload(Location.floors)).all()
+    floor_to_loc_id = {fl.id: loc.id for loc in locations for fl in loc.floors}
+
+    racks = (
+        db.query(Rack)
+        .options(
+            joinedload(Rack.room),
+            joinedload(Rack.devices).joinedload(RackDevice.template),
+        )
+        .order_by(Rack.code.asc())
+        .all()
+    )
+    connections = (
+        db.query(Connection)
+        .options(
+            joinedload(Connection.source_port).joinedload(Port.device),
+            joinedload(Connection.target_port).joinedload(Port.device),
+        )
+        .all()
+    )
+    assets = (
+        db.query(CmdbAsset)
+        .options(joinedload(CmdbAsset.ip_addresses))
+        .filter(CmdbAsset.lifecycle_status != "decommissioned")
+        .order_by(CmdbAsset.id.asc())
+        .all()
+    )
+    subnets = db.query(CmdbSubnet).order_by(CmdbSubnet.id.asc()).all()
+    logical_links = db.query(LogicalTopologyLink).all()
     ro_rows = (
         db.query(AiPassiveDiscoverySnapshot)
         .options(joinedload(AiPassiveDiscoverySnapshot.asset))
         .filter(AiPassiveDiscoverySnapshot.status == "completed")
         .order_by(AiPassiveDiscoverySnapshot.id.desc())
-        .limit(60)
+        .limit(80)
         .all()
     )
-    ro_by_code: Dict[str, AiPassiveDiscoverySnapshot] = {}
-    for rs in ro_rows:
-        if rs.asset and rs.asset.code not in ro_by_code:
-            ro_by_code[rs.asset.code] = rs
-        if rs.target_host and rs.target_host not in ro_by_code:
-            ro_by_code[rs.target_host] = rs
 
-    # Recopilar nodos candidatos (Subredes clave + Equipos de Rack sin CI + Activos CMDB)
-    raw_nodes_by_layer: Dict[str, List[Dict[str, Any]]] = {k[0]: [] for k in LAYER_DEFINITIONS}
-    node_id_by_code: Dict[str, str] = {}
-    asset_id_by_node_id: Dict[str, int] = {}
+    # Filtrado de Racks/Activos según el alcance solicitado
+    allowed_rack_ids: Optional[Set[int]] = None
+    allowed_asset_ids: Optional[Set[int]] = None
+    if scope_type == "location" and scope_target_id is not None:
+        allowed_rack_ids = {
+            rk.id
+            for rk in racks
+            if rk.room and floor_to_loc_id.get(rk.room.floor_id) == scope_target_id
+        }
+    elif scope_type == "rack" and scope_target_id is not None:
+        allowed_rack_ids = {int(scope_target_id)}
+    elif scope_type == "logical_stack" and scope_target_id is not None:
+        st_asset_codes = {
+            n["asset_code"]
+            for s in (base_snap.get("tech_stacks") or [])
+            for n in s.get("nodes", [])
+            if n.get("asset_code")
+        }
+        allowed_asset_ids = {a.id for a in assets if a.code in st_asset_codes}
+        allowed_rack_ids = set()
+    elif scope_type == "host" and scope_target_id is not None:
+        focus_id = int(scope_target_id)
+        neighbor_ids = {focus_id}
+        for lk in logical_links:
+            if lk.source_asset_id == focus_id:
+                neighbor_ids.add(lk.target_asset_id)
+            elif lk.target_asset_id == focus_id:
+                neighbor_ids.add(lk.source_asset_id)
+        allowed_asset_ids = neighbor_ids
+        allowed_rack_ids = set()
 
-    # Subredes IPAM como nodos de contexto en Capa 1 (máx 4 para no saturar el esquema)
-    for idx, sub in enumerate((base_snap.get("subnets") or [])[:4]):
-        nid = f"SUB_{idx + 1}"
-        cidr = str(sub.get("cidr") or "")
-        raw_nodes_by_layer["wan_perimetro"].append(
-            {
-                "id": nid,
-                "asset_id": None,
-                "rack_id": None,
-                "rack_device_id": None,
-                "code": f"VLAN-{sub.get('vlan_id') or idx + 1}",
-                "name": str(sub.get("name") or cidr),
-                "ip": cidr,
-                "subtitle": f"GW {sub.get('gateway') or '—'} · {sub.get('environment') or 'prod'}",
-                "model_name": "Subred IPAM",
-                "serial_number": "",
-                "status": "online",
-                "color_hex": "#DC2626",
-                "listening_ports": [],
-                "containers": [],
-                "snmp_ports_up": 0,
-                "cpu_pct": None,
-                "ram_pct": None,
-                "disk_pct": None,
-                "risk_badges": [],
-            }
-        )
-
-    # Activos CMDB dentro del alcance analizado
-    all_db_assets = {
-        a.id: a
-        for a in db.query(CmdbAsset).options(joinedload(CmdbAsset.host_rack_device)).all()
+    rack_by_id: Dict[int, Rack] = {rk.id: rk for rk in racks}
+    rack_dev_by_id: Dict[int, RackDevice] = {
+        dv.id: dv for rk in racks for dv in rk.devices
     }
-    rack_by_code = {r["code"]: r for r in (base_snap.get("racks") or [])}
 
-    for a_sum in (base_snap.get("assets") or [])[:42]:
-        code = str(a_sum["code"])
-        ro_snap = ro_by_code.get(code) or (
-            ro_by_code.get(a_sum["ips"][0]) if a_sum.get("ips") else None
-        )
+    # Calcular grado de interconexión física/lógica por equipo para distinguir Core vs Acceso
+    rd_peer_set: Dict[int, Set[int]] = {}
+    for conn in connections:
+        sp, tp = conn.source_port, conn.target_port
+        if not sp or not tp or not sp.device or not tp.device:
+            continue
+        if conn.cable_type == "power_ac" or "power" in (sp.port_type or "") or "power" in (tp.port_type or ""):
+            continue
+        d1, d2 = sp.device.id, tp.device.id
+        if d1 != d2:
+            rd_peer_set.setdefault(d1, set()).add(d2)
+            rd_peer_set.setdefault(d2, set()).add(d1)
+
+    asset_peer_set: Dict[int, Set[int]] = {}
+    for lk in logical_links:
+        if lk.source_asset_id != lk.target_asset_id:
+            asset_peer_set.setdefault(lk.source_asset_id, set()).add(lk.target_asset_id)
+            asset_peer_set.setdefault(lk.target_asset_id, set()).add(lk.source_asset_id)
+
+    ro_by_key: Dict[str, AiPassiveDiscoverySnapshot] = {}
+    for rs in ro_rows:
+        if rs.asset and rs.asset.code not in ro_by_key:
+            ro_by_key[rs.asset.code] = rs
+        if rs.target_host and rs.target_host not in ro_by_key:
+            ro_by_key[rs.target_host] = rs
+
+    gateway_ips: Set[str] = {
+        s.gateway.strip() for s in subnets if (s.gateway or "").strip()
+    }
+
+    # --- Agrupar activos CMDB que apuntan al mismo `rack_device_id` (evita duplicados 100%) ---
+    assets_by_rd_id: Dict[int, List[CmdbAsset]] = {}
+    standalone_assets: List[CmdbAsset] = []
+    for a in assets:
+        if allowed_asset_ids is not None and a.id not in allowed_asset_ids:
+            continue
+        if a.rack_device_id and a.rack_device_id in rack_dev_by_id:
+            rd = rack_dev_by_id[a.rack_device_id]
+            if allowed_rack_ids is not None and rd.rack_id not in allowed_rack_ids and allowed_asset_ids is None:
+                continue
+            assets_by_rd_id.setdefault(a.rack_device_id, []).append(a)
+        else:
+            if allowed_rack_ids is not None and allowed_asset_ids is None:
+                if not (a.host_rack_device_id and a.host_rack_device_id in rack_dev_by_id and rack_dev_by_id[a.host_rack_device_id].rack_id in allowed_rack_ids):
+                    continue
+            standalone_assets.append(a)
+
+    raw_nodes_by_layer: Dict[str, List[Dict[str, Any]]] = {k[0]: [] for k in LAYER_DEFINITIONS}
+    node_id_by_asset_id: Dict[int, str] = {}
+    node_id_by_rd_id: Dict[int, str] = {}
+    node_id_by_code: Dict[str, str] = {}
+    node_ips_map: Dict[str, List[str]] = {}
+    node_layer_map: Dict[str, str] = {}
+
+    # 1) Nodos físicos enracados (fusionando su(s) ficha(s) CMDB si existen)
+    for rk in racks:
+        if allowed_rack_ids is not None and rk.id not in allowed_rack_ids:
+            continue
+        for dv in sorted(rk.devices, key=lambda d: (-d.start_u, d.code)):
+            cat = dv.template.category if dv.template else "miscellaneous"
+            if is_auxiliary_rack_item(dv.code, cat):
+                continue
+
+            linked_cis = assets_by_rd_id.get(dv.id, [])
+            # Elegir como CI primario el que tenga IP o no empiece por DISC-
+            primary_ci: Optional[CmdbAsset] = None
+            if linked_cis:
+                linked_cis_sorted = sorted(
+                    linked_cis,
+                    key=lambda c: (0 if c.ip_addresses else 1, 1 if c.code.startswith("DISC-") else 0, c.id),
+                )
+                primary_ci = linked_cis_sorted[0]
+
+            all_ips: List[str] = []
+            if dv.ip_address and dv.ip_address.strip():
+                all_ips.append(dv.ip_address.strip())
+            for ci in linked_cis:
+                for ip_row in ci.ip_addresses:
+                    if ip_row.ip_address and ip_row.ip_address.strip() not in all_ips:
+                        all_ips.append(ip_row.ip_address.strip())
+
+            ro_snap = ro_by_key.get(dv.code)
+            if not ro_snap and primary_ci:
+                ro_snap = ro_by_key.get(primary_ci.code)
+            if not ro_snap and all_ips:
+                ro_snap = ro_by_key.get(all_ips[0])
+
+            listen_ports = [
+                int(p.get("port") or 0)
+                for p in ((ro_snap.listening_ports if ro_snap else None) or [])
+                if p.get("port")
+            ]
+            containers = [
+                f"{c.get('name')} ({c.get('image')})"
+                for c in ((ro_snap.containers if ro_snap else None) or [])[:6]
+            ]
+            snmp_up = sum(
+                1
+                for iface in ((ro_snap.snmp_interfaces if ro_snap else None) or [])
+                if iface.get("oper_status") == "up"
+            )
+
+            deg = len(rd_peer_set.get(dv.id, set()))
+            if primary_ci:
+                deg = max(deg, len(asset_peer_set.get(primary_ci.id, set())))
+
+            layer_key = _classify_canonical_layer(
+                code=dv.code,
+                name=dv.name,
+                asset_class=primary_ci.asset_class if primary_ci else "network_security",
+                rack_category=cat,
+                ips=all_ips,
+                gateway_ips=gateway_ips,
+                switch_peer_degree=deg,
+                listening_ports=listen_ports,
+            )
+
+            node_risks: List[Dict[str, str]] = list(risks_by_code.get(dv.code, []))
+            for ci in linked_cis:
+                for rk_badge in risks_by_code.get(ci.code, []):
+                    if rk_badge not in node_risks:
+                        node_risks.append(rk_badge)
+
+            layer_color = next(c for k, _t, _s, c in LAYER_DEFINITIONS if k == layer_key)
+            border_hex = (
+                "#DC2626"
+                if any(r["severity"] in ("critical", "high") for r in node_risks)
+                else ("#D97706" if node_risks else layer_color)
+            )
+
+            nid = f"DEV_{dv.id}"
+            node_id_by_rd_id[dv.id] = nid
+            node_id_by_code[dv.code] = nid
+            for ci in linked_cis:
+                node_id_by_asset_id[ci.id] = nid
+                node_id_by_code[ci.code] = nid
+
+            tel = telemetry_map.get(primary_ci.code, {}) if primary_ci else {}
+            uh = dv.template.u_height if dv.template else 1
+            u_lbl = f"U{dv.start_u}-U{dv.start_u + uh - 1}" if uh > 1 else f"U{dv.start_u}"
+            model_txt = (
+                f"{dv.template.manufacturer} {dv.template.model_name}"
+                if dv.template
+                else (primary_ci.os_or_firmware if primary_ci else cat)
+            )
+
+            node_ips_map[nid] = all_ips
+            node_layer_map[nid] = layer_key
+            raw_nodes_by_layer[layer_key].append(
+                {
+                    "id": nid,
+                    "asset_id": primary_ci.id if primary_ci else None,
+                    "rack_id": rk.id,
+                    "rack_device_id": dv.id,
+                    "sort_group": f"{rk.code}_{dv.code}",
+                    "code": dv.code,
+                    "name": dv.name,
+                    "ip": all_ips[0] if all_ips else "",
+                    "subtitle": f"Rack {rk.code} ({u_lbl})"
+                    + (f" · :{',:'.join(str(p) for p in listen_ports[:3])}" if listen_ports else ""),
+                    "model_name": model_txt,
+                    "serial_number": dv.serial_number or "",
+                    "status": primary_ci.status if primary_ci else (dv.status or "online"),
+                    "color_hex": border_hex,
+                    "listening_ports": listen_ports[:12],
+                    "containers": containers,
+                    "snmp_ports_up": snmp_up,
+                    "cpu_pct": tel.get("cpu_pct"),
+                    "ram_pct": tel.get("ram_pct"),
+                    "disk_pct": tel.get("disk_pct"),
+                    "risk_badges": node_risks[:5],
+                }
+            )
+
+    # 2) Activos lógicos / VMs / Endpoints sin `rack_device_id` directo
+    ip_already_drawn = {ip for ips in node_ips_map.values() for ip in ips}
+    for a in standalone_assets:
+        a_ips = [ip.ip_address.strip() for ip in a.ip_addresses if (ip.ip_address or "").strip()]
+        # Evitar duplicar un DISC-* cuya IP ya pertenece a un equipo enracado arriba
+        if a.code.upper().startswith("DISC-") and a_ips and all(ip in ip_already_drawn for ip in a_ips):
+            continue
+
+        ro_snap = ro_by_key.get(a.code) or (ro_by_key.get(a_ips[0]) if a_ips else None)
         listen_ports = [
             int(p.get("port") or 0)
             for p in ((ro_snap.listening_ports if ro_snap else None) or [])
@@ -316,56 +590,70 @@ def build_analyzed_network_schema(
             f"{c.get('name')} ({c.get('image')})"
             for c in ((ro_snap.containers if ro_snap else None) or [])[:6]
         ]
-        snmp_up = sum(
-            1
-            for iface in ((ro_snap.snmp_interfaces if ro_snap else None) or [])
-            if iface.get("oper_status") == "up"
+
+        layer_key = _classify_canonical_layer(
+            code=a.code,
+            name=a.name,
+            asset_class=a.asset_class,
+            rack_category="",
+            ips=a_ips,
+            gateway_ips=gateway_ips,
+            switch_peer_degree=len(asset_peer_set.get(a.id, set())),
+            listening_ports=listen_ports,
         )
 
-        layer_key = _classify_asset_layer(a_sum, listen_ports)
+        node_risks = list(risks_by_code.get(a.code, []))
         layer_color = next(c for k, _t, _s, c in LAYER_DEFINITIONS if k == layer_key)
-        node_risks = risks_by_code.get(code, [])
-        if any(r["severity"] in ("critical", "high") for r in node_risks):
-            border_hex = "#DC2626"
-        elif node_risks:
-            border_hex = "#D97706"
+        border_hex = (
+            "#DC2626"
+            if any(r["severity"] in ("critical", "high") for r in node_risks)
+            else ("#D97706" if node_risks else layer_color)
+        )
+
+        host_rk_id: Optional[int] = None
+        host_rk_code = ""
+        if a.host_rack_device_id and a.host_rack_device_id in rack_dev_by_id:
+            hrd = rack_dev_by_id[a.host_rack_device_id]
+            host_rk_id = hrd.rack_id
+            host_rk_code = rack_by_id[hrd.rack_id].code if hrd.rack_id in rack_by_id else ""
+
+        nid = f"CI_{a.id}"
+        node_id_by_asset_id[a.id] = nid
+        node_id_by_code[a.code] = nid
+        node_ips_map[nid] = a_ips
+        node_layer_map[nid] = layer_key
+
+        tel = telemetry_map.get(a.code, {})
+        sub_parts = []
+        if host_rk_code:
+            sub_parts.append(f"Host en {host_rk_code}")
+        if a.ip_addresses and a_ips and a_ips[0] in gateway_ips:
+            sub_parts.append("Gateway L3")
+        elif listen_ports:
+            sub_parts.append(f"RO :{',:'.join(str(p) for p in listen_ports[:3])}")
+        elif a.cpu_cores and layer_key == "compute_and_services":
+            sub_parts.append(f"{a.cpu_cores}vCPU/{a.ram_gb}GB")
         else:
-            border_hex = layer_color
-
-        tel = telemetry_map.get(code, {})
-        rk_code = str(a_sum.get("rack_code") or "")
-        rk_info = rack_by_code.get(rk_code)
-        orm_asset = all_db_assets.get(int(a_sum["id"]))
-
-        nid = f"CI_{a_sum['id']}"
-        node_id_by_code[code] = nid
-        asset_id_by_node_id[nid] = int(a_sum["id"])
-
-        subtitle_parts = []
-        if rk_code:
-            subtitle_parts.append(f"Rack {rk_code}")
-        if listen_ports:
-            subtitle_parts.append(f"RO :{',:'.join(str(p) for p in listen_ports[:4])}")
-        elif a_sum.get("cpu_cores"):
-            subtitle_parts.append(f"{a_sum['cpu_cores']}vCPU/{a_sum['ram_gb']}GB")
+            sub_parts.append(a.asset_class)
 
         raw_nodes_by_layer[layer_key].append(
             {
                 "id": nid,
-                "asset_id": int(a_sum["id"]),
-                "rack_id": rk_info["id"] if rk_info else None,
-                "rack_device_id": orm_asset.rack_device_id if orm_asset else None,
-                "code": code,
-                "name": str(a_sum["name"]),
-                "ip": a_sum["ips"][0] if a_sum.get("ips") else "",
-                "subtitle": " • ".join(subtitle_parts) or str(a_sum["asset_class"]),
-                "model_name": str(a_sum.get("os_or_firmware") or ""),
+                "asset_id": a.id,
+                "rack_id": host_rk_id,
+                "rack_device_id": None,
+                "sort_group": f"{a_ips[0] if a_ips else '999'}_{a.code}",
+                "code": a.code,
+                "name": a.name,
+                "ip": a_ips[0] if a_ips else "",
+                "subtitle": " • ".join(sub_parts),
+                "model_name": a.os_or_firmware or "",
                 "serial_number": "",
-                "status": str(a_sum.get("status") or "online"),
+                "status": a.status or "online",
                 "color_hex": border_hex,
                 "listening_ports": listen_ports[:12],
                 "containers": containers,
-                "snmp_ports_up": snmp_up,
+                "snmp_ports_up": 0,
                 "cpu_pct": tel.get("cpu_pct"),
                 "ram_pct": tel.get("ram_pct"),
                 "disk_pct": tel.get("disk_pct"),
@@ -373,70 +661,69 @@ def build_analyzed_network_schema(
             }
         )
 
-    # Añadir equipos físicos relevantes de Rack que aún no tuvieran ficha CMDB propia
-    for rk in (base_snap.get("racks") or [])[:10]:
-        for dv in (rk.get("devices") or []):
-            dv_code = str(dv["code"])
-            if dv_code in node_id_by_code:
+    # 3) Nodos de Subred L3 (`CmdbSubnet`) en Nivel 1 cuando existen equipos en su rango CIDR
+    parsed_subnets: List[Tuple[str, CmdbSubnet, ipaddress.IPv4Network]] = []
+    if scope_type in ("global_cpd", "location"):
+        for sub in subnets:
+            try:
+                net_obj = ipaddress.ip_network(sub.cidr.strip(), strict=False)
+                if not isinstance(net_obj, ipaddress.IPv4Network):
+                    continue
+            except ValueError:
                 continue
-            cat = str(dv.get("category") or "").lower()
-            if cat in ("cable_manager", "patch_panel", "patchbox", "rack_tray"):
-                continue
-            if cat in ("firewall", "router", "gateway"):
-                lkey = "wan_perimetro"
-            elif cat in ("switch", "pdu", "ups", "external_power_feed", "schuko"):
-                lkey = "switching_racks"
-            elif cat == "storage":
-                lkey = "datos_almacenamiento"
-            else:
-                lkey = "hipervisores_hierro"
-
-            nid = f"RD_{dv['id']}"
-            node_id_by_code[dv_code] = nid
-            raw_nodes_by_layer[lkey].append(
+            sub_nid = f"SUB_{sub.id}"
+            parsed_subnets.append((sub_nid, sub, net_obj))
+            vlan_lbl = f"VLAN-{sub.vlan_id}" if sub.vlan_id else f"NET-{sub.id}"
+            raw_nodes_by_layer["wan_perimetro"].append(
                 {
-                    "id": nid,
+                    "id": sub_nid,
                     "asset_id": None,
-                    "rack_id": int(rk["id"]),
-                    "rack_device_id": int(dv["id"]),
-                    "code": dv_code,
-                    "name": str(dv["name"]),
-                    "ip": str(dv.get("ip_address") or ""),
-                    "subtitle": f"Rack {rk['code']} ({dv['u_range']})",
-                    "model_name": str(dv.get("model") or cat),
+                    "rack_id": None,
+                    "rack_device_id": None,
+                    "sort_group": f"ZZ_SUB_{sub.id}",
+                    "code": vlan_lbl,
+                    "name": sub.name,
+                    "ip": sub.cidr,
+                    "subtitle": f"GW {sub.gateway or '—'} · Segmento L3",
+                    "model_name": "Subred IPAM",
                     "serial_number": "",
-                    "status": str(dv.get("status") or "online"),
-                    "color_hex": "#0284C7" if lkey == "switching_racks" else "#2563EB",
+                    "status": "online",
+                    "color_hex": "#DC2626",
                     "listening_ports": [],
                     "containers": [],
                     "snmp_ports_up": 0,
                     "cpu_pct": None,
                     "ram_pct": None,
                     "disk_pct": None,
-                    "risk_badges": risks_by_code.get(rk["code"], [])[:2],
+                    "risk_badges": [],
                 }
             )
+            node_layer_map[sub_nid] = "wan_perimetro"
 
-    # --- Cálculo geométrico de Zonas (Swimlanes) y Nodos (Grid limpio sin solapamientos) ---
-    canvas_width = 1480.0
-    margin_x = 28.0
-    zone_width = canvas_width - (margin_x * 2)
-    node_w = 236.0
-    node_h = 88.0
+    # Ordenar dentro de cada nivel por `sort_group` (agrupa switches por Rack y endpoints por subred!)
+    for lkey in raw_nodes_by_layer:
+        raw_nodes_by_layer[lkey].sort(key=lambda x: str(x.get("sort_group") or x["code"]))
+
+    # --- Posicionamiento Geométrico Norte -> Sur espaciado para curvas limpias ---
+    cols_per_row = 6
+    node_w = 232.0
+    node_h = 84.0
     gap_x = 24.0
-    gap_y = 20.0
-    cols_per_row = 5
+    gap_y = 26.0
+    margin_x = 32.0
+    canvas_width = margin_x * 2 + cols_per_row * node_w + (cols_per_row - 1) * gap_x + 48.0
+    zone_width = canvas_width - margin_x * 2
 
     zones_out: List[Dict[str, Any]] = []
     nodes_out: List[Dict[str, Any]] = []
-    cursor_y = 24.0
+    cursor_y = 26.0
 
     for layer_key, layer_title, layer_sub, layer_hex in LAYER_DEFINITIONS:
         items = raw_nodes_by_layer.get(layer_key, [])
         if not items:
             continue
         rows_count = max(1, (len(items) + cols_per_row - 1) // cols_per_row)
-        zone_h = 52.0 + rows_count * node_h + (rows_count - 1) * gap_y + 22.0
+        zone_h = 54.0 + rows_count * node_h + (rows_count - 1) * gap_y + 24.0
 
         zones_out.append(
             {
@@ -454,15 +741,16 @@ def build_analyzed_network_schema(
         for idx, item in enumerate(items):
             r_idx = idx // cols_per_row
             c_idx = idx % cols_per_row
-            items_in_this_row = min(cols_per_row, len(items) - r_idx * cols_per_row)
-            total_row_w = items_in_this_row * node_w + (items_in_this_row - 1) * gap_x
-            start_x = margin_x + max(24.0, (zone_width - total_row_w) / 2.0)
-
+            items_in_row = min(cols_per_row, len(items) - r_idx * cols_per_row)
+            row_w = items_in_row * node_w + (items_in_row - 1) * gap_x
+            start_x = margin_x + (zone_width - row_w) / 2.0
             nx = round(start_x + c_idx * (node_w + gap_x), 1)
-            ny = round(cursor_y + 46.0 + r_idx * (node_h + gap_y), 1)
+            ny = round(cursor_y + 48.0 + r_idx * (node_h + gap_y), 1)
+
+            clean_item = {k: v for k, v in item.items() if k != "sort_group"}
             nodes_out.append(
                 {
-                    **item,
+                    **clean_item,
                     "layer_key": layer_key,
                     "x": nx,
                     "y": ny,
@@ -471,125 +759,222 @@ def build_analyzed_network_schema(
                 }
             )
 
-        cursor_y += zone_h + 22.0
+        cursor_y += zone_h + 44.0  # Canal amplio de 44px entre niveles para curvas Norte-Sur
 
-    canvas_height = max(780.0, cursor_y + 16.0)
+    canvas_height = max(780.0, cursor_y + 20.0)
+    visible_node_ids = {str(n["id"]) for n in nodes_out}
+    layer_rank = {k[0]: idx for idx, k in enumerate(LAYER_DEFINITIONS)}
 
-    # --- Construcción de Aristas Multi-Fuente ---
-    edges_out: List[Dict[str, Any]] = []
-    seen_edges = set()
+    # --- Consolidación de Aristas por Par de Nodos (evita líneas superpuestas en LACP / Dual Fibra) ---
+    pair_bundles: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    connected_nodes: Set[str] = set()
 
-    def _add_edge(
-        src_nid: Optional[str],
-        dst_nid: Optional[str],
+    def _orient_north_south(u: str, v: str) -> Tuple[str, str]:
+        ru = layer_rank.get(node_layer_map.get(u, ""), 99)
+        rv = layer_rank.get(node_layer_map.get(v, ""), 99)
+        if ru < rv:
+            return (u, v)
+        if rv < ru:
+            return (v, u)
+        return (u, v) if u < v else (v, u)
+
+    def _register_link(
+        u_opt: Optional[str],
+        v_opt: Optional[str],
         edge_kind: str,
         label: str,
         detail: str,
         color_hex: str,
         dashed: bool = False,
     ) -> None:
-        if not src_nid or not dst_nid or src_nid == dst_nid:
+        if not u_opt or not v_opt or u_opt == v_opt:
             return
-        pair_key = (src_nid, dst_nid, edge_kind, label)
-        if pair_key in seen_edges:
+        if u_opt not in visible_node_ids or v_opt not in visible_node_ids:
             return
-        seen_edges.add(pair_key)
-        edges_out.append(
-            {
-                "id": f"E_{len(edges_out) + 1}",
-                "source_id": src_nid,
-                "target_id": dst_nid,
+        src, dst = _orient_north_south(u_opt, v_opt)
+        connected_nodes.add(src)
+        connected_nodes.add(dst)
+        bkey = (src, dst)
+        bundle = pair_bundles.get(bkey)
+        if bundle is None:
+            pair_bundles[bkey] = {
+                "source_id": src,
+                "target_id": dst,
                 "edge_kind": edge_kind,
-                "label": label[:40],
-                "detail": detail[:120],
+                "labels": [label] if label else [],
+                "details": [detail] if detail else [],
                 "color_hex": color_hex,
                 "dashed": dashed,
+                "count": 1,
             }
-        )
+        else:
+            bundle["count"] += 1
+            if label and label not in bundle["labels"]:
+                bundle["labels"].append(label)
+            if detail and detail not in bundle["details"]:
+                bundle["details"].append(detail)
+            # Priorizar color de fibra / físico si coexiste con enlace lógico duplicado
+            if edge_kind == "physical_cabling":
+                bundle["edge_kind"] = "physical_cabling"
+                bundle["color_hex"] = color_hex
+                bundle["dashed"] = False
+            elif edge_kind == "passive_ro_discovered" and bundle["edge_kind"] not in ("physical_cabling", "logical_confirmed"):
+                bundle["dashed"] = True
 
-    # A) Cableado estructurado físico (`Connection`)
-    for cab in (base_snap.get("cabling_sample") or []):
-        s_nid = node_id_by_code.get(str(cab.get("source_device") or ""))
-        t_nid = node_id_by_code.get(str(cab.get("target_device") or ""))
-        ctype = str(cab.get("cable_type") or "utp_cat6")
-        is_fiber = "fiber" in ctype
-        is_power = "power" in ctype
-        col = "#D97706" if is_power else ("#0284C7" if is_fiber else "#2563EB")
-        lbl = f"{cab.get('source_port') or ''}⇄{cab.get('target_port') or ''}"
-        _add_edge(
-            s_nid,
-            t_nid,
+    # A) Cableado físico de datos (`Connection`, excluyendo cables eléctricos `power_ac`)
+    for conn in connections:
+        sp, tp = conn.source_port, conn.target_port
+        if not sp or not tp or not sp.device or not tp.device:
+            continue
+        ctype = str(conn.cable_type or "utp_cat6")
+        if ctype == "power_ac" or "power" in (sp.port_type or "") or "power" in (tp.port_type or ""):
+            continue
+        u_nid = node_id_by_rd_id.get(sp.device.id)
+        v_nid = node_id_by_rd_id.get(tp.device.id)
+        col = "#0284C7" if "fiber" in ctype else "#2563EB"
+        _register_link(
+            u_nid,
+            v_nid,
             "physical_cabling",
-            lbl,
-            f"Cable físico {ctype}",
+            f"{sp.port_number}⇄{tp.port_number}",
+            f"Cable {ctype}",
             col,
             dashed=False,
         )
 
-    # B) Relación Hipervisor Físico -> VM Huésped
-    rack_dev_code_by_id = {
-        d.id: d.code for d in db.query(RackDevice).all()
-    }
-    for a_sum in (base_snap.get("assets") or []):
-        orm_a = all_db_assets.get(int(a_sum["id"]))
-        if not orm_a:
-            continue
-        vm_nid = node_id_by_code.get(orm_a.code)
-        if orm_a.host_rack_device_id and orm_a.host_rack_device_id in rack_dev_code_by_id:
-            hyp_code = rack_dev_code_by_id[orm_a.host_rack_device_id]
-            # Buscar primero si el hipervisor tiene CI propio o nodo RD_
-            hyp_nid = node_id_by_code.get(hyp_code)
-            if not hyp_nid:
-                for cand_a in all_db_assets.values():
-                    if cand_a.rack_device_id == orm_a.host_rack_device_id:
-                        hyp_nid = node_id_by_code.get(cand_a.code)
-                        break
-            _add_edge(
+    # B) Alojamiento Hipervisor Físico -> VM Huésped
+    for a in assets:
+        vm_nid = node_id_by_asset_id.get(a.id)
+        if a.host_rack_device_id:
+            hyp_nid = node_id_by_rd_id.get(a.host_rack_device_id)
+            _register_link(
                 hyp_nid,
                 vm_nid,
                 "hosting_parent",
                 "Host VM",
-                f"Alojada en hipervisor {hyp_code}",
+                "Alojamiento virtualización",
                 "#4F46E5",
                 dashed=False,
             )
 
-    # C) Enlaces Lógicos Confirmados (`LogicalTopologyLink`)
-    for lk in db.query(LogicalTopologyLink).all():
-        s_a = all_db_assets.get(lk.source_asset_id)
-        t_a = all_db_assets.get(lk.target_asset_id)
-        if s_a and t_a:
-            _add_edge(
-                node_id_by_code.get(s_a.code),
-                node_id_by_code.get(t_a.code),
-                "logical_confirmed",
-                str(lk.protocol_label or lk.link_type),
-                f"Enlace lógico ({lk.link_type})",
-                "#16A34A",
-                dashed=False,
-            )
+    # C) Enlaces lógicos confirmados (`LogicalTopologyLink`)
+    for lk in logical_links:
+        u_nid = node_id_by_asset_id.get(lk.source_asset_id)
+        v_nid = node_id_by_asset_id.get(lk.target_asset_id)
+        short_lbl = str(lk.protocol_label or lk.link_type).split("(")[0].strip()[:26]
+        _register_link(
+            u_nid,
+            v_nid,
+            "logical_confirmed",
+            short_lbl,
+            f"Lógico ({lk.link_type})",
+            "#16A34A",
+            dashed=False,
+        )
 
-    # D) Enlaces Descubiertos Pasivamente en Fase 2 (`inferred_dependencies` RO: TCP sockets & LLDP)
+    # D) Descubrimiento Pasivo RO (Fase 2: conexiones TCP establecidas + vecinos LLDP)
     for rs in ro_rows:
         for dep in (rs.inferred_dependencies or []):
-            s_code = str(dep.get("source_code") or "")
-            t_code = str(dep.get("target_code") or "")
-            _add_edge(
-                node_id_by_code.get(s_code),
-                node_id_by_code.get(t_code),
+            s_nid = (
+                node_id_by_asset_id.get(int(dep["source_asset_id"]))
+                if dep.get("source_asset_id")
+                else node_id_by_code.get(str(dep.get("source_code") or ""))
+            )
+            t_nid = (
+                node_id_by_asset_id.get(int(dep["target_asset_id"]))
+                if dep.get("target_asset_id")
+                else node_id_by_code.get(str(dep.get("target_code") or ""))
+            )
+            _register_link(
+                s_nid,
+                t_nid,
                 "passive_ro_discovered",
                 f"RO {dep.get('protocol_label') or 'TCP'}",
-                f"Descubierto pasivamente ({rs.collector_type})",
+                f"Descubierto RO ({rs.collector_type})",
                 "#06B6D4",
                 dashed=True,
             )
+
+    # E) Topología IP L3 automática (`Gateway -> Subred` y `Subred -> Nodos sin enlace físico directo`)
+    for sub_nid, sub, net_obj in parsed_subnets:
+        gw_ip = (sub.gateway or "").strip()
+        # 1. Conectar el Gateway o los Core Switches de esa subred con el nodo Subred
+        gw_connected = False
+        for nid, ips in node_ips_map.items():
+            if gw_ip and gw_ip in ips:
+                _register_link(
+                    nid,
+                    sub_nid,
+                    "subnet_l3",
+                    f"GW {gw_ip}",
+                    f"Pasarela L3 de {sub.cidr}",
+                    "#DC2626",
+                    dashed=False,
+                )
+                gw_connected = True
+
+        # Si no hay router con la IP exacta del gateway, enlazar la subred con los Core Switches presentes en ella
+        for nid, ips in node_ips_map.items():
+            if node_layer_map.get(nid) == "core_distribution":
+                if any(
+                    _ip_in_net(ip_s, net_obj)
+                    for ip_s in ips
+                ):
+                    _register_link(
+                        sub_nid,
+                        nid,
+                        "subnet_l3",
+                        f"VLAN {sub.vlan_id or 'Mgmt'}",
+                        f" Troncal L3 {sub.cidr}",
+                        "#0284C7",
+                        dashed=False,
+                    )
+                    gw_connected = True
+
+        # 2. Enlazar cualquier host/servidor/endpoint cuya IP pertenezca a esta subred y aún esté sin cable L2
+        for nid, ips in node_ips_map.items():
+            if nid == sub_nid or nid in connected_nodes:
+                continue
+            if any(_ip_in_net(ip_s, net_obj) for ip_s in ips):
+                _register_link(
+                    sub_nid,
+                    nid,
+                    "subnet_l3",
+                    "IP LAN",
+                    f"Miembro L3 de {sub.cidr}",
+                    "#64748B",
+                    dashed=True,
+                )
+
+    edges_out: List[Dict[str, Any]] = []
+    for idx, b in enumerate(pair_bundles.values(), start=1):
+        cnt = int(b["count"])
+        labels = b["labels"]
+        if cnt >= 2:
+            sample = ", ".join(labels[:2])
+            agg_label = f"{cnt}x Enlaces ({sample})"[:36]
+        else:
+            agg_label = (labels[0] if labels else "Enlace")[:36]
+        edges_out.append(
+            {
+                "id": f"E_{idx}",
+                "source_id": b["source_id"],
+                "target_id": b["target_id"],
+                "edge_kind": b["edge_kind"],
+                "label": agg_label,
+                "detail": " | ".join(b["details"][:4])[:160],
+                "color_hex": b["color_hex"],
+                "dashed": bool(b["dashed"]),
+                "bundle_count": cnt,
+            }
+        )
 
     return sanitize_context_payload(
         {
             "scope_type": scope_type,
             "scope_target_id": scope_target_id,
-            "title": f"Esquema Analítico de Red — {base_snap['scope_label']}",
-            "subtitle": "Topología en 5 capas fusionando Cableado Rack, CMDB, Riesgos SPOF y Descubrimiento Pasivo RO",
+            "title": f"Esquema Topológico de Red — {base_snap['scope_label']}",
+            "subtitle": "Jerarquía Norte-Sur deduplicada (Perímetro L3 ➔ Core HA ➔ Acceso por Rack ➔ Servidores ➔ Endpoints)",
             "canvas_width": canvas_width,
             "canvas_height": canvas_height,
             "zones": zones_out,
@@ -602,12 +987,21 @@ def build_analyzed_network_schema(
                 "edges_physical": sum(1 for e in edges_out if e["edge_kind"] == "physical_cabling"),
                 "edges_hosting": sum(1 for e in edges_out if e["edge_kind"] == "hosting_parent"),
                 "edges_logical": sum(1 for e in edges_out if e["edge_kind"] == "logical_confirmed"),
+                "edges_subnet_l3": sum(1 for e in edges_out if e["edge_kind"] == "subnet_l3"),
                 "edges_passive_ro": sum(1 for e in edges_out if e["edge_kind"] == "passive_ro_discovered"),
                 "nodes_with_risks": sum(1 for n in nodes_out if n.get("risk_badges")),
             },
             "finops_findings": finops_findings,
         }
     )
+
+
+def _ip_in_net(ip_str: str, net_obj: ipaddress.IPv4Network) -> bool:
+    try:
+        addr = ipaddress.ip_address(ip_str.strip())
+        return isinstance(addr, ipaddress.IPv4Address) and addr in net_obj
+    except ValueError:
+        return False
 
 
 # ==============================================================================
@@ -623,11 +1017,6 @@ def publish_analyzed_schema_to_tech_stack(
     include_passive_ro_edges: bool = True,
     published_by: str = "editor",
 ) -> Dict[str, Any]:
-    """
-    Convierte el esquema de red analizado por el Agente IA en un `TechStackDiagram`
-    editable dentro de `4. Red & Host`, creando sus zonas (`canvas_boxes`), nodos CMDB
-    y flechas de flujo.
-    """
     schema = build_analyzed_network_schema(
         db=db,
         scope_type=scope_type,
@@ -656,7 +1045,7 @@ def publish_analyzed_schema_to_tech_stack(
     stack = TechStackDiagram(
         code=stack_code,
         name=clean_title[:180],
-        description=f"Generado a partir del análisis solo-lectura de RackDoc AI por {published_by}.",
+        description=f"Generado a partir del análisis topológico solo-lectura de RackDoc AI por {published_by}.",
         business_service=schema["title"][:140],
         environment="production",
         owner_team="Arquitectura & IA",

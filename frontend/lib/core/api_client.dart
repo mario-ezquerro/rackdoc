@@ -1264,4 +1264,143 @@ class RackDocApiClient {
       await _post('/ai-agent/network-schema/publish-stack', payload) as Map,
     );
   }
+
+  // ===========================================================================
+  // TARGETS PROMETHEUS / OPENTELEMETRY MULTIPUERTO Y PERFILES / GRÁFICAS CUSTOM
+  // ===========================================================================
+
+  Future<Map<String, dynamic>> getAssetTelemetryTargets(int assetId) async {
+    return Map<String, dynamic>.from(
+      await _get('/network-hosts/assets/$assetId/telemetry-targets') as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> createAssetTelemetryTarget(
+    int assetId,
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _post('/network-hosts/assets/$assetId/telemetry-targets', payload)
+          as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> updateAssetTelemetryTarget(
+    int targetId,
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _put('/network-hosts/telemetry-targets/$targetId', payload) as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> deleteAssetTelemetryTarget(int targetId) async {
+    return Map<String, dynamic>.from(
+      await _delete('/network-hosts/telemetry-targets/$targetId') as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> probeTelemetryTarget(
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _post('/network-hosts/telemetry-targets/probe', payload) as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> getAssetAvailableMetrics(int assetId) async {
+    return Map<String, dynamic>.from(
+      await _get('/network-hosts/telemetry/$assetId/available-metrics') as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> previewAssetTelemetryQuery(
+    int assetId,
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _post('/network-hosts/telemetry/$assetId/preview-query/run', payload)
+          as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> getTelemetryProfiles() async {
+    return Map<String, dynamic>.from(
+      await _get('/network-hosts/telemetry-profiles') as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> createTelemetryProfile(
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _post('/network-hosts/telemetry-profiles', payload) as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> updateTelemetryProfile(
+    int profileId,
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _put('/network-hosts/telemetry-profiles/$profileId', payload)
+          as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> deleteTelemetryProfile(int profileId) async {
+    return Map<String, dynamic>.from(
+      await _delete('/network-hosts/telemetry-profiles/$profileId') as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> toggleAssetTelemetryProfile(
+    int assetId,
+    int profileId,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _post(
+            '/network-hosts/assets/$assetId/telemetry-profiles/$profileId/toggle',
+          )
+          as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> createAssetCustomChart(
+    int assetId,
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _post('/network-hosts/assets/$assetId/custom-charts', payload)
+          as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> updateAssetCustomChart(
+    int chartId,
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _put('/network-hosts/custom-charts/$chartId', payload) as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> deleteAssetCustomChart(int chartId) async {
+    return Map<String, dynamic>.from(
+      await _delete('/network-hosts/custom-charts/$chartId') as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> promoteCustomChartToProfile(
+    int chartId,
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _post(
+            '/network-hosts/custom-charts/$chartId/promote-to-profile',
+            payload,
+          )
+          as Map,
+    );
+  }
 }

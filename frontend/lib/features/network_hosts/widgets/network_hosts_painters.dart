@@ -592,3 +592,214 @@ class _MiniSparklinePainter extends CustomPainter {
   bool shouldRepaint(covariant _MiniSparklinePainter oldDelegate) => true;
 }
 
+Color _parseTelemetryHexColor(String? hex, Color fallback) {
+  if (hex == null || hex.trim().isEmpty) return fallback;
+  var clean = hex.trim().replaceFirst('#', '');
+  if (clean.length == 6) clean = 'FF$clean';
+  final parsed = int.tryParse(clean, radix: 16);
+  if (parsed == null) return fallback;
+  return Color(parsed);
+}
+
+class _PrometheusMultiSeriesChartPainter extends CustomPainter {
+  final List<String> timeLabels;
+  final List<Map<String, dynamic>> series;
+  final String unit;
+  final double? warnThreshold;
+  final double? critThreshold;
+
+  _PrometheusMultiSeriesChartPainter({
+    required this.timeLabels,
+    required this.series,
+    this.unit = '',
+    this.warnThreshold,
+    this.critThreshold,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (series.isEmpty) return;
+    int maxLen = 0;
+    for (final s in series) {
+      final vals = (s['values'] as List?) ?? const [];
+      if (vals.length > maxLen) maxLen = vals.length;
+    }
+    if (maxLen < 2) return;
+
+    const leftPad = 38.0;
+    const bottomPad = 15.0;
+    const topPad = 6.0;
+    final chartW = math.max(20.0, size.width - leftPad - 4.0);
+    final chartH = math.max(20.0, size.height - bottomPad - topPad);
+
+    double maxVal = unit == '%' ? 100.0 : 1.0;
+    for (final s in series) {
+      final vals = (s['values'] as List?) ?? const [];
+      for (final rawV in vals) {
+        final v = (rawV as num?)?.toDouble() ?? 0.0;
+        if (v > maxVal) maxVal = v;
+      }
+    }
+    if (warnThreshold != null && warnThreshold! > maxVal) {
+      maxVal = warnThreshold! * 1.1;
+    }
+    if (critThreshold != null && critThreshold! > maxVal) {
+      maxVal = critThreshold! * 1.08;
+    }
+    if (unit != '%') {
+      maxVal = math.max(maxVal * 1.18, 5.0);
+    }
+
+    final gridPaint = Paint()
+      ..color = AppTheme.border.withValues(alpha: 0.38)
+      ..strokeWidth = 0.8;
+
+    for (int i = 0; i <= 3; i++) {
+      final frac = i / 3.0;
+      final y = topPad + chartH * frac;
+      canvas.drawLine(
+        Offset(leftPad, y),
+        Offset(leftPad + chartW, y),
+        gridPaint,
+      );
+      final val = maxVal * (1.0 - frac);
+      final suffix = unit.isEmpty ? '' : (unit.length <= 2 ? unit : '');
+      final lbl = val >= 10
+          ? '${val.toStringAsFixed(0)}$suffix'
+          : '${val.toStringAsFixed(1)}$suffix';
+      final tp = TextPainter(
+        text: TextSpan(
+          text: lbl,
+          style: const TextStyle(
+            fontSize: 8.1,
+            fontFamily: 'monospace',
+            color: AppTheme.textMuted,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(math.max(0, leftPad - tp.width - 4), y - 5));
+    }
+
+    if (warnThreshold != null && warnThreshold! <= maxVal && warnThreshold! > 0) {
+      final wy = topPad + chartH * (1.0 - (warnThreshold! / maxVal));
+      canvas.drawLine(
+        Offset(leftPad, wy),
+        Offset(leftPad + chartW, wy),
+        Paint()
+          ..color = AppTheme.warning.withValues(alpha: 0.55)
+          ..strokeWidth = 1.1,
+      );
+    }
+    if (critThreshold != null && critThreshold! <= maxVal && critThreshold! > 0) {
+      final cy = topPad + chartH * (1.0 - (critThreshold! / maxVal));
+      canvas.drawLine(
+        Offset(leftPad, cy),
+        Offset(leftPad + chartW, cy),
+        Paint()
+          ..color = AppTheme.error.withValues(alpha: 0.55)
+          ..strokeWidth = 1.1,
+      );
+    }
+
+    if (timeLabels.length >= 2) {
+      final xIndices = [0, timeLabels.length ~/ 2, timeLabels.length - 1];
+      for (final idx in xIndices) {
+        final lbl = timeLabels[idx];
+        if (lbl.isEmpty) continue;
+        final x = leftPad + (idx / (timeLabels.length - 1)) * chartW;
+        final tp = TextPainter(
+          text: TextSpan(
+            text: lbl,
+            style: const TextStyle(
+              fontSize: 8.0,
+              fontFamily: 'monospace',
+              color: AppTheme.textMuted,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        tp.paint(
+          canvas,
+          Offset(
+            (x - tp.width / 2).clamp(leftPad, leftPad + chartW - tp.width),
+            topPad + chartH + 2,
+          ),
+        );
+      }
+    }
+
+    final chartRect = Rect.fromLTWH(leftPad, topPad, chartW, chartH);
+    final fillArea = series.length <= 2;
+
+    for (int sIdx = 0; sIdx < series.length; sIdx++) {
+      final s = series[sIdx];
+      final rawVals = (s['values'] as List?) ?? const [];
+      if (rawVals.length < 2) continue;
+      final fallbackCol = AppTheme.accentBlue;
+      final col = _parseTelemetryHexColor(
+        s['color_hex']?.toString(),
+        fallbackCol,
+      );
+
+      final coords = <Offset>[];
+      for (int i = 0; i < rawVals.length; i++) {
+        final v = (rawVals[i] as num?)?.toDouble() ?? 0.0;
+        final x = chartRect.left + (i / (rawVals.length - 1)) * chartRect.width;
+        final y = chartRect.bottom -
+            ((v / maxVal).clamp(0.0, 1.0) * chartRect.height);
+        coords.add(Offset(x, y));
+      }
+
+      final path = Path()..moveTo(coords.first.dx, coords.first.dy);
+      for (int i = 0; i < coords.length - 1; i++) {
+        final p0 = coords[i];
+        final p1 = coords[i + 1];
+        final midX = (p0.dx + p1.dx) / 2;
+        path.cubicTo(midX, p0.dy, midX, p1.dy, p1.dx, p1.dy);
+      }
+
+      if (fillArea) {
+        final fillPath = Path.from(path)
+          ..lineTo(coords.last.dx, chartRect.bottom)
+          ..lineTo(coords.first.dx, chartRect.bottom)
+          ..close();
+        canvas.drawPath(
+          fillPath,
+          Paint()
+            ..shader = LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                col.withValues(alpha: 0.28),
+                col.withValues(alpha: 0.06),
+                col.withValues(alpha: 0.01),
+              ],
+            ).createShader(chartRect),
+        );
+      }
+
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = col
+          ..strokeWidth = series.length > 3 ? 1.85 : 2.2
+          ..strokeCap = StrokeCap.round
+          ..style = PaintingStyle.stroke,
+      );
+
+      final lastPt = coords.last;
+      canvas.drawCircle(
+        lastPt,
+        4.2,
+        Paint()..color = col.withValues(alpha: 0.28),
+      );
+      canvas.drawCircle(lastPt, 2.4, Paint()..color = col);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _PrometheusMultiSeriesChartPainter oldDelegate) =>
+      true;
+}
+

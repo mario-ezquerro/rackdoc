@@ -18,6 +18,7 @@ part 'tabs/tech_stack_2d_tab.dart';
 part 'tabs/logical_topology_tab.dart';
 part 'tabs/nagios_snmp_prometheus_tabs.dart';
 part 'dialogs/network_hosts_crud_dialogs.dart';
+part 'dialogs/telemetry_management_dialogs.dart';
 part 'widgets/datacenter_style_host_config_panel.dart';
 part 'widgets/network_hosts_painters.dart';
 
@@ -111,6 +112,7 @@ class _NetworkHostsViewState extends State<NetworkHostsView>
   int _telemetryRangeHours = 6;
   Map<String, dynamic>? _telemetryData;
   bool _loadingTelemetry = false;
+  String _selectedTelemetryTabKey = 'system_base';
 
   // Estado del Dashboard de Stacks Tecnológicos estilo Datacenter Floor 2D
   final GlobalKey _stackCanvasKey = GlobalKey();
