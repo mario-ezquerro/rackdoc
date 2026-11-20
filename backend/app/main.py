@@ -199,7 +199,7 @@ app = FastAPI(
         "- **Webhooks de Automatización Ansible & Agentes IA**: `/api/v1/automation/webhook/*` y `/api/v1/automation/ai-context`.\n"
         "- **Documentación interactiva**: Swagger UI (`/docs` y `/api/v1/docs`) y ReDoc (`/redoc`)."
     ),
-    version="1.4.0",
+    version="1.4.1",
     openapi_tags=OPENAPI_TAGS_METADATA,
     contact={
         "name": "RackDoc DCIM Project",

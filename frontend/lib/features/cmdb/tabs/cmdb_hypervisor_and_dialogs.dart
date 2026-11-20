@@ -645,8 +645,13 @@ extension _CmdbHypervisorAndDialogsExt on _CmdbViewState {
   Future<void> _openAssetEditorDialog({
     Map<String, dynamic>? existing,
     String? prefilledIp,
+    String? prefilledHostname,
     String? prefilledFqdn,
     String? prefilledMac,
+    String? prefilledOs,
+    String? prefilledPlatform,
+    String? prefilledAssetClass,
+    String? prefilledNotes,
     int? defaultHostRackDeviceId,
   }) async {
     final bool isEdit = existing != null;
@@ -654,16 +659,16 @@ extension _CmdbHypervisorAndDialogsExt on _CmdbViewState {
       text: (existing?['code'] ?? 'VM-APP-02').toString(),
     );
     final nameCtrl = TextEditingController(
-      text: (existing?['name'] ?? '').toString(),
+      text: (existing?['name'] ?? prefilledHostname ?? '').toString(),
     );
     final hostCtrl = TextEditingController(
-      text: (existing?['hostname'] ?? '').toString(),
+      text: (existing?['hostname'] ?? prefilledHostname ?? '').toString(),
     );
     final fqdnCtrl = TextEditingController(
       text: (existing?['fqdn'] ?? prefilledFqdn ?? '').toString(),
     );
     final osCtrl = TextEditingController(
-      text: (existing?['os_or_firmware'] ?? 'Ubuntu Server 24.04 LTS').toString(),
+      text: (existing?['os_or_firmware'] ?? prefilledOs ?? 'Ubuntu Server 24.04 LTS').toString(),
     );
     final cpuCtrl = TextEditingController(
       text: '${existing?['cpu_cores'] ?? 8}',
@@ -675,7 +680,7 @@ extension _CmdbHypervisorAndDialogsExt on _CmdbViewState {
       text: '${existing?['storage_gb'] ?? 250}',
     );
     final platCtrl = TextEditingController(
-      text: (existing?['hypervisor_or_platform'] ?? 'VMware vSphere 8.0').toString(),
+      text: (existing?['hypervisor_or_platform'] ?? prefilledPlatform ?? 'VMware vSphere 8.0').toString(),
     );
     final existingCfInit = (existing?['custom_fields'] is Map)
         ? Map<String, dynamic>.from(existing!['custom_fields'] as Map)
@@ -693,11 +698,16 @@ extension _CmdbHypervisorAndDialogsExt on _CmdbViewState {
       text: (existing?['responsible_person'] ?? 'Alex Geng').toString(),
     );
     final notesCtrl = TextEditingController(
-      text: (existing?['notes'] ?? '').toString(),
+      text: (existing?['notes'] ?? prefilledNotes ?? '').toString(),
     );
 
     String assetClass =
-        (existing?['asset_class'] ?? 'virtual_machine').toString();
+        (existing?['asset_class'] ??
+                ((prefilledAssetClass != null &&
+                        _CmdbViewState._assetClassLabels.containsKey(prefilledAssetClass))
+                    ? prefilledAssetClass
+                    : 'virtual_machine'))
+            .toString();
     String environment = (existing?['environment'] ?? 'production').toString();
     String criticality = (existing?['criticality'] ?? 'high').toString();
     int? hostRackDeviceId =

@@ -18,6 +18,7 @@ from ..schemas import (
     AiMcpSaveDocumentInput,
     AiOllamaPullInput,
     AiPassiveHostAuditInput,
+    AiPassiveNetworkScanInput,
     AiPassiveSnmpWalkInput,
     AiPublishNetworkSchemaInput,
     AiReadonlyChatInput,
@@ -31,6 +32,7 @@ from ..services.passive_discovery_service import (
     apply_passive_snapshot_to_topology,
     list_passive_discovery_snapshots,
     run_passive_host_audit_async,
+    run_passive_network_fingerprint_scan,
     run_passive_snmp_walk_discovery,
 )
 from ..services.ai_agent_service import (
@@ -453,6 +455,37 @@ def launch_passive_snmp_walk_endpoint(
         scan_and_create_cmdb_suggestions(db=db)
         return {
             "snapshot": snap,
+            "overview": build_ai_agent_overview(db=db, base_backend_url=_infer_base_url(request)),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@api_router.post(
+    "/ai-agent/passive-discovery/network-scan",
+    tags=["AI Agent Read-Only & Auto-Documenter (Ollama + MCP)"],
+    summary="Barrido de red 100% Solo-Lectura con Huella OS, Pila TCP/IP (`TTL`, `MSS`, `WScale`) y OUI MAC",
+)
+def launch_passive_network_scan_endpoint(
+    payload: AiPassiveNetworkScanInput,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        snaps = run_passive_network_fingerprint_scan(
+            db=db,
+            target_range=payload.target_range,
+            timeout_sec=payload.timeout_sec,
+            count_limit=payload.count_limit,
+            collected_by=user.username or "operator",
+        )
+        scan_and_create_cmdb_suggestions(db=db)
+        return {
+            "snapshots": snaps,
+            "detected_count": len(snaps),
             "overview": build_ai_agent_overview(db=db, base_backend_url=_infer_base_url(request)),
         }
     except ValueError as exc:

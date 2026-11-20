@@ -75,7 +75,7 @@ class _CmdbViewState extends State<CmdbView> {
   String _scanResultFilter = 'detected_or_cmdb';
   final Set<String> _selectedDiscoveredIps = {};
   final Set<String> _dismissedScanIps = {};
-  String _bulkImportAssetClass = 'other_machine';
+  String _bulkImportAssetClass = 'auto';
   int? _bulkImportLocationId;
   bool _alsoRegisterScannedSubnet = true;
   bool _importingDiscovered = false;
@@ -509,8 +509,25 @@ class _CmdbViewState extends State<CmdbView> {
         final dns = Map<String, dynamic>.from((probes['dns_ptr'] as Map?) ?? {});
         final arp = Map<String, dynamic>.from((probes['arp'] as Map?) ?? {});
         final tcp = Map<String, dynamic>.from((probes['tcp'] as Map?) ?? {});
-        final String ptr = (dns['ptr_hostname'] ?? '').toString();
-        final String mac = (arp['mac_address'] ?? '').toString();
+        final fp = (r['fingerprint'] is Map)
+            ? Map<String, dynamic>.from(r['fingerprint'] as Map)
+            : <String, dynamic>{};
+        final String ptr = (fp['fqdn_detected'] ?? dns['fqdn_detected'] ?? dns['ptr_hostname'] ?? '')
+            .toString()
+            .trim();
+        final String hostDet = (fp['hostname_detected'] ?? dns['hostname_detected'] ?? '')
+            .toString()
+            .trim();
+        final String mac = (fp['mac_address'] ?? arp['mac_address'] ?? '')
+            .toString()
+            .trim();
+        final String osGuess = (fp['os_guess'] ?? '').toString().trim();
+        final String platGuess = (fp['hypervisor_or_platform'] ?? fp['mac_vendor'] ?? '')
+            .toString()
+            .trim();
+        final String domainGuess = (fp['domain_or_workgroup'] ?? '')
+            .toString()
+            .trim();
         final List<int> openPorts = ((tcp['open_ports'] as List?) ?? [])
             .map((e) => (e as num).toInt())
             .toList();
@@ -518,12 +535,18 @@ class _CmdbViewState extends State<CmdbView> {
           'ip_address': (r['ip_address'] ?? '').toString(),
           'subnet_mask': parsedScanned?.subnetMask ?? '255.255.255.0',
           'location_id': _bulkImportLocationId,
-          'hostname': ptr.isNotEmpty ? ptr.split('.').first : '',
+          'hostname': hostDet.isNotEmpty
+              ? hostDet
+              : (ptr.isNotEmpty ? ptr.split('.').first : ''),
           'fqdn': ptr,
           'mac_address': mac,
           'asset_class': _bulkImportAssetClass,
+          'os_or_firmware': osGuess,
+          'hypervisor_or_platform': platGuess,
+          'domain_or_workgroup': domainGuess,
           'environment': 'production',
           'open_ports': openPorts,
+          if (fp.isNotEmpty) 'fingerprint': fp,
           'notes': 'Añadido desde escaneo de rango (${r['summary'] ?? ''})',
         };
       }).toList();

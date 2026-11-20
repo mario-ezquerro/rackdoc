@@ -1924,27 +1924,40 @@ def scan_and_create_cmdb_suggestions(
             existing_pending.add((asset.id, "criticality"))
             created += 1
 
-        # 3. Sugerir `os_or_firmware` desde Descubrimiento Pasivo RO o desde catálogo hardware si está vacío
-        if not (asset.os_or_firmware or "").strip() and (asset.id, "os_or_firmware") not in existing_pending:
+        # 3. Sugerir `os_or_firmware` desde Descubrimiento Pasivo RO, Huella de Red o catálogo hardware si está vacío o genérico
+        cur_os = (asset.os_or_firmware or "").strip()
+        is_generic_os = (
+            not cur_os
+            or cur_os.startswith("Detectado en escaneo")
+            or cur_os.startswith("Detectado por Sondeo")
+        )
+        if is_generic_os and (asset.id, "os_or_firmware") not in existing_pending:
             inferred_os = ""
             reason_os = ""
+            cf_ast = asset.custom_fields if isinstance(asset.custom_fields, dict) else {}
+            net_fp = cf_ast.get("network_fingerprint") if isinstance(cf_ast.get("network_fingerprint"), dict) else {}
             if ps_snap and (ps_snap.os_or_sysdescr or "").strip():
                 inferred_os = ps_snap.os_or_sysdescr.strip()[:120]
                 reason_os = f"Detectado en vivo mediante descubrimiento pasivo RO ({ps_snap.collector_type})."
+            elif (net_fp.get("os_guess") or "").strip():
+                inferred_os = str(net_fp["os_guess"]).strip()[:120]
+                ev_list = net_fp.get("evidence") or []
+                ev_txt = f" ({ev_list[0]})" if ev_list else ""
+                reason_os = f"Inferido por huella de red OS + pila TCP/IP + OUI MAC{ev_txt}."
             elif asset.rack_device_id and asset.rack_device_id in rack_devs_by_id:
                 rd = rack_devs_by_id[asset.rack_device_id]
                 if rd.template:
                     inferred_os = f"{rd.template.manufacturer} {rd.template.model_name} ({rd.template.category})"[:120]
                     reason_os = "Campo OS/Firmware vacío en CMDB; inferido desde la plantilla hardware montada en el Rack."
-            if inferred_os:
+            if inferred_os and inferred_os != cur_os:
                 db.add(
                     AiCmdbSuggestion(
                         asset_id=asset.id,
                         field_name="os_or_firmware",
-                        current_value="",
+                        current_value=cur_os,
                         proposed_value=inferred_os,
                         rationale=reason_os,
-                        confidence=0.94 if ps_snap else 0.84,
+                        confidence=0.94 if ps_snap else 0.88,
                         status="pending",
                         source_doc_id=source_doc_id,
                     )

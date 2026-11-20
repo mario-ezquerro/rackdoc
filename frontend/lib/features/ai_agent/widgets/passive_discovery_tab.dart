@@ -30,7 +30,12 @@ class PassiveDiscoveryTab extends StatefulWidget {
 }
 
 class _PassiveDiscoveryTabState extends State<PassiveDiscoveryTab> {
-  String _collectorMode = 'snmp'; // 'snmp' | 'host_audit'
+  String _collectorMode = 'net_scan'; // 'net_scan' | 'snmp' | 'host_audit'
+
+  // Controles Barrido Pasivo Red / Huella OS + TCP/IP + MAC
+  final TextEditingController _netRangeCtrl =
+      TextEditingController(text: '192.168.2.0/24');
+  bool _runningNetScan = false;
 
   // Controles Walk SNMP RO
   final TextEditingController _snmpHostCtrl = TextEditingController();
@@ -53,6 +58,7 @@ class _PassiveDiscoveryTabState extends State<PassiveDiscoveryTab> {
 
   @override
   void dispose() {
+    _netRangeCtrl.dispose();
     _snmpHostCtrl.dispose();
     _snmpPortCtrl.dispose();
     _snmpCommunityCtrl.dispose();
@@ -61,6 +67,38 @@ class _PassiveDiscoveryTabState extends State<PassiveDiscoveryTab> {
     _ephPortCtrl.dispose();
     _ephSecretCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _launchNetworkFingerprintScan() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final range = _netRangeCtrl.text.trim();
+    if (range.isEmpty) {
+      messenger.avisoError(
+        'Indica una IP, rango (10.20.20.1-50) o red CIDR (10.20.20.0/24).',
+      );
+      return;
+    }
+    setState(() => _runningNetScan = true);
+    try {
+      final res = await widget.api.runPassiveNetworkScan({
+        'target_range': range,
+        'timeout_sec': 0.6,
+        'count_limit': 254,
+      });
+      if (!mounted) return;
+      final ov = Map<String, dynamic>.from((res['overview'] ?? const {}) as Map);
+      widget.onOverviewUpdated(ov);
+      final count = (res['detected_count'] as num?)?.toInt() ?? 0;
+      messenger.avisoExito(
+        'Barrido RO completado en $range: $count máquina(s) activas perfiladas (OS, Pila TCP/IP y MAC OUI).',
+      );
+    } catch (e) {
+      messenger.avisoError(e);
+    } finally {
+      if (mounted) {
+        setState(() => _runningNetScan = false);
+      }
+    }
   }
 
   Future<void> _launchSnmpWalk() async {
@@ -233,14 +271,19 @@ class _PassiveDiscoveryTabState extends State<PassiveDiscoveryTab> {
                 SegmentedButton<String>(
                   segments: const [
                     ButtonSegment(
+                      value: 'net_scan',
+                      icon: Icon(Icons.memory_rounded, size: 15),
+                      label: Text('Huella Red / OS'),
+                    ),
+                    ButtonSegment(
                       value: 'snmp',
-                      icon: Icon(Icons.router_outlined, size: 16),
-                      label: Text('SNMP IF/LLDP'),
+                      icon: Icon(Icons.router_outlined, size: 15),
+                      label: Text('SNMP'),
                     ),
                     ButtonSegment(
                       value: 'host_audit',
-                      icon: Icon(Icons.terminal_rounded, size: 16),
-                      label: Text('SSH / WinRM RO'),
+                      icon: Icon(Icons.terminal_rounded, size: 15),
+                      label: Text('SSH/WinRM'),
                     ),
                   ],
                   selected: {_collectorMode},
@@ -248,7 +291,52 @@ class _PassiveDiscoveryTabState extends State<PassiveDiscoveryTab> {
                       setState(() => _collectorMode = sel.first),
                 ),
                 const SizedBox(height: 14),
-                if (_collectorMode == 'snmp') ...[
+                if (_collectorMode == 'net_scan') ...[
+                  TextField(
+                    controller: _netRangeCtrl,
+                    onSubmitted: (_) => _launchNetworkFingerprintScan(),
+                    decoration: const InputDecoration(
+                      labelText: 'IP, Rango o Red CIDR a escanear (100% RO)',
+                      hintText: 'Ej: 10.20.20.0/24 o 10.20.20.1-50',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Deduce Sistema Operativo, respuestas de pila TCP/IP (TTL, saltos, MSS, Window Scale, TS/SACK), '
+                    'fabricante MAC OUI / hipervisor y banners SSH, HTTP/TLS, SMB/NTLMSSP, NetBIOS, SNMP y mDNS sin credenciales ni escritura.',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppPalette.slate600,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: (!widget.canLaunchAudit || _runningNetScan)
+                          ? null
+                          : _launchNetworkFingerprintScan,
+                      icon: _runningNetScan
+                          ? const SizedBox(
+                              width: 15,
+                              height: 15,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.radar_rounded, size: 17),
+                      label: Text(
+                        _runningNetScan
+                            ? 'Perfilando máquinas en red...'
+                            : 'Escanear Red y Averiguar OS / TCP-IP / MAC',
+                      ),
+                    ),
+                  ),
+                ] else if (_collectorMode == 'snmp') ...[
                   TextField(
                     controller: _snmpHostCtrl,
                     decoration: const InputDecoration(
@@ -492,6 +580,27 @@ class _PassiveDiscoveryTabState extends State<PassiveDiscoveryTab> {
                           ((s['inferred_dependencies'] ?? const []) as List)
                               .map((e) => Map<String, dynamic>.from(e as Map))
                               .toList();
+                      final runningEv =
+                          ((s['running_services'] ?? const []) as List)
+                              .map((e) => e.toString())
+                              .where((x) => x.isNotEmpty)
+                              .toList();
+                      final fpMetaList =
+                          ((s['web_vhosts_or_dbs'] ?? const []) as List)
+                              .whereType<Map>()
+                              .map((e) => Map<String, dynamic>.from(e))
+                              .toList();
+                      final Map<String, dynamic> netMeta =
+                          (s['collector_type'] == 'network_fingerprint_ro' &&
+                                  fpMetaList.isNotEmpty)
+                              ? fpMetaList.first
+                              : const <String, dynamic>{};
+                      final Map<String, dynamic> netStack =
+                          (netMeta['tcpip_stack'] is Map)
+                              ? Map<String, dynamic>.from(
+                                  netMeta['tcpip_stack'] as Map,
+                                )
+                              : const <String, dynamic>{};
 
                       return Container(
                         padding: const EdgeInsets.all(16),
@@ -540,7 +649,9 @@ class _PassiveDiscoveryTabState extends State<PassiveDiscoveryTab> {
                                     ),
                                   ),
                                 ),
-                                if (ok && widget.canEdit)
+                                if (ok &&
+                                    widget.canEdit &&
+                                    (snmpIfs.isNotEmpty || deps.isNotEmpty))
                                   applied
                                       ? const Chip(
                                           label: Text(
@@ -644,10 +755,35 @@ class _PassiveDiscoveryTabState extends State<PassiveDiscoveryTab> {
                             if (listenPorts.isNotEmpty) ...[
                               const SizedBox(height: 10),
                               Text(
-                                'Puertos en escucha (${listenPorts.length}): ${listenPorts.take(14).map((p) => ":${p['port']}/${p['proto']} (${p['process'] ?? ''})").join(', ')}',
+                                'Puertos / Servicios detectados (${listenPorts.length}): ${listenPorts.take(14).map((p) {
+                                  final b = (p['banner'] ?? '').toString().trim();
+                                  return ":${p['port']}/${p['proto']} (${p['process'] ?? ''}${b.isNotEmpty ? ' · $b' : ''})";
+                                }).join(', ')}',
                                 style: const TextStyle(
                                   fontSize: 11.5,
                                   color: AppPalette.slate800,
+                                ),
+                              ),
+                            ],
+                            if (netMeta.isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Text(
+                                'Pila TCP/IP & MAC: ${(netStack['stack_signature'] ?? 'N/D')}  •  MAC: ${(netMeta['mac_address'] ?? '').toString().isNotEmpty ? netMeta['mac_address'] : 'Sin ARP L2'}${(netMeta['mac_vendor'] ?? '').toString().isNotEmpty ? " [${netMeta['mac_vendor']}]" : ""}${(netMeta['suggested_asset_class_label'] ?? '').toString().isNotEmpty ? "  •  Rol sugerido: ${netMeta['suggested_asset_class_label']}" : ""}',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppPalette.indigo600,
+                                ),
+                              ),
+                            ],
+                            if (s['collector_type'] == 'network_fingerprint_ro' &&
+                                runningEv.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'Evidencias: ${runningEv.join("  •  ")}',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppPalette.slate600,
                                 ),
                               ),
                             ],

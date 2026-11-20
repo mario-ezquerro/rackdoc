@@ -31,6 +31,14 @@ from ..models import (
     TechStackNode,
 )
 from .monitor import check_host_connectivity
+from .os_fingerprint_service import (
+    fingerprint_active_host,
+    lookup_arp_mac_fast,
+    lookup_mac_vendor,
+    normalize_mac_address,
+    probe_icmp_with_ttl,
+    probe_tcp_port_with_stack,
+)
 from ..logging_setup import get_logger
 from ..time_utils import utcnow
 
@@ -468,24 +476,10 @@ def _probe_single_tcp_port(target_ip: str, port: int, timeout_sec: float = 0.65)
 
 def _lookup_arp_mac(target_ip: str) -> Optional[str]:
     """
-    Consulta la tabla ARP del sistema operativo (macOS / Linux) tras haber enviado sondas a target_ip.
-    Si aparece una dirección MAC válida (distinta de incomplete/ff:ff:ff:ff:ff:ff), la devuelve.
+    Consulta la tabla ARP del sistema operativo (`/proc/net/arp`, `ip neigh` o `arp -n`)
+    normalizando la dirección MAC al formato `AA:BB:CC:DD:EE:FF`.
     """
-    for cmd in (["arp", "-n", target_ip], ["ip", "neigh", "show", target_ip]):
-        try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1.5)
-            out = (proc.stdout or "") + " " + (proc.stderr or "")
-            if "incomplete" in out.lower() or "failed" in out.lower():
-                continue
-            m = re.search(r"([0-9a-fA-F]{1,2}(?::[0-9a-fA-F]{1,2}){5})", out)
-            if m:
-                mac = m.group(1).upper()
-                if mac != "FF:FF:FF:FF:FF:FF" and mac != "00:00:00:00:00:00":
-                    return mac
-        except Exception:
-            logger.debug("Lectura de la tabla ARP fallida.", exc_info=True)
-            continue
-    return None
+    return lookup_arp_mac_fast(target_ip)
 
 
 def _lookup_reverse_dns(target_ip: str) -> Optional[str]:
@@ -511,37 +505,38 @@ def _probe_ip_network_only(
     """
     Sondeo puro de red (sin tocar sesión de BD, 100% thread-safe para escanear /24 en paralelo).
     Ejecuta:
-    1) ICMP Ping
-    2) Sondeo TCP a puertos comunes (detectando tanto SYN-ACK 'open' como rechazo activo 'refused_alive')
-    3) Tabla ARP local (MAC Address)
+    1) ICMP Ping con extracción de TTL de la pila IP remota
+    2) Sondeo TCP con extracción de métricas de pila TCP/IP (`MSS`, `Window Scale`, `Timestamps`, `SACK`)
+    3) Tabla ARP local L2 (MAC Address normalizada + fabricante IEEE OUI)
     4) DNS Inverso (PTR)
+    5) Si el host está activo, Huella Digital profunda de OS, Banners (SSH/HTTP/TLS/SMB-NTLMSSP/NBSTAT/SNMP/mDNS) y Pila TCP/IP
     """
     start_ts = time.perf_counter()
     eff_icmp_timeout = 0.35 if is_bulk_scan else max(0.45, min(timeout_sec, 1.5))
     eff_tcp_timeout = 0.25 if is_bulk_scan else max(0.3, min(timeout_sec, 0.8))
 
-    icmp_status, icmp_ms, icmp_detail = check_host_connectivity(
-        host=ip_clean,
-        method="icmp",
-        port=0,
-        timeout_sec=eff_icmp_timeout,
-    )
-    icmp_alive = icmp_status == "online"
+    icmp_res = probe_icmp_with_ttl(ip_clean, timeout_sec=eff_icmp_timeout)
+    icmp_alive = bool(icmp_res["alive"])
+    icmp_ms = icmp_res["latency_ms"]
+    icmp_detail = icmp_res["detail"]
 
+    tcp_results: List[Dict[str, Any]] = []
     open_ports: List[int] = []
     refused_ports: List[int] = []
     ports_to_check = probe_ports[:4] if is_bulk_scan else probe_ports
     for p in ports_to_check:
-        p_num, p_state = _probe_single_tcp_port(ip_clean, p, eff_tcp_timeout)
-        if p_state == "open":
-            open_ports.append(p_num)
+        res_tcp = probe_tcp_port_with_stack(ip_clean, p, eff_tcp_timeout)
+        tcp_results.append(res_tcp)
+        if res_tcp["state"] == "open":
+            open_ports.append(p)
 
-    # Si en modo masivo respondió a ping o algún puerto abierto, probamos el resto de puertos para dar el informe completo
+    # Si en modo masivo respondió a ping o algún puerto abierto, probamos el resto de puertos base
     if is_bulk_scan and (icmp_alive or open_ports) and len(probe_ports) > 4:
         for p in probe_ports[4:]:
-            p_num, p_state = _probe_single_tcp_port(ip_clean, p, eff_tcp_timeout)
-            if p_state == "open":
-                open_ports.append(p_num)
+            res_tcp = probe_tcp_port_with_stack(ip_clean, p, eff_tcp_timeout)
+            tcp_results.append(res_tcp)
+            if res_tcp["state"] == "open":
+                open_ports.append(p)
 
     tcp_alive = len(open_ports) > 0
     arp_mac = _lookup_arp_mac(ip_clean) if (not is_bulk_scan or icmp_alive or tcp_alive) else None
@@ -556,12 +551,37 @@ def _probe_ip_network_only(
         else None
     )
     has_ptr = ptr_hostname is not None and ptr_hostname != ip_clean
+
+    # 5) Huella Digital de Sistema Operativo, Pila TCP/IP, Banners y OUI MAC sobre máquinas activas
+    fingerprint: Optional[Dict[str, Any]] = None
+    if icmp_alive or tcp_alive or arp_alive:
+        try:
+            fingerprint = fingerprint_active_host(
+                target_ip=ip_clean,
+                icmp_probe=icmp_res,
+                initial_tcp_results=tcp_results,
+                arp_mac=arp_mac,
+                ptr_hostname=ptr_hostname if has_ptr else None,
+                is_bulk_scan=is_bulk_scan,
+            )
+            if fingerprint:
+                fp_ports = fingerprint.get("open_ports") or []
+                if fp_ports:
+                    open_ports = sorted(set(open_ports) | set(fp_ports))
+                    tcp_alive = tcp_alive or any(p != 161 for p in open_ports)
+                if not arp_mac and fingerprint.get("mac_address"):
+                    arp_mac = fingerprint["mac_address"]
+                    arp_alive = True
+        except Exception as exc:
+            logger.debug("Huella OS parcial fallida en %s: %s", ip_clean, exc)
+
     elapsed_total_ms = round((time.perf_counter() - start_ts) * 1000.0, 1)
 
     return {
         "ip_clean": ip_clean,
         "icmp_alive": icmp_alive,
         "icmp_ms": icmp_ms,
+        "icmp_ttl": icmp_res.get("ttl"),
         "icmp_detail": icmp_detail,
         "tcp_alive": tcp_alive,
         "tested_ports": probe_ports,
@@ -571,6 +591,7 @@ def _probe_ip_network_only(
         "arp_mac": arp_mac,
         "has_ptr": has_ptr,
         "ptr_hostname": ptr_hostname,
+        "fingerprint": fingerprint,
         "elapsed_ms": elapsed_total_ms,
     }
 
@@ -581,10 +602,11 @@ def _assemble_ip_verification_result(
     matched_sub: Optional[CmdbSubnet],
     now_dt: datetime,
 ) -> Dict[str, Any]:
-    """Consolida los resultados de ping ICMP, puertos TCP, tabla ARP, PTR DNS y propietario CMDB."""
+    """Consolida los resultados de ping ICMP, puertos TCP, tabla ARP, PTR DNS, Huella OS/TCP-IP/MAC y propietario CMDB."""
     ip_clean = probe_data["ip_clean"]
     icmp_alive = probe_data["icmp_alive"]
     icmp_ms = probe_data["icmp_ms"]
+    icmp_ttl = probe_data.get("icmp_ttl")
     icmp_detail = probe_data["icmp_detail"]
     tcp_alive = probe_data["tcp_alive"]
     probe_ports = probe_data["tested_ports"]
@@ -594,7 +616,17 @@ def _assemble_ip_verification_result(
     arp_mac = probe_data["arp_mac"]
     has_ptr = probe_data["has_ptr"]
     ptr_hostname = probe_data["ptr_hostname"]
+    fp: Optional[Dict[str, Any]] = probe_data.get("fingerprint")
     elapsed_total_ms = probe_data["elapsed_ms"]
+
+    mac_vendor = (fp or {}).get("mac_vendor") or (lookup_mac_vendor(arp_mac).get("vendor") if arp_mac else "")
+    os_guess = (fp or {}).get("os_guess") or ""
+    os_conf = (fp or {}).get("confidence")
+    dev_type_guess = (fp or {}).get("device_type_guess") or ""
+    host_detected = (fp or {}).get("hostname_detected") or ""
+    fqdn_detected = (fp or {}).get("fqdn_detected") or (ptr_hostname or "")
+    stack_info = (fp or {}).get("tcpip_stack") or {}
+    stack_sig = stack_info.get("stack_signature") or ""
 
     documented_in_cmdb = len(cmdb_owners) > 0
     network_responding = icmp_alive or tcp_alive or arp_alive
@@ -615,17 +647,21 @@ def _assemble_ip_verification_result(
         verdict_severity = "danger"
         can_safely_assign = False
         reasons = []
-        if icmp_alive:
-            reasons.append(f"responde a Ping ({icmp_ms} ms)")
+        if os_guess:
+            reasons.append(f"SO estimado: {os_guess} ({os_conf}%)")
+        if mac_vendor and arp_mac:
+            reasons.append(f"MAC {arp_mac} ({mac_vendor})")
+        elif arp_mac:
+            reasons.append(f"MAC {arp_mac}")
+        if host_detected or fqdn_detected:
+            reasons.append(f"Host: {fqdn_detected or host_detected}")
         if open_ports:
-            reasons.append(f"tiene puertos TCP abiertos ({', '.join(map(str, open_ports))})")
-        if arp_mac:
-            reasons.append(f"resuelve MAC en tabla ARP ({arp_mac})")
-        if has_ptr:
-            reasons.append(f"resuelve DNS PTR ({ptr_hostname})")
+            reasons.append(f"Puertos abiertos: {', '.join(map(str, open_ports[:10]))}")
+        elif icmp_alive:
+            reasons.append(f"Ping OK ({icmp_ms} ms)")
         recommendation = (
-            f"Equipo activo detectado en la red ({', '.join(reasons)}) que aún NO está registrado en la CMDB. "
-            "Pulsa 'Añadir a CMDB' para registrarlo y pasarlo a verde."
+            f"Máquina activa localizada ({' • '.join(reasons)}) aún NO registrada en la CMDB. "
+            "Pulsa 'Añadir a CMDB' para incorporarla con su SO, fabricante MAC y servicios detectados."
         )
     elif documented_in_cmdb and network_responding:
         verdict = "active_in_network"
@@ -633,8 +669,9 @@ def _assemble_ip_verification_result(
         verdict_severity = "success"
         can_safely_assign = False
         owner_names = ", ".join(f"{o['asset_code']} ({o['ip_role_label']})" for o in cmdb_owners)
+        fp_tail = f" • Huella red: {os_guess}" + (f" [{mac_vendor}]" if mac_vendor else "") if os_guess else ""
         recommendation = (
-            f"La IP ya está registrada en la CMDB [{owner_names}] y el equipo responde activamente en la red."
+            f"La IP ya está registrada en la CMDB [{owner_names}] y responde activamente en red{fp_tail}."
         )
     else:
         verdict = "no_response"
@@ -648,12 +685,29 @@ def _assemble_ip_verification_result(
         )
 
     probe_summary_parts = [
-        f"ICMP: {'OK (' + str(icmp_ms) + ' ms)' if icmp_alive else 'Sin respuesta'}",
+        f"ICMP: {'OK (' + str(icmp_ms) + ' ms' + (', TTL=' + str(icmp_ttl) if icmp_ttl else '') + ')' if icmp_alive else 'Sin respuesta'}",
         f"TCP: {'Abiertos ' + str(open_ports) if open_ports else '0 puertos abiertos'}",
-        f"ARP: {arp_mac or 'Sin MAC local'}",
-        f"DNS PTR: {ptr_hostname or 'Sin PTR'}",
+        f"MAC: {(arp_mac + (' [' + mac_vendor + ']' if mac_vendor else '')) if arp_mac else 'Sin MAC local'}",
+        f"Host/PTR: {fqdn_detected or host_detected or 'Sin PTR'}",
     ]
+    if os_guess:
+        probe_summary_parts.append(f"OS: {os_guess} ({os_conf}%)")
     summary_text = " | ".join(probe_summary_parts)
+
+    arp_detail = (
+        f"MAC: {arp_mac}" + (f" • {mac_vendor}" if mac_vendor else "")
+        if arp_mac
+        else "Sin entrada ARP L2 local"
+    )
+    dns_detail = (
+        f"PTR DNS: {ptr_hostname}"
+        if has_ptr
+        else (
+            f"Nombre por protocolo (SMB/SNMP/mDNS/TLS): {fqdn_detected or host_detected}"
+            if (fqdn_detected or host_detected)
+            else "Sin registro DNS inverso (PTR)"
+        )
+    )
 
     return {
         "ip_address": ip_clean,
@@ -673,10 +727,12 @@ def _assemble_ip_verification_result(
         "summary": summary_text,
         "elapsed_ms": elapsed_total_ms,
         "checked_at": now_dt.isoformat(),
+        "fingerprint": fp,
         "probes": {
             "icmp": {
                 "alive": icmp_alive,
                 "latency_ms": icmp_ms,
+                "ttl": icmp_ttl,
                 "detail": icmp_detail,
             },
             "tcp": {
@@ -697,12 +753,31 @@ def _assemble_ip_verification_result(
             "arp": {
                 "alive": arp_alive,
                 "mac_address": arp_mac or "",
-                "detail": f"MAC detectada en caché ARP: {arp_mac}" if arp_mac else "Sin entrada ARP L2 local",
+                "mac_vendor": mac_vendor,
+                "detail": arp_detail,
             },
             "dns_ptr": {
-                "has_ptr": has_ptr,
+                "has_ptr": has_ptr or bool(fqdn_detected or host_detected),
                 "ptr_hostname": ptr_hostname or "",
-                "detail": f"Resolución inversa PTR: {ptr_hostname}" if has_ptr else "Sin registro DNS inverso (PTR)",
+                "hostname_detected": host_detected,
+                "fqdn_detected": fqdn_detected,
+                "detail": dns_detail,
+            },
+            "os_fingerprint": {
+                "detected": bool(os_guess),
+                "os_guess": os_guess,
+                "device_type_guess": dev_type_guess,
+                "confidence": os_conf or 0,
+                "detail": (
+                    f"{os_guess} ({os_conf}% confianza) • {dev_type_guess}"
+                    if os_guess
+                    else "Sin firma OS (equipo inactivo)"
+                ),
+            },
+            "tcpip_stack": {
+                "detected": bool(stack_sig and stack_sig != "Sin telemetría de cabeceras L3/L4"),
+                "signature": stack_sig,
+                "detail": stack_sig or "Sin respuesta de pila TCP/IP",
             },
         },
     }
@@ -904,14 +979,18 @@ def verify_ip_target_or_find_free(
         results.append(assembled)
 
         if ip_candidate in records_by_ip:
+            fp_live = pdata.get("fingerprint") or {}
+            mac_live = normalize_mac_address(pdata.get("arp_mac") or fp_live.get("mac_address")) or ""
+            fqdn_live = (pdata.get("ptr_hostname") or fp_live.get("fqdn_detected") or "").strip()
+            host_live = (fp_live.get("hostname_detected") or "").strip()
             for rec in records_by_ip[ip_candidate]:
                 rec.last_verification_status = assembled["verdict"]
                 rec.last_verified_at = now_dt
                 rec.last_verification_detail = assembled["summary"]
-                if pdata.get("arp_mac") and not rec.mac_address:
-                    rec.mac_address = pdata["arp_mac"]
-                if pdata.get("ptr_hostname") and not rec.fqdn:
-                    rec.fqdn = pdata["ptr_hostname"]
+                if mac_live and not rec.mac_address:
+                    rec.mac_address = mac_live
+                if fqdn_live and not rec.fqdn:
+                    rec.fqdn = fqdn_live
                 ast = rec.asset
                 if ast:
                     is_alive = bool(
@@ -923,14 +1002,34 @@ def verify_ip_target_or_find_free(
                     if pdata.get("icmp_ms") is not None:
                         ast.last_ping_ms = pdata["icmp_ms"]
                     ast.last_checked_at = now_dt
+                    if fp_live:
+                        cf_live = dict(ast.custom_fields or {})
+                        cf_live["network_fingerprint"] = fp_live
+                        ast.custom_fields = cf_live
+                        os_cur = (ast.os_or_firmware or "").strip()
+                        os_det = (fp_live.get("os_guess") or "").strip()
+                        if os_det and (
+                            not os_cur
+                            or os_cur.startswith("Detectado en escaneo")
+                            or os_cur.startswith("Detectado por Sondeo")
+                        ):
+                            ast.os_or_firmware = os_det[:120]
+                        plat_cur = (ast.hypervisor_or_platform or "").strip()
+                        plat_det = (fp_live.get("hypervisor_or_platform") or "").strip()
+                        if plat_det and (not plat_cur or plat_cur == "Descubrimiento Manual CMDB"):
+                            ast.hypervisor_or_platform = plat_det[:120]
+                        if fqdn_live and not ast.fqdn:
+                            ast.fqdn = fqdn_live
+                        if host_live and (not ast.hostname or ast.hostname.startswith("host-")):
+                            ast.hostname = host_live
                     if ast.rack_device_id:
                         rdev = db.query(RackDevice).filter(RackDevice.id == ast.rack_device_id).first()
                         if rdev:
                             rdev.status = ast.status
                             rdev.last_ping_ms = ast.last_ping_ms
                             rdev.last_checked_at = now_dt
-                            if pdata.get("arp_mac") and not rdev.mac_address:
-                                rdev.mac_address = pdata["arp_mac"]
+                            if mac_live and not rdev.mac_address:
+                                rdev.mac_address = mac_live
                 db_modified = True
 
     if db_modified:
@@ -1023,37 +1122,54 @@ def import_discovered_hosts_to_cmdb(
         if not ip_str:
             continue
         item_loc_id = item.get("location_id") if item.get("location_id") is not None else location_id
+        fp_in: Dict[str, Any] = item.get("fingerprint") if isinstance(item.get("fingerprint"), dict) else {}
+        mac_norm = normalize_mac_address(str(item.get("mac_address") or fp_in.get("mac_address") or "")) or ""
+        ptr_fqdn = str(item.get("fqdn") or fp_in.get("fqdn_detected") or "").strip()
+        raw_host = str(item.get("hostname") or fp_in.get("hostname_detected") or "").strip()
+
         # Comprobar si ya existe la IP en la CMDB (incluyendo equipos creados primero en Rack Editor)
         existing_ip = db.query(CmdbIpAddress).filter(CmdbIpAddress.ip_address == ip_str).first()
         if existing_ip:
             ast_ex = existing_ip.asset
-            mac_in = str(item.get("mac_address") or "").strip()
-            ptr_in = str(item.get("fqdn") or "").strip()
-            if mac_in and not existing_ip.mac_address:
-                existing_ip.mac_address = mac_in
-            if ptr_in and not existing_ip.fqdn:
-                existing_ip.fqdn = ptr_in
+            if mac_norm and not existing_ip.mac_address:
+                existing_ip.mac_address = mac_norm
+            if ptr_fqdn and not existing_ip.fqdn:
+                existing_ip.fqdn = ptr_fqdn
             existing_ip.last_verification_status = "active_in_network"
             existing_ip.last_verified_at = utcnow()
             if ast_ex:
                 ast_ex.status = "online"
                 ast_ex.last_checked_at = utcnow()
-                if ptr_in and not ast_ex.fqdn:
-                    ast_ex.fqdn = ptr_in
-                if item_loc_id is not None:
-                    cf = dict(ast_ex.custom_fields or {})
-                    if not cf.get("location_id"):
-                        cf["location_id"] = item_loc_id
-                        ast_ex.custom_fields = cf
+                if ptr_fqdn and not ast_ex.fqdn:
+                    ast_ex.fqdn = ptr_fqdn
+                if raw_host and (not ast_ex.hostname or ast_ex.hostname.startswith("host-")):
+                    ast_ex.hostname = raw_host
+                cf = dict(ast_ex.custom_fields or {})
+                cf_changed = False
+                if item_loc_id is not None and not cf.get("location_id"):
+                    cf["location_id"] = item_loc_id
+                    cf_changed = True
+                if fp_in:
+                    cf["network_fingerprint"] = fp_in
+                    cf_changed = True
+                if cf_changed:
+                    ast_ex.custom_fields = cf
+                os_in_ex = str(item.get("os_or_firmware") or fp_in.get("os_guess") or "").strip()
+                if os_in_ex and (
+                    not (ast_ex.os_or_firmware or "").strip()
+                    or str(ast_ex.os_or_firmware).startswith("Detectado en escaneo")
+                    or str(ast_ex.os_or_firmware).startswith("Detectado por Sondeo")
+                ):
+                    ast_ex.os_or_firmware = os_in_ex[:120]
                 if ast_ex.rack_device_id:
                     rdev = db.query(RackDevice).filter(RackDevice.id == ast_ex.rack_device_id).first()
                     if rdev:
                         rdev.status = "online"
                         rdev.last_checked_at = utcnow()
-                        if mac_in and not rdev.mac_address:
-                            rdev.mac_address = mac_in
-                        if ptr_in and not rdev.fqdn:
-                            rdev.fqdn = ptr_in
+                        if mac_norm and not rdev.mac_address:
+                            rdev.mac_address = mac_norm
+                        if ptr_fqdn and not rdev.fqdn:
+                            rdev.fqdn = ptr_fqdn
             imported_ips_list.append(ip_str)
             imported_assets_info.append({
                 "ip_address": ip_str,
@@ -1072,8 +1188,6 @@ def import_discovered_hosts_to_cmdb(
             continue
 
         last_oct = ip_str.replace(".", "-")
-        ptr_fqdn = str(item.get("fqdn") or "").strip()
-        raw_host = str(item.get("hostname") or "").strip()
         if not raw_host and ptr_fqdn:
             raw_host = ptr_fqdn.split(".")[0]
         if not raw_host:
@@ -1086,16 +1200,32 @@ def import_discovered_hosts_to_cmdb(
             suffix += 1
             code = f"{base_code}-{suffix}".upper()
 
-        open_ports = item.get("open_ports") or []
-        asset_class = str(item.get("asset_class") or "other_machine")
+        open_ports = sorted(set((item.get("open_ports") or []) + (fp_in.get("open_ports") or [])))
+        requested_class = str(item.get("asset_class") or "auto").strip()
+        suggested_class = str(fp_in.get("suggested_asset_class") or "").strip()
+        if requested_class in ("", "auto") and suggested_class in ASSET_CLASS_LABELS:
+            asset_class = suggested_class
+        elif requested_class in ASSET_CLASS_LABELS:
+            asset_class = requested_class
+        elif suggested_class in ASSET_CLASS_LABELS:
+            asset_class = suggested_class
+        else:
+            asset_class = "other_machine"
+
         mon_method = "icmp"
         mon_port = 22
         if 22 in open_ports:
             mon_method, mon_port = "ssh", 22
+        elif 8006 in open_ports:
+            mon_method, mon_port = "https", 8006
         elif 443 in open_ports:
             mon_method, mon_port = "https", 443
+        elif 8443 in open_ports:
+            mon_method, mon_port = "https", 8443
         elif 80 in open_ports:
             mon_method, mon_port = "http", 80
+        elif 161 in open_ports:
+            mon_method, mon_port = "snmp", 161
         elif open_ports:
             mon_method, mon_port = "tcp", int(open_ports[0])
 
@@ -1104,18 +1234,58 @@ def import_discovered_hosts_to_cmdb(
         custom_f: Dict[str, Any] = {}
         if eff_loc_id is not None:
             custom_f["location_id"] = eff_loc_id
+        if fp_in:
+            custom_f["network_fingerprint"] = fp_in
+            if fp_in.get("mac_vendor"):
+                custom_f["mac_vendor"] = fp_in["mac_vendor"]
+            if fp_in.get("domain_or_workgroup"):
+                custom_f["domain_or_workgroup"] = fp_in["domain_or_workgroup"]
+
+        eff_os = str(item.get("os_or_firmware") or fp_in.get("os_guess") or "").strip()
+        if not eff_os:
+            eff_os = (
+                f"Detectado en escaneo (Puertos: {open_ports})"
+                if open_ports
+                else "Detectado por Sondeo de Red"
+            )
+        eff_platform = str(
+            item.get("hypervisor_or_platform")
+            or fp_in.get("hypervisor_or_platform")
+            or fp_in.get("mac_vendor")
+            or "Descubrimiento Activo CMDB"
+        ).strip()
+
+        dev_label = str(fp_in.get("device_type_guess") or "").strip()
+        display_name = (
+            ptr_fqdn
+            or (f"{raw_host} ({dev_label})" if raw_host and not raw_host.startswith("host-") and dev_label else "")
+            or (raw_host if raw_host and not raw_host.startswith("host-") else "")
+            or (f"{dev_label} ({ip_str})" if dev_label else f"Equipo Detectado ({ip_str})")
+        )
+
+        ev_lines = fp_in.get("evidence") or []
+        auto_notes = str(item.get("notes") or "").strip()
+        if ev_lines and "Evidencias de huella:" not in auto_notes:
+            ev_joined = " | ".join(str(x) for x in ev_lines[:5])
+            auto_notes = (
+                f"{auto_notes}\nEvidencias de huella: {ev_joined}".strip()
+                if auto_notes
+                else f"Incorporado desde escaneo de red ({ip_str}). Evidencias de huella: {ev_joined}"
+            )
+        elif not auto_notes:
+            auto_notes = f"Incorporado desde escaneo de rango ({ip_str})"
 
         asset = CmdbAsset(
             code=code,
-            name=ptr_fqdn or f"Equipo Detectado ({ip_str})",
-            hostname=raw_host,
-            fqdn=ptr_fqdn,
+            name=display_name[:180],
+            hostname=raw_host[:120],
+            fqdn=ptr_fqdn[:180],
             asset_class=asset_class,
             environment=str(item.get("environment") or "production"),
             criticality="medium",
             lifecycle_status="active",
-            os_or_firmware=f"Detectado en escaneo (Puertos: {open_ports})" if open_ports else "Detectado por Sondeo de Red",
-            hypervisor_or_platform="Descubrimiento Manual CMDB",
+            os_or_firmware=eff_os[:120],
+            hypervisor_or_platform=eff_platform[:120],
             owner_team="Sistemas & Redes",
             responsible_person="",
             sync_source="cmdb",
@@ -1125,7 +1295,7 @@ def import_discovered_hosts_to_cmdb(
             status="online",
             last_checked_at=utcnow(),
             custom_fields=custom_f,
-            notes=str(item.get("notes") or f"Incorporado desde escaneo de rango ({ip_str})"),
+            notes=auto_notes,
         )
         db.add(asset)
         db.flush()
@@ -1140,13 +1310,13 @@ def import_discovered_hosts_to_cmdb(
             vlan_id=matched_sub.vlan_id if matched_sub else vlan_id,
             ip_role="mgmt_heartbeat",
             interface_name="eth0",
-            mac_address=str(item.get("mac_address") or "").strip(),
-            fqdn=ptr_fqdn,
+            mac_address=mac_norm,
+            fqdn=ptr_fqdn[:180],
             is_heartbeat_ip=True,
             allocation_status="assigned",
             last_verification_status="active_in_network",
             last_verified_at=utcnow(),
-            last_verification_detail="Añadido tras verificación de rango IP en CMDB",
+            last_verification_detail=f"OS: {eff_os} | MAC: {mac_norm or 'N/D'}",
         )
         db.add(new_ip_rec)
         db.flush()

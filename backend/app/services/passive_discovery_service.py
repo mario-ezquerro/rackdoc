@@ -17,6 +17,8 @@ Capacidades:
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import ipaddress
 import json
 import os
 import secrets
@@ -38,6 +40,7 @@ from ..models import (
     SwitchSnmpPort,
 )
 from ..time_utils import utcnow
+from .cmdb_service import _probe_ip_network_only
 from .monitor import _encode_ber_length, _encode_oid
 from .provisioning_service import (
     PLAYBOOKS_DIR,
@@ -797,3 +800,143 @@ def list_passive_discovery_snapshots(db: Session, limit: int = 50) -> Dict[str, 
         "snapshots": [serialize_passive_snapshot(s) for s in snaps],
         "vault_credentials": [serialize_credential(c) for c in creds],
     }
+
+
+def run_passive_network_fingerprint_scan(
+    db: Session,
+    target_range: str,
+    timeout_sec: float = 0.6,
+    count_limit: int = 254,
+    collected_by: str = "operator",
+) -> List[Dict[str, Any]]:
+    """
+    Ejecuta un barrido 100% Solo-Lectura sobre una IP, rango o red CIDR sin escribir en `cmdb_assets`
+    ni en `cmdb_ip_addresses`. Por cada máquina activa detectada, genera una instantánea
+    `AiPassiveDiscoverySnapshot` (`collector_type='network_fingerprint_ro'`) con Sistema Operativo,
+    firma de Pila TCP/IP (`TTL`, `MSS`, `WScale`, `TS/SACK`), OUI MAC y banners L7.
+    """
+    raw = (target_range or "").strip()
+    if not raw:
+        raise ValueError("Debes indicar una IP, rango (ej. 10.20.20.1-50) o red CIDR (ej. 10.20.20.0/24).")
+
+    eff_limit = max(1, min(count_limit or 254, 256))
+    ips_to_test: List[str] = []
+
+    if "/" in raw:
+        try:
+            net = ipaddress.ip_network(raw, strict=False)
+        except ValueError as exc:
+            raise ValueError(f"El bloque CIDR '{raw}' no es válido: {exc}")
+        if net.num_addresses <= 2:
+            ips_to_test = [str(ip) for ip in net][:eff_limit]
+        else:
+            for idx, h_ip in enumerate(net.hosts()):
+                if idx >= eff_limit:
+                    break
+                ips_to_test.append(str(h_ip))
+    elif "-" in raw:
+        left, right = [x.strip() for x in raw.split("-", 1)]
+        try:
+            s_ip = ipaddress.ip_address(left)
+            if "." in right:
+                e_ip = ipaddress.ip_address(right)
+            else:
+                prefix = left.rsplit(".", 1)[0]
+                e_ip = ipaddress.ip_address(f"{prefix}.{int(right)}")
+        except ValueError as exc:
+            raise ValueError(f"El rango de IPs '{raw}' no es válido: {exc}")
+        curr, end_v = int(s_ip), int(e_ip)
+        if end_v < curr:
+            curr, end_v = end_v, curr
+        for off in range(min(end_v - curr + 1, eff_limit)):
+            ips_to_test.append(str(ipaddress.ip_address(curr + off)))
+    elif "," in raw:
+        for p in [x.strip() for x in raw.split(",") if x.strip()][:eff_limit]:
+            ipaddress.ip_address(p)
+            ips_to_test.append(p)
+    else:
+        try:
+            ipaddress.ip_address(raw)
+            ips_to_test = [raw]
+        except ValueError as exc:
+            raise ValueError(f"Destino de red '{raw}' no válido: {exc}")
+
+    base_ports = [22, 80, 443, 3389, 445, 8006, 902, 161]
+    is_bulk = len(ips_to_test) > 12
+    max_workers = min(24, max(1, len(ips_to_test)))
+    probe_by_ip: Dict[str, Dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futs = {
+            pool.submit(_probe_ip_network_only, ip_s, base_ports, timeout_sec, is_bulk): ip_s
+            for ip_s in ips_to_test
+        }
+        for fut, ip_k in futs.items():
+            probe_by_ip[ip_k] = fut.result()
+
+    # Mapear IPs conocidas en CMDB (solo lectura)
+    ip_rows = (
+        db.query(CmdbIpAddress)
+        .filter(CmdbIpAddress.ip_address.in_(ips_to_test))
+        .all()
+        if ips_to_test
+        else []
+    )
+    asset_id_by_ip = {r.ip_address: r.asset_id for r in ip_rows if r.asset_id}
+
+    run_code = f"NETFP-{secrets.token_hex(3).upper()}"
+    created_snaps: List[AiPassiveDiscoverySnapshot] = []
+    for ip_s in ips_to_test:
+        pdata = probe_by_ip[ip_s]
+        if not (pdata.get("icmp_alive") or pdata.get("tcp_alive") or pdata.get("arp_alive")):
+            continue
+        fp = pdata.get("fingerprint") or {}
+        os_str = fp.get("os_guess") or "Activo en red (OS indeterminado)"
+        conf = fp.get("confidence")
+        os_full = f"{os_str} [{conf}%]" if conf else os_str
+        if fp.get("mac_vendor"):
+            os_full = f"{os_full} • {fp['mac_vendor']}"
+
+        l_ports = [
+            {
+                "port": svc.get("port"),
+                "proto": svc.get("protocol") or "tcp",
+                "process": svc.get("service") or "",
+                "banner": svc.get("banner") or "",
+            }
+            for svc in (fp.get("open_services") or [])
+        ]
+        meta_entry = {
+            "mac_address": fp.get("mac_address") or pdata.get("arp_mac") or "",
+            "mac_vendor": fp.get("mac_vendor") or "",
+            "device_type_guess": fp.get("device_type_guess") or "",
+            "suggested_asset_class": fp.get("suggested_asset_class") or "other_machine",
+            "suggested_asset_class_label": fp.get("suggested_asset_class_label") or "",
+            "tcpip_stack": fp.get("tcpip_stack") or {},
+            "banners": fp.get("banners") or {},
+        }
+        snap = AiPassiveDiscoverySnapshot(
+            run_code=run_code,
+            collector_type="network_fingerprint_ro",
+            target_host=ip_s,
+            asset_id=asset_id_by_ip.get(ip_s),
+            status="completed",
+            hostname_detected=(fp.get("fqdn_detected") or fp.get("hostname_detected") or pdata.get("ptr_hostname") or "")[:180],
+            os_or_sysdescr=os_full[:250],
+            listening_ports=l_ports,
+            peer_connections=[],
+            running_services=list(fp.get("evidence") or []),
+            containers=[],
+            web_vhosts_or_dbs=[meta_entry],
+            snmp_interfaces=[],
+            inferred_dependencies=[],
+            collected_by=collected_by,
+        )
+        db.add(snap)
+        created_snaps.append(snap)
+
+    if created_snaps:
+        db.commit()
+        for s in created_snaps:
+            db.refresh(s)
+
+    return [serialize_passive_snapshot(s) for s in created_snaps]

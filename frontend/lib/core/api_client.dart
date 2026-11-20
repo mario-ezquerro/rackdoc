@@ -1226,6 +1226,14 @@ class RackDocApiClient {
     );
   }
 
+  Future<Map<String, dynamic>> runPassiveNetworkScan(
+    Map<String, dynamic> payload,
+  ) async {
+    return Map<String, dynamic>.from(
+      await _post('/ai-agent/passive-discovery/network-scan', payload) as Map,
+    );
+  }
+
   Future<Map<String, dynamic>> applyPassiveSnapshotTopology(
     int snapshotId,
   ) async {

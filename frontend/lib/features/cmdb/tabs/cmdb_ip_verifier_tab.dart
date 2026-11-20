@@ -82,8 +82,8 @@ extension _CmdbIpVerifierTabExt on _CmdbViewState {
                 const SizedBox(height: 6),
                 const Text(
                   'Introduce una IP concreta (10.20.20.45), un rango (10.20.20.1-50) o una red CIDR completa (ej. 1.1.1.1/24 o 10.20.20.0/24). '
-                  'El sistema analizará en paralelo todo el rango con 4 sondas reales (Ping ICMP + Puertos TCP + Caché ARP MAC + DNS PTR) '
-                  'y te permitirá decidir qué equipos o IPs encontradas quieres añadir a la CMDB y cuáles descartar.',
+                  'El motor analizará en paralelo todo el rango extrayendo disponibilidad, Sistema Operativo, respuestas de la pila TCP/IP (TTL, saltos, MSS, Window Scale), '
+                  'dirección MAC + fabricante OUI/Hipervisor y banners L7 (SSH, HTTP/TLS, SMB/NTLMSSP, NetBIOS, SNMP y mDNS).',
                   style: TextStyle(
                     fontSize: 12,
                     color: AppPalette.slate600,
@@ -658,12 +658,20 @@ extension _CmdbIpVerifierTabExt on _CmdbViewState {
                                   fontWeight: FontWeight.w700,
                                   color: AppPalette.slate900,
                                 ),
-                                items: _CmdbViewState._assetClassLabels.entries.map((e) {
-                                  return DropdownMenuItem<String>(
-                                    value: e.key,
-                                    child: Text('Crear como: ${e.value}'),
-                                  );
-                                }).toList(),
+                                items: [
+                                  const DropdownMenuItem<String>(
+                                    value: 'auto',
+                                    child: Text(
+                                      'Crear como: Autodetectar por Huella OS / MAC',
+                                    ),
+                                  ),
+                                  ..._CmdbViewState._assetClassLabels.entries.map((e) {
+                                    return DropdownMenuItem<String>(
+                                      value: e.key,
+                                      child: Text('Crear como: ${e.value}'),
+                                    );
+                                  }),
+                                ],
                                 onChanged: (v) {
                                   if (v != null) {
                                     _rebuildState(() => _bulkImportAssetClass = v);
@@ -870,6 +878,37 @@ extension _CmdbIpVerifierTabExt on _CmdbViewState {
     final Map<String, dynamic> dns = Map<String, dynamic>.from(
       (probes['dns_ptr'] as Map?) ?? {},
     );
+    final Map<String, dynamic> osProbe = Map<String, dynamic>.from(
+      (probes['os_fingerprint'] as Map?) ?? {},
+    );
+    final Map<String, dynamic> stackProbe = Map<String, dynamic>.from(
+      (probes['tcpip_stack'] as Map?) ?? {},
+    );
+    final Map<String, dynamic> fp = (r['fingerprint'] is Map)
+        ? Map<String, dynamic>.from(r['fingerprint'] as Map)
+        : <String, dynamic>{};
+    final String osGuess = (fp['os_guess'] ?? osProbe['os_guess'] ?? '').toString().trim();
+    final int osConfidence = ((fp['confidence'] ?? osProbe['confidence'] ?? 0) as num).toInt();
+    final String devTypeGuess = (fp['device_type_guess'] ?? osProbe['device_type_guess'] ?? '')
+        .toString()
+        .trim();
+    final String suggestedClass = (fp['suggested_asset_class'] ?? '').toString().trim();
+    final String suggestedClassLabel = (fp['suggested_asset_class_label'] ?? '').toString().trim();
+    final String macVendor = (fp['mac_vendor'] ?? arp['mac_vendor'] ?? '').toString().trim();
+    final String hostDetected = (fp['hostname_detected'] ?? dns['hostname_detected'] ?? '')
+        .toString()
+        .trim();
+    final String fqdnDetected = (fp['fqdn_detected'] ?? dns['fqdn_detected'] ?? dns['ptr_hostname'] ?? '')
+        .toString()
+        .trim();
+    final String platformGuess = (fp['hypervisor_or_platform'] ?? macVendor).toString().trim();
+    final List<String> fpEvidence = ((fp['evidence'] as List?) ?? [])
+        .map((e) => e.toString())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    final List<Map<String, dynamic>> openServices = ((fp['open_services'] as List?) ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
     final List<Map<String, dynamic>> owners =
         ((r['cmdb_owners'] as List?) ?? [])
             .map((e) => Map<String, dynamic>.from(e as Map))
@@ -975,6 +1014,57 @@ extension _CmdbIpVerifierTabExt on _CmdbViewState {
                     color: AppPalette.slate600,
                   ),
                 ),
+                if (osGuess.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppPalette.indigo100,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppPalette.blue300),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.memory_rounded,
+                          size: 13,
+                          color: AppPalette.indigo600,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '$osGuess ($osConfidence%)',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: AppPalette.indigo600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                if (macVendor.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppPalette.slate300),
+                    ),
+                    child: Text(
+                      macVendor,
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppPalette.slate700,
+                      ),
+                    ),
+                  ),
                 if (widget.canEdit &&
                     !documentedInCmdb &&
                     verdict == 'conflict_unregistered') ...[
@@ -1003,8 +1093,17 @@ extension _CmdbIpVerifierTabExt on _CmdbViewState {
                   OutlinedButton.icon(
                     onPressed: () => _openAssetEditorDialog(
                       prefilledIp: ip,
-                      prefilledFqdn: (dns['ptr_hostname'] ?? '').toString(),
-                      prefilledMac: (arp['mac_address'] ?? '').toString(),
+                      prefilledHostname: hostDetected.isNotEmpty
+                          ? hostDetected
+                          : (fqdnDetected.isNotEmpty ? fqdnDetected.split('.').first : null),
+                      prefilledFqdn: fqdnDetected,
+                      prefilledMac: (fp['mac_address'] ?? arp['mac_address'] ?? '').toString(),
+                      prefilledOs: osGuess.isNotEmpty ? osGuess : null,
+                      prefilledPlatform: platformGuess.isNotEmpty ? platformGuess : null,
+                      prefilledAssetClass: suggestedClass.isNotEmpty ? suggestedClass : null,
+                      prefilledNotes: fpEvidence.isNotEmpty
+                          ? 'Huella de red: ${fpEvidence.take(4).join(" | ")}'
+                          : null,
                     ),
                     style: OutlinedButton.styleFrom(
                       visualDensity: VisualDensity.compact,
@@ -1148,13 +1247,95 @@ extension _CmdbIpVerifierTabExt on _CmdbViewState {
                     const SizedBox(width: 8),
                     Expanded(
                       child: _buildProbeResultBox(
-                        title: '4. DNS Inverso (PTR)',
+                        title: '4. Hostname / DNS / NetBIOS',
                         active: dns['has_ptr'] == true,
                         detail: (dns['detail'] ?? '').toString(),
                       ),
                     ),
                   ],
                 ),
+                if (fp.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildProbeResultBox(
+                          title: '5. Firma de Sistema Operativo y Rol',
+                          active: osGuess.isNotEmpty,
+                          detail: osGuess.isNotEmpty
+                              ? '$osGuess ($osConfidence% conf.) • $devTypeGuess${suggestedClassLabel.isNotEmpty ? " [$suggestedClassLabel]" : ""}'
+                              : 'Sin firma de sistema operativo',
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _buildProbeResultBox(
+                          title: '6. Pila TCP/IP & Fabricante MAC (OUI)',
+                          active: stackProbe['detected'] == true || macVendor.isNotEmpty,
+                          detail:
+                              '${(stackProbe['detail'] ?? '').toString()}${macVendor.isNotEmpty ? " • OUI: $macVendor" : ""}',
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (openServices.isNotEmpty || fpEvidence.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppPalette.slate50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppPalette.slate200),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (openServices.isNotEmpty) ...[
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: openServices.take(12).map((svc) {
+                                final String b = (svc['banner'] ?? '').toString().trim();
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: AppPalette.slate300),
+                                  ),
+                                  child: Text(
+                                    ':${svc['port']}/${svc['protocol']} ${svc['service']}${b.isNotEmpty ? " — $b" : ""}',
+                                    style: const TextStyle(
+                                      fontSize: 10.5,
+                                      fontFamily: 'monospace',
+                                      fontWeight: FontWeight.w700,
+                                      color: AppPalette.slate800,
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ],
+                          if (fpEvidence.isNotEmpty) ...[
+                            if (openServices.isNotEmpty) const SizedBox(height: 6),
+                            Text(
+                              'Evidencias OS / TCP-IP / MAC: ${fpEvidence.join("  •  ")}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppPalette.slate600,
+                                height: 1.35,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
               ],
             ),
           ),

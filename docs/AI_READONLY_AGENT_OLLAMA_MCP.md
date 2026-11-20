@@ -53,7 +53,8 @@ Desde **`9. Administración -> Motor de IA Solo-Lectura`** (exclusivo rol `admin
    - Chat técnico contextualizado con el inventario real (accesible incluso con rol `viewer`).
 5. **`5. Borradores CMDB (`Human-in-the-Loop`)`**:
    - Revisa y aplica con 1 clic descripciones operativas, sistemas operativos/firmware o alineaciones de criticidad sugeridas.
-6. **`6. Descubrimiento Pasivo RO`**:
+6. **`6. Descubrimiento Pasivo RO`** (y **`6. CMDB & Control IPs -> Escáner IP/CIDR`**):
+   - **Huella de Red, OS, Pila TCP/IP y OUI MAC (`os_fingerprint_service.py`)**: al escanear cualquier IP, rango o red CIDR, perfila cada máquina activa sin requerir privilegios root (`CAP_NET_RAW`) ni credenciales, combinando respuestas de pila TCP/IP (`ICMP TTL` + estimación de saltos L3, `TCP MSS`, `Window Scale`, `Timestamps`, `SACK`), dirección MAC normalizada + fabricante IEEE OUI / hipervisor (`VMware`, `Proxmox`, `KVM`, `Hyper-V`, `Cisco`, `Fortinet`, `Ubiquiti`, `MikroTik`, `Synology`, `Dell`, `HPE`, etc.) y firmas L7 (`SSH`, `HTTP/HTTPS + X.509 TLS`, desafío público `SMB2/NTLMSSP Build`, `NetBIOS NBSTAT`, `SNMPv2c sysDescr/sysName` y `mDNS`).
    - **Walk SNMP `IF-MIB` + `LLDP-MIB` (`161/UDP`)**: descubre bocas, velocidades, MACs, estados y vecinos LLDP.
    - **Auditoría SSH (Linux) / WinRM (Windows)**: descubre puertos escuchando, conexiones TCP establecidas entre servidores y contenedores Docker/Podman sin escribir en el disco remoto.
 

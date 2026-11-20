@@ -699,10 +699,14 @@ class CmdbDiscoveredHostItem(BaseModel):
     hostname: str = ""
     fqdn: str = ""
     mac_address: str = ""
-    asset_class: str = "other_machine"
+    asset_class: str = "auto"
+    os_or_firmware: str = ""
+    hypervisor_or_platform: str = ""
+    domain_or_workgroup: str = ""
     environment: str = "production"
     location_id: Optional[int] = None
     open_ports: List[int] = []
+    fingerprint: Optional[Dict[str, Any]] = None
     notes: str = ""
 
 
@@ -1283,6 +1287,13 @@ class AiPassiveSnmpWalkInput(BaseModel):
     version: str = "v2c"  # v1 | v2c
     timeout_sec: float = 2.0
     max_oids_per_table: int = 128
+
+
+class AiPassiveNetworkScanInput(BaseModel):
+    """Solicitud de barrido pasivo RO de IP/Rango/CIDR con huella de OS, Pila TCP/IP y OUI MAC."""
+    target_range: str
+    timeout_sec: float = 0.6
+    count_limit: int = 254
 
 
 class AiPublishNetworkSchemaInput(BaseModel):
